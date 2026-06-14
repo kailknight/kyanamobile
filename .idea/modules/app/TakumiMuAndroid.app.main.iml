@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module version="4">
+  <component name="AdditionalModuleElements">
+    <content url="file://D:/firstproject/sokol-master">
+      <sourceFolder url="file://D:/firstproject/sokol-master" type="native-header-root" />
+      <sourceFolder url="file://D:/firstproject/sokol-master/util" type="native-header-root" />
+    </content>
+    <content url="file://$MODULE_DIR$/../../../../5.Main/dependencies/include">
+      <sourceFolder url="file://$MODULE_DIR$/../../../../5.Main/dependencies/include" type="native-header-root" />
+    </content>
+    <content url="file://$MODULE_DIR$/../../../../5.Main/source">
+      <sourceFolder url="file://$MODULE_DIR$/../../../../5.Main/source" type="native-Source-root" />
+    </content>
+    <content url="file://$MODULE_DIR$/../../../app/src/main" dumb="true">
+      <sourceFolder url="file://$MODULE_DIR$/../../../app/src/main/cpp" type="native-Source-root" />
+    </content>
+  </component>
+</module>

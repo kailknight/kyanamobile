@@ -1,0 +1,12 @@
+R_DEF: Internal format may change without notice
+local
+mipmap balo
+mipmap banner_preload_1
+mipmap banner_preload_2
+mipmap character
+mipmap hit
+mipmap ic_launcher
+mipmap ic_launcher_round
+mipmap map
+mipmap minimap
+mipmap setting

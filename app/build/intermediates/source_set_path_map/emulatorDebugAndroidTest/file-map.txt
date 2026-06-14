@@ -1,0 +1,4 @@
+com.muonline.client.test.app-emulator-0 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\generated\res\resValues\androidTest\emulator\debug
+com.muonline.client.test.app-mergeEmulatorDebugAndroidTestResources-1 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\intermediates\incremental\emulatorDebugAndroidTest\mergeEmulatorDebugAndroidTestResources\merged.dir
+com.muonline.client.test.app-mergeEmulatorDebugAndroidTestResources-2 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\intermediates\incremental\emulatorDebugAndroidTest\mergeEmulatorDebugAndroidTestResources\stripped.dir
+com.muonline.client.test.app-merged_res-3 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\intermediates\merged_res\emulatorDebugAndroidTest

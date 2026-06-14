@@ -1,0 +1,25 @@
+com.muonline.client.app-lifecycle-viewmodel-2.5.1-0 C:\Users\KYANa\.gradle\caches\transforms-4\0585c6e470ffb5121456cb34ff48f2df\transformed\lifecycle-viewmodel-2.5.1\res
+com.muonline.client.app-lifecycle-process-2.4.1-1 C:\Users\KYANa\.gradle\caches\transforms-4\1011cdbb6d7157ee8f211ee8ade77e36\transformed\lifecycle-process-2.4.1\res
+com.muonline.client.app-lifecycle-runtime-2.5.1-2 C:\Users\KYANa\.gradle\caches\transforms-4\1197b1bdc12d5343443960277337fb57\transformed\lifecycle-runtime-2.5.1\res
+com.muonline.client.app-appcompat-1.6.1-3 C:\Users\KYANa\.gradle\caches\transforms-4\149f59938b35074dc7fe35e9f9516797\transformed\appcompat-1.6.1\res
+com.muonline.client.app-savedstate-1.2.0-4 C:\Users\KYANa\.gradle\caches\transforms-4\1994ce5e64b44b9d01d1d6e298fa051e\transformed\savedstate-1.2.0\res
+com.muonline.client.app-startup-runtime-1.1.1-5 C:\Users\KYANa\.gradle\caches\transforms-4\26cf5def2526301f26425d7e3694a429\transformed\startup-runtime-1.1.1\res
+com.muonline.client.app-emoji2-1.2.0-6 C:\Users\KYANa\.gradle\caches\transforms-4\3096be1dbc00866d160560a9e46569ee\transformed\emoji2-1.2.0\res
+com.muonline.client.app-lifecycle-viewmodel-savedstate-2.5.1-7 C:\Users\KYANa\.gradle\caches\transforms-4\57c4f9b07423f406471aebeac9c49a3b\transformed\lifecycle-viewmodel-savedstate-2.5.1\res
+com.muonline.client.app-core-1.9.0-8 C:\Users\KYANa\.gradle\caches\transforms-4\8b9fa7ab399feb78cf8011afa90058d3\transformed\core-1.9.0\res
+com.muonline.client.app-annotation-experimental-1.3.0-9 C:\Users\KYANa\.gradle\caches\transforms-4\9e73ff031c81f49f4503164dcc7ce8dd\transformed\annotation-experimental-1.3.0\res
+com.muonline.client.app-lifecycle-livedata-core-2.5.1-10 C:\Users\KYANa\.gradle\caches\transforms-4\b16bf5d0102b9fd8c5b90ff177affab7\transformed\lifecycle-livedata-core-2.5.1\res
+com.muonline.client.app-appcompat-resources-1.6.1-11 C:\Users\KYANa\.gradle\caches\transforms-4\b91686136cef2f805a360573be738b70\transformed\appcompat-resources-1.6.1\res
+com.muonline.client.app-emoji2-views-helper-1.2.0-12 C:\Users\KYANa\.gradle\caches\transforms-4\bc1c93d9fa3ca1026af6d26d2a16658a\transformed\emoji2-views-helper-1.2.0\res
+com.muonline.client.app-activity-1.6.0-13 C:\Users\KYANa\.gradle\caches\transforms-4\c82db67f5d5b6a420fa619142e1b3c6d\transformed\activity-1.6.0\res
+com.muonline.client.app-core-ktx-1.9.0-14 C:\Users\KYANa\.gradle\caches\transforms-4\fbc77fbfaaee5d21cc3c15ce0bc6fe40\transformed\core-ktx-1.9.0\res
+com.muonline.client.app-fragment-1.3.6-15 C:\Users\KYANa\.gradle\caches\transforms-4\fcf2d4df9b8365e6d05a0a6a9a9967f2\transformed\fragment-1.3.6\res
+com.muonline.client.app-emulator-16 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\generated\res\pngs\emulator\debug
+com.muonline.client.app-emulator-17 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\generated\res\resValues\emulator\debug
+com.muonline.client.app-packageEmulatorDebugResources-18 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\intermediates\incremental\emulatorDebug\packageEmulatorDebugResources\merged.dir
+com.muonline.client.app-packageEmulatorDebugResources-19 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\intermediates\incremental\emulatorDebug\packageEmulatorDebugResources\stripped.dir
+com.muonline.client.app-merged_res-20 E:\MU\MU Mobile\Source_Server-Mobi\android\app\build\intermediates\merged_res\emulatorDebug
+com.muonline.client.app-debug-21 E:\MU\MU Mobile\Source_Server-Mobi\android\app\src\debug\res
+com.muonline.client.app-emulator-22 E:\MU\MU Mobile\Source_Server-Mobi\android\app\src\emulator\res
+com.muonline.client.app-emulatorDebug-23 E:\MU\MU Mobile\Source_Server-Mobi\android\app\src\emulatorDebug\res
+com.muonline.client.app-main-24 E:\MU\MU Mobile\Source_Server-Mobi\android\app\src\main\res

@@ -1,0 +1,19 @@
+-- The CXX compiler identification is Clang 14.0.6
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: C:/Users/KYANa/AppData/Local/Android/Sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- PROJECT_ROOT = E:/MU/MU Mobile/Source_Server-Mobi
+-- CLIENT_ROOT  = E:/MU/MU Mobile/Source_Server-Mobi/5.Main
+-- GAME_SRC_DIR = E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source
+-- JNI_LIBS_DIR = E:/MU/MU Mobile/Source_Server-Mobi/android/app/src/main/jniLibs/x86_64
+-- SOKOL_ROOT   = D:/firstproject/sokol-master
+-- BGFX_ROOT    = D:/firstproject/bgfx-master
+-- BX_ROOT      = D:/firstproject/bx
+-- BIMG_ROOT    = D:/firstproject/bimg
+-- MU_ENABLE_BGFX = OFF
+-- Game source files count: 375
+-- Configuring done
+-- Generating done
+-- Build files have been written to: E:/MU/MU Mobile/Source_Server-Mobi/android/app/.cxx/Debug/4585e4e4/x86_64
