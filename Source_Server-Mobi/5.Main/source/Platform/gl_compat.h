@@ -197,12 +197,23 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount);
 // draw (the previous behaviour) cost ~6.7MB of CPU->GPU traffic per frame
 // across ~300 skinned meshes while the GPU sat idle.
 // Call GL_DeleteSkinnedMeshBuffers when the mesh is released.
+// Per-draw shader state, so passes that used to fall back to the CPU path
+// (unlit/const-colour, untextured colour, chrome env-mapping, wave scroll)
+// can run on the GPU too. Defaults describe the plain lit+textured pass.
+struct GLSkinDrawState {
+    bool  useTexture = true;      // false -> flat colour, no texture fetch
+    bool  useVertexLight = true;  // false -> flat u_bodyLight, no per-vertex lighting
+    bool  chromeMode = false;     // true  -> env-map uv from the skinned normal
+    float texOffsetU = 0.0f;      // wave/scroll offset
+    float texOffsetV = 0.0f;
+};
+
 void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
                         const uint16_t* indices, int indexCount,
                         unsigned int* vboInOut, unsigned int* eboInOut,
                         const float mvp[16], const float lightDir[3],
                         const float bodyLight[3], float alpha,
-                        GLuint textureId);
+                        GLuint textureId, const GLSkinDrawState& state);
 void GL_DeleteSkinnedMeshBuffers(unsigned int* vboInOut, unsigned int* eboInOut);
 
 #endif // __ANDROID__

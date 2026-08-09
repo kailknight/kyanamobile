@@ -3076,9 +3076,22 @@ void MainScene(HDC hDC)
 			extern int g_ProfImDrawCalls;
 			extern int g_ProfVerts;
 
-			unicode::t_char szProf3[128];
-			unicode::_sprintf(szProf3, "draw %d  IM %d  verts %d",
-				g_ProfDrawCalls, g_ProfImDrawCalls, g_ProfVerts);
+			// Mesh path split: GPU (persistent VBO + shader skinning) vs CPU
+			// fallback (per-vertex transform + per-frame upload).
+			extern unsigned long long g_ProfGpuMeshTicks;
+			extern unsigned long long g_ProfCpuMeshTicks;
+			extern int g_ProfGpuMeshCalls;
+			extern int g_ProfCpuMeshCalls;
+
+			unicode::t_char szProf3[176];
+			unicode::_sprintf(szProf3, "draw %d IM %d verts %d | gpuM %.0fms/%d cpuM %.0fms/%d",
+				g_ProfDrawCalls, g_ProfImDrawCalls, g_ProfVerts,
+				static_cast<double>(g_ProfGpuMeshTicks) * tickToMs, g_ProfGpuMeshCalls,
+				static_cast<double>(g_ProfCpuMeshTicks) * tickToMs, g_ProfCpuMeshCalls);
+			g_ProfGpuMeshTicks = 0;
+			g_ProfCpuMeshTicks = 0;
+			g_ProfGpuMeshCalls = 0;
+			g_ProfCpuMeshCalls = 0;
 			SIZE size3 = {};
 			g_pMultiLanguage->_GetTextExtentPoint32(
 				g_pRenderText->GetFontDC(), szProf3, lstrlen(szProf3), &size3);

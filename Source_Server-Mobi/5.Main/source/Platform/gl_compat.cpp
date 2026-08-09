@@ -2337,8 +2337,15 @@ layout(location = 5) in vec3 a_restNormal;
 layout(location = 6) in vec2 a_uv;
 layout(location = 7) in float a_boneIndex;
 
-layout(location = 20) uniform highp mat4 u_mvp;
-layout(location = 21) uniform highp vec3 u_lightDir;
+// Uniform locations: a mat4 consumes FOUR consecutive locations (one per
+// column), so u_mvp occupies 0-3 and everything else starts at 4. An earlier
+// version put u_lightDir at 21 while u_mvp sat at 20 - overlapping columns.
+// Adreno tolerated it, but it is invalid GLSL and would fail elsewhere.
+layout(location = 0) uniform highp mat4 u_mvp;
+layout(location = 4) uniform highp vec3 u_lightDir;
+layout(location = 5) uniform int u_useVertexLight;  // 0 = flat body light
+layout(location = 6) uniform vec2 u_texOffset;      // wave/scroll offset
+layout(location = 7) uniform int u_chromeMode;      // 1 = env-map uv from normal
 
 layout(std140, binding = 0) uniform BoneBlock {
     highp vec4 u_boneRows[600]; // kMaxSkinBones(200) * 3 rows - keep in sync
@@ -2364,32 +2371,49 @@ void main() {
     skinnedNormal.z = dot(row2.xyz, a_restNormal);
 
     gl_Position = u_mvp * vec4(skinnedPos, 1.0);
-    v_uv = a_uv;
 
-    // Matches BMD::Transform's per-vertex luminosity EXACTLY, including NOT
-    // normalizing either vector: dot(rotatedNormal, LightPosition)*0.8+0.4,
-    // floored at 0.2. LightPosition on the CPU side is a fixed-magnitude
-    // (~1.5) rotated vector, not a unit direction - normalizing here would
-    // change the brightness compared to the CPU path, not just its precision.
-    float luminosity = dot(skinnedNormal, u_lightDir) * 0.8 + 0.4;
-    v_light = max(luminosity, 0.2);
+    // Chrome/metal passes derive their texcoords from the transformed normal
+    // (environment mapping) instead of the mesh UVs - matches the CPU path's
+    // g_chrome[] lookup, which is built from the same rotated normal.
+    if (u_chromeMode == 1) {
+        v_uv = normalize(skinnedNormal).xy * 0.5 + 0.5 + u_texOffset;
+    } else {
+        v_uv = a_uv + u_texOffset;
+    }
+
+    if (u_useVertexLight == 1) {
+        // Matches BMD::Transform's per-vertex luminosity EXACTLY, including NOT
+        // normalizing either vector: dot(rotatedNormal, LightPosition)*0.8+0.4,
+        // floored at 0.2. LightPosition on the CPU side is a fixed-magnitude
+        // (~1.5) rotated vector, not a unit direction - normalizing here would
+        // change the brightness compared to the CPU path, not just its precision.
+        float luminosity = dot(skinnedNormal, u_lightDir) * 0.8 + 0.4;
+        v_light = max(luminosity, 0.2);
+    } else {
+        v_light = 1.0;   // unlit pass: colour comes straight from u_bodyLight
+    }
 }
 )";
 
-// Fragment uniforms start at 24 (after u_mvp's 4 locations: 20-23 for its mat4 columns).
+// Fragment uniforms continue the vertex shader's numbering (u_mvp took 0-3).
 static const char* s_skinFragSrc = R"(#version 310 es
 precision mediump float;
-layout(location = 24) uniform sampler2D u_sampler;
-layout(location = 25) uniform vec3 u_bodyLight;
-layout(location = 26) uniform float u_alpha;
+layout(location = 8)  uniform sampler2D u_sampler;
+layout(location = 9)  uniform vec3 u_bodyLight;
+layout(location = 10) uniform float u_alpha;
+layout(location = 11) uniform int u_useTexture;   // 0 = untextured colour pass
 
 in vec2 v_uv;
 in float v_light;
 out vec4 outFragColor;
 
 void main() {
-    vec4 texColor = texture(u_sampler, v_uv);
-    outFragColor = vec4(texColor.rgb * u_bodyLight * v_light, texColor.a * u_alpha);
+    if (u_useTexture == 1) {
+        vec4 texColor = texture(u_sampler, v_uv);
+        outFragColor = vec4(texColor.rgb * u_bodyLight * v_light, texColor.a * u_alpha);
+    } else {
+        outFragColor = vec4(u_bodyLight * v_light, u_alpha);
+    }
 }
 )";
 
@@ -2479,7 +2503,7 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
                         unsigned int* vboInOut, unsigned int* eboInOut,
                         const float mvp[16], const float lightDir[3],
                         const float bodyLight[3], float alpha,
-                        GLuint textureId) {
+                        GLuint textureId, const GLSkinDrawState& state) {
     if (!GL_SkinIsReady() || !vertices || vertexCount <= 0 || !indices || indexCount <= 0 ||
         !vboInOut || !eboInOut) {
         return;
@@ -2488,14 +2512,18 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     UseProgramCached(s_skinProg);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_skinBoneUbo);
 
-    glUniformMatrix4fv(20, 1, GL_FALSE, mvp);
-    glUniform3fv(21, 1, lightDir);
-    glUniform3fv(25, 1, bodyLight);
-    glUniform1f(26, alpha);
+    glUniformMatrix4fv(0, 1, GL_FALSE, mvp);   // mat4 occupies locations 0-3
+    glUniform3fv(4, 1, lightDir);
+    glUniform1i(5, state.useVertexLight ? 1 : 0);
+    glUniform2f(6, state.texOffsetU, state.texOffsetV);
+    glUniform1i(7, state.chromeMode ? 1 : 0);
+    glUniform3fv(9, 1, bodyLight);
+    glUniform1f(10, alpha);
+    glUniform1i(11, state.useTexture ? 1 : 0);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureId);
-    glUniform1i(24, 0);
+    glUniform1i(8, 0);
 
     // Rest-pose geometry is immutable: upload once, then only bind. Animation
     // is entirely in the bone-matrix UBO, so nothing here changes per frame.
