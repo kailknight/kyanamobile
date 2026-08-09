@@ -9227,6 +9227,16 @@ static void RunAndroidGameFrame()
         g_AndroidFrameState.muHelperLastTickMs += 250u;
     }
 
+    // NOTE: this is the live per-frame path (sokol_app desc.frame_cb =
+    // OnAndroidSappFrame -> RunAndroidGameFrame). The old SDL "while
+    // (!Destroy)" loop further down this file (with its own s_crfResult/
+    // CheckRenderNextFrame/SDL_GL_SetSwapInterval calls, and the whole
+    // Scenes/*.cpp frame-timing system CheckRenderNextFrame lived in) is
+    // dead code inside a #if 0 block AND excluded from the CMake build
+    // (see ".*Scenes.*\\.cpp$" in CMakeLists.txt) - never runs, doesn't
+    // even link. The actually-live frame cap is the sleep-based limiter in
+    // ZzzScene.cpp's RenderScene() (target_fps/ms_per_frame), which reads
+    // the g_adaptivePerf.targetFps default set above via SetTargetFps().
     if (g_bWndActive)
     {
         const Uint64 renderSceneStart = static_cast<Uint64>(MU_MobilePerfNow());

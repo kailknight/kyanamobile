@@ -856,6 +856,34 @@ void GL_Compat_Shutdown() {
     s_quadIndexCapacityQuads = 0;
 }
 
+void GL_InvalidateCachedGLState() {
+    // Call this after any code OUTSIDE gl_compat.cpp makes raw GL calls that
+    // change program/texture/buffer bindings or cap (enable/disable) state -
+    // e.g. RenderBackend.cpp's render-scale FBO blit pass. Without this, the
+    // cached-state checks throughout this file (UseProgramCached,
+    // GL_TrackBindTexture, GL_Enable_Compat/Disable_Compat, BindArrayBufferCached,
+    // ApplyShaderStateCommon's uniform caching) would wrongly believe GL is
+    // still in the state gl_compat last set it to, and skip re-issuing the
+    // real GL calls needed to actually restore it.
+    s_currentProgram = 0;
+    s_boundTexture = 0;
+    s_boundArrayBuffer = 0;
+    s_boundElementArrayBuffer = 0;
+    s_capBitsKnown = 0;
+    s_lastBlendSrc = 0xFFFFFFFFu;
+    s_lastBlendDst = 0xFFFFFFFFu;
+    s_lastDepthFunc = 0xFFFFFFFFu;
+    s_lastDepthMask = 2;
+    s_lastColorMaskR = 2;
+    s_lastColorMaskG = 2;
+    s_lastColorMaskB = 2;
+    s_lastColorMaskA = 2;
+    s_hasLastMvp = false;
+    s_lastUseTex = -1;
+    s_lastAlphaTest = -1;
+    s_lastAlphaRef = -1.0f;
+}
+
 // =============================================================================
 // Internal: flush immediate mode vertices
 // Handles GL_QUADS (not in GLES2) by converting each quad to 2 triangles.

@@ -34,6 +34,12 @@ void GL_ColorMask_Compat(GLboolean red, GLboolean green, GLboolean blue, GLboole
 void GL_ClearColor_Compat(float red, float green, float blue, float alpha);
 void GL_Clear_Compat(GLbitfield mask);
 void GL_FlushPending();
+// Call after external code makes raw GL calls (program/texture/buffer binds,
+// glEnable/glDisable) that bypass this file's cached-state tracking - e.g.
+// a render-to-texture blit pass done outside gl_compat.cpp. Forces every
+// subsequent gl_compat call to re-sync real GL state instead of trusting
+// its now-stale cache.
+void GL_InvalidateCachedGLState();
 
 // ── Matrix stack ───────────────────────────────────────────────────────────
 void GL_MatrixMode(GLenum mode);         // GL_MODELVIEW or GL_PROJECTION
