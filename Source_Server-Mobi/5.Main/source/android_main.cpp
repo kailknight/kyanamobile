@@ -7935,6 +7935,34 @@ bool IsAggressiveMobilePerfModeEnabled()
 #endif
 }
 
+// ── Render scale ───────────────────────────────────────────────────────────
+// Renders the game at a fraction of the physical resolution and upscales the
+// result to fill the display, trading sharpness for fill-rate.
+//
+// This works by telling the ENGINE its screen is the smaller size: WindowWidth/
+// WindowHeight feed every glViewport2() call, the UI scale factor
+// (g_fScreenRate_x = WindowWidth/640) and the projection, so scaling them keeps
+// all of that self-consistent. RenderBackend then renders into an FBO of that
+// size and blits it up to the physical surface.
+//
+// Do NOT instead leave the engine at native size and just shrink the render
+// target - the engine resets the viewport to WindowWidth/WindowHeight itself
+// all over the place (glViewport2, ZzzOpenglUtil.cpp), so a native-sized
+// viewport in a smaller buffer renders zoomed and misaligns touch input.
+//
+// Touch is unaffected: sokol reports touch in PHYSICAL pixels, so the event
+// handler normalises against g_NativePresentWidth/Height (below) rather than
+// the scaled drawable size.
+//
+// 1.0 = native (feature off). 0.75 renders ~44% fewer pixels.
+static float g_RenderScaleX = 0.75f;
+static float g_RenderScaleY = 0.75f;
+
+// Physical surface size, as reported by sokol - the blit target, and the basis
+// for normalising touch coordinates.
+static int g_NativePresentWidth = 0;
+static int g_NativePresentHeight = 0;
+
 static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reason)
 {
     if ((screenW <= 1) || (screenH <= 1))
@@ -7981,7 +8009,23 @@ static void SyncAndroidDrawableSizeFromSokol(const char* reason)
 {
     const int screenW = sapp_width();
     const int screenH = sapp_height();
-    ApplyAndroidDrawableSize(screenW, screenH, reason);
+    if ((screenW <= 1) || (screenH <= 1))
+    {
+        return;
+    }
+
+    // Physical size drives the upscale blit and touch normalisation.
+    g_NativePresentWidth = screenW;
+    g_NativePresentHeight = screenH;
+    RenderBackend_SetNativePresentSize(screenW, screenH);
+
+    // The engine is told the SCALED size - see the g_RenderScale* comment above.
+    int renderW = static_cast<int>(screenW * g_RenderScaleX);
+    int renderH = static_cast<int>(screenH * g_RenderScaleY);
+    if (renderW < 1) renderW = 1;
+    if (renderH < 1) renderH = 1;
+
+    ApplyAndroidDrawableSize(renderW, renderH, reason);
 }
 
 static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
@@ -8780,8 +8824,14 @@ static void QueueSappEventAsSDL(const sapp_event* event)
     case SAPP_EVENTTYPE_TOUCHES_ENDED:
     case SAPP_EVENTTYPE_TOUCHES_CANCELLED:
         {
-            const float safeW = static_cast<float>((g_DrawableWidth > 0) ? g_DrawableWidth : 1);
-            const float safeH = static_cast<float>((g_DrawableHeight > 0) ? g_DrawableHeight : 1);
+            // Normalise against the PHYSICAL surface, not g_DrawableWidth/Height:
+            // sokol reports touch positions in physical pixels, while the
+            // drawable size is the (possibly smaller) render size once render
+            // scaling is enabled. Using the scaled size here would push every
+            // touch past 1.0 and clamp it to the screen edge, which is exactly
+            // how an earlier attempt at render scaling broke the login screen.
+            const float safeW = static_cast<float>((g_NativePresentWidth > 0) ? g_NativePresentWidth : g_DrawableWidth > 0 ? g_DrawableWidth : 1);
+            const float safeH = static_cast<float>((g_NativePresentHeight > 0) ? g_NativePresentHeight : g_DrawableHeight > 0 ? g_DrawableHeight : 1);
             Uint32 sdlType = SDL_FINGERMOTION;
             if (event->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) sdlType = SDL_FINGERDOWN;
             else if ((event->type == SAPP_EVENTTYPE_TOUCHES_ENDED) || (event->type == SAPP_EVENTTYPE_TOUCHES_CANCELLED)) sdlType = SDL_FINGERUP;

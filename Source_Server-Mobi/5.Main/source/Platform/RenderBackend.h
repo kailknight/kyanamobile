@@ -37,6 +37,12 @@ public:
     virtual void Shutdown() = 0;
 };
 
+// Physical surface size, i.e. what the (possibly smaller) render target is
+// upscaled to on Present(). Must be set before/when the drawable size changes;
+// if it equals the render size, no scaling is done and rendering goes straight
+// to the backbuffer.
+void RenderBackend_SetNativePresentSize(int width, int height);
+
 RenderBackendType ParseRenderBackendType(const char* value);
 const char* RenderBackendTypeToString(RenderBackendType type);
 std::unique_ptr<IRenderBackend> CreateRenderBackend(RenderBackendType type);
