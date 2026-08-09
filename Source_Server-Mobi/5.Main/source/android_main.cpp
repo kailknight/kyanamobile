@@ -7963,6 +7963,32 @@ static float g_RenderScaleY = 0.75f;
 static int g_NativePresentWidth = 0;
 static int g_NativePresentHeight = 0;
 
+// TEMP profiling: last frame's top-level phase split, read by the FPS overlay.
+unsigned long long g_ProfSceneTicks = 0;
+unsigned long long g_ProfPadTicks = 0;
+unsigned long long g_ProfPresentTicks = 0;
+
+// TEMP profiling: Scene() sub-phase breakdown, taken from the engine's own
+// existing per-frame snapshots (which are otherwise only ever PERF_LOGI'd, and
+// logcat is unavailable on retail "user" builds). Scene() is ~97ms of a ~111ms
+// frame with Present() at 0ms, so the cost is CPU-side inside here somewhere.
+unsigned long long g_ProfObjMoveTicks = 0;
+unsigned long long g_ProfObjRenderTicks = 0;
+unsigned long long g_ProfCharMoveTicks = 0;
+unsigned long long g_ProfCharRenderTicks = 0;
+unsigned long long g_ProfTerrainTicks = 0;
+unsigned long long g_ProfEffectsTicks = 0;
+unsigned long long g_ProfParticlesTicks = 0;
+unsigned long long g_ProfUiTicks = 0;
+
+// Character render is ~50ms of a ~110ms frame and is NOT the skinning math
+// (0.8ms) - an A/B with GPU skinning on vs off left it unchanged at ~52ms.
+// These are its sub-phases, to find what actually costs that.
+unsigned long long g_ProfCharShadowTicks = 0;
+unsigned long long g_ProfCharMonsterObjTicks = 0;
+unsigned long long g_ProfCharAttachTicks = 0;
+unsigned long long g_ProfCharPostTicks = 0;
+
 static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reason)
 {
     if ((screenW <= 1) || (screenH <= 1))
@@ -9323,6 +9349,23 @@ static void RunAndroidGameFrame()
         const TerrainPerfSnapshot terrainPerf = ConsumeTerrainPerfSnapshot();
         const MainScenePerfSnapshot mainScenePerf = ConsumeMainScenePerfSnapshot();
 
+        // TEMP profiling: mirror this frame's sub-phase costs into globals the
+        // FPS overlay can read (see g_Prof* declarations above).
+        g_ProfObjMoveTicks = static_cast<unsigned long long>(objectPerf.moveTicks);
+        g_ProfObjRenderTicks = static_cast<unsigned long long>(objectPerf.renderTicks);
+        g_ProfCharMoveTicks = static_cast<unsigned long long>(characterPerf.moveTicks);
+        g_ProfCharRenderTicks = static_cast<unsigned long long>(characterPerf.renderTicks);
+        g_ProfTerrainTicks =
+            static_cast<unsigned long long>(terrainPerf.renderTicks) +
+            static_cast<unsigned long long>(terrainPerf.afterTicks);
+        g_ProfEffectsTicks = static_cast<unsigned long long>(mainScenePerf.effectsTicks);
+        g_ProfParticlesTicks = static_cast<unsigned long long>(mainScenePerf.particlesTicks);
+        g_ProfUiTicks = static_cast<unsigned long long>(mainScenePerf.uiTicks);
+        g_ProfCharShadowTicks = static_cast<unsigned long long>(characterPerf.renderShadowTicks);
+        g_ProfCharMonsterObjTicks = static_cast<unsigned long long>(characterPerf.renderMonsterObjectTicks);
+        g_ProfCharAttachTicks = static_cast<unsigned long long>(characterPerf.renderAttachmentTicks);
+        g_ProfCharPostTicks = static_cast<unsigned long long>(characterPerf.renderPostTicks);
+
         ++g_AndroidFrameState.perfFrames;
         g_AndroidFrameState.drawCallsTotal += frameDrawCalls;
         g_AndroidFrameState.vertsTotal += frameVerts;
@@ -9346,6 +9389,15 @@ static void RunAndroidGameFrame()
         g_AndroidFrameState.sceneTicksTotal += virtualPadStart - renderSceneStart;
         g_AndroidFrameState.padTicksTotal += presentStart - virtualPadStart;
         g_AndroidFrameState.presentTicksTotal += presentEnd - presentStart;
+
+        // TEMP profiling: last frame's top-level split, surfaced in the FPS
+        // overlay (ZzzScene.cpp). logcat is unavailable on retail "user"
+        // builds, and PERF_LOGI therefore never reaches us on the test devices.
+        // Scene() covers all game update + 3D + UI drawing; Present() is the
+        // flush/blit/swap, where GPU back-pressure shows up.
+        g_ProfSceneTicks = virtualPadStart - renderSceneStart;
+        g_ProfPadTicks = presentStart - virtualPadStart;
+        g_ProfPresentTicks = presentEnd - presentStart;
         g_AndroidFrameState.objMoveTicksTotal += static_cast<Uint64>(objectPerf.moveTicks);
         g_AndroidFrameState.objRenderTicksTotal += static_cast<Uint64>(objectPerf.renderTicks);
         g_AndroidFrameState.terrainRenderTicksTotal += static_cast<Uint64>(terrainPerf.renderTicks);

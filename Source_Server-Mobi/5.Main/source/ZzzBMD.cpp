@@ -13,6 +13,9 @@
 #include "SMD.h"
 #include "zzzEffect.h"
 #include "MapManager.h"
+#if defined(__ANDROID__) || defined(MU_IOS)
+#include "Platform/MobileTime.h"   // TEMP: CPU profiling timers (g_Prof* below)
+#endif
 #include "./Utilities/Log/muConsoleDebug.h"
 //#include "FillPolygon.h"
 #include "GMBattleCastle.h"
@@ -125,6 +128,16 @@ const void* g_SkinOwnerModel = nullptr;
 // device. Reset once per frame by the overlay after it reads them.
 int g_SkinStatMeshCalls = 0;  // RenderMesh calls reaching the mobile section
 int g_SkinStatModeOk    = 0;  // ... of those, passing the render-mode/lit/wave test
+// TEMP CPU profiling: accumulated ticks per frame for the CPU skinning work,
+// so we can see where the CPU time actually goes before deciding what is safe
+// to remove. Reset each frame by the FPS overlay (ZzzScene.cpp) after reading.
+// Measuring first because VertexTransform/NormalTransform feed shadow volumes,
+// SideHair, PhysicsManager and effect spawn points as well as rendering, so a
+// blind skip is not safe.
+unsigned long long g_ProfTransformTicks = 0;  // BMD::Transform  (per-vertex skinning)
+unsigned long long g_ProfAnimationTicks = 0;  // BMD::Animation  (bone matrices)
+int g_ProfTransformCalls = 0;
+
 int g_SkinStatShader    = 0;  // ... of those, with the skin shader compiled+linked
 int g_SkinStatReady     = 0;  // ... of those, also with bone matrices cached
 int g_SkinStatXform1    = 0;  // ... of those, in Translate=true mode
@@ -156,6 +169,16 @@ void BMD::Animation(float (*BoneMatrix)[3][4],float AnimationFrame,float PriorFr
 #endif //PBG_ADD_NEWCHAR_MONK_ANI
 {
     if ( NumActions<=0 ) return;
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// TEMP profiling - see g_Prof* declarations above.
+	struct ProfScope
+	{
+		unsigned long long start;
+		ProfScope() : start(MU_MobilePerfNow()) {}
+		~ProfScope() { g_ProfAnimationTicks += (MU_MobilePerfNow() - start); }
+	} profScope;
+#endif
 
     if(PriorAction >= NumActions) PriorAction = 0;
 	if(CurrentAction >= NumActions)CurrentAction = 0;
@@ -284,6 +307,16 @@ void BMD::Transform(float (*BoneMatrix)[3][4],vec3_t BoundingBoxMin,vec3_t Bound
 void BMD::Transform(float (*BoneMatrix)[3][4],vec3_t BoundingBoxMin,vec3_t BoundingBoxMax,OBB_t *OBB,bool Translate)
 #endif //PBG_ADD_NEWCHAR_MONK_ITEM
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// TEMP profiling - see g_Prof* declarations above.
+	struct ProfScope
+	{
+		unsigned long long start;
+		ProfScope() : start(MU_MobilePerfNow()) { ++g_ProfTransformCalls; }
+		~ProfScope() { g_ProfTransformTicks += (MU_MobilePerfNow() - start); }
+	} profScope;
+#endif
+
 	// transform
 	vec3_t LightPosition;
 

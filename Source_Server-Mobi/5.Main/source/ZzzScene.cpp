@@ -2,6 +2,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#if defined(__ANDROID__) || defined(MU_IOS)
+#include "Platform/MobileTime.h"   // TEMP: CPU profiling readout in the FPS overlay
+#endif
 #include "UIManager.h"
 #include "GuildCache.h"
 #include "ZzzOpenglUtil.h"
@@ -2988,24 +2991,43 @@ void MainScene(HDC hDC)
 			// logcat is unavailable on retail "user" builds like the test
 			// device, and this overlay is the one text element known to
 			// render reliably in-game. Format: calls/modeOk/xformOk/drawn.
+			extern int g_SkinStatDrawn;
 			extern int g_SkinStatMeshCalls;
 			extern int g_SkinStatModeOk;
 			extern int g_SkinStatShader;
 			extern int g_SkinStatReady;
 			extern int g_SkinStatXform1;
 			extern int g_SkinStatXform2;
-			extern int g_SkinStatDrawn;
 
-			unicode::t_char szFpsText[128];
-			unicode::_sprintf(szFpsText, "FPS %.1f S %d/%d/%d/%d T %d/%d D %d",
+			// TEMP CPU profiling: how much of each frame the CPU spends inside
+			// BMD::Transform (per-vertex skinning) and BMD::Animation (bone
+			// matrices). Render scaling showed the client is CPU-bound, so this
+			// says whether the duplicated CPU skinning is actually the hotspot
+			// before anything gets removed.
+			extern unsigned long long g_ProfTransformTicks;
+			extern unsigned long long g_ProfAnimationTicks;
+			extern int g_ProfTransformCalls;
+
+			// Top-level frame split from android_main.cpp: scene (all update +
+			// 3D + UI drawing) vs virtual pad vs present (flush/blit/swap).
+			extern unsigned long long g_ProfSceneTicks;
+			extern unsigned long long g_ProfPresentTicks;
+
+			const double tickToMs = 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
+
+			unicode::t_char szFpsText[192];
+			unicode::_sprintf(szFpsText, "FPS %.1f scn %.0f pres %.0f | xf %.1f/%d an %.1f D %d",
 				FPS_AVG,
-				g_SkinStatMeshCalls,
-				g_SkinStatModeOk,
-				g_SkinStatShader,
-				g_SkinStatReady,
-				g_SkinStatXform1,
-				g_SkinStatXform2,
+				static_cast<double>(g_ProfSceneTicks) * tickToMs,
+				static_cast<double>(g_ProfPresentTicks) * tickToMs,
+				static_cast<double>(g_ProfTransformTicks) * tickToMs,
+				g_ProfTransformCalls,
+				static_cast<double>(g_ProfAnimationTicks) * tickToMs,
 				g_SkinStatDrawn);
+
+			g_ProfTransformTicks = 0;
+			g_ProfAnimationTicks = 0;
+			g_ProfTransformCalls = 0;
 			g_SkinStatMeshCalls = 0;
 			g_SkinStatModeOk = 0;
 			g_SkinStatShader = 0;
@@ -3028,6 +3050,44 @@ void MainScene(HDC hDC)
 			const int hudWidth = (DisplayWinReal > 0) ? DisplayWinReal : DisplayWin;
 			const int fpsX = (((hudWidth - size.cx) - 12) > 10) ? ((hudWidth - size.cx) - 12) : 10;
 			g_pRenderText->RenderText(fpsX, DisplayHeight - 26, szFpsText);
+
+			// TEMP profiling line 2: Scene() sub-phase breakdown, all in ms.
+			// Scene() dominates the frame while Present() is ~0, so whichever
+			// bucket is large here is the actual bottleneck.
+			extern unsigned long long g_ProfObjMoveTicks;
+			extern unsigned long long g_ProfObjRenderTicks;
+			extern unsigned long long g_ProfCharMoveTicks;
+			extern unsigned long long g_ProfCharRenderTicks;
+			extern unsigned long long g_ProfTerrainTicks;
+			extern unsigned long long g_ProfEffectsTicks;
+			extern unsigned long long g_ProfParticlesTicks;
+			extern unsigned long long g_ProfUiTicks;
+
+			// chrR sub-phases: shadow / monster-object / attachments / post.
+			// Whatever is left after those is the character body draw itself.
+			extern unsigned long long g_ProfCharShadowTicks;
+			extern unsigned long long g_ProfCharMonsterObjTicks;
+			extern unsigned long long g_ProfCharAttachTicks;
+			extern unsigned long long g_ProfCharPostTicks;
+
+			unicode::t_char szProf2[192];
+			unicode::_sprintf(szProf2,
+				"objR %.0f chrR %.0f [sh %.0f mob %.0f att %.0f post %.0f] ter %.0f ui %.0f",
+				static_cast<double>(g_ProfObjRenderTicks) * tickToMs,
+				static_cast<double>(g_ProfCharRenderTicks) * tickToMs,
+				static_cast<double>(g_ProfCharShadowTicks) * tickToMs,
+				static_cast<double>(g_ProfCharMonsterObjTicks) * tickToMs,
+				static_cast<double>(g_ProfCharAttachTicks) * tickToMs,
+				static_cast<double>(g_ProfCharPostTicks) * tickToMs,
+				static_cast<double>(g_ProfTerrainTicks) * tickToMs,
+				static_cast<double>(g_ProfUiTicks) * tickToMs);
+
+			SIZE size2 = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProf2, lstrlen(szProf2), &size2);
+			const int prof2X = (((hudWidth - size2.cx) - 12) > 10) ? ((hudWidth - size2.cx) - 12) : 10;
+			g_pRenderText->RenderText(prof2X, DisplayHeight - 38, szProf2);
+
 			g_pRenderText->SetFont(g_hFont);
 
 			EndBitmap();
