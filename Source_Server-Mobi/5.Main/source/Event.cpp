@@ -24,7 +24,7 @@
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-// Å©¸®½º¸¶½º ÀÌº¥Æ®
+// Å©ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ®
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
 CXmasEvent::CXmasEvent(void)
@@ -111,14 +111,21 @@ void CXmasEvent::CreateXmasEventEffect(CHARACTER* pCha, OBJECT *pObj, int iType)
 	
 	switch(c->Object.SubType)
 	{
+	// Bounded copies: c->ID is char[32] but GlobalText entries are loaded from
+	// a localization file with no length guarantee. An over-long entry here
+	// would abort the process via FORTIFY exactly like the monster-name
+	// overflow fixed in Setting_Monster (ZzzCharacter.cpp).
 	case MODEL_XMAS_EVENT_CHA_SSANTA:
-		::strcpy(c->ID, GlobalText[2245]);	// 2245
+		::strncpy(c->ID, GlobalText[2245], sizeof(c->ID) - 1);	// 2245
+		c->ID[sizeof(c->ID) - 1] = '\0';
 		break;
 	case MODEL_XMAS_EVENT_CHA_DEER:
-		::strcpy(c->ID, GlobalText[2246]);	// 2246
+		::strncpy(c->ID, GlobalText[2246], sizeof(c->ID) - 1);	// 2246
+		c->ID[sizeof(c->ID) - 1] = '\0';
 		break;
 	case MODEL_XMAS_EVENT_CHA_SNOWMAN:
-		::strcpy(c->ID, GlobalText[2247]);	// 2247
+		::strncpy(c->ID, GlobalText[2247], sizeof(c->ID) - 1);	// 2247
+		c->ID[sizeof(c->ID) - 1] = '\0';
 		break;
 	}
 
@@ -258,7 +265,7 @@ CHARACTER* CNewYearsDayEvent::CreateMonster(int iType, int iPosX, int iPosY, int
 		{
 			OpenMonsterModel(122);
 			pCharacter = CreateCharacter(iKey, MODEL_MONSTER01+122, iPosX, iPosY);
-			strcpy(pCharacter->ID, "º¹ÁÖ¸Ó´Ï");
+			strcpy(pCharacter->ID, "ï¿½ï¿½ï¿½Ö¸Ó´ï¿½");
 			pCharacter->Object.Scale = 1.5f;
 		}
 		break;
@@ -373,7 +380,7 @@ bool CNewYearsDayEvent::MoveMonsterVisual(CHARACTER* c,OBJECT* o, BMD* b)
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-// Çà¿îÀÇ ÆÄ¶õ°¡¹æ ÀÌº¥Æ®
+// ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ä¶ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ìºï¿½Æ®
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifdef CSK_FIX_BLUELUCKYBAG_MOVECOMMAND
@@ -446,7 +453,7 @@ CHARACTER* C09SummerEvent::CreateMonster(int iType, int iPosX, int iPosY, int iK
 	{
 		OpenMonsterModel(154);
 		pCharacter = CreateCharacter(iKey, MODEL_MONSTER01+154, iPosX, iPosY);
-		strcpy(pCharacter->ID, "¿ì»ê");
+		strcpy(pCharacter->ID, "ï¿½ï¿½ï¿½");
 		pCharacter->Object.Scale = 0.8f;
 		pCharacter->Object.HiddenMesh = 2;
 		pCharacter->Object.m_iAnimation = 0;

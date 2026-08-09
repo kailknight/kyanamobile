@@ -78,6 +78,60 @@ vec3_t NormalTransform[MAX_MESH][MAX_VERTICES];
 float  IntensityTransform[MAX_MESH][MAX_VERTICES];
 vec3_t LightTransform[MAX_MESH][MAX_VERTICES];
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+// GPU skinning: per-frame bone/light/body state, cached by BMD::Transform()
+// so BMD::RenderMesh() can reach it without either function's signature
+// changing (RenderMesh has no OBJECT*/bone-matrix parameter and is called
+// from ~200 places across the codebase - see the "GPU skinning" section
+// near RenderMesh below for the full rationale). Global, not a BMD member,
+// matching VertexTransform/NormalTransform/LightTransform just above:
+// this pipeline has always assumed strictly sequential Transform()-then-
+// RenderMesh() calls per instance, never interleaved.
+//
+// TEMP kill switch for this test: flip to false to fall back to the
+// existing CPU path everywhere, with zero other code changes needed.
+bool g_GpuSkinningTestEnabled = true;
+
+float  g_SkinBoneMatrixCache[MAX_BONES][3][4];
+int    g_SkinBoneMatrixCacheCount = 0;
+vec3_t g_SkinLightDirCache = { 0.f, 1.f, 0.f };
+bool   g_SkinLightValid = false;
+float  g_SkinBodyScaleCache = 1.f;
+vec3_t g_SkinBodyOriginCache = { 0.f, 0.f, 0.f };
+// How the last Transform() call left the vertices, which decides how the GPU
+// path must build its MVP:
+//   0 = not eligible, use the CPU path
+//   1 = Translate=true:  CPU bakes BodyScale + BodyOrigin into the vertices,
+//                        so the GPU must fold that into the MVP itself.
+//   2 = Translate=false: vertices stay in bone space and the caller has
+//                        already put the object transform in the MODELVIEW
+//                        matrix, so the plain current MVP is correct as-is.
+int g_SkinTransformMode = 0;
+
+// The BMD whose bone matrices are currently in g_SkinBoneMatrixCache.
+// Transform() and RenderMesh() communicate only through these globals, but
+// RenderMesh is called from ~200 sites and plenty of them draw a DIFFERENT
+// model (attached weapons/items/wings, other objects) without a matching
+// Transform() call first. Skinning such a mesh against another model's bone
+// matrices produces garbage vertex positions - in practice enormous
+// off-screen triangles that flood the rasterizer and can hang or crash the
+// GPU driver. RenderMesh must therefore refuse to GPU-skin unless it is the
+// same BMD that populated the cache.
+const void* g_SkinOwnerModel = nullptr;
+
+// TEMP diagnostics for the GPU-skinning test: counts why meshes do or don't
+// reach the GPU path. Surfaced in the on-screen FPS overlay (ZzzScene.cpp)
+// because logcat is unavailable on retail "user" builds like the test
+// device. Reset once per frame by the overlay after it reads them.
+int g_SkinStatMeshCalls = 0;  // RenderMesh calls reaching the mobile section
+int g_SkinStatModeOk    = 0;  // ... of those, passing the render-mode/lit/wave test
+int g_SkinStatShader    = 0;  // ... of those, with the skin shader compiled+linked
+int g_SkinStatReady     = 0;  // ... of those, also with bone matrices cached
+int g_SkinStatXform1    = 0;  // ... of those, in Translate=true mode
+int g_SkinStatXform2    = 0;  // ... of those, in Translate=false mode
+int g_SkinStatDrawn     = 0;  // ... of those, actually GPU-skinned (mesh eligible)
+#endif
+
 unsigned char ShadowBuffer[256*256];
 int           ShadowBufferWidth  = 256;
 int           ShadowBufferHeight = 256;
@@ -255,6 +309,45 @@ void BMD::Transform(float (*BoneMatrix)[3][4],vec3_t BoundingBoxMin,vec3_t Bound
 		AngleMatrix(ShadowAngle,Matrix);
 		VectorIRotate(Position,Matrix,LightPosition);
 	}
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// GPU-skinning test: cache this call's bone matrices + light + body
+	// transform so RenderMesh (which has no bone-matrix parameter - see the
+	// "GPU skinning" section further down this file) can reach them.
+	// g_SkinTransformValid narrows this to exactly the case this function
+	// otherwise handles identically to the CPU path below: Translate=true,
+	// BoneScale==1 (the "if(BoneScale == 1.f)" branch a few lines down),
+	// and no _Scale override. Anything outside that keeps using the CPU
+	// path untouched, same as an ineligible mesh would.
+	if (g_GpuSkinningTestEnabled && NumBones > 0 && NumBones <= MAX_BONES)
+	{
+		memcpy(g_SkinBoneMatrixCache, BoneMatrix, sizeof(float) * 3 * 4 * NumBones);
+		g_SkinBoneMatrixCacheCount = NumBones;
+		g_SkinLightValid = LightEnable;
+		if (LightEnable)
+		{
+			VectorCopy(LightPosition, g_SkinLightDirCache);
+		}
+		g_SkinBodyScaleCache = BodyScale;
+		VectorCopy(BodyOrigin, g_SkinBodyOriginCache);
+
+		// Only the BoneScale==1 branch below (and no _Scale override) matches
+		// what the GPU shader computes; anything else keeps the CPU path.
+#ifdef PBG_ADD_NEWCHAR_MONK_ITEM
+		const bool eligible = (_Scale == 0.f) && (BoneScale == 1.f);
+#else
+		const bool eligible = (BoneScale == 1.f);
+#endif
+		g_SkinTransformMode = eligible ? (Translate ? 1 : 2) : 0;
+		g_SkinOwnerModel = this;
+	}
+	else
+	{
+		g_SkinTransformMode = 0;
+		g_SkinOwnerModel = nullptr;
+	}
+#endif
+
 	vec3_t BoundingMin;
 	vec3_t BoundingMax;
 #ifdef _DEBUG
@@ -1333,8 +1426,9 @@ bool CanBuildSkinRestPoseData(const Mesh_t& mesh)
 // already flattens indexed triangles) - indices are trivially 0..N-1 as a
 // result, kept as a real buffer only so the API stays generic if a future
 // change de-duplicates shared vertices.
-bool BuildSkinRestPoseData(const Mesh_t& mesh, std::vector<float>& outVertices, std::vector<unsigned short>& outIndices)
+bool BuildSkinRestPoseData(const Mesh_t& mesh, std::vector<float>& outVertices, std::vector<unsigned short>& outIndices, int& outMaxBoneIndex)
 {
+	outMaxBoneIndex = -1;
 	if (!CanBuildSkinRestPoseData(mesh))
 	{
 		return false;
@@ -1399,6 +1493,20 @@ bool BuildSkinRestPoseData(const Mesh_t& mesh, std::vector<float>& outVertices, 
 			// if not, the vertex's bone wins, same as the CPU path
 			// effectively resolves it per-vertex-index rather than
 			// per-normal-index.
+			// A bone index outside the shader's uniform array would read out
+			// of bounds on the GPU - reject the whole mesh to the CPU path
+			// rather than emit a draw that can fault the driver.
+			if (v.Node < 0 || v.Node >= MAX_BONES)
+			{
+				outVertices.clear();
+				outIndices.clear();
+				outMaxBoneIndex = -1;
+				return false;
+			}
+			if (v.Node > outMaxBoneIndex)
+			{
+				outMaxBoneIndex = v.Node;
+			}
 			outVertices.push_back(static_cast<float>(v.Node));
 
 			outIndices.push_back(static_cast<unsigned short>(outIndices.size()));
@@ -1406,6 +1514,21 @@ bool BuildSkinRestPoseData(const Mesh_t& mesh, std::vector<float>& outVertices, 
 	}
 
 	return true;
+}
+
+// Lazily builds and caches mesh.GpuSkin*Cache on first call; a no-op on
+// every call after that. Mesh_t is per-model (shared across every instance
+// of that model on screen), so this cost is paid once per model, not once
+// per frame or per character.
+void EnsureSkinRestPoseCache(Mesh_t& mesh)
+{
+	if (mesh.GpuSkinCacheBuilt)
+	{
+		return;
+	}
+	mesh.GpuSkinCacheEligible = BuildSkinRestPoseData(
+		mesh, mesh.GpuSkinVertexCache, mesh.GpuSkinIndexCache, mesh.GpuSkinMaxBoneIndex);
+	mesh.GpuSkinCacheBuilt = true;
 }
 }
 #endif
@@ -1746,6 +1869,89 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 		else if(i == StreamMesh)
 		{
 			mobileConstantColor[3] = 1.0f;
+		}
+	}
+
+	// GPU-skinning test: intercepts exactly the case TryRenderMeshDirectBatchMobile's
+	// RENDER_TEXTURE+lit branch below already handles (same render mode, same
+	// lit/textured requirement), routing it through the GPU-skinned draw path
+	// instead when a valid bone-matrix cache is available. Deliberately narrow -
+	// anything that doesn't qualify (wave, chrome, blend-mesh, unlit, non-triangle
+	// mesh, etc.) falls through unchanged to the exact same CPU path as before.
+	++g_SkinStatMeshCalls;
+	const bool skinModeOk =
+		Render == RENDER_TEXTURE &&
+		EnableLight &&
+		!EnableWave;
+	if (skinModeOk) ++g_SkinStatModeOk;
+	const bool skinShaderOk = skinModeOk && GL_SkinIsReady();
+	if (skinShaderOk) ++g_SkinStatShader;
+	const bool skinReady = skinShaderOk && g_SkinBoneMatrixCacheCount > 0;
+	if (skinReady) ++g_SkinStatReady;
+	if (skinReady && g_SkinTransformMode == 1) ++g_SkinStatXform1;
+	if (skinReady && g_SkinTransformMode == 2) ++g_SkinStatXform2;
+
+	// g_SkinOwnerModel guard: only skin when the cached bone matrices belong
+	// to THIS model (see g_SkinOwnerModel's declaration - many RenderMesh
+	// call sites draw a different model than the last Transform() call).
+	if (g_GpuSkinningTestEnabled && skinReady && g_SkinTransformMode != 0 &&
+		g_SkinOwnerModel == this)
+	{
+		EnsureSkinRestPoseCache(*m);
+		if (m->GpuSkinCacheEligible && !m->GpuSkinVertexCache.empty() &&
+			m->GpuSkinMaxBoneIndex >= 0 &&
+			m->GpuSkinMaxBoneIndex < g_SkinBoneMatrixCacheCount)
+		{
+			++g_SkinStatDrawn;
+			GL_UpdateSkinningBones(g_SkinBoneMatrixCache, g_SkinBoneMatrixCacheCount);
+
+			float baseMvp[16];
+			GL_GetCurrentMVP(baseMvp);
+
+			float finalMvp[16];
+			if (g_SkinTransformMode == 2)
+			{
+				// Vertices stay in bone space and the caller already put the
+				// object transform in the MODELVIEW matrix, so the current
+				// MVP is already exactly right.
+				memcpy(finalMvp, baseMvp, sizeof(finalMvp));
+			}
+			else
+			{
+				// finalMvp = baseMvp * Model, Model = Translate(BodyOrigin) * Scale(BodyScale)
+				// (uniform scale, no rotation - matches BMD::Transform's CPU order exactly:
+				// bone-transform first, then * BodyScale, then + BodyOrigin). Closed-form
+				// since Model has this simple sparsity pattern, no generic 4x4 multiply needed.
+				for (int c = 0; c < 3; ++c)
+				{
+					for (int r = 0; r < 4; ++r)
+					{
+						finalMvp[c * 4 + r] = baseMvp[c * 4 + r] * g_SkinBodyScaleCache;
+					}
+				}
+				for (int r = 0; r < 4; ++r)
+				{
+					finalMvp[12 + r] =
+						baseMvp[0 * 4 + r] * g_SkinBodyOriginCache[0] +
+						baseMvp[1 * 4 + r] * g_SkinBodyOriginCache[1] +
+						baseMvp[2 * 4 + r] * g_SkinBodyOriginCache[2] +
+						baseMvp[3 * 4 + r];
+				}
+			}
+
+			GL_DrawSkinnedMesh(
+				m->GpuSkinVertexCache.data(),
+				static_cast<int>(m->GpuSkinVertexCache.size() / 9),
+				m->GpuSkinIndexCache.data(),
+				static_cast<int>(m->GpuSkinIndexCache.size()),
+				finalMvp,
+				g_SkinLightDirCache,
+				BodyLight,
+				Alpha,
+				pBitmap->TextureNumber);
+
+			NotifyAdaptiveObjectRenderPassRendered(RenderFlag, Alpha);
+			return;
 		}
 	}
 

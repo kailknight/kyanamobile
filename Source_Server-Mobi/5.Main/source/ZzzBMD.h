@@ -2,6 +2,7 @@
 #define __ZZZBMD_H__
 
 #include "TextureScript.h"
+#include <vector>
 
 #define MAX_BONES    200
 #define MAX_MESH     50
@@ -150,15 +151,34 @@ typedef struct _Mesh_t
 
     TextureScript* m_csTScript;
 
+	// GPU-skinning rest-pose cache (additive, built lazily on first use by
+	// BuildSkinRestPoseData in ZzzBMD.cpp - see the "GPU skinning" section
+	// there). Built once per mesh (this data never changes frame to frame,
+	// only bone matrices do) and reused for every instance/frame after
+	// that. Empty/false means "not built yet or not eligible" - callers
+	// must always check GpuSkinCacheBuilt before using the vectors.
+	std::vector<float> GpuSkinVertexCache;
+	std::vector<unsigned short> GpuSkinIndexCache;
+	bool GpuSkinCacheBuilt;
+	bool GpuSkinCacheEligible;
+	// Highest bone index referenced by this mesh's vertices. The GPU path
+	// must refuse to draw unless the currently uploaded bone-matrix array
+	// actually covers this index, or the shader reads past the valid
+	// matrices and produces garbage geometry.
+	int  GpuSkinMaxBoneIndex;
+
 	_Mesh_t()
-	{	
+	{
 		Vertices = NULL;
 		Normals = NULL;
 		Triangles = NULL;
 		Commands = NULL;
 		m_csTScript= NULL;
+		GpuSkinCacheBuilt = false;
+		GpuSkinCacheEligible = false;
+		GpuSkinMaxBoneIndex = -1;
 
-		NumVertices = NumNormals = NumTexCoords = 
+		NumVertices = NumNormals = NumTexCoords =
 			NumVertexColors = NumTriangles = 0;
 	}
 

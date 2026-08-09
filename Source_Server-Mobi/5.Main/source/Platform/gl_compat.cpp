@@ -2324,11 +2324,18 @@ void GL_BatchAppendIndexedTrianglesConstColor(const float* positions3,
 // includes. Keep this in sync with MAX_BONES (currently 200) if that changes.
 static constexpr int kMaxSkinBones = 200;
 
+// NOTE: vertex attribute locations MUST be < GL_MAX_VERTEX_ATTRIBS, which
+// GLES 3.x only guarantees to be 16 (and Adreno reports exactly 16). Using
+// 20-23 here made the program fail to LINK on-device - silently, since
+// LOGE is compiled out in this file. Locations 4-7 stay clear of
+// gl_compat's own program (0-2) and RenderBackend.cpp's blit (10-11).
+// Uniform locations below are a separate, much larger namespace
+// (GL_MAX_UNIFORM_LOCATIONS, min 1024) so those can stay at 20+.
 static const char* s_skinVertSrc = R"(#version 310 es
-layout(location = 20) in vec3 a_restPos;
-layout(location = 21) in vec3 a_restNormal;
-layout(location = 22) in vec2 a_uv;
-layout(location = 23) in float a_boneIndex;
+layout(location = 4) in vec3 a_restPos;
+layout(location = 5) in vec3 a_restNormal;
+layout(location = 6) in vec2 a_uv;
+layout(location = 7) in float a_boneIndex;
 
 layout(location = 20) uniform highp mat4 u_mvp;
 layout(location = 21) uniform highp vec3 u_lightDir;
@@ -2359,10 +2366,12 @@ void main() {
     gl_Position = u_mvp * vec4(skinnedPos, 1.0);
     v_uv = a_uv;
 
-    // Matches BMD::Transform's per-vertex luminosity: dot(normal,lightDir)*0.8+0.4,
-    // floored at 0.2. skinnedNormal isn't unit length unless BoneScale==1 in the
-    // CPU path either, so normalize here for a stable result across bone scales.
-    float luminosity = dot(normalize(skinnedNormal), u_lightDir) * 0.8 + 0.4;
+    // Matches BMD::Transform's per-vertex luminosity EXACTLY, including NOT
+    // normalizing either vector: dot(rotatedNormal, LightPosition)*0.8+0.4,
+    // floored at 0.2. LightPosition on the CPU side is a fixed-magnitude
+    // (~1.5) rotated vector, not a unit direction - normalizing here would
+    // change the brightness compared to the CPU path, not just its precision.
+    float luminosity = dot(skinnedNormal, u_lightDir) * 0.8 + 0.4;
     v_light = max(luminosity, 0.2);
 }
 )";
@@ -2388,8 +2397,14 @@ static GLuint s_skinProg = 0;
 static GLuint s_skinBoneUbo = 0;
 static GLuint s_skinVbo = 0;      // scratch VBO for callers that pass raw vertex data
 static GLsizeiptr s_skinVboCapacity = 0;
+static GLuint s_skinEbo = 0;      // scratch EBO - see the client-pointer note in GL_DrawSkinnedMesh
+static GLsizeiptr s_skinEboCapacity = 0;
 
 using SkinVertex = GLSkinVertex; // layout owned by gl_compat.h - callers build it directly
+
+void GL_GetCurrentMVP(float mvp[16]) {
+    GetMVP(mvp);
+}
 
 bool GL_SkinInit() {
     GLuint vs = CompileShader(GL_VERTEX_SHADER, s_skinVertSrc);
@@ -2414,6 +2429,7 @@ bool GL_SkinInit() {
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
     glGenBuffers(1, &s_skinVbo);
+    glGenBuffers(1, &s_skinEbo);
 
     GL_InvalidateCachedGLState();
     LOGI("GL_SkinInit: OK (prog=%u, boneUbo=%u)", s_skinProg, s_skinBoneUbo);
@@ -2424,7 +2440,9 @@ void GL_SkinShutdown() {
     if (s_skinProg)    { glDeleteProgram(s_skinProg); s_skinProg = 0; }
     if (s_skinBoneUbo) { glDeleteBuffers(1, &s_skinBoneUbo); s_skinBoneUbo = 0; }
     if (s_skinVbo)     { glDeleteBuffers(1, &s_skinVbo); s_skinVbo = 0; }
+    if (s_skinEbo)     { glDeleteBuffers(1, &s_skinEbo); s_skinEbo = 0; }
     s_skinVboCapacity = 0;
+    s_skinEboCapacity = 0;
 }
 
 bool GL_SkinIsReady() {
@@ -2482,23 +2500,44 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     }
 
     const GLsizei stride = sizeof(SkinVertex);
-    glEnableVertexAttribArray(20);
-    glVertexAttribPointer(20, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restPos));
-    glEnableVertexAttribArray(21);
-    glVertexAttribPointer(21, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restNormal));
-    glEnableVertexAttribArray(22);
-    glVertexAttribPointer(22, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, uv));
-    glEnableVertexAttribArray(23);
-    glVertexAttribPointer(23, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, boneIndex));
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restPos));
+    glEnableVertexAttribArray(5);
+    glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restNormal));
+    glEnableVertexAttribArray(6);
+    glVertexAttribPointer(6, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, uv));
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, boneIndex));
 
-    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, indices);
+    // Upload indices into a real element buffer rather than passing the
+    // caller's pointer straight to glDrawElements. Mobile GLES drivers read
+    // client-side pointers asynchronously (this file already documents
+    // SEGV_ACCERR from exactly that on Mali - see GL_SetPreferDirectVertexArrays),
+    // so handing them a pointer into a caller-owned std::vector is a
+    // use-after-free waiting to happen the moment that cache is rebuilt or
+    // its model unloaded while a frame is still in flight.
+    const GLsizeiptr indexBytes = static_cast<GLsizeiptr>(indexCount) * sizeof(uint16_t);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_skinEbo);
+    if (indexBytes > s_skinEboCapacity) {
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, indices, GL_DYNAMIC_DRAW);
+        s_skinEboCapacity = indexBytes;
+    } else {
+        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, indexBytes, indices);
+    }
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-    glDisableVertexAttribArray(20);
-    glDisableVertexAttribArray(21);
-    glDisableVertexAttribArray(22);
-    glDisableVertexAttribArray(23);
+    glDisableVertexAttribArray(4);
+    glDisableVertexAttribArray(5);
+    glDisableVertexAttribArray(6);
+    glDisableVertexAttribArray(7);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, 0);
+
+    // Everything above bypassed gl_compat's own cached-state tracking (own
+    // program/attrib locations, raw texture/buffer binds) - tell it to
+    // re-sync instead of trusting stale cached values on the next call.
+    GL_InvalidateCachedGLState();
 
     ++s_drawCallCount;
     s_totalVertices += vertexCount;

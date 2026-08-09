@@ -179,6 +179,12 @@ struct GLSkinVertex {
     float boneIndex; // float, not int - matches the shader's vertex attrib type
 };
 
+// Current Projection * View (does NOT include any per-object model
+// transform - the CPU vertex path bakes object position/scale directly
+// into vertex positions instead of using a model matrix, so callers
+// building their own model matrix for GL_DrawSkinnedMesh's mvp must
+// multiply it onto this themselves).
+void GL_GetCurrentMVP(float mvp[16]);
 bool GL_SkinIsReady();
 // boneMatrix3x4: BMD::Animation's output format, float[boneCount][3][4].
 void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount);

@@ -14540,8 +14540,16 @@ void Setting_Monster(CHARACTER *c,int Type,int PositionX,int PositionY)
 		{
 			if(Type == MonsterScript[i].Type)
 			{
-	     		strcpy(c->ID,MonsterScript[i].Name);
-	
+				// CRASH FIX: MonsterScript[].Name is char[MAX_MONSTER_NAME]
+				// (64) but c->ID is only char[32], so any monster whose name
+				// exceeds 31 chars made bionic's FORTIFY abort the process the
+				// moment it spawned ("prevented 33-byte write into 32-byte
+				// buffer"). That is what crashed the client on entering Devias.
+				// Bounded copy + explicit NUL: long names render truncated
+				// instead of killing the process.
+				strncpy(c->ID, MonsterScript[i].Name, sizeof(c->ID) - 1);
+				c->ID[sizeof(c->ID) - 1] = '\0';
+
 				break;
 			}
 		}
@@ -14549,7 +14557,10 @@ void Setting_Monster(CHARACTER *c,int Type,int PositionX,int PositionY)
 
 		if (NpcName != 0)
 		{
-			strcpy(c->ID, NpcName->Name);
+			// NPCNAME_DATA::Name is char[25] so it fits today, but bound it
+			// too so widening that field later can't reintroduce the crash.
+			strncpy(c->ID, NpcName->Name, sizeof(c->ID) - 1);
+			c->ID[sizeof(c->ID) - 1] = '\0';
 		}
 
 		c->MonsterIndex = Type;
@@ -16557,7 +16568,15 @@ NexCustomMonter:
 	case 566:
 		OpenNpc(MODEL_TIME_LIMIT_QUEST_NPC_TERSIA);
 		c = CreateCharacter(Key, MODEL_TIME_LIMIT_QUEST_NPC_TERSIA, PositionX, PositionY);
-		strcpy(c->ID, "±æµå°ü¸®ÀÎ Å×¸£½Ã¾Æ");
+		// CRASH FIX: this literal is 38 bytes (37 + NUL) but c->ID is char[32].
+		// strcpy of a string literal compiles to a memcpy of the literal's full
+		// length, so bionic's FORTIFY aborts the process the instant this NPC
+		// spawns ("prevented 38-byte write into 32-byte buffer") - which is what
+		// crashed the client on entering Devias, where this NPC lives.
+		// Bounded copy + explicit NUL; the name renders truncated rather than
+		// killing the process.
+		strncpy(c->ID, "±æµå°ü¸®ÀÎ Å×¸£½Ã¾Æ", sizeof(c->ID) - 1);
+		c->ID[sizeof(c->ID) - 1] = '\0';
 		c->Object.Scale = 0.93f;
 		break;
 	case 567:
@@ -16570,7 +16589,10 @@ NexCustomMonter:
 		{
 			OpenNpc(MODEL_TIME_LIMIT_QUEST_NPC_ZAIRO);
 			c = CreateCharacter(Key, MODEL_TIME_LIMIT_QUEST_NPC_ZAIRO, PositionX, PositionY);
-			strcpy(c->ID, "¶°µ¹ÀÌ»óÀÎ ÀÚÀÌ·Î");
+			// CRASH FIX: same overflow as case 566 above - 34-byte literal
+			// (33 + NUL) into c->ID's 32 bytes. Bounded copy + explicit NUL.
+			strncpy(c->ID, "¶°µ¹ÀÌ»óÀÎ ÀÚÀÌ·Î", sizeof(c->ID) - 1);
+			c->ID[sizeof(c->ID) - 1] = '\0';
 			c->Object.LifeTime = 100;
 			c->Object.Scale = 0.8f;
 			c->Object.m_fEdgeScale = 1.1f;

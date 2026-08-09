@@ -2984,8 +2984,35 @@ void MainScene(HDC hDC)
 		{
 			BeginBitmap();
 
-			unicode::t_char szFpsText[32];
-			unicode::_sprintf(szFpsText, "FPS %.1f", FPS_AVG);
+			// TEMP: GPU-skinning test counters appended to the FPS readout -
+			// logcat is unavailable on retail "user" builds like the test
+			// device, and this overlay is the one text element known to
+			// render reliably in-game. Format: calls/modeOk/xformOk/drawn.
+			extern int g_SkinStatMeshCalls;
+			extern int g_SkinStatModeOk;
+			extern int g_SkinStatShader;
+			extern int g_SkinStatReady;
+			extern int g_SkinStatXform1;
+			extern int g_SkinStatXform2;
+			extern int g_SkinStatDrawn;
+
+			unicode::t_char szFpsText[128];
+			unicode::_sprintf(szFpsText, "FPS %.1f S %d/%d/%d/%d T %d/%d D %d",
+				FPS_AVG,
+				g_SkinStatMeshCalls,
+				g_SkinStatModeOk,
+				g_SkinStatShader,
+				g_SkinStatReady,
+				g_SkinStatXform1,
+				g_SkinStatXform2,
+				g_SkinStatDrawn);
+			g_SkinStatMeshCalls = 0;
+			g_SkinStatModeOk = 0;
+			g_SkinStatShader = 0;
+			g_SkinStatReady = 0;
+			g_SkinStatXform1 = 0;
+			g_SkinStatXform2 = 0;
+			g_SkinStatDrawn = 0;
 
 			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
 			g_pRenderText->SetBgColor(0, 0, 0, 140);
