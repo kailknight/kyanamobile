@@ -167,4 +167,17 @@ void GL_BatchAppendIndexedTrianglesConstColor(const float* positions3,
                                               float texOffsetU,
                                               float texOffsetV);
 
+// ── GPU skinning (additive, not wired into any character's render path
+//    yet - see the "GPU skinning" section in gl_compat.cpp) ────────────────
+bool GL_SkinIsReady();
+// boneMatrix3x4: BMD::Animation's output format, float[boneCount][3][4].
+void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount);
+// vertices: array of {float restPos[3]; float restNormal[3]; float uv[2]; float boneIndex;}
+// mvp: object world transform composed with view*projection (16 floats, column-major).
+void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
+                        const uint16_t* indices, int indexCount,
+                        const float mvp[16], const float lightDir[3],
+                        const float bodyLight[3], float alpha,
+                        GLuint textureId);
+
 #endif // __ANDROID__

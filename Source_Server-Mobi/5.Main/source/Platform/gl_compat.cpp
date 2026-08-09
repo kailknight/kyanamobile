@@ -696,6 +696,9 @@ void main() {
 // =============================================================================
 // Init / Shutdown
 // =============================================================================
+bool GL_SkinInit();       // defined further down - GPU skinning, additive/unused for now
+void GL_SkinShutdown();
+
 void GL_Compat_Init() {
     // Init matrix stacks with identity
     for (int i = 0; i < MAX_STACK; ++i) mat4_identity(s_mvStack[i]);
@@ -775,6 +778,14 @@ void GL_Compat_Init() {
     s_samplerUniformInitialized = true;
 
     LOGI("GL_Compat_Init: OK (prog=%u, progOpaque=%u, vbo=%u, ebo=%u)", s_prog, s_progOpaque, s_vbo, s_ebo);
+
+    // GPU skinning: compiles/links the shader and allocates its UBO so this
+    // gets verified on every app launch, but GL_SkinIsReady() being false is
+    // non-fatal - nothing calls GL_DrawSkinnedMesh yet, so a failure here
+    // does not affect any current rendering.
+    if (!GL_SkinInit()) {
+        LOGE("GL_Compat_Init: GL_SkinInit failed (non-fatal, skinning unused so far)");
+    }
 }
 
 void GL_GetDrawStats(int* drawCalls, int* vertices) {
@@ -820,6 +831,7 @@ bool GL_GetPreferDirectVertexArrays() {
 
 void GL_Compat_Shutdown() {
     FlushPendingImmediateBatch();
+    GL_SkinShutdown();
     if (s_prog) { glDeleteProgram(s_prog); s_prog = 0; }
     if (s_progOpaque) { glDeleteProgram(s_progOpaque); s_progOpaque = 0; }
     if (s_vbo)  { glDeleteBuffers(1, &s_vbo); s_vbo = 0; }
@@ -2293,6 +2305,208 @@ void GL_BatchAppendIndexedTrianglesConstColor(const float* positions3,
     s_hasBatch = true;
     s_batchPrimMode = GL_TRIANGLES;
     ++s_vaConvertedDrawCalls;
+}
+
+// =============================================================================
+// GPU skinning (additive, NOT wired into any render path yet)
+// =============================================================================
+// Status: infrastructure only. Nothing in the game calls GL_DrawSkinnedMesh
+// yet - BMD::RenderMesh/BMD::Transform still do CPU skinning exactly as
+// before. This exists so the shader/UBO plumbing can be built and verified
+// (compiles, links, runs standalone) before any character's render path is
+// touched. See BMD::Transform (ZzzBMD.cpp) for the CPU reference this must
+// match: out[i] = dot(restVec, boneRow[i]) [+ boneRow[i].w for position].
+//
+// Own attribute/uniform locations (20+) and UBO binding (0), deliberately
+// far from gl_compat's own program (locations 0-7) and RenderBackend.cpp's
+// blit program (locations 10-11) so none of the three ever alias.
+// Not ZzzBMD.h's MAX_BONES directly - this file stays free of game-layer
+// includes. Keep this in sync with MAX_BONES (currently 200) if that changes.
+static constexpr int kMaxSkinBones = 200;
+
+static const char* s_skinVertSrc = R"(#version 310 es
+layout(location = 20) in vec3 a_restPos;
+layout(location = 21) in vec3 a_restNormal;
+layout(location = 22) in vec2 a_uv;
+layout(location = 23) in float a_boneIndex;
+
+layout(location = 20) uniform highp mat4 u_mvp;
+layout(location = 21) uniform highp vec3 u_lightDir;
+
+layout(std140, binding = 0) uniform BoneBlock {
+    highp vec4 u_boneRows[600]; // kMaxSkinBones(200) * 3 rows - keep in sync
+};
+
+out mediump vec2 v_uv;
+out mediump float v_light;
+
+void main() {
+    int b = int(a_boneIndex) * 3;
+    vec4 row0 = u_boneRows[b + 0];
+    vec4 row1 = u_boneRows[b + 1];
+    vec4 row2 = u_boneRows[b + 2];
+
+    vec3 skinnedPos;
+    skinnedPos.x = dot(row0.xyz, a_restPos) + row0.w;
+    skinnedPos.y = dot(row1.xyz, a_restPos) + row1.w;
+    skinnedPos.z = dot(row2.xyz, a_restPos) + row2.w;
+
+    vec3 skinnedNormal;
+    skinnedNormal.x = dot(row0.xyz, a_restNormal);
+    skinnedNormal.y = dot(row1.xyz, a_restNormal);
+    skinnedNormal.z = dot(row2.xyz, a_restNormal);
+
+    gl_Position = u_mvp * vec4(skinnedPos, 1.0);
+    v_uv = a_uv;
+
+    // Matches BMD::Transform's per-vertex luminosity: dot(normal,lightDir)*0.8+0.4,
+    // floored at 0.2. skinnedNormal isn't unit length unless BoneScale==1 in the
+    // CPU path either, so normalize here for a stable result across bone scales.
+    float luminosity = dot(normalize(skinnedNormal), u_lightDir) * 0.8 + 0.4;
+    v_light = max(luminosity, 0.2);
+}
+)";
+
+// Fragment uniforms start at 24 (after u_mvp's 4 locations: 20-23 for its mat4 columns).
+static const char* s_skinFragSrc = R"(#version 310 es
+precision mediump float;
+layout(location = 24) uniform sampler2D u_sampler;
+layout(location = 25) uniform vec3 u_bodyLight;
+layout(location = 26) uniform float u_alpha;
+
+in vec2 v_uv;
+in float v_light;
+out vec4 outFragColor;
+
+void main() {
+    vec4 texColor = texture(u_sampler, v_uv);
+    outFragColor = vec4(texColor.rgb * u_bodyLight * v_light, texColor.a * u_alpha);
+}
+)";
+
+static GLuint s_skinProg = 0;
+static GLuint s_skinBoneUbo = 0;
+static GLuint s_skinVbo = 0;      // scratch VBO for callers that pass raw vertex data
+static GLsizeiptr s_skinVboCapacity = 0;
+
+struct SkinVertex {
+    float restPos[3];
+    float restNormal[3];
+    float uv[2];
+    float boneIndex;
+};
+
+bool GL_SkinInit() {
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, s_skinVertSrc);
+    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, s_skinFragSrc);
+    if (!vs || !fs) {
+        LOGE("GL_SkinInit: shader compile failed");
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        return false;
+    }
+    s_skinProg = LinkProgram(vs, fs);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    if (!s_skinProg) {
+        LOGE("GL_SkinInit: link failed");
+        return false;
+    }
+
+    glGenBuffers(1, &s_skinBoneUbo);
+    glBindBuffer(GL_UNIFORM_BUFFER, s_skinBoneUbo);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 4 * 3 * kMaxSkinBones, nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    glGenBuffers(1, &s_skinVbo);
+
+    GL_InvalidateCachedGLState();
+    LOGI("GL_SkinInit: OK (prog=%u, boneUbo=%u)", s_skinProg, s_skinBoneUbo);
+    return true;
+}
+
+void GL_SkinShutdown() {
+    if (s_skinProg)    { glDeleteProgram(s_skinProg); s_skinProg = 0; }
+    if (s_skinBoneUbo) { glDeleteBuffers(1, &s_skinBoneUbo); s_skinBoneUbo = 0; }
+    if (s_skinVbo)     { glDeleteBuffers(1, &s_skinVbo); s_skinVbo = 0; }
+    s_skinVboCapacity = 0;
+}
+
+bool GL_SkinIsReady() {
+    return s_skinProg != 0 && s_skinBoneUbo != 0;
+}
+
+// boneMatrix3x4: boneCount entries of BMD's float[3][4] affine format (as
+// produced by BMD::Animation) - same row-major, translation-in-column-3
+// layout VectorTransform/VectorRotate use. Uploads directly, no conversion.
+void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
+    if (!s_skinBoneUbo || boneCount <= 0) {
+        return;
+    }
+    if (boneCount > kMaxSkinBones) {
+        boneCount = kMaxSkinBones;
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, s_skinBoneUbo);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float) * 4 * 3 * boneCount, boneMatrix3x4);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+}
+
+// Draws one skinned mesh from caller-supplied vertex/index data using the
+// bone matrices last uploaded via GL_UpdateSkinningBones. mvp should already
+// include the object's world transform (BodyOrigin/Angle/Scale) composed
+// with view*projection, since vertices here are bone-local rest-pose, not
+// pre-baked to world space like gl_compat's other draw paths.
+void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
+                        const uint16_t* indices, int indexCount,
+                        const float mvp[16], const float lightDir[3],
+                        const float bodyLight[3], float alpha,
+                        GLuint textureId) {
+    if (!GL_SkinIsReady() || !vertices || vertexCount <= 0 || !indices || indexCount <= 0) {
+        return;
+    }
+
+    UseProgramCached(s_skinProg);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_skinBoneUbo);
+
+    glUniformMatrix4fv(20, 1, GL_FALSE, mvp);
+    glUniform3fv(21, 1, lightDir);
+    glUniform3fv(25, 1, bodyLight);
+    glUniform1f(26, alpha);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureId);
+    glUniform1i(24, 0);
+
+    const GLsizeiptr bytes = static_cast<GLsizeiptr>(vertexCount) * sizeof(SkinVertex);
+    glBindBuffer(GL_ARRAY_BUFFER, s_skinVbo);
+    if (bytes > s_skinVboCapacity) {
+        glBufferData(GL_ARRAY_BUFFER, bytes, vertices, GL_DYNAMIC_DRAW);
+        s_skinVboCapacity = bytes;
+    } else {
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, vertices);
+    }
+
+    const GLsizei stride = sizeof(SkinVertex);
+    glEnableVertexAttribArray(20);
+    glVertexAttribPointer(20, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restPos));
+    glEnableVertexAttribArray(21);
+    glVertexAttribPointer(21, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restNormal));
+    glEnableVertexAttribArray(22);
+    glVertexAttribPointer(22, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, uv));
+    glEnableVertexAttribArray(23);
+    glVertexAttribPointer(23, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, boneIndex));
+
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, indices);
+
+    glDisableVertexAttribArray(20);
+    glDisableVertexAttribArray(21);
+    glDisableVertexAttribArray(22);
+    glDisableVertexAttribArray(23);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, 0);
+
+    ++s_drawCallCount;
+    s_totalVertices += vertexCount;
 }
 
 #endif // __ANDROID__
