@@ -134,7 +134,8 @@ static constexpr GLenum kCompatProjectionMode = 0x1701; // GL_PROJECTION
 // =============================================================================
 // Shader programs
 // =============================================================================
-static GLuint s_prog    = 0;   // main textured+colored shader
+static GLuint s_prog    = 0;   // alpha-tested/discard textured+colored shader
+static GLuint s_progOpaque = 0; // same, but no discard - keeps Early-Z/LRZ alive on Adreno/Mali
 static GLuint s_vbo     = 0;
 static GLuint s_ebo     = 0;
 
@@ -504,6 +505,15 @@ static inline void UseProgramCached(GLuint program) {
     if (s_currentProgram != program) {
         glUseProgram(program);
         s_currentProgram = program;
+        // Each GL program object owns independent uniform storage, so
+        // switching between s_prog/s_progOpaque invalidates every
+        // "already set to this value" cache below even though both share
+        // the same explicit uniform locations - force the next
+        // ApplyShaderStateCommon to resync onto the newly bound program.
+        s_hasLastMvp = false;
+        s_lastUseTex = -1;
+        s_lastAlphaTest = -1;
+        s_lastAlphaRef = -1.0f;
     }
 }
 
@@ -601,14 +611,19 @@ static GLuint LinkProgram(GLuint vs, GLuint fs) {
 // Shaders source
 // =============================================================================
 
-// Vertex shader: transforms by MVP, passes color + texcoord through
+// Vertex shader: transforms by MVP, passes color + texcoord through.
+// Explicit layout locations so both fragment-shader variants below link into
+// programs with identical attribute/uniform locations - lets the rest of the
+// file treat s_aPos/s_uMVP/etc as valid no matter which program is bound.
+// Position stays highp (geometry precision matters over large world coords);
+// the color/uv varyings are mediump since fragment work only touches color math.
 static const char* s_vertSrc = R"(#version 310 es
-in vec4 a_pos;
-in vec4 a_color;
-in vec2 a_uv;
-uniform mat4 u_mvp;
-out vec4 v_color;
-out vec2 v_uv;
+layout(location = 0) in vec4 a_pos;
+layout(location = 1) in vec4 a_color;
+layout(location = 2) in vec2 a_uv;
+layout(location = 0) uniform highp mat4 u_mvp;
+out mediump vec4 v_color;
+out mediump vec2 v_uv;
 void main() {
     gl_Position = u_mvp * a_pos;
     v_color = a_color;
@@ -616,13 +631,20 @@ void main() {
 }
 )";
 
-// Fragment shader: texture * color, with optional alpha test
+// Fragment shader (alpha-tested / blended draws): texture * color, with
+// optional alpha test. Used for particles, foliage/fences, and anything else
+// with GL_ALPHA_TEST or GL_BLEND enabled. mediump: Adreno runs mediump ~2x
+// highp for simple color math like this, and color values don't need highp range.
+// Fragment uniforms start at location 4: u_mvp above is a mat4, which
+// consumes 4 consecutive locations (one per column, locations 0-3) in the
+// linked program's shared uniform-location space - starting fragment
+// uniforms at 1 would silently alias u_mvp's columns and fail to link.
 static const char* s_fragSrc = R"(#version 310 es
-precision highp float;
-uniform sampler2D u_sampler;
-uniform int u_useTex;
-uniform int u_alphaTest;
-uniform float u_alphaRef;
+precision mediump float;
+layout(location = 4) uniform sampler2D u_sampler;
+layout(location = 5) uniform int u_useTex;
+layout(location = 6) uniform int u_alphaTest;
+layout(location = 7) uniform float u_alphaRef;
 in vec4 v_color;
 in vec2 v_uv;
 out vec4 outFragColor;
@@ -638,6 +660,34 @@ void main() {
     }
     if (u_alphaTest == 1 && c.a <= u_alphaRef) {
         discard;
+    }
+    outFragColor = c;
+}
+)";
+
+// Fragment shader (opaque draws, no GL_ALPHA_TEST/GL_BLEND): identical color
+// math but WITHOUT any discard. On Adreno/Mali, a `discard` in the shader
+// disables Early-Z/LRZ for every draw using that program - even draws that
+// never actually take the discard branch, e.g. fully opaque terrain/character
+// meshes with alpha always 1. Routing those through this variant instead lets
+// the GPU reject occluded fragments before shading them. Same uniform
+// locations as s_fragSrc (see layout(location=...) above) so both programs
+// share one set of cached uniform-location variables.
+static const char* s_fragSrcOpaque = R"(#version 310 es
+precision mediump float;
+layout(location = 4) uniform sampler2D u_sampler;
+layout(location = 5) uniform int u_useTex;
+layout(location = 6) uniform int u_alphaTest;
+layout(location = 7) uniform float u_alphaRef;
+in vec4 v_color;
+in vec2 v_uv;
+out vec4 outFragColor;
+void main() {
+    vec4 c;
+    if (u_useTex == 1) {
+        c = texture(u_sampler, v_uv) * v_color;
+    } else {
+        c = v_color;
     }
     outFragColor = c;
 }
@@ -689,13 +739,18 @@ void GL_Compat_Init() {
     s_quadIndices.clear();
     s_quadIndexCapacityQuads = 0;
 
-    // Compile shaders
-    GLuint vs = CompileShader(GL_VERTEX_SHADER,   s_vertSrc);
-    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, s_fragSrc);
-    if (!vs || !fs) { LOGE("GL_Compat_Init: shader compile failed"); return; }
-    s_prog = LinkProgram(vs, fs);
-    glDeleteShader(vs); glDeleteShader(fs);
-    if (!s_prog) { LOGE("GL_Compat_Init: link failed"); return; }
+    // Compile shaders. Both programs share one vertex shader object and use
+    // matching explicit layout(location=...) on every attribute/uniform (see
+    // s_vertSrc/s_fragSrc/s_fragSrcOpaque above), so the single set of
+    // location variables queried below is valid for either program.
+    GLuint vs          = CompileShader(GL_VERTEX_SHADER,   s_vertSrc);
+    GLuint fsAlphaTest = CompileShader(GL_FRAGMENT_SHADER, s_fragSrc);
+    GLuint fsOpaque    = CompileShader(GL_FRAGMENT_SHADER, s_fragSrcOpaque);
+    if (!vs || !fsAlphaTest || !fsOpaque) { LOGE("GL_Compat_Init: shader compile failed"); return; }
+    s_prog       = LinkProgram(vs, fsAlphaTest);
+    s_progOpaque = LinkProgram(vs, fsOpaque);
+    glDeleteShader(vs); glDeleteShader(fsAlphaTest); glDeleteShader(fsOpaque);
+    if (!s_prog || !s_progOpaque) { LOGE("GL_Compat_Init: link failed"); return; }
 
     s_aPos    = glGetAttribLocation(s_prog,  "a_pos");
     s_aColor  = glGetAttribLocation(s_prog,  "a_color");
@@ -710,13 +765,16 @@ void GL_Compat_Init() {
     glGenBuffers(1, &s_vbo);
     glGenBuffers(1, &s_ebo);
 
-    // Sampler uniform is constant (texture unit 0).
+    // Sampler uniform is constant (texture unit 0) - each program has its own
+    // uniform storage, so it must be set once per program, not just once overall.
     UseProgramCached(s_prog);
+    glUniform1i(s_uSampler, 0);
+    UseProgramCached(s_progOpaque);
     glUniform1i(s_uSampler, 0);
     UseProgramCached(0);
     s_samplerUniformInitialized = true;
 
-    LOGI("GL_Compat_Init: OK (prog=%u, vbo=%u, ebo=%u)", s_prog, s_vbo, s_ebo);
+    LOGI("GL_Compat_Init: OK (prog=%u, progOpaque=%u, vbo=%u, ebo=%u)", s_prog, s_progOpaque, s_vbo, s_ebo);
 }
 
 void GL_GetDrawStats(int* drawCalls, int* vertices) {
@@ -763,6 +821,7 @@ bool GL_GetPreferDirectVertexArrays() {
 void GL_Compat_Shutdown() {
     FlushPendingImmediateBatch();
     if (s_prog) { glDeleteProgram(s_prog); s_prog = 0; }
+    if (s_progOpaque) { glDeleteProgram(s_progOpaque); s_progOpaque = 0; }
     if (s_vbo)  { glDeleteBuffers(1, &s_vbo); s_vbo = 0; }
     if (s_ebo)  { glDeleteBuffers(1, &s_ebo); s_ebo = 0; }
     s_verts.clear();
@@ -802,7 +861,13 @@ void GL_Compat_Shutdown() {
 // Handles GL_QUADS (not in GLES2) by converting each quad to 2 triangles.
 // =============================================================================
 static inline void ApplyShaderStateCommon(bool modelViewBaked) {
-    UseProgramCached(s_prog);
+    // Fully opaque draws (no alpha test, no blending - terrain, character
+    // meshes, opaque UI) go through the no-discard program so Early-Z/LRZ can
+    // reject occluded fragments before shading. Alpha-tested or blended draws
+    // (foliage/fences, particles/effects) need the discard-capable variant.
+    const bool needsDiscard = s_alphaTestEnabled || (s_capBits & CAP_BLEND) != 0;
+    const GLuint targetProg = (needsDiscard || !s_progOpaque) ? s_prog : s_progOpaque;
+    UseProgramCached(targetProg);
     if (!s_samplerUniformInitialized) {
         glUniform1i(s_uSampler, 0);
         s_samplerUniformInitialized = true;

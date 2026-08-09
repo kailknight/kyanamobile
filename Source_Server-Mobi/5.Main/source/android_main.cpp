@@ -7225,7 +7225,13 @@ namespace
         int highFpsStreak = 0;
         int defaultMessageBudget = 90;
         int minMessageBudget = 35;
-        double targetFps = -1.0;        // -1 = uncapped, run at full GPU speed
+        // Software frame cap (VSync is deliberately off - see SDL_GL_SetSwapInterval(0)
+        // below - so this is the only thing that stops the loop rendering flat-out).
+        // Capped at 60: doesn't affect areas that are already below 60fps (the CPU/GPU
+        // bottleneck there needs the draw-call/shader/skinning work, not a cap), but
+        // avoids burning GPU cycles - and the resulting heat/throttling - in menus and
+        // lighter scenes that could otherwise render past what the display can show.
+        double targetFps = 60.0;
         double lowFpsThreshold = 50.0;
         double highFpsThreshold = 58.0;
         double minEffectScale = 0.42;
@@ -9910,7 +9916,7 @@ int SDL_main(int argc, char* argv[])
 
     (void)0;
     SetMaxMessagePerCycle(g_adaptivePerf.defaultMessageBudget);
-    SetTargetFps(g_adaptivePerf.targetFps);  // -1 = uncapped
+    SetTargetFps(g_adaptivePerf.targetFps);  // 60 by default; see AdaptivePerfState::targetFps
     LOGI(
         "Android perf defaults: maxMsgPerCycle=%d targetFps=%.1f fxScale=%.2f adaptive=on isEmulator=%d",
         g_MaxMessagePerCycle,
@@ -10107,7 +10113,7 @@ int SDL_main(int argc, char* argv[])
         if (g_bWndActive)
         {
             static bool s_crfResult = false;
-            s_crfResult = true;
+            s_crfResult = CheckRenderNextFrame();
 
             if (s_crfResult)
             {

@@ -1,8 +1,8 @@
 ///////////////////////////////////////////////////////////////////////////////
-// AI°ü·Ã ÇÔ¼ö
-// Å¸ÄÏ¹æÇâÀ¸·Î ¹æÇâ Æ²±â, ±æÃ£±â, fps±¸ÇÏ±â µîµî
+// AIï¿½ï¿½ï¿½ï¿½ ï¿½Ô¼ï¿½
+// Å¸ï¿½Ï¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ Æ²ï¿½ï¿½, ï¿½ï¿½Ã£ï¿½ï¿½, fpsï¿½ï¿½ï¿½Ï±ï¿½ ï¿½ï¿½ï¿½
 //
-// *** ÇÔ¼ö ·¹º§: 2
+// *** ï¿½Ô¼ï¿½ ï¿½ï¿½ï¿½ï¿½: 2
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
@@ -312,7 +312,7 @@ void SetAction_Fenrir_Damage(CHARACTER* c, OBJECT* o)
 		SetAction(o, PLAYER_FENRIR_DAMAGE_ONE_LEFT);
 	else if(c->Weapon[0].Type != -1 && c->Weapon[1].Type != -1 && c->Weapon[0].Type ==MODEL_BOW+15)//CustomArrow Cung
 		SetAction(o, PLAYER_FENRIR_DAMAGE_ONE_LEFT);
-	else	// ¸Ç¼Õ
+	else	// ï¿½Ç¼ï¿½
 		SetAction(o, PLAYER_FENRIR_DAMAGE);
 #ifdef PBG_ADD_NEWCHAR_MONK_ANI
 	}
@@ -850,8 +850,17 @@ void CalcFPS()
 		FPS = 1000 / differenceMs;
 	}
 
-	FPS_ANIMATION_FACTOR = minf(static_cast<float>(REFERENCE_FPS / FPS), 2.5f); // no less than 10 fps
+	const float rawAnimationFactor = minf(static_cast<float>(REFERENCE_FPS / FPS), 2.5f); // no less than 10 fps
 	//FPS_ANIMATION_FACTOR = 0.45f; // no less than 10 fps
+
+	// Low-pass filter the factor so a single-frame hitch (GC pause, thermal
+	// throttle stall, driver hiccup) doesn't apply as one large discrete jump
+	// to both position (MoveCharacterPosition) and animation-frame advance
+	// (BMD::PlayAnimation) in the same tick - that mismatch is what reads as
+	// monsters/characters "sliding" during their walk animation.
+	static float smoothedAnimationFactor = 1.0f;
+	smoothedAnimationFactor += (rawAnimationFactor - smoothedAnimationFactor) * 0.35f;
+	FPS_ANIMATION_FACTOR = smoothedAnimationFactor;
 
 	// Calculate average fps every 2 seconds or 25 frames
 	const double diffSinceStart = WorldTime - start;

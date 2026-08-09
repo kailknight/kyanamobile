@@ -4,12 +4,11 @@
 !/Source_Server-Mobi/
 !/.gitignore
 
-# --- Source_Server-Mobi: track only the Android mobile client ---
+# --- Source_Server-Mobi: track only the shared engine/game source ---
 # (server projects, backup copy, vendored third-party code, and loose
 # debug artifacts at this level are not part of the client render work)
 /Source_Server-Mobi/*
 !/Source_Server-Mobi/5.Main/
-!/Source_Server-Mobi/android/
 
 /Source_Server-Mobi/5.Main/boost_1_80_0/
 /Source_Server-Mobi/5.Main/dependencies/
@@ -18,17 +17,11 @@
 # Backup copy of the source tree, not built by CMake - don't track/edit.
 /Source_Server-Mobi/5.Main - Copy/
 
-# Gradle/CMake build output and IDE state.
-/Source_Server-Mobi/android/.gradle/
-/Source_Server-Mobi/android/.idea/
-/Source_Server-Mobi/android/app/build/
-/Source_Server-Mobi/android/app/.cxx/
-/Source_Server-Mobi/android/build/
-/Source_Server-Mobi/android/local.properties
-*.iml
-
-# Prebuilt vendor binaries (SDL2, botan, mpg123) - not source we edit.
-/Source_Server-Mobi/android/app/src/main/jniLibs/**/*.so
+# Source_Server-Mobi/android is ALREADY its own separate git repo (its own
+# .git, remote "origin" -> github.com/fittail08/kyanamobile, predates this
+# outer repo) - don't nest/shadow it here as a gitlink. This outer repo is
+# only a safety net for the 5.Main engine source, which has no git of its own.
+/Source_Server-Mobi/android/
 
 # Compiled artifacts if any get generated in-place.
 *.o
