@@ -2389,12 +2389,7 @@ static GLuint s_skinBoneUbo = 0;
 static GLuint s_skinVbo = 0;      // scratch VBO for callers that pass raw vertex data
 static GLsizeiptr s_skinVboCapacity = 0;
 
-struct SkinVertex {
-    float restPos[3];
-    float restNormal[3];
-    float uv[2];
-    float boneIndex;
-};
+using SkinVertex = GLSkinVertex; // layout owned by gl_compat.h - callers build it directly
 
 bool GL_SkinInit() {
     GLuint vs = CompileShader(GL_VERTEX_SHADER, s_skinVertSrc);

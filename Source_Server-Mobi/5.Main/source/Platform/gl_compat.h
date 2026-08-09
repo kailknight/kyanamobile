@@ -169,10 +169,20 @@ void GL_BatchAppendIndexedTrianglesConstColor(const float* positions3,
 
 // ── GPU skinning (additive, not wired into any character's render path
 //    yet - see the "GPU skinning" section in gl_compat.cpp) ────────────────
+// Rest-pose (bone-local, not transformed) vertex layout for GL_DrawSkinnedMesh.
+// Callers building this data (e.g. a future BMD model-load step) must match
+// this layout exactly - it's uploaded to the GPU as raw bytes.
+struct GLSkinVertex {
+    float restPos[3];
+    float restNormal[3];
+    float uv[2];
+    float boneIndex; // float, not int - matches the shader's vertex attrib type
+};
+
 bool GL_SkinIsReady();
 // boneMatrix3x4: BMD::Animation's output format, float[boneCount][3][4].
 void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount);
-// vertices: array of {float restPos[3]; float restNormal[3]; float uv[2]; float boneIndex;}
+// vertices: GLSkinVertex[vertexCount]
 // mvp: object world transform composed with view*projection (16 floats, column-major).
 void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
                         const uint16_t* indices, int indexCount,

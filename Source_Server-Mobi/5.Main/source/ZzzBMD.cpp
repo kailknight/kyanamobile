@@ -1293,6 +1293,120 @@ bool TryRenderMeshDirectBatchMobile(int meshIndex,
 	}
 	return true;
 }
+
+// =============================================================================
+// GPU skinning: rest-pose vertex buffer extraction (additive, unused so far)
+// =============================================================================
+// Builds a flat (restPos, restNormal, uv, boneIndex) buffer + a trivial
+// triangle-list index buffer for GL_DrawSkinnedMesh, from a mesh's REST-POSE
+// data - no bone transform applied here, that happens in the vertex shader.
+// None of this data changes frame to frame (only the bone matrices do), so
+// this is meant to be called once per mesh and cached by the caller, not
+// rebuilt every frame.
+//
+// Same constraint as CanUseMobileDirectMeshBatch above: only meshes made
+// entirely of triangles (Polygon==3) are supported; anything else returns
+// false and the caller keeps using the existing CPU-transform path for that
+// mesh untouched.
+bool CanBuildSkinRestPoseData(const Mesh_t& mesh)
+{
+	if (mesh.NumTriangles <= 0 || mesh.Triangles == nullptr ||
+		mesh.Vertices == nullptr || mesh.Normals == nullptr)
+	{
+		return false;
+	}
+	for (int t = 0; t < mesh.NumTriangles; ++t)
+	{
+		if (mesh.Triangles[t].Polygon != 3)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+// outVertices: 9 floats per vertex (restPos.xyz, restNormal.xyz, uv.xy,
+// boneIndex) - must match Platform/gl_compat.h's GLSkinVertex layout byte
+// for byte, since this is uploaded to the GPU as raw bytes by that file.
+// outIndices: 3 per triangle, a flat triangle list with no vertex sharing
+// across triangles (matches how CanUseMobileDirectMeshBatch's fast path
+// already flattens indexed triangles) - indices are trivially 0..N-1 as a
+// result, kept as a real buffer only so the API stays generic if a future
+// change de-duplicates shared vertices.
+bool BuildSkinRestPoseData(const Mesh_t& mesh, std::vector<float>& outVertices, std::vector<unsigned short>& outIndices)
+{
+	if (!CanBuildSkinRestPoseData(mesh))
+	{
+		return false;
+	}
+
+	const bool hasTexCoords = (mesh.TexCoords != nullptr && mesh.NumTexCoords > 0);
+	const int numVerts = mesh.NumTriangles * 3;
+	if (numVerts <= 0 || numVerts > 65535)
+	{
+		// Flat (non-shared) triangle list can exceed the 16-bit index range
+		// for very dense meshes - bail out, caller keeps using the CPU path.
+		return false;
+	}
+
+	outVertices.clear();
+	outVertices.reserve(static_cast<size_t>(numVerts) * 9);
+	outIndices.clear();
+	outIndices.reserve(static_cast<size_t>(numVerts));
+
+	for (int t = 0; t < mesh.NumTriangles; ++t)
+	{
+		const Triangle_t& tri = mesh.Triangles[t];
+		for (int corner = 0; corner < 3; ++corner)
+		{
+			const short vi = tri.VertexIndex[corner];
+			const short ni = tri.NormalIndex[corner];
+			if (vi < 0 || vi >= mesh.NumVertices || ni < 0 || ni >= mesh.NumNormals)
+			{
+				// Malformed data - bail rather than read out of bounds.
+				outVertices.clear();
+				outIndices.clear();
+				return false;
+			}
+
+			const Vertex_t& v = mesh.Vertices[vi];
+			const Normal_t& n = mesh.Normals[ni];
+
+			outVertices.push_back(v.Position[0]);
+			outVertices.push_back(v.Position[1]);
+			outVertices.push_back(v.Position[2]);
+			outVertices.push_back(n.Normal[0]);
+			outVertices.push_back(n.Normal[1]);
+			outVertices.push_back(n.Normal[2]);
+
+			float u = 0.0f, texv = 0.0f;
+			if (hasTexCoords)
+			{
+				const short ti = tri.TexCoordIndex[corner];
+				if (ti >= 0 && ti < mesh.NumTexCoords)
+				{
+					u = mesh.TexCoords[ti].TexCoordU;
+					texv = mesh.TexCoords[ti].TexCoordV;
+				}
+			}
+			outVertices.push_back(u);
+			outVertices.push_back(texv);
+
+			// The vertex's own bone (v.Node) drives both position and
+			// normal skinning here, matching how BMD::Transform uses
+			// v->Node for VertexTransform. Well-formed models have the
+			// corresponding Normal at the same corner on the same bone;
+			// if not, the vertex's bone wins, same as the CPU path
+			// effectively resolves it per-vertex-index rather than
+			// per-normal-index.
+			outVertices.push_back(static_cast<float>(v.Node));
+
+			outIndices.push_back(static_cast<unsigned short>(outIndices.size()));
+		}
+	}
+
+	return true;
+}
 }
 #endif
 
