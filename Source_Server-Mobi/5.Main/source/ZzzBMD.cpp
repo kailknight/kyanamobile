@@ -1977,6 +1977,8 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 				static_cast<int>(m->GpuSkinVertexCache.size() / 9),
 				m->GpuSkinIndexCache.data(),
 				static_cast<int>(m->GpuSkinIndexCache.size()),
+				&m->GpuSkinVbo,
+				&m->GpuSkinEbo,
 				finalMvp,
 				g_SkinLightDirCache,
 				BodyLight,
@@ -3374,6 +3376,11 @@ void BMD::Release()
 		{
        		Mesh_t *m = &Meshs[i];
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+			// Release the GPU-skinning rest-pose buffers with the mesh, or
+			// every map change would leak a VBO+EBO per mesh.
+			GL_DeleteSkinnedMeshBuffers(&m->GpuSkinVbo, &m->GpuSkinEbo);
+#endif
 			delete []m->Vertices;
 			delete []m->Normals;
 			delete []m->TexCoords;

@@ -166,6 +166,11 @@ typedef struct _Mesh_t
 	// actually covers this index, or the shader reads past the valid
 	// matrices and produces garbage geometry.
 	int  GpuSkinMaxBoneIndex;
+	// GL buffer handles for the rest-pose geometry above. Created and filled
+	// on first draw, then reused every frame - the rest pose never changes,
+	// only the bone matrices do. Released via GL_DeleteSkinnedMeshBuffers.
+	unsigned int GpuSkinVbo;
+	unsigned int GpuSkinEbo;
 
 	_Mesh_t()
 	{
@@ -177,6 +182,8 @@ typedef struct _Mesh_t
 		GpuSkinCacheBuilt = false;
 		GpuSkinCacheEligible = false;
 		GpuSkinMaxBoneIndex = -1;
+		GpuSkinVbo = 0;
+		GpuSkinEbo = 0;
 
 		NumVertices = NumNormals = NumTexCoords =
 			NumVertexColors = NumTriangles = 0;

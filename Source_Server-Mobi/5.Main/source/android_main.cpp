@@ -7989,6 +7989,14 @@ unsigned long long g_ProfCharMonsterObjTicks = 0;
 unsigned long long g_ProfCharAttachTicks = 0;
 unsigned long long g_ProfCharPostTicks = 0;
 
+// TEMP profiling: draw-path split for the frame (see the note where these are
+// assigned). High imDrawCalls means work is going through the slow per-vertex
+// immediate-mode emulation rather than the batched VBO path.
+int g_ProfDrawCalls = 0;
+int g_ProfImDrawCalls = 0;
+int g_ProfVaConvertedDrawCalls = 0;
+int g_ProfVerts = 0;
+
 static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reason)
 {
     if ((screenW <= 1) || (screenH <= 1))
@@ -9337,6 +9345,17 @@ static void RunAndroidGameFrame()
             const RenderBackendStats stats = g_RenderBackend->GetAndResetStats();
             frameDrawCalls = stats.drawCalls;
             frameVerts = stats.vertices;
+
+            // TEMP profiling: draw-path split. imDrawCalls counts draws that
+            // went through the immediate-mode emulation, where GL_Vertex3f
+            // does a full matrix transform PER VERTEX on the CPU. Overlay
+            // passes using RENDER_METAL / RENDER_CHROME2 / RENDER_LIGHTMAP are
+            // rejected by CanUseMobileDirectMeshBatch (ZzzBMD.cpp) and land
+            // there, which is the suspected cost behind chrR's 39ms "post".
+            g_ProfDrawCalls = stats.drawCalls;
+            g_ProfImDrawCalls = stats.imDrawCalls;
+            g_ProfVaConvertedDrawCalls = stats.vaConvertedDrawCalls;
+            g_ProfVerts = stats.vertices;
         }
         else
         {

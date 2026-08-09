@@ -190,10 +190,19 @@ bool GL_SkinIsReady();
 void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount);
 // vertices: GLSkinVertex[vertexCount]
 // mvp: object world transform composed with view*projection (16 floats, column-major).
+//
+// vboInOut/eboInOut: caller-owned handles, zero-initialised. The rest-pose
+// vertices and indices never change once built, so they are uploaded to GL
+// ONCE on the first draw and reused every frame after. Re-uploading them per
+// draw (the previous behaviour) cost ~6.7MB of CPU->GPU traffic per frame
+// across ~300 skinned meshes while the GPU sat idle.
+// Call GL_DeleteSkinnedMeshBuffers when the mesh is released.
 void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
                         const uint16_t* indices, int indexCount,
+                        unsigned int* vboInOut, unsigned int* eboInOut,
                         const float mvp[16], const float lightDir[3],
                         const float bodyLight[3], float alpha,
                         GLuint textureId);
+void GL_DeleteSkinnedMeshBuffers(unsigned int* vboInOut, unsigned int* eboInOut);
 
 #endif // __ANDROID__

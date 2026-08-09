@@ -3070,6 +3070,22 @@ void MainScene(HDC hDC)
 			extern unsigned long long g_ProfCharAttachTicks;
 			extern unsigned long long g_ProfCharPostTicks;
 
+			// Draw-path split: total draws, how many went through the slow
+			// per-vertex immediate-mode emulation, and total vertices.
+			extern int g_ProfDrawCalls;
+			extern int g_ProfImDrawCalls;
+			extern int g_ProfVerts;
+
+			unicode::t_char szProf3[128];
+			unicode::_sprintf(szProf3, "draw %d  IM %d  verts %d",
+				g_ProfDrawCalls, g_ProfImDrawCalls, g_ProfVerts);
+			SIZE size3 = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProf3, lstrlen(szProf3), &size3);
+			const int hudW3 = (DisplayWinReal > 0) ? DisplayWinReal : DisplayWin;
+			const int prof3X = (((hudW3 - size3.cx) - 12) > 10) ? ((hudW3 - size3.cx) - 12) : 10;
+			g_pRenderText->RenderText(prof3X, DisplayHeight - 50, szProf3);
+
 			unicode::t_char szProf2[192];
 			unicode::_sprintf(szProf2,
 				"objR %.0f chrR %.0f [sh %.0f mob %.0f att %.0f post %.0f] ter %.0f ui %.0f",

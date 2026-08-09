@@ -2469,12 +2469,19 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
 // include the object's world transform (BodyOrigin/Angle/Scale) composed
 // with view*projection, since vertices here are bone-local rest-pose, not
 // pre-baked to world space like gl_compat's other draw paths.
+void GL_DeleteSkinnedMeshBuffers(unsigned int* vboInOut, unsigned int* eboInOut) {
+    if (vboInOut && *vboInOut) { glDeleteBuffers(1, vboInOut); *vboInOut = 0; }
+    if (eboInOut && *eboInOut) { glDeleteBuffers(1, eboInOut); *eboInOut = 0; }
+}
+
 void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
                         const uint16_t* indices, int indexCount,
+                        unsigned int* vboInOut, unsigned int* eboInOut,
                         const float mvp[16], const float lightDir[3],
                         const float bodyLight[3], float alpha,
                         GLuint textureId) {
-    if (!GL_SkinIsReady() || !vertices || vertexCount <= 0 || !indices || indexCount <= 0) {
+    if (!GL_SkinIsReady() || !vertices || vertexCount <= 0 || !indices || indexCount <= 0 ||
+        !vboInOut || !eboInOut) {
         return;
     }
 
@@ -2490,13 +2497,17 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     glBindTexture(GL_TEXTURE_2D, textureId);
     glUniform1i(24, 0);
 
-    const GLsizeiptr bytes = static_cast<GLsizeiptr>(vertexCount) * sizeof(SkinVertex);
-    glBindBuffer(GL_ARRAY_BUFFER, s_skinVbo);
-    if (bytes > s_skinVboCapacity) {
-        glBufferData(GL_ARRAY_BUFFER, bytes, vertices, GL_DYNAMIC_DRAW);
-        s_skinVboCapacity = bytes;
+    // Rest-pose geometry is immutable: upload once, then only bind. Animation
+    // is entirely in the bone-matrix UBO, so nothing here changes per frame.
+    const bool firstUpload = (*vboInOut == 0);
+    if (firstUpload) {
+        glGenBuffers(1, vboInOut);
+        glBindBuffer(GL_ARRAY_BUFFER, *vboInOut);
+        glBufferData(GL_ARRAY_BUFFER,
+                     static_cast<GLsizeiptr>(vertexCount) * sizeof(SkinVertex),
+                     vertices, GL_STATIC_DRAW);
     } else {
-        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, vertices);
+        glBindBuffer(GL_ARRAY_BUFFER, *vboInOut);
     }
 
     const GLsizei stride = sizeof(SkinVertex);
@@ -2509,20 +2520,21 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     glEnableVertexAttribArray(7);
     glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, boneIndex));
 
-    // Upload indices into a real element buffer rather than passing the
-    // caller's pointer straight to glDrawElements. Mobile GLES drivers read
-    // client-side pointers asynchronously (this file already documents
-    // SEGV_ACCERR from exactly that on Mali - see GL_SetPreferDirectVertexArrays),
-    // so handing them a pointer into a caller-owned std::vector is a
-    // use-after-free waiting to happen the moment that cache is rebuilt or
-    // its model unloaded while a frame is still in flight.
-    const GLsizeiptr indexBytes = static_cast<GLsizeiptr>(indexCount) * sizeof(uint16_t);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_skinEbo);
-    if (indexBytes > s_skinEboCapacity) {
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, indices, GL_DYNAMIC_DRAW);
-        s_skinEboCapacity = indexBytes;
+    // Indices live in their own immutable element buffer, uploaded once with
+    // the vertices. Never pass the caller's pointer to glDrawElements: mobile
+    // GLES drivers read client-side pointers asynchronously (this file already
+    // documents SEGV_ACCERR from exactly that on Mali - see
+    // GL_SetPreferDirectVertexArrays), so a pointer into a caller-owned
+    // std::vector is a use-after-free the moment that cache is rebuilt or its
+    // model unloaded while a frame is still in flight.
+    if (firstUpload) {
+        glGenBuffers(1, eboInOut);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                     static_cast<GLsizeiptr>(indexCount) * sizeof(uint16_t),
+                     indices, GL_STATIC_DRAW);
     } else {
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, indexBytes, indices);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
     }
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
