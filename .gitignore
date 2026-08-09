@@ -1,0 +1,40 @@
+# Only Source_Server-Mobi is the live project; everything else at the
+# repo root is a build archive / snapshot copy, ignored by default.
+/*
+!/Source_Server-Mobi/
+!/.gitignore
+
+# --- Source_Server-Mobi: track only the Android mobile client ---
+# (server projects, backup copy, vendored third-party code, and loose
+# debug artifacts at this level are not part of the client render work)
+/Source_Server-Mobi/*
+!/Source_Server-Mobi/5.Main/
+!/Source_Server-Mobi/android/
+
+/Source_Server-Mobi/5.Main/boost_1_80_0/
+/Source_Server-Mobi/5.Main/dependencies/
+/Source_Server-Mobi/5.Main/sdk-directx9/
+
+# Backup copy of the source tree, not built by CMake - don't track/edit.
+/Source_Server-Mobi/5.Main - Copy/
+
+# Gradle/CMake build output and IDE state.
+/Source_Server-Mobi/android/.gradle/
+/Source_Server-Mobi/android/.idea/
+/Source_Server-Mobi/android/app/build/
+/Source_Server-Mobi/android/app/.cxx/
+/Source_Server-Mobi/android/build/
+/Source_Server-Mobi/android/local.properties
+*.iml
+
+# Prebuilt vendor binaries (SDL2, botan, mpg123) - not source we edit.
+/Source_Server-Mobi/android/app/src/main/jniLibs/**/*.so
+
+# Compiled artifacts if any get generated in-place.
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.apk
+*.aab
