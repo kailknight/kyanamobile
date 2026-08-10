@@ -53,22 +53,57 @@ allocation per frame. Orphaning at the size actually being drawn fixed it:
 | 2D quad path `bmp` | 8.2 ms / 99 calls | 3.3 ms / 97 |
 | character `post` | 10 ms | 2 ms |
 
-## MediaTek — the open problem
+## MediaTek / Mali — measured
 
-**A MediaTek device runs the same build at ~5 FPS.** Nothing below has been
-measured on it yet. Before theorising, get the overlay numbers off that device
-the same way (see Method). Specific things worth suspecting, in order:
+Device: realme RMX5000, **MT6878 (Dimensity 7300), Mali-G615**, Android 16,
+1080x2400. The "~5 FPS" report was the **pre-fix** build.
 
-1. `pres` — if it is **not** 0 there, that device is GPU/bandwidth-bound and
-   the entire CPU-bound conclusion above does not transfer. Check this first,
-   it changes everything.
-2. The streaming VBO path. `glBufferData` per draw is cheap on Adreno; Mali /
-   PowerVR drivers can behave very differently. `GL_SetSkipVBOOrphan(true)`
-   is the existing switch to A/B that.
-3. Render scale — currently 0.75. Fill rate was irrelevant on Adreno but a
-   weaker GPU may be pixel-bound.
-4. Shader compilation / precision. The compat shader uses `highp`; some
-   Mali parts are much slower with it.
+With the current build it runs a **stable 28-29.5 FPS** (`scn` 32-38 ms):
+eight consecutive samples read 29.0 / 29.1 / 29.5 / 29.2 / 28.1 / 28.9 / 28.7 /
+28.4. No jumping.
+
+`pres` is 0-1 ms, so **Mali is CPU-bound too** — the diagnosis transfers.
+
+**The jumping is a first-run effect.** Immediately after the initial 552 MB
+`data.zip` download and extraction, frames spiked hard (FPS 7.4, `scn` 132 ms,
+`objR` 58 ms, `chrR` 36 ms) while pure-CPU work stayed flat (`out`, the FreeType
+rasterise, held at ~4 ms). After a clean relaunch with the data already
+extracted it is stable. Treat spikes as asset streaming, and re-check when
+entering a new map rather than assuming a steady-state problem.
+
+**Ruled out by measurement — do not retry:** disabling VBO orphaning on Mali.
+The theory was that Mali recycles buffer allocations from a pool and our
+per-draw `glBufferData` exhausts it. `GL_SetSkipVBOOrphan(true)` made things
+catastrophically worse, not better:
+
+| | orphan on | orphan off |
+|---|---|---|
+| FPS | 28-29 | **3.1 - 3.8** |
+| `scn` | 32-38 ms | 112 - 278 ms |
+| `bmp` (2D quads) | 0.2 ms / 103 | **14.8 - 56.3 ms** / 102 |
+| `ui` | 4 ms | 30 - 74 ms |
+
+Without orphaning, `glBufferSubData` overwrites a buffer the GPU is still
+reading and the driver stalls. Per-draw orphaning is correct on both GPUs.
+The `g_ForceSkipVBOOrphan` switch in `android_main.cpp` is left in place,
+defaulted off, with this result recorded at the call site.
+
+**Where the frame actually goes on Mali** — text is the standout:
+
+`text n18 h0 m0 | ext 0.7 out 3.6 wr 0.3 up 6.5` ≈ **11 ms of a 33 ms frame,
+33%**, versus roughly 10% on Adreno. `up` (texture upload + draw) is ~360 µs
+per string here against ~76 µs on Adreno, so Mali's `glTexSubImage2D` path is
+about 5x more expensive. Two consequences:
+
+1. **The profiling overlay is now a significant distortion.** Eight of those 18
+   strings are the overlay's own lines, they are long, and they change every
+   frame so they can never be cached. On this device the instrumentation costs
+   roughly 4-5 ms/frame — about 15% of the frame. Numbers taken with it on are
+   pessimistic; strip it before judging real-world performance.
+2. **Fixing the text section cache matters far more here than on Adreno.** It
+   targets exactly the `out` + `up` cost, which is ~10 ms/frame on Mali against
+   ~3 ms on Adreno. See the Text rendering section for the bug that has it
+   disabled.
 
 ## Method that worked
 
@@ -167,15 +202,19 @@ wrong-but-harmless text.
 
 ## Next steps, in order
 
-1. **MediaTek at 5 FPS** — see that section. Get `pres` first.
-2. **`par` (particles) 4-7 ms** — now the largest bucket on Adreno.
+1. **Fix the text section cache.** Highest value now: it is ~10 ms/frame on
+   Mali and ~3 ms on Adreno, and it is the one piece of work already written
+   but disabled. See the Text rendering section for the exact symptom.
+2. **Strip or gate the profiling overlay** before any further judgement of real
+   performance — it costs ~4-5 ms/frame on Mali.
+3. **`par` (particles) 4-7 ms** — the largest remaining bucket on Adreno.
    `ZzzEffectBlurSpark.cpp`, `ZzzEffectMagicSkill.cpp`, `Sprite.cpp`,
    `ShadowVolume.cpp`, `SideHair.cpp`, `PhysicsManager.cpp`,
    `CSWaterTerrain.cpp` still use `glBegin` immediate mode.
-3. **Static VBOs for world props.** ~334 visible objects cost ~8 ms in open
+4. **Static VBOs for world props.** ~334 visible objects cost ~8 ms in open
    areas, ~24 µs each, re-submitted every frame. Same fix pattern as the two
    wins so far, and no visual cost — unlike shortening draw distance.
-4. **Split-resolution UI** (3D to a scaled FBO, upscale, then UI at native res)
+5. **Split-resolution UI** (3D to a scaled FBO, upscale, then UI at native res)
    if UI sharpness matters. The FBO and blit already exist in
    `RenderBackend.cpp`; today the whole frame goes through them, which is why
    the UI is soft at render scale 0.75. Note this is a *quality* change, not a

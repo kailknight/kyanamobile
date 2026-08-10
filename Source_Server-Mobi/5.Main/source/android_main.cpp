@@ -7958,6 +7958,13 @@ bool IsAggressiveMobilePerfModeEnabled()
 static float g_RenderScaleX = 0.75f;
 static float g_RenderScaleY = 0.75f;
 
+// TEMP A/B for the Mali/MediaTek stall investigation - see the call site.
+// Tested true on MT6878/Mali-G615: catastrophically worse, not better. The 2D
+// quad path went from 0.2ms to 14-56ms per frame and the frame from ~35ms to
+// 112-278ms, because glBufferSubData then overwrites a buffer the GPU is still
+// reading and the driver stalls. Per-draw orphaning is correct on Mali too.
+static bool g_ForceSkipVBOOrphan = false;
+
 // Physical surface size, as reported by sokol - the blit target, and the basis
 // for normalising touch coordinates.
 static int g_NativePresentWidth = 0;
@@ -9068,7 +9075,14 @@ static bool InitializeAndroidGame()
     const bool preferDirectVertexArrays = IsLikelyAndroidEmulator();
     g_adaptivePerf.isEmulator = preferDirectVertexArrays;
     GL_SetPreferDirectVertexArrays(preferDirectVertexArrays);
-    GL_SetSkipVBOOrphan(preferDirectVertexArrays);
+    // TEMP A/B: orphaning the streaming VBO per draw is a large win on Adreno
+    // (see the 298739f commit), but Mali recycles buffer allocations from a
+    // pool, and exhausting that pool makes the driver wait on the GPU. The
+    // MediaTek/Mali device shows objR and chrR spiking 6-7x on some frames
+    // while pure-CPU work stays flat, which is the shape of a driver stall
+    // rather than the CPU slowing down. Set true to fall back to a grow-only
+    // buffer with glBufferSubData, with no other change.
+    GL_SetSkipVBOOrphan(preferDirectVertexArrays || g_ForceSkipVBOOrphan);
     LOGI(
         "GL compat VA policy: preferDirect=%d (emulator=%d)",
         preferDirectVertexArrays ? 1 : 0,
@@ -9919,7 +9933,14 @@ int SDL_main(int argc, char* argv[])
     GL_SetPreferDirectVertexArrays(preferDirectVertexArrays);
     // SwiftShader (emulator) has no real GPU pipeline 鑺掗垾鐘偓?skip VBO orphaning.
     // Eliminates ~105 unnecessary driver-level malloc() calls per frame.
-    GL_SetSkipVBOOrphan(preferDirectVertexArrays);
+    // TEMP A/B: orphaning the streaming VBO per draw is a large win on Adreno
+    // (see the 298739f commit), but Mali recycles buffer allocations from a
+    // pool, and exhausting that pool makes the driver wait on the GPU. The
+    // MediaTek/Mali device shows objR and chrR spiking 6-7x on some frames
+    // while pure-CPU work stays flat, which is the shape of a driver stall
+    // rather than the CPU slowing down. Set true to fall back to a grow-only
+    // buffer with glBufferSubData, with no other change.
+    GL_SetSkipVBOOrphan(preferDirectVertexArrays || g_ForceSkipVBOOrphan);
     LOGI(
         "GL compat VA policy: preferDirect=%d (emulator=%d)",
         preferDirectVertexArrays ? 1 : 0,
