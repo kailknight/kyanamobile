@@ -569,28 +569,9 @@ namespace
     struct AdaptiveFpsGate
     {
         float smoothedFps = 0.0f;
-        bool belowCullGate = false;   // < 58
-        bool stressedFrame = false;   // < 44
-        bool severeFrame = false;     // < 34
-        bool extremeFrame = false;    // < 15
     };
 
     AdaptiveFpsGate g_adaptiveFpsGate;
-
-    inline void LatchFpsThreshold(float fps, float threshold, float margin, bool& state)
-    {
-        if (state)
-        {
-            if (fps > threshold + margin)
-            {
-                state = false;
-            }
-        }
-        else if (fps < threshold - margin)
-        {
-            state = true;
-        }
-    }
 
     inline void UpdateAdaptiveFpsGate(float currentFps)
     {
@@ -610,12 +591,63 @@ namespace
             // frame, short enough to react to actually entering a crowd.
             gate.smoothedFps += (currentFps - gate.smoothedFps) * 0.05f;
         }
+    }
 
-        const float fps = gate.smoothedFps;
-        LatchFpsThreshold(fps, 58.0f, 5.0f, gate.belowCullGate);
-        LatchFpsThreshold(fps, 44.0f, 4.0f, gate.stressedFrame);
-        LatchFpsThreshold(fps, 34.0f, 3.0f, gate.severeFrame);
-        LatchFpsThreshold(fps, 15.0f, 2.0f, gate.extremeFrame);
+    // Latched "is the frame rate below `threshold`" for every adaptive site in
+    // this file. The state only flips once the smoothed rate has crossed the
+    // threshold by `margin`, so a frame rate sitting on a threshold cannot
+    // chatter. Repeated calls within a frame are idempotent - the smoothed
+    // value only moves in UpdateAdaptiveFpsGate, once per frame - so this is
+    // safe to call per object.
+    inline bool AdaptiveFpsBelow(float threshold, float margin = 3.0f)
+    {
+        struct Latch
+        {
+            float threshold;
+            bool state;
+        };
+        static Latch latches[24] = {};
+        static int latchCount = 0;
+
+        const float fps = g_adaptiveFpsGate.smoothedFps;
+        if (fps <= 0.0f)
+        {
+            return false;
+        }
+
+        Latch* latch = nullptr;
+        for (int i = 0; i < latchCount; ++i)
+        {
+            if (latches[i].threshold == threshold)
+            {
+                latch = &latches[i];
+                break;
+            }
+        }
+        if (latch == nullptr)
+        {
+            if (latchCount >= static_cast<int>(sizeof(latches) / sizeof(latches[0])))
+            {
+                return fps < threshold;
+            }
+            latch = &latches[latchCount++];
+            latch->threshold = threshold;
+            latch->state = (fps < threshold);
+            return latch->state;
+        }
+
+        if (latch->state)
+        {
+            if (fps > threshold + margin)
+            {
+                latch->state = false;
+            }
+        }
+        else if (fps < threshold - margin)
+        {
+            latch->state = true;
+        }
+        return latch->state;
     }
 
     inline bool ShouldCullStaticObjectByImportance(const OBJECT* o,
@@ -637,14 +669,18 @@ namespace
         }
 
         (void)currentFps;
-        if (!g_adaptiveFpsGate.belowCullGate)
+        // Originally "fps >= 58 -> never cull". The dead band has to stay
+        // reachable from both sides, and the frame cap is 60, so a 58 threshold
+        // with a wide margin would latch on and never release. Centre it lower:
+        // culling engages below 48 and releases again above 56.
+        if (!AdaptiveFpsBelow(52.0f, 4.0f))
         {
             return false;
         }
 
-        const bool stressedFrame = g_adaptiveFpsGate.stressedFrame;
-        const bool severeFrame = g_adaptiveFpsGate.severeFrame;
-        const bool extremeFrame = g_adaptiveFpsGate.extremeFrame;
+        const bool stressedFrame = AdaptiveFpsBelow(44.0f, 4.0f);
+        const bool severeFrame = AdaptiveFpsBelow(34.0f, 3.0f);
+        const bool extremeFrame = AdaptiveFpsBelow(15.0f, 2.0f);
         const bool stadiumStaticObject = IsStadiumStaticWorldObject(o);
         const bool stadiumHeavyDecorObject = IsStadiumHeavyDecorObject(o);
         const float importance = GetStaticObjectScreenImportance(o, distSq);
@@ -839,7 +875,7 @@ namespace
         uint32_t period = 1u;
         if (bucket == AdaptiveDistanceBucket::Far)
         {
-            period = (currentFps < 34.0f) ? 3u : 2u;
+            period = AdaptiveFpsBelow(34.0f, 3.0f) ? 3u : 2u;
         }
         else if (bucket == AdaptiveDistanceBucket::Mid && currentFps < 38.0f)
         {
@@ -877,10 +913,11 @@ namespace
         const bool midBucket = (bucket == AdaptiveDistanceBucket::Mid);
         const bool farBucket = (bucket == AdaptiveDistanceBucket::Far);
         const bool staticSceneObject = IsAdaptiveStaticSceneObject(o);
-        const bool heavyFrame = (currentFps < 40.0f);
-        const bool stressedFrame = (currentFps < 34.0f);
-        const bool severeFrame = (currentFps < 28.0f);
-        const bool recoveryFrame = (currentFps < 48.0f);
+        // Latched, so these cannot chatter frame to frame. See AdaptiveFpsBelow.
+        const bool heavyFrame = AdaptiveFpsBelow(40.0f, 3.0f);
+        const bool stressedFrame = AdaptiveFpsBelow(34.0f, 3.0f);
+        const bool severeFrame = AdaptiveFpsBelow(28.0f, 3.0f);
+        const bool recoveryFrame = AdaptiveFpsBelow(48.0f, 4.0f);
 
         g_objectRenderLodContext.active = true;
 
@@ -4310,7 +4347,7 @@ namespace
         const float currentFps = static_cast<float>(FPS);
         // Latched, so this cannot flip on a single slow frame. See
         // UpdateAdaptiveFpsGate.
-        const bool extremeFrame = g_adaptiveFpsGate.extremeFrame;
+        const bool extremeFrame = AdaptiveFpsBelow(15.0f, 2.0f);
 
         ++g_objectPerfSnapshot.renderCandidates;
         TrackObjectRenderBucket(bucket);
@@ -4393,10 +4430,13 @@ static bool RenderObjectWithAdaptiveBudget(OBJECT* o)
         (zoomedOutWideWeight > 0.14f && bucket == AdaptiveDistanceBucket::Far);
     const int crowdPressure = g_objectPerfSnapshot.renderCandidates;
     const float currentFps = static_cast<float>(FPS);
-    const bool heavyFrame = (currentFps > 0.f && currentFps < 50.f);
-    const bool stressedFrame = (currentFps > 0.f && currentFps < 42.f);
-    const bool severeFrame = (currentFps > 0.f && currentFps < 34.f);
-    const bool extremeFrame = (currentFps > 0.f && currentFps < 15.f);
+    // Latched. These drive visualPeriod, which draws an object's supplemental
+    // passes only every Nth frame - a strobe - so letting them flip on a single
+    // frame made static scenery visibly flicker. See AdaptiveFpsBelow.
+    const bool heavyFrame = AdaptiveFpsBelow(50.0f, 4.0f);
+    const bool stressedFrame = AdaptiveFpsBelow(42.0f, 4.0f);
+    const bool severeFrame = AdaptiveFpsBelow(34.0f, 3.0f);
+    const bool extremeFrame = AdaptiveFpsBelow(15.0f, 2.0f);
     const float stadiumCullStartSq =
         kObjectNearAdaptiveMinDistance * kObjectNearAdaptiveMinDistance;
 
@@ -6003,8 +6043,8 @@ void MoveObjects()
                             const AdaptiveDistanceBucket bucket = ClassifyObjectDistance(distSq, adaptiveThresholds);
                             TrackObjectMoveBucket(bucket);
                             const float currentFps = static_cast<float>(FPS);
-                            const bool heavyFrame = (currentFps > 0.f && currentFps < 32.f);
-                            const bool severeFrame = (currentFps > 0.f && currentFps < 24.f);
+                            const bool heavyFrame = AdaptiveFpsBelow(32.0f, 3.0f);
+                            const bool severeFrame = AdaptiveFpsBelow(24.0f, 3.0f);
                             const float nearAdaptiveMinDistanceSq =
                                 kObjectNearAdaptiveMinDistance * kObjectNearAdaptiveMinDistance;
                             const int movePressure = g_objectPerfSnapshot.moveCandidates;
