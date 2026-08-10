@@ -7981,6 +7981,18 @@ unsigned long long g_ProfEffectsTicks = 0;
 unsigned long long g_ProfParticlesTicks = 0;
 unsigned long long g_ProfUiTicks = 0;
 
+// The four buckets above plus objR/chrR/ter only account for ~32ms of a ~51ms
+// Scene(). These are the rest of the MainScenePerfSnapshot, so that line 4 of
+// the overlay closes the ~19ms that was previously unattributed.
+unsigned long long g_ProfShadowTicks = 0;
+unsigned long long g_ProfBoidsTicks = 0;
+unsigned long long g_ProfMiscWorldTicks = 0;
+unsigned long long g_ProfJointsTicks = 0;
+unsigned long long g_ProfBlursTicks = 0;
+unsigned long long g_ProfSpritesTicks = 0;
+unsigned long long g_ProfPointsTicks = 0;
+unsigned long long g_ProfAfterEffectsTicks = 0;
+
 // Character render is ~50ms of a ~110ms frame and is NOT the skinning math
 // (0.8ms) - an A/B with GPU skinning on vs off left it unchanged at ~52ms.
 // These are its sub-phases, to find what actually costs that.
@@ -9380,6 +9392,14 @@ static void RunAndroidGameFrame()
         g_ProfEffectsTicks = static_cast<unsigned long long>(mainScenePerf.effectsTicks);
         g_ProfParticlesTicks = static_cast<unsigned long long>(mainScenePerf.particlesTicks);
         g_ProfUiTicks = static_cast<unsigned long long>(mainScenePerf.uiTicks);
+        g_ProfShadowTicks = static_cast<unsigned long long>(mainScenePerf.shadowTicks);
+        g_ProfBoidsTicks = static_cast<unsigned long long>(mainScenePerf.boidsTicks);
+        g_ProfMiscWorldTicks = static_cast<unsigned long long>(mainScenePerf.miscWorldTicks);
+        g_ProfJointsTicks = static_cast<unsigned long long>(mainScenePerf.jointsTicks);
+        g_ProfBlursTicks = static_cast<unsigned long long>(mainScenePerf.blursTicks);
+        g_ProfSpritesTicks = static_cast<unsigned long long>(mainScenePerf.spritesTicks);
+        g_ProfPointsTicks = static_cast<unsigned long long>(mainScenePerf.pointsTicks);
+        g_ProfAfterEffectsTicks = static_cast<unsigned long long>(mainScenePerf.afterEffectsTicks);
         g_ProfCharShadowTicks = static_cast<unsigned long long>(characterPerf.renderShadowTicks);
         g_ProfCharMonsterObjTicks = static_cast<unsigned long long>(characterPerf.renderMonsterObjectTicks);
         g_ProfCharAttachTicks = static_cast<unsigned long long>(characterPerf.renderAttachmentTicks);

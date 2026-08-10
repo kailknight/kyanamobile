@@ -95,6 +95,18 @@ namespace
 		return static_cast<unsigned long long>(MU_MobilePerfNow()) - start;
 	}
 }
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+// TEMP profiling: the `ui` bucket is ~15ms of a ~51ms Scene(), which is far too
+// much for 2D work. These split it by pass so the overlay can show where it
+// goes. Written once per frame in RenderScene, read by the FPS overlay below.
+unsigned long long g_ProfUiSelectTicks = 0;
+unsigned long long g_ProfUiInterfaceTicks = 0;
+unsigned long long g_ProfUiPartyTicks = 0;
+unsigned long long g_ProfUiNewUiTicks = 0;
+unsigned long long g_ProfUiInfoTicks = 0;
+unsigned long long g_ProfUiCursorTicks = 0;
+#endif
 extern int DisplayWinReal;
 extern float g_androidZoomOverride;
 extern bool IsAggressiveMobilePerfModeEnabled();
@@ -2675,13 +2687,11 @@ bool RenderMainScene()
 
 #ifdef __ANDROID__
 	unsigned long long dbgPhaseStart = MainScenePerfNow();
-	static unsigned long long s_dbgSelect = 0, s_dbgInterface = 0, s_dbgPartyNewUi = 0, s_dbgNewUiOnly = 0, s_dbgInfo = 0, s_dbgCursor = 0;
-	static int s_dbgUiCounter = 0;
 #endif
 
     SelectObjects();
 #ifdef __ANDROID__
-	s_dbgSelect += MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
+	g_ProfUiSelectTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 	BeginBitmap();
     RenderObjectDescription();
@@ -2693,16 +2703,16 @@ bool RenderMainScene()
 	RenderTournamentInterface();
 	EndBitmap();
 #ifdef __ANDROID__
-	s_dbgInterface += MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
+	g_ProfUiInterfaceTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 
 	g_pPartyManager->Render();
 #ifdef __ANDROID__
-	s_dbgPartyNewUi += MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
+	g_ProfUiPartyTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 	g_pNewUISystem->Render();
 #ifdef __ANDROID__
-	s_dbgNewUiOnly += MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
+	g_ProfUiNewUiTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 
 	BeginBitmap();
@@ -2719,7 +2729,7 @@ bool RenderMainScene()
 
 	EndBitmap();
 #ifdef __ANDROID__
-	s_dbgInfo += MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
+	g_ProfUiInfoTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 	BeginBitmap();
 
@@ -2727,23 +2737,7 @@ bool RenderMainScene()
 
 	EndBitmap();
 #ifdef __ANDROID__
-	s_dbgCursor += MainScenePerfElapsed(dbgPhaseStart);
-	if ((++s_dbgUiCounter % 60) == 0)
-	{
-		const double freq = static_cast<double>(MU_MobilePerfFrequency());
-		if (FILE* f = fopen("mu_ui_debug.txt", "a"))
-		{
-			fprintf(f, "UI(avg over 60 frames, ms) select=%.3f interfacePass=%.3f party=%.3f newUI=%.3f info=%.3f cursor=%.3f\n",
-				(static_cast<double>(s_dbgSelect) * 1000.0 / freq) / 60.0,
-				(static_cast<double>(s_dbgInterface) * 1000.0 / freq) / 60.0,
-				(static_cast<double>(s_dbgPartyNewUi) * 1000.0 / freq) / 60.0,
-				(static_cast<double>(s_dbgNewUiOnly) * 1000.0 / freq) / 60.0,
-				(static_cast<double>(s_dbgInfo) * 1000.0 / freq) / 60.0,
-				(static_cast<double>(s_dbgCursor) * 1000.0 / freq) / 60.0);
-			fclose(f);
-		}
-		s_dbgSelect = s_dbgInterface = s_dbgPartyNewUi = s_dbgNewUiOnly = s_dbgInfo = s_dbgCursor = 0;
-	}
+	g_ProfUiCursorTicks = MainScenePerfElapsed(dbgPhaseStart);
 #endif
 	g_mainScenePerfSnapshot.uiTicks += MainScenePerfElapsed(uiStart);
     EndOpengl();
@@ -3083,11 +3077,23 @@ void MainScene(HDC hDC)
 			extern int g_ProfGpuMeshCalls;
 			extern int g_ProfCpuMeshCalls;
 
+			// The 2D quad path, which everything in the UI funnels through.
+			extern unsigned long long g_ProfBitmapTicks;
+			extern int g_ProfBitmapCalls;
+			extern unsigned long long g_ProfGetColorTicks;
+			extern int g_ProfGetColorCalls;
+
 			unicode::t_char szProf3[176];
-			unicode::_sprintf(szProf3, "draw %d IM %d verts %d | gpuM %.0fms/%d cpuM %.0fms/%d",
-				g_ProfDrawCalls, g_ProfImDrawCalls, g_ProfVerts,
+			unicode::_sprintf(szProf3, "draw %d IM %d | gpuM %.0f/%d cpuM %.0f/%d | bmp %.1f/%d glGet %.1f/%d",
+				g_ProfDrawCalls, g_ProfImDrawCalls,
 				static_cast<double>(g_ProfGpuMeshTicks) * tickToMs, g_ProfGpuMeshCalls,
-				static_cast<double>(g_ProfCpuMeshTicks) * tickToMs, g_ProfCpuMeshCalls);
+				static_cast<double>(g_ProfCpuMeshTicks) * tickToMs, g_ProfCpuMeshCalls,
+				static_cast<double>(g_ProfBitmapTicks) * tickToMs, g_ProfBitmapCalls,
+				static_cast<double>(g_ProfGetColorTicks) * tickToMs, g_ProfGetColorCalls);
+			g_ProfBitmapTicks = 0;
+			g_ProfBitmapCalls = 0;
+			g_ProfGetColorTicks = 0;
+			g_ProfGetColorCalls = 0;
 			g_ProfGpuMeshTicks = 0;
 			g_ProfCpuMeshTicks = 0;
 			g_ProfGpuMeshCalls = 0;
@@ -3116,6 +3122,124 @@ void MainScene(HDC hDC)
 				g_pRenderText->GetFontDC(), szProf2, lstrlen(szProf2), &size2);
 			const int prof2X = (((hudWidth - size2.cx) - 12) > 10) ? ((hudWidth - size2.cx) - 12) : 10;
 			g_pRenderText->RenderText(prof2X, DisplayHeight - 38, szProf2);
+
+			// TEMP profiling line 4: the rest of Scene(). objR+chrR+ter+ui only
+			// covered ~32ms of ~51ms; these are the buckets that hold the other
+			// ~19ms. Several of these passes still use glBegin immediate mode.
+			extern unsigned long long g_ProfShadowTicks;
+			extern unsigned long long g_ProfBoidsTicks;
+			extern unsigned long long g_ProfMiscWorldTicks;
+			extern unsigned long long g_ProfJointsTicks;
+			extern unsigned long long g_ProfBlursTicks;
+			extern unsigned long long g_ProfSpritesTicks;
+			extern unsigned long long g_ProfPointsTicks;
+			extern unsigned long long g_ProfAfterEffectsTicks;
+
+			unicode::t_char szProf4[192];
+			unicode::_sprintf(szProf4,
+				"jnt %.1f eff %.1f blr %.1f spr %.1f par %.1f pnt %.1f aft %.1f msc %.1f shd %.1f bod %.1f",
+				static_cast<double>(g_ProfJointsTicks) * tickToMs,
+				static_cast<double>(g_ProfEffectsTicks) * tickToMs,
+				static_cast<double>(g_ProfBlursTicks) * tickToMs,
+				static_cast<double>(g_ProfSpritesTicks) * tickToMs,
+				static_cast<double>(g_ProfParticlesTicks) * tickToMs,
+				static_cast<double>(g_ProfPointsTicks) * tickToMs,
+				static_cast<double>(g_ProfAfterEffectsTicks) * tickToMs,
+				static_cast<double>(g_ProfMiscWorldTicks) * tickToMs,
+				static_cast<double>(g_ProfShadowTicks) * tickToMs,
+				static_cast<double>(g_ProfBoidsTicks) * tickToMs);
+
+			SIZE size4 = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProf4, lstrlen(szProf4), &size4);
+			const int prof4X = (((hudWidth - size4.cx) - 12) > 10) ? ((hudWidth - size4.cx) - 12) : 10;
+			g_pRenderText->RenderText(prof4X, DisplayHeight - 62, szProf4);
+
+			// TEMP profiling line 5: the `ui` bucket split by pass, plus the two
+			// per-frame update (not render) costs, which also live inside scn.
+			extern unsigned long long g_ProfObjMoveTicks;
+			extern unsigned long long g_ProfCharMoveTicks;
+
+			unicode::t_char szProf5[192];
+			unicode::_sprintf(szProf5,
+				"ui[sel %.1f ifc %.1f pty %.1f new %.1f inf %.1f cur %.1f] mv o%.1f c%.1f",
+				static_cast<double>(g_ProfUiSelectTicks) * tickToMs,
+				static_cast<double>(g_ProfUiInterfaceTicks) * tickToMs,
+				static_cast<double>(g_ProfUiPartyTicks) * tickToMs,
+				static_cast<double>(g_ProfUiNewUiTicks) * tickToMs,
+				static_cast<double>(g_ProfUiInfoTicks) * tickToMs,
+				static_cast<double>(g_ProfUiCursorTicks) * tickToMs,
+				static_cast<double>(g_ProfObjMoveTicks) * tickToMs,
+				static_cast<double>(g_ProfCharMoveTicks) * tickToMs);
+
+			SIZE size5 = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProf5, lstrlen(szProf5), &size5);
+			const int prof5X = (((hudWidth - size5.cx) - 12) > 10) ? ((hudWidth - size5.cx) - 12) : 10;
+			g_pRenderText->RenderText(prof5X, DisplayHeight - 74, szProf5);
+
+#ifdef __ANDROID__
+			// TEMP profiling line 6: the three most expensive UI windows this
+			// frame, by class name (CNewUIManager.cpp). `new` is the single
+			// biggest bucket in the frame, so this says which window it is.
+			extern char g_ProfUiTopWindows[176];
+
+			unicode::t_char szProf6[192];
+			unicode::_sprintf(szProf6, "%s", g_ProfUiTopWindows);
+
+			SIZE size6 = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProf6, lstrlen(szProf6), &size6);
+			const int prof6X = (((hudWidth - size6.cx) - 12) > 10) ? ((hudWidth - size6.cx) - 12) : 10;
+			g_pRenderText->RenderText(prof6X, DisplayHeight - 86, szProf6);
+
+			// TEMP profiling line 7: the text pipeline (UIControls.cpp), which
+			// every one of those UI windows funnels through. ext = glyph metrics,
+			// out = FreeType rasterise, wr = colourise copy loop, up = texture
+			// upload + draw, n = strings drawn this frame.
+			extern unsigned long long g_ProfTextExtentTicks;
+			extern unsigned long long g_ProfTextOutTicks;
+			extern unsigned long long g_ProfTextWriteTicks;
+			extern unsigned long long g_ProfTextUploadTicks;
+			extern int g_ProfTextCalls;
+			extern int g_ProfTextCacheHits;
+			extern int g_ProfTextCacheMisses;
+
+			unicode::t_char szProf7[192];
+			unicode::_sprintf(szProf7, "text n%d h%d m%d | ext %.1f out %.1f wr %.1f up %.1f",
+				g_ProfTextCalls, g_ProfTextCacheHits, g_ProfTextCacheMisses,
+				static_cast<double>(g_ProfTextExtentTicks) * tickToMs,
+				static_cast<double>(g_ProfTextOutTicks) * tickToMs,
+				static_cast<double>(g_ProfTextWriteTicks) * tickToMs,
+				static_cast<double>(g_ProfTextUploadTicks) * tickToMs);
+
+			SIZE size7 = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProf7, lstrlen(szProf7), &size7);
+			const int prof7X = (((hudWidth - size7.cx) - 12) > 10) ? ((hudWidth - size7.cx) - 12) : 10;
+			g_pRenderText->RenderText(prof7X, DisplayHeight - 98, szProf7);
+
+			// Reset here, at the end of the overlay, so the overlay's own text
+			// lines are not counted against the next frame's game UI.
+			g_ProfTextExtentTicks = 0;
+			g_ProfTextOutTicks = 0;
+			g_ProfTextWriteTicks = 0;
+			g_ProfTextUploadTicks = 0;
+			g_ProfTextCalls = 0;
+			g_ProfTextCacheHits = 0;
+			g_ProfTextCacheMisses = 0;
+
+			// TEMP debug: draw the text atlas itself, so a wrong glyph on screen
+			// can be told apart from a wrong lookup - if the atlas contains the
+			// right pixels the bug is in the UVs, and if it does not it is in
+			// the upload.
+			extern int TextCacheDebugTextureHandle();
+			const int atlasHandle = TextCacheDebugTextureHandle();
+			if (atlasHandle != 0)
+			{
+				RenderBitmap(atlasHandle, 40.f, 40.f, 512.f, 1024.f, 0.f, 0.f, 1.f, 1.f, false, false);
+			}
+#endif
 
 			g_pRenderText->SetFont(g_hFont);
 

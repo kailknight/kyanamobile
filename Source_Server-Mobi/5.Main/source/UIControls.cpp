@@ -7,6 +7,11 @@
 #if defined(__ANDROID__) || defined(MU_IOS)
 #include <SDL.h>
 #endif
+#ifdef __ANDROID__
+#include "Platform/MobileTime.h"
+#include <unordered_map>
+extern int CachTexture;
+#endif
 #include "UIWindows.h"
 #include "ZzzOpenglUtil.h"
 #include "ZzzTexture.h"
@@ -1572,7 +1577,7 @@ BOOL CUISimpleChatListBox::RenderDataLine(int iLineNumber)
 	char Text[MAX_TEXT_LENGTH + 1] = {0};
 	
 	SIZE TextSize = {0, 0};
-	// ÀÌ¸§
+	// ï¿½Ì¸ï¿½
 	if(m_TextListIter->m_szID[0] != NULL)
 	{
 		switch(m_TextListIter->m_iType)
@@ -1777,12 +1782,12 @@ void CUIChatPalListBox::RenderInterface()
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x + m_iWidth - 12, m_iPos_y - m_iHeight - 1, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1,13.0f, 13.0f, 13.0f/16.0f, 29.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1,13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡ã
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1,13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 		
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x + m_iWidth - 12, m_iPos_y - 12, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 13.0f/16.0f, 16.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡å
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 
 		SetLineColor(2);
 		RenderColor((float)m_iPos_x + m_iWidth - m_fScrollBarWidth + 1, m_fScrollBarRange_top,(float)1,(float)m_fScrollBarRange_bottom - m_fScrollBarRange_top);
@@ -2446,7 +2451,7 @@ BOOL CUILetterTextListBox::RenderDataLine(int iLineNumber)
 {
 	EnableAlphaTest();
 	char Text[MAX_TEXT_LENGTH + 1] = {0};
-	// ³»¿ë
+	// ï¿½ï¿½ï¿½ï¿½
 	g_pRenderText->SetTextColor(230, 220, 200, 255);
 	g_pRenderText->SetBgColor(0, 0, 0, 0);
 
@@ -2464,7 +2469,7 @@ CUISocketListBox::CUISocketListBox()
 {
 	m_iMaxLineCount = UIMAX_TEXT_LINE;
 	m_iCurrentRenderEndLine = 0;
-	m_iNumRenderLine = 6;	// 3ÀÇ ¹è¼ö·Î -_-
+	m_iNumRenderLine = 6;	// 3ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ -_-
 
 	m_fScrollBarRange_top = 0;
 	m_fScrollBarRange_bottom = 0;
@@ -2701,6 +2706,344 @@ void CUIRenderText::SetFont(HFONT hFont)
 		m_pRenderText->SetFont(hFont);
 }
 
+#ifdef __ANDROID__
+// TEMP profiling: every RenderText call re-rasterises the string with FreeType,
+// runs two scalar per-pixel copy loops over it and re-uploads it, every frame.
+// These say which of those four stages actually costs the ~11ms that the UI
+// windows (MainFrameWindow / HeroPositionInfo / ChatLogWindow) spend.
+unsigned long long g_ProfTextExtentTicks = 0;
+unsigned long long g_ProfTextOutTicks = 0;
+unsigned long long g_ProfTextWriteTicks = 0;
+unsigned long long g_ProfTextUploadTicks = 0;
+int g_ProfTextCalls = 0;
+int g_ProfTextCacheHits = 0;
+int g_ProfTextCacheMisses = 0;
+
+namespace
+{
+	inline unsigned long long TextProfNow()
+	{
+		return static_cast<unsigned long long>(MU_MobilePerfNow());
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cached text
+//
+// The UI text is almost entirely identical from one frame to the next, yet
+// every RenderText call re-measured the string (FreeType metrics), re-rendered
+// it (FreeType rasterise into a fresh SDL surface), re-colourised it into the
+// shared BITMAP_FONT scratch buffer and re-uploaded that buffer to the same GL
+// texture before drawing. Measured at ~9ms/frame for ~18 strings.
+//
+// Two caches remove that work. The extent cache answers the measurement, and
+// the section cache holds the composed pixels in one persistent atlas texture
+// so a repeated string costs a bind and a quad. This is the same fix as the
+// persistent rest-pose VBO for meshes: stop re-uploading immutable data.
+// ---------------------------------------------------------------------------
+// Defined in ZzzOpenglUtil.cpp alongside the rest of the 2D path counters.
+extern unsigned long long g_ProfGetColorTicks;
+extern int g_ProfGetColorCalls;
+
+// Kill switches for the text cache below. Set false to fall back to rasterising
+// and uploading every string every frame, with no other change, for A/B.
+// The two halves are separable so a regression can be bisected: the extent
+// cache only answers measurement, the section cache holds the composed pixels.
+bool g_TextExtentCacheEnabled = true;
+bool g_TextSectionCacheEnabled = false;
+
+namespace TextCache
+{
+	// Slot geometry mirrors the limits the composition code already assumes:
+	// LIMIT_WIDTH in RenderText and LIMIT_HEIGHT in WriteText.
+	const int SLOT_W = 256;
+	const int SLOT_H = 32;
+	const int COLS = 4;
+	const int ROWS = 64;
+	const int SLOTS = COLS * ROWS;          // 256 cached sections
+	const int TEX_W = SLOT_W * COLS;        // 1024
+	const int TEX_H = SLOT_H * ROWS;        // 2048, so 8MB RGBA
+	const int MAX_SECTIONS = 4;             // longer strings use the old path
+
+	struct Extent
+	{
+		std::string text;
+		int cx;
+		int cy;
+		unsigned int lastUsedFrame;
+	};
+
+	struct Section
+	{
+		std::string text;
+		int slot;
+		int width;
+		int height;
+		unsigned int lastUsedFrame;
+	};
+
+	GLuint s_texture = 0;
+	bool s_textureFailed = false;
+	unsigned int s_frame = 0;
+
+	std::unordered_map<unsigned long long, Extent> s_extents;
+	std::unordered_map<unsigned long long, Section> s_sections;
+	// Slot -> key of the section occupying it, so eviction can drop both sides.
+	unsigned long long s_slotOwner[SLOTS];
+	int s_freeSlots = SLOTS;
+
+	inline unsigned long long HashBytes(unsigned long long h, const void* data, size_t len)
+	{
+		const unsigned char* p = static_cast<const unsigned char*>(data);
+		for (size_t i = 0; i < len; ++i)
+		{
+			h ^= static_cast<unsigned long long>(p[i]);
+			h *= 1099511628211ULL;
+		}
+		return h;
+	}
+
+	inline unsigned long long HashInt(unsigned long long h, unsigned long long value)
+	{
+		return HashBytes(h, &value, sizeof(value));
+	}
+
+	void Reset()
+	{
+		s_extents.clear();
+		s_sections.clear();
+		for (int i = 0; i < SLOTS; ++i)
+			s_slotOwner[i] = 0;
+		s_freeSlots = SLOTS;
+	}
+
+	bool EnsureTexture()
+	{
+		if (s_texture != 0)
+			return true;
+		if (s_textureFailed)
+			return false;
+
+		GLuint tex = 0;
+		glGenTextures(1, &tex);
+		if (tex == 0)
+		{
+			s_textureFailed = true;
+			return false;
+		}
+
+		// GL_NEAREST + CLAMP_TO_EDGE matches how BITMAP_FONT itself is loaded
+		// (ZzzOpenData.cpp), so cached glyphs sample identically to live ones.
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		std::vector<unsigned char> zero(static_cast<size_t>(TEX_W) * SLOT_H * 4, 0);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, TEX_W, TEX_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		// Clear row band by row band rather than allocating a full 8MB staging
+		// buffer just to zero the atlas once.
+		for (int row = 0; row < ROWS; ++row)
+		{
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row * SLOT_H, TEX_W, SLOT_H,
+				GL_RGBA, GL_UNSIGNED_BYTE, &zero[0]);
+		}
+
+		s_texture = tex;
+		Reset();
+		CachTexture = 0x7FFFFFFF;   // force the next BindTexture to re-bind
+		return true;
+	}
+
+	void ReleaseTexture()
+	{
+		if (s_texture != 0)
+		{
+			glDeleteTextures(1, &s_texture);
+			s_texture = 0;
+		}
+		s_textureFailed = false;
+		Reset();
+	}
+
+	// Least-recently-used eviction. Only runs on a miss with a full atlas, and
+	// the scan is over 256 entries, so it stays off the hot path.
+	int AcquireSlot()
+	{
+		if (s_freeSlots > 0)
+		{
+			for (int i = 0; i < SLOTS; ++i)
+			{
+				if (s_slotOwner[i] == 0)
+				{
+					--s_freeSlots;
+					return i;
+				}
+			}
+		}
+
+		unsigned long long oldestKey = 0;
+		unsigned int oldestFrame = 0xFFFFFFFFu;
+		for (std::unordered_map<unsigned long long, Section>::const_iterator it = s_sections.begin();
+			it != s_sections.end(); ++it)
+		{
+			if (it->second.lastUsedFrame < oldestFrame)
+			{
+				oldestFrame = it->second.lastUsedFrame;
+				oldestKey = it->first;
+			}
+		}
+		if (oldestKey == 0)
+			return -1;
+
+		std::unordered_map<unsigned long long, Section>::iterator victim = s_sections.find(oldestKey);
+		const int slot = victim->second.slot;
+		s_slotOwner[slot] = 0;
+		s_sections.erase(victim);
+		return slot;
+	}
+
+	// Copy the freshly composed section out of the shared BITMAP_FONT scratch
+	// buffer into this entry's slot. Runs once per distinct string, not once
+	// per frame, which is the whole point of the cache.
+	void UploadSection(int slot, int width, int height)
+	{
+		BITMAP_t* b = &Bitmaps[BITMAP_FONT];
+		if (b->Buffer == NULL || width <= 0 || height <= 0)
+			return;
+
+		const int col = slot % COLS;
+		const int row = slot / COLS;
+
+		glBindTexture(GL_TEXTURE_2D, s_texture);
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		// WriteText composes with a fixed 256-texel stride (LIMIT_WIDTH).
+		glPixelStorei(GL_UNPACK_ROW_LENGTH, SLOT_W);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, col * SLOT_W, row * SLOT_H, width, height,
+			GL_RGBA, GL_UNSIGNED_BYTE, b->Buffer);
+		glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+		// The engine caches the last bound texture by index; tell it what is
+		// actually bound now (BindTexture treats a negative value as a raw GL
+		// texture name, which is how the cached quads below are drawn).
+		CachTexture = -static_cast<int>(s_texture);
+	}
+
+	// Mirrors CUIRenderTextOriginal::UploadText's screen-edge clipping, but
+	// samples the persistent atlas instead of re-uploading the scratch buffer.
+	void DrawSection(int slot, int sx, int sy, int width, int height, int typeShadow)
+	{
+		const int col = slot % COLS;
+		const int row = slot / COLS;
+
+		float uOffset = 0.f;
+		float vOffset = 0.f;
+		if (sx < 0)
+		{
+			uOffset = static_cast<float>(-sx);
+			width += sx;
+			sx = 0;
+		}
+		else if (sx + width > (int)WindowWidth)
+		{
+			width = (int)WindowWidth - sx;
+		}
+		if (sy < 0)
+		{
+			vOffset = static_cast<float>(-sy);
+			height += sy;
+			sy = 0;
+		}
+		else if (sy + height > (int)WindowHeight)
+		{
+			height = (int)WindowHeight - sy;
+		}
+
+		if (!(width > 0 && height > 0 && sx + width > 0 && sy + height > 0))
+			return;
+
+		const float u = ((col * SLOT_W) + uOffset + 0.01f) / (float)TEX_W;
+		const float v = ((row * SLOT_H) + vOffset + 0.01f) / (float)TEX_H;
+		const float uWidth = (width + 0.01f) / (float)TEX_W;
+		const float vHeight = (height + 0.01f) / (float)TEX_H;
+		const int tex = -static_cast<int>(s_texture);
+
+		if (typeShadow)
+		{
+			GLfloat ColorFont[4];
+			// GL_CURRENT_COLOR is not a GLES2 query. Timed because a rejected
+			// glGet still costs a driver round trip, once per shadowed string.
+			++g_ProfGetColorCalls;
+			const unsigned long long profGetStart = TextProfNow();
+			glGetFloatv(GL_CURRENT_COLOR, ColorFont);
+			g_ProfGetColorTicks += TextProfNow() - profGetStart;
+			glColor4f(0.0, 0.0, 0.0, 0.75);
+			const float offset = (typeShadow == 1) ? 0.5f : 1.45f;
+			RenderBitmap(tex, (float)sx - offset, (float)sy - offset, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
+			RenderBitmap(tex, (float)sx - offset, (float)sy + offset, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
+			RenderBitmap(tex, (float)sx + offset, (float)sy - offset, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
+			RenderBitmap(tex, (float)sx + offset, (float)sy + offset, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
+			glColor4fv(ColorFont);
+		}
+		RenderBitmap(tex, (float)sx, (float)sy, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
+	}
+
+	// AndroidTextOut clears only the box it is about to draw into, so the
+	// shared font DIB is never a clean slate - it still holds the tail of
+	// whatever longer string was rendered into it last. The old code got away
+	// with that because every visible string was re-rendered in draw order
+	// every frame, so the leftovers were always overwritten before they could
+	// be read. With the cache only the misses touch the DIB, so leftovers can
+	// be arbitrarily old, and WriteText copies them in past the end of a
+	// shorter string. Clear the exact region WriteText is about to read.
+	void ClearFontDibRegion(BYTE* fontBuffer, int widthPixels, int heightRows)
+	{
+		if (fontBuffer == NULL || widthPixels <= 0 || heightRows <= 0)
+			return;
+
+		const int dibWidth = static_cast<int>(640 * g_fScreenRate_x);
+		const int dibHeight = static_cast<int>(480 * g_fScreenRate_y);
+		const int pitch = ((dibWidth * 24 + 31) & ~31) >> 3;
+		if (widthPixels > dibWidth)
+			widthPixels = dibWidth;
+		if (heightRows > dibHeight)
+			heightRows = dibHeight;
+
+		for (int y = 0; y < heightRows; ++y)
+		{
+			memset(fontBuffer + static_cast<size_t>(y) * pitch, 0,
+				static_cast<size_t>(widthPixels) * 3);
+		}
+	}
+
+	// The extent map has no slot budget, so trim it when it grows past the
+	// number of strings any single frame could plausibly use.
+	void TrimExtents()
+	{
+		if (s_extents.size() <= 512)
+			return;
+		for (std::unordered_map<unsigned long long, Extent>::iterator it = s_extents.begin();
+			it != s_extents.end(); )
+		{
+			if ((s_frame - it->second.lastUsedFrame) > 6000)
+				it = s_extents.erase(it);
+			else
+				++it;
+		}
+	}
+}
+#endif
+
+#ifdef __ANDROID__
+// TEMP debug: hands the atlas to the FPS overlay so it can be drawn on screen.
+// Returns the negative-handle form BindTexture uses for a raw GL texture name.
+int TextCacheDebugTextureHandle()
+{
+	return (TextCache::s_texture != 0) ? -static_cast<int>(TextCache::s_texture) : 0;
+}
+#endif
+
 void CUIRenderText::RenderText(int iPos_x, int iPos_y, const char* pszText, int iBoxWidth /* = 0 */, int iBoxHeight /* = 0 */, int iSort /* = RT3_SORT_LEFT */, OUT SIZE* lpTextSize /* = NULL */)
 {
 
@@ -2715,6 +3058,7 @@ CUIRenderTextOriginal::CUIRenderTextOriginal()
 	m_hBitmap = NULL;
 	m_pFontBuffer = NULL;
 	m_dwTextColor = m_dwBackColor = 0;
+	m_hCurFont = NULL;
 }
 CUIRenderTextOriginal::~CUIRenderTextOriginal() { Release(); }
 
@@ -2734,6 +3078,7 @@ bool CUIRenderTextOriginal::Create(HDC hDC)
 	m_hFontDC = CreateCompatibleDC(hDC);
 	SelectObject(m_hFontDC, m_hBitmap);
 	SelectObject(m_hFontDC, g_hFont);
+	m_hCurFont = g_hFont;
 	m_dwBackColor = 0;				//. Default Background Color;
 	m_dwTextColor = 0xFFFFFFFF;		//. Default Text Color
 	m_TypeShadow = 0;
@@ -2749,6 +3094,9 @@ bool CUIRenderTextOriginal::Create(HDC hDC)
 }
 void CUIRenderTextOriginal::Release()
 {
+#ifdef __ANDROID__
+	TextCache::ReleaseTexture();
+#endif
 	if (m_hFontDC != NULL)
 	{
 		DeleteDC(m_hFontDC);
@@ -2780,7 +3128,7 @@ void CUIRenderTextOriginal::SetBgColor(BYTE byRed, BYTE byGreen, BYTE byBlue, BY
 void CUIRenderTextOriginal::SetShadowText(int Type) { m_TypeShadow = Type; }
 void CUIRenderTextOriginal::SetBgColor(DWORD dwColor) { m_dwBackColor = dwColor; }
 
-void CUIRenderTextOriginal::SetFont(HFONT hFont) { SelectObject(m_hFontDC, hFont); }
+void CUIRenderTextOriginal::SetFont(HFONT hFont) { SelectObject(m_hFontDC, hFont); m_hCurFont = hFont; }
 
 void CUIRenderTextOriginal::WriteText(int iOffset, int iWidth, int iHeight)
 {
@@ -2894,11 +3242,57 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 	
 	SIZE RealTextSize;
 
-	if (pszText[0] == '\0') 
+#ifdef __ANDROID__
+	++g_ProfTextCalls;
+	++TextCache::s_frame;
+	const size_t textLen = strlen(pszText);
+	const unsigned long long fontKey = (unsigned long long)(size_t)m_hCurFont;
+
+	// Measuring a string is a pure function of (bytes, font), so it only ever
+	// needs doing once. This alone was ~2.8ms/frame of FreeType glyph metrics.
+	bool haveExtent = false;
+	unsigned long long extentKey = 0;
+	if (textLen > 0 && g_TextExtentCacheEnabled)
+	{
+		extentKey = TextCache::HashBytes(1469598103934665603ULL, pszText, textLen);
+		extentKey = TextCache::HashInt(extentKey, fontKey);
+
+		std::unordered_map<unsigned long long, TextCache::Extent>::iterator it =
+			TextCache::s_extents.find(extentKey);
+		if (it != TextCache::s_extents.end() &&
+			it->second.text.size() == textLen &&
+			memcmp(it->second.text.data(), pszText, textLen) == 0)
+		{
+			RealTextSize.cx = it->second.cx;
+			RealTextSize.cy = it->second.cy;
+			it->second.lastUsedFrame = TextCache::s_frame;
+			haveExtent = true;
+		}
+	}
+
+	const unsigned long long profExtentStart = TextProfNow();
+	if (!haveExtent)
+	{
+#endif
+	if (pszText[0] == '\0')
 		g_pMultiLanguage->_GetTextExtentPoint32(m_hFontDC, "0", 1, &RealTextSize);
-	else 
+	else
 		g_pMultiLanguage->_GetTextExtentPoint32(m_hFontDC,pszText,lstrlen(pszText),&RealTextSize);
-	
+#ifdef __ANDROID__
+	}
+	g_ProfTextExtentTicks += TextProfNow() - profExtentStart;
+
+	if (!haveExtent && textLen > 0 && g_TextExtentCacheEnabled)
+	{
+		TextCache::Extent& entry = TextCache::s_extents[extentKey];
+		entry.text.assign(pszText, textLen);
+		entry.cx = RealTextSize.cx;
+		entry.cy = RealTextSize.cy;
+		entry.lastUsedFrame = TextCache::s_frame;
+		TextCache::TrimExtents();
+	}
+#endif
+
 	MU_POINTF RealBoxPos = { (float)iPos_x*g_fScreenRate_x, (float)iPos_y*g_fScreenRate_y };
 	SIZEF RealBoxSize = { (float)iBoxWidth*g_fScreenRate_x, (float)iBoxHeight*g_fScreenRate_y };
 	SIZEF RealRenderingSize = { (long)RealTextSize.cx, (long)RealTextSize.cy };	
@@ -2987,21 +3381,173 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 		EndRenderColor();
 	}
 
-	if(pszText[0] != 0x0a)
+	int iRealRenderWidth = RealRenderingSize.cx;
+	int iNumberOfSections = ComputeSectionCount(iRealRenderWidth, LIMIT_WIDTH);
+
+#ifdef __ANDROID__
+	// A string is cacheable when its composed pixels are a pure function of the
+	// key below. The excluded cases all depend on whatever the scratch DIB
+	// happened to hold from a previous call: an empty string and a leading 0x0a
+	// both skip TextOut, and a non-zero iClipMove shifts the read window.
+	const bool bCacheable =
+		g_TextSectionCacheEnabled &&
+		textLen > 0 &&
+		pszText[0] != 0x0a &&
+		iClipMove == 0 &&
+		iNumberOfSections > 0 &&
+		iNumberOfSections <= TextCache::MAX_SECTIONS &&
+		RealRenderingSize.cy > 0 &&
+		RealRenderingSize.cy <= TextCache::SLOT_H &&
+		TextCache::EnsureTexture();
+
+	if (bCacheable)
 	{
+		unsigned long long baseKey = TextCache::HashBytes(1469598103934665603ULL, pszText, textLen);
+		baseKey = TextCache::HashInt(baseKey, m_dwTextColor);
+		baseKey = TextCache::HashInt(baseKey, fontKey);
+		baseKey = TextCache::HashInt(baseKey, static_cast<unsigned long long>(iRealRenderWidth));
+		baseKey = TextCache::HashInt(baseKey, static_cast<unsigned long long>(RealRenderingSize.cy));
+
+		unsigned long long keys[TextCache::MAX_SECTIONS];
+		TextCache::Section* hits[TextCache::MAX_SECTIONS] = { NULL, NULL, NULL, NULL };
+		bool bAllResident = true;
+		for (int i = 0; i < iNumberOfSections; i++)
+		{
+			// Key 0 marks a free slot, so keep every real key non-zero.
+			keys[i] = TextCache::HashInt(baseKey, static_cast<unsigned long long>(i)) | 1ULL;
+
+			std::unordered_map<unsigned long long, TextCache::Section>::iterator it =
+				TextCache::s_sections.find(keys[i]);
+			if (it != TextCache::s_sections.end() &&
+				it->second.text.size() == textLen &&
+				memcmp(it->second.text.data(), pszText, textLen) == 0)
+			{
+				hits[i] = &it->second;
+			}
+			else
+			{
+				bAllResident = false;
+			}
+		}
+
+		if (bAllResident)
+		{
+			++g_ProfTextCacheHits;
+			const unsigned long long profDrawStart = TextProfNow();
+			for (int i = 0; i < iNumberOfSections; i++)
+			{
+				hits[i]->lastUsedFrame = TextCache::s_frame;
+				TextCache::DrawSection(hits[i]->slot,
+					(int)(RealBoxPos.x + LIMIT_WIDTH * i + iTab), (int)RealBoxPos.y,
+					hits[i]->width, hits[i]->height, m_TypeShadow);
+			}
+			g_ProfTextUploadTicks += TextProfNow() - profDrawStart;
+
+			if (lpTextSize)
+			{
+				lpTextSize->cx = RealRenderingSize.cx / g_fScreenRate_x;
+				lpTextSize->cy = RealRenderingSize.cy / g_fScreenRate_y;
+			}
+			return;
+		}
+
+		// At least one section is missing, so the string has to be rasterised.
+		// Refill every section from the one rasterisation rather than mixing
+		// cached and fresh pixels.
+		++g_ProfTextCacheMisses;
+		const unsigned long long profTextOutStart = TextProfNow();
+		TextCache::ClearFontDibRegion(m_pFontBuffer,
+			iRealRenderWidth + (iClipMove / 3) + 1, RealRenderingSize.cy);
 		::SetBkColor(m_hFontDC, RGB(0, 0, 0));
 		::SetTextColor(m_hFontDC, RGB(255,255,255));
 		g_pMultiLanguage->_TextOut(m_hFontDC, 0, 0, pszText, lstrlen(pszText));
+		g_ProfTextOutTicks += TextProfNow() - profTextOutStart;
+
+		for (int i = 0; i < iNumberOfSections; i++)
+		{
+			SIZE RealSectionLine = { (long)ComputeSectionSpan(iRealRenderWidth, LIMIT_WIDTH, i, iNumberOfSections), (long)RealRenderingSize.cy };
+
+			int slot = (hits[i] != NULL) ? hits[i]->slot : -1;
+			if (slot < 0)
+			{
+				// A stale entry under this key (different text) owns its slot;
+				// take it over instead of leaking it.
+				std::unordered_map<unsigned long long, TextCache::Section>::iterator stale =
+					TextCache::s_sections.find(keys[i]);
+				if (stale != TextCache::s_sections.end())
+				{
+					slot = stale->second.slot;
+					TextCache::s_sections.erase(stale);
+				}
+				else
+				{
+					slot = TextCache::AcquireSlot();
+				}
+			}
+			if (slot < 0)
+				continue;
+
+			const unsigned long long profWriteStart = TextProfNow();
+			WriteText(LIMIT_WIDTH*i*3+iClipMove, RealSectionLine.cx, RealSectionLine.cy);
+			const unsigned long long profUploadStart = TextProfNow();
+			g_ProfTextWriteTicks += profUploadStart - profWriteStart;
+
+			TextCache::UploadSection(slot, RealSectionLine.cx, RealSectionLine.cy);
+			TextCache::DrawSection(slot,
+				(int)(RealBoxPos.x + LIMIT_WIDTH * i + iTab), (int)RealBoxPos.y,
+				RealSectionLine.cx, RealSectionLine.cy, m_TypeShadow);
+			g_ProfTextUploadTicks += TextProfNow() - profUploadStart;
+
+			TextCache::Section& entry = TextCache::s_sections[keys[i]];
+			entry.text.assign(pszText, textLen);
+			entry.slot = slot;
+			entry.width = RealSectionLine.cx;
+			entry.height = RealSectionLine.cy;
+			entry.lastUsedFrame = TextCache::s_frame;
+			TextCache::s_slotOwner[slot] = keys[i];
+		}
+
+		if (lpTextSize)
+		{
+			lpTextSize->cx = RealRenderingSize.cx / g_fScreenRate_x;
+			lpTextSize->cy = RealRenderingSize.cy / g_fScreenRate_y;
+		}
+		return;
 	}
-	
-	int iRealRenderWidth = RealRenderingSize.cx;
-	int iNumberOfSections = ComputeSectionCount(iRealRenderWidth, LIMIT_WIDTH);
+#endif
+
+	if(pszText[0] != 0x0a)
+	{
+#ifdef __ANDROID__
+		const unsigned long long profTextOutStart = TextProfNow();
+		// Cached strings no longer refresh the DIB, so a string on this path
+		// can follow arbitrarily old contents. See ClearFontDibRegion.
+		TextCache::ClearFontDibRegion(m_pFontBuffer,
+			iRealRenderWidth + (iClipMove / 3) + 1, RealRenderingSize.cy);
+#endif
+		::SetBkColor(m_hFontDC, RGB(0, 0, 0));
+		::SetTextColor(m_hFontDC, RGB(255,255,255));
+		g_pMultiLanguage->_TextOut(m_hFontDC, 0, 0, pszText, lstrlen(pszText));
+#ifdef __ANDROID__
+		g_ProfTextOutTicks += TextProfNow() - profTextOutStart;
+#endif
+	}
+
 		for(int i=0; i<iNumberOfSections; i++)
 	{
 		SIZE RealSectionLine = { (long)ComputeSectionSpan(iRealRenderWidth, LIMIT_WIDTH, i, iNumberOfSections), (long)RealRenderingSize.cy };
-		
+
+#ifdef __ANDROID__
+		const unsigned long long profWriteStart = TextProfNow();
+		WriteText(LIMIT_WIDTH*i*3+iClipMove, RealSectionLine.cx, RealSectionLine.cy);
+		const unsigned long long profUploadStart = TextProfNow();
+		g_ProfTextWriteTicks += profUploadStart - profWriteStart;
+		UploadText(RealBoxPos.x+LIMIT_WIDTH*i+iTab, RealBoxPos.y, RealSectionLine.cx, RealSectionLine.cy);
+		g_ProfTextUploadTicks += TextProfNow() - profUploadStart;
+#else
 		WriteText(LIMIT_WIDTH*i*3+iClipMove, RealSectionLine.cx, RealSectionLine.cy);
 		UploadText(RealBoxPos.x+LIMIT_WIDTH*i+iTab, RealBoxPos.y, RealSectionLine.cx, RealSectionLine.cy);
+#endif
 	}
 
 	if(lpTextSize)
@@ -3859,12 +4405,12 @@ void CUITextInputBox::RenderScrollbar()
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x+m_iWidth-m_fScrollBarWidth, m_iPos_y - 4, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x+m_iWidth-m_fScrollBarWidth, (float)m_iPos_y - 4,13.0f, 13.0f, 13.0f/16.0f, 29.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x+m_iWidth-m_fScrollBarWidth, (float)m_iPos_y - 4,13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡ã
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x+m_iWidth-m_fScrollBarWidth, (float)m_iPos_y - 4,13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 		
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x+m_iWidth-m_fScrollBarWidth, m_iPos_y + m_iHeight - 9, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x+m_iWidth-m_fScrollBarWidth, (float)m_iPos_y + m_iHeight - 9,13.0f, 13.0f, 13.0f/16.0f, 16.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x+m_iWidth-m_fScrollBarWidth, (float)m_iPos_y + m_iHeight - 9,13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡å
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x+m_iWidth-m_fScrollBarWidth, (float)m_iPos_y + m_iHeight - 9,13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 
 		EnableAlphaTest();
 		SetLineColor(2);
@@ -4810,12 +5356,12 @@ void CUIGuildNoticeListBox::RenderInterface()
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x + m_iWidth - 12, m_iPos_y - m_iHeight - 1, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1,13.0f, 13.0f, 13.0f/16.0f, 29.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1,13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡ã
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1,13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 		
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x + m_iWidth - 12, m_iPos_y - 12, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 13.0f/16.0f, 16.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡å
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 
 		EnableAlphaTest();
 		SetLineColor(2);
@@ -4977,12 +5523,12 @@ void CUINewGuildMemberListBox::RenderInterface()
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x + m_iWidth - 12, m_iPos_y - m_iHeight - 1, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1, 13.0f, 13.0f, 13.0f/16.0f, 29.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1, 13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡ã
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1, 13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 		
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x + m_iWidth - 12, m_iPos_y - 12, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 13.0f/16.0f, 16.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
-			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡å
+			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,	13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 
 		EnableAlphaTest();
 		SetLineColor(2);
@@ -5192,14 +5738,14 @@ void CUIUnionGuildListBox::RenderInterface()
 				13.0f, 13.0f, 13.0f/16.0f, 29.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - m_iHeight - 1,
-				13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡ã
+				13.0f, 13.0f, 0.0f, 3.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 		
 		if (MouseLButtonPush && ::CheckMouseIn(m_iPos_x + m_iWidth - 12, m_iPos_y - 12, 13.0f, 13.0f) == TRUE)
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,
 				13.0f, 13.0f, 13.0f/16.0f, 16.0f/32.0f, -13.0f/16.0f, -13.0f/32.0f);
 		else
 			RenderBitmap(BITMAP_INTERFACE_EX+12, (float)m_iPos_x + m_iWidth - 12, (float)m_iPos_y - 12,
-				13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ¡å
+				13.0f, 13.0f, 0.0f, 16.0f/32.0f, 13.0f/16.0f, 13.0f/32.0f);	// ï¿½ï¿½
 
 		EnableAlphaTest();
 		SetLineColor(2);
@@ -6198,7 +6744,7 @@ void CUIQuestContentsListBox::RenderCoveredInterface()
 	if (SLGetSelectLine() == m_TextList.end())
 		return;
 	
-	// ¾ÆÀÌÅÛÀÎ°¡?
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î°ï¿½?
 	if (QUEST_REQUEST_ITEM == m_TextListIter->m_dwType
 		|| QUEST_REWARD_ITEM == m_TextListIter->m_dwType)
 	{

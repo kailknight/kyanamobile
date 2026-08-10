@@ -741,6 +741,9 @@ class CUIRenderTextOriginal : public IUIRenderText
 	BYTE* m_pFontBuffer;
 	int m_TypeShadow;
 	DWORD m_dwTextColor, m_dwBackColor;
+	// The selected font is only reachable through the DC, but the text cache
+	// needs it as part of its key, so keep the handle alongside it.
+	HFONT m_hCurFont;
 public:
 	CUIRenderTextOriginal();
 	virtual ~CUIRenderTextOriginal();
