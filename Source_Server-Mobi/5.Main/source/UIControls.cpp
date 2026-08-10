@@ -2750,7 +2750,7 @@ extern int g_ProfGetColorCalls;
 // The two halves are separable so a regression can be bisected: the extent
 // cache only answers measurement, the section cache holds the composed pixels.
 bool g_TextExtentCacheEnabled = true;
-bool g_TextSectionCacheEnabled = true;
+bool g_TextSectionCacheEnabled = false;
 
 namespace TextCache
 {
