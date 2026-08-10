@@ -3247,16 +3247,6 @@ void MainScene(HDC hDC)
 			g_ProfTextCacheHits = 0;
 			g_ProfTextCacheMisses = 0;
 
-			// TEMP debug: draw the text atlas itself, so a wrong glyph on screen
-			// can be told apart from a wrong lookup - if the atlas contains the
-			// right pixels the bug is in the UVs, and if it does not it is in
-			// the upload.
-			extern int TextCacheDebugTextureHandle();
-			const int atlasHandle = TextCacheDebugTextureHandle();
-			if (atlasHandle != 0)
-			{
-				RenderBitmap(atlasHandle, 40.f, 40.f, 512.f, 1024.f, 0.f, 0.f, 1.f, 1.f, false, false);
-			}
 #endif
 
 			g_pRenderText->SetFont(g_hFont);

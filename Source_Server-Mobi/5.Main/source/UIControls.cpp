@@ -2750,7 +2750,7 @@ extern int g_ProfGetColorCalls;
 // The two halves are separable so a regression can be bisected: the extent
 // cache only answers measurement, the section cache holds the composed pixels.
 bool g_TextExtentCacheEnabled = true;
-bool g_TextSectionCacheEnabled = false;
+bool g_TextSectionCacheEnabled = true;
 
 namespace TextCache
 {
@@ -2969,6 +2969,18 @@ namespace TextCache
 		const float vHeight = (height + 0.01f) / (float)TEX_H;
 		const int tex = -static_cast<int>(s_texture);
 
+		// Bind explicitly rather than trusting the engine's CachTexture shadow.
+		// Plenty of code binds textures with a raw glBindTexture and never
+		// updates that shadow - the virtual pad's own PNG draws do it every
+		// frame - so BindTexture can wrongly conclude the atlas is already
+		// bound and skip the bind, leaving the quad to sample whatever texture
+		// actually is bound. That is what smeared the pad's GL_LINEAR button
+		// art across the PK/CHAT/JWL labels. The old path never hit this
+		// because it re-bound the font texture immediately before every draw;
+		// a cache hit does no upload, so it has to do the same explicitly.
+		glBindTexture(GL_TEXTURE_2D, s_texture);
+		CachTexture = tex;
+
 		if (typeShadow)
 		{
 			GLfloat ColorFont[4];
@@ -3032,15 +3044,6 @@ namespace TextCache
 				++it;
 		}
 	}
-}
-#endif
-
-#ifdef __ANDROID__
-// TEMP debug: hands the atlas to the FPS overlay so it can be drawn on screen.
-// Returns the negative-handle form BindTexture uses for a raw GL texture name.
-int TextCacheDebugTextureHandle()
-{
-	return (TextCache::s_texture != 0) ? -static_cast<int>(TextCache::s_texture) : 0;
 }
 #endif
 
