@@ -551,6 +551,73 @@ namespace
 #endif
     }
 
+    // The adaptive thresholds below are hard cliffs on the *instantaneous*
+    // frame rate, and culling is itself what changes the frame rate. Sitting
+    // near a threshold therefore oscillates: cull -> frame gets faster -> stop
+    // culling -> frame gets slower -> cull again. Measured on the Lorencia
+    // plaza at ~58fps, this toggled 176 of 340 objects on and off on
+    // consecutive frames - fences and walls visibly flickering.
+    //
+    // It never showed before because the client sat at ~17fps, permanently
+    // below every threshold, so the decision was stable. Fixing the frame rate
+    // put it right on the 58fps gate.
+    //
+    // Two things stop the chatter: a smoothed frame rate so single-frame
+    // spikes do not decide anything, and a dead band so a threshold has to be
+    // crossed by a margin before the state flips back. Evaluated once per
+    // frame in RenderObjects, not per object.
+    struct AdaptiveFpsGate
+    {
+        float smoothedFps = 0.0f;
+        bool belowCullGate = false;   // < 58
+        bool stressedFrame = false;   // < 44
+        bool severeFrame = false;     // < 34
+        bool extremeFrame = false;    // < 15
+    };
+
+    AdaptiveFpsGate g_adaptiveFpsGate;
+
+    inline void LatchFpsThreshold(float fps, float threshold, float margin, bool& state)
+    {
+        if (state)
+        {
+            if (fps > threshold + margin)
+            {
+                state = false;
+            }
+        }
+        else if (fps < threshold - margin)
+        {
+            state = true;
+        }
+    }
+
+    inline void UpdateAdaptiveFpsGate(float currentFps)
+    {
+        if (currentFps <= 0.0f)
+        {
+            return;
+        }
+
+        AdaptiveFpsGate& gate = g_adaptiveFpsGate;
+        if (gate.smoothedFps <= 0.0f)
+        {
+            gate.smoothedFps = currentFps;
+        }
+        else
+        {
+            // ~20 frame time constant: long enough to ignore a single slow
+            // frame, short enough to react to actually entering a crowd.
+            gate.smoothedFps += (currentFps - gate.smoothedFps) * 0.05f;
+        }
+
+        const float fps = gate.smoothedFps;
+        LatchFpsThreshold(fps, 58.0f, 5.0f, gate.belowCullGate);
+        LatchFpsThreshold(fps, 44.0f, 4.0f, gate.stressedFrame);
+        LatchFpsThreshold(fps, 34.0f, 3.0f, gate.severeFrame);
+        LatchFpsThreshold(fps, 15.0f, 2.0f, gate.extremeFrame);
+    }
+
     inline bool ShouldCullStaticObjectByImportance(const OBJECT* o,
         const AdaptiveDistanceBucket bucket,
         const float distSq,
@@ -569,14 +636,15 @@ namespace
             return false;
         }
 
-        if (currentFps <= 0.0f || currentFps >= 58.0f)
+        (void)currentFps;
+        if (!g_adaptiveFpsGate.belowCullGate)
         {
             return false;
         }
 
-        const bool stressedFrame = (currentFps < 44.0f);
-        const bool severeFrame = (currentFps < 34.0f);
-        const bool extremeFrame = (currentFps < 15.0f);
+        const bool stressedFrame = g_adaptiveFpsGate.stressedFrame;
+        const bool severeFrame = g_adaptiveFpsGate.severeFrame;
+        const bool extremeFrame = g_adaptiveFpsGate.extremeFrame;
         const bool stadiumStaticObject = IsStadiumStaticWorldObject(o);
         const bool stadiumHeavyDecorObject = IsStadiumHeavyDecorObject(o);
         const float importance = GetStaticObjectScreenImportance(o, distSq);
@@ -4240,7 +4308,9 @@ namespace
         const bool adaptiveEnabled = IsObjectAdaptiveEnabled();
         const bool fullObjectVisibility = IsAndroidFullObjectVisibilityMode();
         const float currentFps = static_cast<float>(FPS);
-        const bool extremeFrame = (currentFps > 0.f && currentFps < 15.f);
+        // Latched, so this cannot flip on a single slow frame. See
+        // UpdateAdaptiveFpsGate.
+        const bool extremeFrame = g_adaptiveFpsGate.extremeFrame;
 
         ++g_objectPerfSnapshot.renderCandidates;
         TrackObjectRenderBucket(bucket);
@@ -4643,6 +4713,8 @@ static bool RenderObjectWithAdaptiveBudget(OBJECT* o)
 void RenderObjects()
 {
     const Uint64 renderTicksStart = static_cast<Uint64>(MU_MobilePerfNow());
+    // Once per frame, before any per-object cull decision reads it.
+    UpdateAdaptiveFpsGate(static_cast<float>(FPS));
 #if defined(__ANDROID__) || defined(MU_IOS)
     std::vector<std::pair<OBJECT*, float>> staticCandidates;
     staticCandidates.reserve(512);

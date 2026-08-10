@@ -3160,6 +3160,24 @@ void MainScene(HDC hDC)
 			extern unsigned long long g_ProfObjMoveTicks;
 			extern unsigned long long g_ProfCharMoveTicks;
 
+			// How much the existing frustum/distance culling actually rejects.
+			extern int g_ProfObjCandidates;
+			extern int g_ProfObjRendered;
+			extern int g_ProfObjCulled;
+			extern int g_ProfCharCandidates;
+			extern int g_ProfCharRendered;
+
+			unicode::t_char szProfCull[192];
+			unicode::_sprintf(szProfCull, "cull obj %d/%d (cut %d) chr %d/%d",
+				g_ProfObjRendered, g_ProfObjCandidates, g_ProfObjCulled,
+				g_ProfCharRendered, g_ProfCharCandidates);
+
+			SIZE sizeCull = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProfCull, lstrlen(szProfCull), &sizeCull);
+			const int profCullX = (((hudWidth - sizeCull.cx) - 12) > 10) ? ((hudWidth - sizeCull.cx) - 12) : 10;
+			g_pRenderText->RenderText(profCullX, DisplayHeight - 110, szProfCull);
+
 			unicode::t_char szProf5[192];
 			unicode::_sprintf(szProf5,
 				"ui[sel %.1f ifc %.1f pty %.1f new %.1f inf %.1f cur %.1f] mv o%.1f c%.1f",

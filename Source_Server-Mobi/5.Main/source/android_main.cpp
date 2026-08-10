@@ -7984,6 +7984,16 @@ unsigned long long g_ProfUiTicks = 0;
 // The four buckets above plus objR/chrR/ter only account for ~32ms of a ~51ms
 // Scene(). These are the rest of the MainScenePerfSnapshot, so that line 4 of
 // the overlay closes the ~19ms that was previously unattributed.
+// Frustum/distance culling already runs at three levels in RenderObjects (per
+// terrain block, per object, plus adaptive distance buckets). These surface how
+// much it actually rejects, so "render only what the camera sees" can be
+// checked rather than assumed.
+int g_ProfObjCandidates = 0;
+int g_ProfObjRendered = 0;
+int g_ProfObjCulled = 0;
+int g_ProfCharCandidates = 0;
+int g_ProfCharRendered = 0;
+
 unsigned long long g_ProfShadowTicks = 0;
 unsigned long long g_ProfBoidsTicks = 0;
 unsigned long long g_ProfMiscWorldTicks = 0;
@@ -9392,6 +9402,11 @@ static void RunAndroidGameFrame()
         g_ProfEffectsTicks = static_cast<unsigned long long>(mainScenePerf.effectsTicks);
         g_ProfParticlesTicks = static_cast<unsigned long long>(mainScenePerf.particlesTicks);
         g_ProfUiTicks = static_cast<unsigned long long>(mainScenePerf.uiTicks);
+        g_ProfObjCandidates = objectPerf.renderCandidates;
+        g_ProfObjRendered = objectPerf.renderRendered;
+        g_ProfObjCulled = objectPerf.renderDistanceCulled;
+        g_ProfCharCandidates = characterPerf.renderCandidates;
+        g_ProfCharRendered = characterPerf.renderRendered;
         g_ProfShadowTicks = static_cast<unsigned long long>(mainScenePerf.shadowTicks);
         g_ProfBoidsTicks = static_cast<unsigned long long>(mainScenePerf.boidsTicks);
         g_ProfMiscWorldTicks = static_cast<unsigned long long>(mainScenePerf.miscWorldTicks);
