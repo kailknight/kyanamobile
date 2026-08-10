@@ -13,6 +13,18 @@
 #if !defined(__ANDROID__) && !defined(MU_IOS)
 #include "wglext.h"
 #endif
+#ifdef __ANDROID__
+#include "Platform/MobileTime.h"
+
+// TEMP profiling: the 2D path (UI panels, icons, text quads) goes through
+// RenderBitmap, one glBegin/glEnd quad per call. The UI windows cost ~13ms a
+// frame and only ~4ms of that is text rasterisation, so this says how much of
+// the rest is the quad path itself.
+unsigned long long g_ProfBitmapTicks = 0;
+int g_ProfBitmapCalls = 0;
+unsigned long long g_ProfGetColorTicks = 0;
+int g_ProfGetColorCalls = 0;
+#endif
 
 extern float g_fScreenRate_x;
 extern float g_fScreenRate_y;
@@ -1509,6 +1521,18 @@ void RenderColorBitmap(int Texture,float x,float y,float Width,float Height,floa
 
 void RenderBitmap(int Texture,float x,float y,float Width,float Height,float u,float v,float uWidth,float vHeight,bool Scale,bool StartScale,float Alpha)
 {
+#ifdef __ANDROID__
+	++g_ProfBitmapCalls;
+	const unsigned long long profBitmapStart = static_cast<unsigned long long>(MU_MobilePerfNow());
+	struct ProfBitmapScope
+	{
+		unsigned long long start;
+		~ProfBitmapScope()
+		{
+			g_ProfBitmapTicks += static_cast<unsigned long long>(MU_MobilePerfNow()) - start;
+		}
+	} profBitmapScope = { profBitmapStart };
+#endif
 #if defined(__ANDROID__) || defined(MU_IOS)
 	static bool s_loggedLoginLogoTexture[2] = { false, false };
 	const int logoSlot = (Texture == BITMAP_LOG_IN + 16) ? 0 : ((Texture == BITMAP_LOG_IN + 17) ? 1 : -1);

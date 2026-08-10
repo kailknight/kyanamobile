@@ -947,6 +947,38 @@ static inline void ApplyShaderStateCommon(bool modelViewBaked) {
     }
 }
 
+// Stream one draw's worth of vertices into the shared streaming VBO.
+//
+// Buffer orphaning gives the driver a fresh allocation so overwriting a buffer
+// the GPU may still be reading does not stall. The size it orphans matters: the
+// previous code passed s_vboCapacity, which is the high-water mark across every
+// batch in the session — the bulk vertex-array draws push it into the hundreds
+// of KB — and it did that before *every* draw, including the 36-byte-per-vertex
+// UI quads. At ~600 immediate-mode draws a frame that is hundreds of megabytes
+// of driver allocation per frame, and it measured at ~83us per 2D quad.
+//
+// Orphaning at the size actually being drawn keeps the stall-avoidance property
+// (it is still a fresh allocation) and folds the upload into the same call.
+static void StreamVertexData(const void* data, GLsizeiptr bytes) {
+    if (s_skipVBOOrphan) {
+        // Software renderers (SwiftShader): a fresh allocation per draw is pure
+        // malloc cost with no pipeline to stall, so keep a grow-only buffer.
+        if (bytes > s_vboCapacity) {
+            GLsizeiptr newCapacity = std::max<GLsizeiptr>(65536, s_vboCapacity);
+            while (newCapacity < bytes) {
+                newCapacity <<= 1;
+            }
+            s_vboCapacity = newCapacity;
+            glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
+        }
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, data);
+        return;
+    }
+
+    glBufferData(GL_ARRAY_BUFFER, bytes, data, GL_STREAM_DRAW);
+    s_vboCapacity = bytes;
+}
+
 static void DrawPreparedVerts(const IMVertex* verts, size_t vertCount, GLenum drawMode, bool modelViewBaked) {
     if (!verts || vertCount == 0 || !s_prog || !s_vbo) {
         return;
@@ -955,22 +987,7 @@ static void DrawPreparedVerts(const IMVertex* verts, size_t vertCount, GLenum dr
     const GLsizeiptr drawBytes = static_cast<GLsizeiptr>(vertCount * sizeof(IMVertex));
 
     BindArrayBufferCached(s_vbo);
-    if (drawBytes > s_vboCapacity) {
-        GLsizeiptr newCapacity = std::max<GLsizeiptr>(65536, s_vboCapacity);
-        while (newCapacity < drawBytes) {
-            newCapacity <<= 1;
-        }
-        s_vboCapacity = newCapacity;
-        // Must allocate new capacity — orphan required regardless of skip flag.
-        glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
-    } else if (!s_skipVBOOrphan) {
-        // Buffer orphaning: glBufferData(nullptr) gives driver a fresh buffer,
-        // avoiding GPU pipeline stall when overwriting a buffer still in use.
-        // Critical on Adreno/Mali. Skipped on software renderers (SwiftShader)
-        // where it just triggers an unnecessary malloc per draw call.
-        glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
-    }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, drawBytes, verts);
+    StreamVertexData(verts, drawBytes);
 
     ApplyShaderStateCommon(modelViewBaked);
 
@@ -1045,18 +1062,7 @@ static bool DrawPreparedQuadsIndexed(const IMVertex* verts, size_t vertCount, bo
     const GLsizeiptr drawBytes = static_cast<GLsizeiptr>(vertCount * sizeof(IMVertex));
 
     BindArrayBufferCached(s_vbo);
-    if (drawBytes > s_vboCapacity) {
-        GLsizeiptr newCapacity = std::max<GLsizeiptr>(65536, s_vboCapacity);
-        while (newCapacity < drawBytes) {
-            newCapacity <<= 1;
-        }
-        s_vboCapacity = newCapacity;
-        glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
-    } else if (!s_skipVBOOrphan) {
-        // Same orphan strategy as DrawPreparedVerts — skip on SwiftShader.
-        glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
-    }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, drawBytes, verts);
+    StreamVertexData(verts, drawBytes);
 
     ApplyShaderStateCommon(modelViewBaked);
 
@@ -1975,17 +1981,7 @@ void GL_DrawQuadsBulk(const float* vertexData, int quadCount) {
     const GLsizeiptr dataBytes = (GLsizeiptr)(vertCount * sizeof(IMVertex));
 
     BindArrayBufferCached(s_vbo);
-    bool resizedBuffer = false;
-    if (dataBytes > s_vboCapacity) {
-        GLsizeiptr newCap = std::max<GLsizeiptr>(65536, s_vboCapacity);
-        while (newCap < dataBytes) newCap <<= 1;
-        s_vboCapacity = newCap;
-        resizedBuffer = true;
-    }
-    if (resizedBuffer || !s_skipVBOOrphan) {
-        glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
-    }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, dataBytes, vertexData);
+    StreamVertexData(vertexData, dataBytes);
 
     ApplyShaderStateCommon(false);  // use full MVP (not baked)
 
@@ -2007,17 +2003,7 @@ void GL_DrawTrisBulk(const float* vertexData, int triCount) {
     const GLsizeiptr dataBytes = (GLsizeiptr)(vertCount * sizeof(IMVertex));
 
     BindArrayBufferCached(s_vbo);
-    bool resizedBuffer = false;
-    if (dataBytes > s_vboCapacity) {
-        GLsizeiptr newCap = std::max<GLsizeiptr>(65536, s_vboCapacity);
-        while (newCap < dataBytes) newCap <<= 1;
-        s_vboCapacity = newCap;
-        resizedBuffer = true;
-    }
-    if (resizedBuffer || !s_skipVBOOrphan) {
-        glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
-    }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, dataBytes, vertexData);
+    StreamVertexData(vertexData, dataBytes);
 
     ApplyShaderStateCommon(false);
 
