@@ -402,6 +402,33 @@ void GL_TrackBindTexture(GLenum target, GLuint tex) {
 int g_ProfTexDefineCount = 0;
 unsigned long long g_ProfTexDefineTicks = 0;
 
+// TEMP profiling: Early-Z program split, and the actual depth/stencil format
+// the driver gave us for the currently bound framebuffer.
+int g_ProfEarlyZOpaqueDraws = 0;
+int g_ProfEarlyZDiscardDraws = 0;
+// Tested true on MT6878/Mali-G615 and the frame collapsed (FPS 28 -> 6.4), but
+// that measurement is NOT trustworthy: the device had drifted into a degraded
+// state during the run, and reverting this flag did not restore the frame rate
+// either. Only a force-stop and relaunch did. So the collapse was the drift,
+// not this flag. The experiment needs redoing from a freshly restarted app if
+// anyone wants a real answer.
+//
+// What the counters next to it did establish, and this part is solid: only
+// ~15 of ~190 draws per frame take the no-discard program, so the Early-Z
+// split is currently inert for ~92% of the scene.
+bool g_ForceEarlyZOpaqueProgram = false;
+int g_ProfDepthBits = -1;
+int g_ProfStencilBits = -1;
+
+void GL_SampleDepthStencilFormat()
+{
+    GLint d = 0, s = 0;
+    glGetIntegerv(GL_DEPTH_BITS, &d);
+    glGetIntegerv(GL_STENCIL_BITS, &s);
+    g_ProfDepthBits = static_cast<int>(d);
+    g_ProfStencilBits = static_cast<int>(s);
+}
+
 void GL_TexImage2D_Compat(GLenum target, GLint level, GLint internalformat,
                           GLsizei width, GLsizei height, GLint border,
                           GLenum format, GLenum type, const void* pixels) {
@@ -926,7 +953,24 @@ static inline void ApplyShaderStateCommon(bool modelViewBaked) {
     // reject occluded fragments before shading. Alpha-tested or blended draws
     // (foliage/fences, particles/effects) need the discard-capable variant.
     const bool needsDiscard = s_alphaTestEnabled || (s_capBits & CAP_BLEND) != 0;
-    const GLuint targetProg = (needsDiscard || !s_progOpaque) ? s_prog : s_progOpaque;
+    // TEMP A/B: forces every draw onto the no-discard program to measure the
+    // upper bound of an Early-Z fix. Visually wrong - alpha-tested foliage and
+    // fences render as opaque quads - but it bounds the win before anyone
+    // refactors the engine's blend state to earn it honestly.
+    const GLuint targetProg =
+        (g_ForceEarlyZOpaqueProgram && s_progOpaque)
+            ? s_progOpaque
+            : ((needsDiscard || !s_progOpaque) ? s_prog : s_progOpaque);
+
+    // TEMP profiling: the Early-Z split only helps if draws actually land on
+    // the no-discard program. A shader containing discard forces Mali/Adreno
+    // to disable early depth test, so if almost everything is taking the
+    // discard path (blend left enabled, say) the optimisation is inert.
+    if (targetProg == s_progOpaque) {
+        ++g_ProfEarlyZOpaqueDraws;
+    } else {
+        ++g_ProfEarlyZDiscardDraws;
+    }
     UseProgramCached(targetProg);
     if (!s_samplerUniformInitialized) {
         glUniform1i(s_uSampler, 0);

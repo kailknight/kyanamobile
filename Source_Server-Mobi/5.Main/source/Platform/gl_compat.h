@@ -104,6 +104,11 @@ bool GL_GetPreferDirectVertexArrays();
 // Eliminates ~105 unnecessary driver-level malloc calls per frame on emulator.
 void GL_SetSkipVBOOrphan(bool skip);
 
+// TEMP profiling: reads GL_DEPTH_BITS / GL_STENCIL_BITS for whichever
+// framebuffer is currently bound, so the real depth-stencil format can be
+// confirmed rather than assumed.
+void GL_SampleDepthStencilFormat();
+
 // ── Enable/Disable for fixed-function states ───────────────────────────────
 void GL_Enable_Compat(GLenum cap);
 void GL_Disable_Compat(GLenum cap);

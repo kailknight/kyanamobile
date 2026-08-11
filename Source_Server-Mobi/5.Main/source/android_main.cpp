@@ -7972,6 +7972,12 @@ int g_ProfHitchFrames = 0;
 double g_ProfHitchSceneMsSum = 0.0;
 int g_ProfWorstTexDefines = 0;
 unsigned long long g_ProfWorstTexDefineTicks = 0;
+int g_ProfWorstObjRendered = 0;
+int g_ProfWorstObjCandidates = 0;
+int g_ProfWorstVisualCalls = 0;
+int g_ProfWorstCharRendered = 0;
+int g_ProfWorstDrawCalls = 0;
+int g_ProfVisualCallsNow = 0;
 
 // Defined in Platform/gl_compat.cpp - texture definitions (asset loads) this
 // frame, and the time spent in them.
@@ -9438,6 +9444,7 @@ static void RunAndroidGameFrame()
         g_ProfUiTicks = static_cast<unsigned long long>(mainScenePerf.uiTicks);
         g_ProfObjCandidates = objectPerf.renderCandidates;
         g_ProfObjRendered = objectPerf.renderRendered;
+        g_ProfVisualCallsNow = objectPerf.visualCalls;
         g_ProfObjCulled = objectPerf.renderDistanceCulled;
         g_ProfCharCandidates = characterPerf.renderCandidates;
         g_ProfCharRendered = characterPerf.renderRendered;
@@ -9518,6 +9525,13 @@ static void RunAndroidGameFrame()
                 g_ProfWorstObjMoveTicks = g_ProfObjMoveTicks;
                 g_ProfWorstTexDefines = g_ProfTexDefineCount;
                 g_ProfWorstTexDefineTicks = g_ProfTexDefineTicks;
+                // How much work the bad frame actually did, so "slow frame"
+                // can be told apart from "frame that rendered far more".
+                g_ProfWorstObjRendered = objectPerf.renderRendered;
+                g_ProfWorstObjCandidates = objectPerf.renderCandidates;
+                g_ProfWorstVisualCalls = objectPerf.visualCalls;
+                g_ProfWorstCharRendered = characterPerf.renderRendered;
+                g_ProfWorstDrawCalls = frameDrawCalls;
             }
 
             // Reset the per-frame asset-load counters for the next frame.

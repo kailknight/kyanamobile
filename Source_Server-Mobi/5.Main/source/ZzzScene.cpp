@@ -3183,17 +3183,46 @@ void MainScene(HDC hDC)
 			extern int g_ProfTexDefineCount;
 
 			unicode::t_char szProfWorst[192];
+			// Early-Z / depth-format verification. Sampled here because the
+			// render-scale FBO is the framebuffer actually bound during the
+			// scene, so this reports its format rather than the default one.
+			extern int g_ProfEarlyZOpaqueDraws;
+			extern int g_ProfEarlyZDiscardDraws;
+			extern int g_ProfDepthBits;
+			extern int g_ProfStencilBits;
+			GL_SampleDepthStencilFormat();
+
+			unicode::t_char szProfZ[192];
+			unicode::_sprintf(szProfZ, "depth %d stencil %d | earlyZ opaque %d discard %d",
+				g_ProfDepthBits, g_ProfStencilBits,
+				g_ProfEarlyZOpaqueDraws, g_ProfEarlyZDiscardDraws);
+			g_ProfEarlyZOpaqueDraws = 0;
+			g_ProfEarlyZDiscardDraws = 0;
+
+			SIZE sizeZ = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProfZ, lstrlen(szProfZ), &sizeZ);
+			const int profZX = (((hudWidth - sizeZ.cx) - 12) > 10) ? ((hudWidth - sizeZ.cx) - 12) : 10;
+			g_pRenderText->RenderText(profZX, DisplayHeight - 134, szProfZ);
+
+			extern int g_ProfWorstObjRendered;
+			extern int g_ProfWorstObjCandidates;
+			extern int g_ProfWorstVisualCalls;
+			extern int g_ProfWorstCharRendered;
+			extern int g_ProfWorstDrawCalls;
+			extern int g_ProfVisualCallsNow;
+
 			unicode::_sprintf(szProfWorst,
-				"worst %.0f [obj %.0f chr %.0f ui %.0f mv %.0f tex %d/%.0fms] hitch %d/%d texNow %d",
+				"worst %.0f [obj %.0f chr %.0f ui %.0f] work o%d/%d vis%d c%d D%d | now o%d vis%d D%d | hitch %d/%d",
 				g_ProfWorstSceneMs,
 				static_cast<double>(g_ProfWorstObjTicks) * tickToMs,
 				static_cast<double>(g_ProfWorstCharTicks) * tickToMs,
 				static_cast<double>(g_ProfWorstUiTicks) * tickToMs,
-				static_cast<double>(g_ProfWorstObjMoveTicks) * tickToMs,
-				g_ProfWorstTexDefines,
-				static_cast<double>(g_ProfWorstTexDefineTicks) * tickToMs,
-				g_ProfHitchCount, g_ProfHitchFrames,
-				g_ProfTexDefineCount);
+				g_ProfWorstObjRendered, g_ProfWorstObjCandidates,
+				g_ProfWorstVisualCalls, g_ProfWorstCharRendered,
+				g_ProfWorstDrawCalls,
+				g_ProfObjRendered, g_ProfVisualCallsNow, g_ProfDrawCalls,
+				g_ProfHitchCount, g_ProfHitchFrames);
 
 			SIZE sizeWorst = {};
 			g_pMultiLanguage->_GetTextExtentPoint32(
