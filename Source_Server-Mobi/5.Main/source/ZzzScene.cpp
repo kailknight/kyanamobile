@@ -3167,6 +3167,40 @@ void MainScene(HDC hDC)
 			extern int g_ProfCharCandidates;
 			extern int g_ProfCharRendered;
 
+			// Worst frame in the last 600, with its breakdown latched. A hitch
+			// is a frame over twice the window mean.
+			extern double g_ProfWorstSceneMs;
+			extern unsigned long long g_ProfWorstObjTicks;
+			extern unsigned long long g_ProfWorstCharTicks;
+			extern unsigned long long g_ProfWorstUiTicks;
+			extern unsigned long long g_ProfWorstParticleTicks;
+			extern unsigned long long g_ProfWorstObjMoveTicks;
+			extern int g_ProfHitchCount;
+			extern int g_ProfHitchFrames;
+
+			extern int g_ProfWorstTexDefines;
+			extern unsigned long long g_ProfWorstTexDefineTicks;
+			extern int g_ProfTexDefineCount;
+
+			unicode::t_char szProfWorst[192];
+			unicode::_sprintf(szProfWorst,
+				"worst %.0f [obj %.0f chr %.0f ui %.0f mv %.0f tex %d/%.0fms] hitch %d/%d texNow %d",
+				g_ProfWorstSceneMs,
+				static_cast<double>(g_ProfWorstObjTicks) * tickToMs,
+				static_cast<double>(g_ProfWorstCharTicks) * tickToMs,
+				static_cast<double>(g_ProfWorstUiTicks) * tickToMs,
+				static_cast<double>(g_ProfWorstObjMoveTicks) * tickToMs,
+				g_ProfWorstTexDefines,
+				static_cast<double>(g_ProfWorstTexDefineTicks) * tickToMs,
+				g_ProfHitchCount, g_ProfHitchFrames,
+				g_ProfTexDefineCount);
+
+			SIZE sizeWorst = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProfWorst, lstrlen(szProfWorst), &sizeWorst);
+			const int profWorstX = (((hudWidth - sizeWorst.cx) - 12) > 10) ? ((hudWidth - sizeWorst.cx) - 12) : 10;
+			g_pRenderText->RenderText(profWorstX, DisplayHeight - 122, szProfWorst);
+
 			unicode::t_char szProfCull[192];
 			unicode::_sprintf(szProfCull, "cull obj %d/%d (cut %d) chr %d/%d",
 				g_ProfObjRendered, g_ProfObjCandidates, g_ProfObjCulled,

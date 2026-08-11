@@ -7958,6 +7958,26 @@ bool IsAggressiveMobilePerfModeEnabled()
 static float g_RenderScaleX = 0.75f;
 static float g_RenderScaleY = 0.75f;
 
+// TEMP profiling: worst frame in a rolling window, with its bucket breakdown
+// latched, so a single screenshot can show what a hitch consisted of.
+double g_ProfWorstSceneMs = 0.0;
+unsigned long long g_ProfWorstObjTicks = 0;
+unsigned long long g_ProfWorstCharTicks = 0;
+unsigned long long g_ProfWorstUiTicks = 0;
+unsigned long long g_ProfWorstParticleTicks = 0;
+unsigned long long g_ProfWorstTerrainTicks = 0;
+unsigned long long g_ProfWorstObjMoveTicks = 0;
+int g_ProfHitchCount = 0;
+int g_ProfHitchFrames = 0;
+double g_ProfHitchSceneMsSum = 0.0;
+int g_ProfWorstTexDefines = 0;
+unsigned long long g_ProfWorstTexDefineTicks = 0;
+
+// Defined in Platform/gl_compat.cpp - texture definitions (asset loads) this
+// frame, and the time spent in them.
+extern int g_ProfTexDefineCount;
+extern unsigned long long g_ProfTexDefineTicks;
+
 // TEMP A/B for the Mali/MediaTek stall investigation - see the call site.
 // Tested true on MT6878/Mali-G615: catastrophically worse, not better. The 2D
 // quad path went from 0.2ms to 14-56ms per frame and the frame from ~35ms to
@@ -9464,6 +9484,56 @@ static void RunAndroidGameFrame()
         // Scene() covers all game update + 3D + UI drawing; Present() is the
         // flush/blit/swap, where GPU back-pressure shows up.
         g_ProfSceneTicks = virtualPadStart - renderSceneStart;
+
+        // TEMP profiling: a screenshot only samples whatever instant it lands
+        // on, so it almost never catches a hitch. Track the worst frame in a
+        // rolling window and latch its bucket breakdown, so one screenshot
+        // shows what the bad frame actually looked like, plus how often the
+        // frame overran badly.
+        {
+            const double frameMs =
+                static_cast<double>(g_ProfSceneTicks) * 1000.0 /
+                static_cast<double>(MU_MobilePerfFrequency());
+
+            ++g_ProfHitchFrames;
+            g_ProfHitchSceneMsSum += frameMs;
+
+            const double meanMs =
+                (g_ProfHitchFrames > 0)
+                    ? (g_ProfHitchSceneMsSum / static_cast<double>(g_ProfHitchFrames))
+                    : frameMs;
+            if ((g_ProfHitchFrames > 30) && (frameMs > (meanMs * 2.0)))
+            {
+                ++g_ProfHitchCount;
+            }
+
+            if (frameMs > g_ProfWorstSceneMs)
+            {
+                g_ProfWorstSceneMs = frameMs;
+                g_ProfWorstObjTicks = g_ProfObjRenderTicks;
+                g_ProfWorstCharTicks = g_ProfCharRenderTicks;
+                g_ProfWorstUiTicks = g_ProfUiTicks;
+                g_ProfWorstParticleTicks = g_ProfParticlesTicks;
+                g_ProfWorstTerrainTicks = g_ProfTerrainTicks;
+                g_ProfWorstObjMoveTicks = g_ProfObjMoveTicks;
+                g_ProfWorstTexDefines = g_ProfTexDefineCount;
+                g_ProfWorstTexDefineTicks = g_ProfTexDefineTicks;
+            }
+
+            // Reset the per-frame asset-load counters for the next frame.
+            g_ProfTexDefineCount = 0;
+            g_ProfTexDefineTicks = 0;
+
+            // Roll the window so a single startup stall does not dominate the
+            // reading forever.
+            if (g_ProfHitchFrames >= 600)
+            {
+                g_ProfHitchFrames = 0;
+                g_ProfHitchSceneMsSum = 0.0;
+                g_ProfHitchCount = 0;
+                g_ProfWorstSceneMs = 0.0;
+            }
+        }
         g_ProfPadTicks = presentStart - virtualPadStart;
         g_ProfPresentTicks = presentEnd - presentStart;
         g_AndroidFrameState.objMoveTicksTotal += static_cast<Uint64>(objectPerf.moveTicks);

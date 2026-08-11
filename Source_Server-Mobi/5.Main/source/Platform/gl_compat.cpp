@@ -7,6 +7,7 @@
 #if defined(__ANDROID__) || defined(MU_IOS)
 
 #include "gl_compat.h"
+#include "MobileTime.h"
 #include <GLES3/gl32.h>
 #include <android/log.h>
 
@@ -395,9 +396,28 @@ void GL_TrackBindTexture(GLenum target, GLuint tex) {
 // bitmaps into it between RenderBitmap() calls. Without a flush here, all
 // quads queued into the immediate batch end up sampling the last-uploaded
 // content (visual: every label shows the final string).
+// TEMP profiling: counts texture *definitions* (asset loads), not the
+// per-string glTexSubImage2D updates the text path does. A frame that hitches
+// while this is non-zero is stalling on asset streaming, not on rendering.
+int g_ProfTexDefineCount = 0;
+unsigned long long g_ProfTexDefineTicks = 0;
+
 void GL_TexImage2D_Compat(GLenum target, GLint level, GLint internalformat,
                           GLsizei width, GLsizei height, GLint border,
                           GLenum format, GLenum type, const void* pixels) {
+    const unsigned long long profTexStart =
+        static_cast<unsigned long long>(MU_MobilePerfNow());
+    ++g_ProfTexDefineCount;
+    struct ProfTexScope
+    {
+        unsigned long long start;
+        ~ProfTexScope()
+        {
+            g_ProfTexDefineTicks +=
+                static_cast<unsigned long long>(MU_MobilePerfNow()) - start;
+        }
+    } profTexScope = { profTexStart };
+
     if (target == GL_TEXTURE_2D) {
         FlushPendingImmediateBatch();
     }
