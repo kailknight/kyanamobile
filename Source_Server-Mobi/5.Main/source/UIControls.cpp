@@ -3031,10 +3031,27 @@ namespace TextCache
 
 	// The extent map has no slot budget, so trim it when it grows past the
 	// number of strings any single frame could plausibly use.
+	// Called after every miss. It must therefore be cheap on the common path:
+	// the original ran a full O(n) scan whenever the map held more than 512
+	// entries, and a stream of unique strings - damage numbers, chat lines,
+	// player names, or a debug overlay - keeps it permanently over that
+	// threshold. Every miss then scanned the whole map while the map kept
+	// growing, so the client got progressively slower the longer it ran and
+	// only a restart cleared it. Measured at 40fps -> 6fps over a long session.
+	//
+	// Now the scan is amortised across many inserts, and the map has a hard
+	// ceiling so it cannot grow without bound between scans.
+	int s_insertsSinceTrim = 0;
+
 	void TrimExtents()
 	{
+		if (++s_insertsSinceTrim < 256)
+			return;
+		s_insertsSinceTrim = 0;
+
 		if (s_extents.size() <= 512)
 			return;
+
 		for (std::unordered_map<unsigned long long, Extent>::iterator it = s_extents.begin();
 			it != s_extents.end(); )
 		{
@@ -3043,6 +3060,12 @@ namespace TextCache
 			else
 				++it;
 		}
+
+		// Everything is recent enough to survive the age test, which happens
+		// when unique strings arrive faster than they age out. Drop the lot
+		// rather than let it grow; it refills within a frame or two.
+		if (s_extents.size() > 4096)
+			s_extents.clear();
 	}
 }
 #endif

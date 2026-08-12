@@ -7979,6 +7979,34 @@ int g_ProfWorstCharRendered = 0;
 int g_ProfWorstDrawCalls = 0;
 int g_ProfVisualCallsNow = 0;
 
+// TEMP: on-screen overlay switch, and the file-based drift log that replaces
+// it. The overlay draws ~8 long strings a frame that change every frame, so it
+// can never be cached and measured ~4-5ms/frame on Mali - it distorts exactly
+// what it is measuring. mu_drift_log.txt lets a long run be measured clean.
+bool g_ShowPerfOverlay = false;
+
+// Plain FPS readout only - the shipping-friendly option. One short string a
+// frame instead of the eight long profiling lines.
+bool g_ShowFpsOnly = true;
+int g_DriftFrames = 0;
+double g_DriftSceneMsSum = 0.0;
+double g_DriftWorstMs = 0.0;
+int g_DriftHitches = 0;
+double g_DriftStartSec = 0.0;
+double g_DriftLastLogSec = 0.0;
+double g_DriftTextExtentMs = 0.0;
+double g_DriftTextOutMs = 0.0;
+double g_DriftTextUpMs = 0.0;
+int g_DriftTextCalls = 0;
+
+extern unsigned long long g_ProfTextExtentTicks;
+extern unsigned long long g_ProfTextOutTicks;
+extern unsigned long long g_ProfTextWriteTicks;
+extern unsigned long long g_ProfTextUploadTicks;
+extern int g_ProfTextCalls;
+extern int g_ProfTextCacheHits;
+extern int g_ProfTextCacheMisses;
+
 // Defined in Platform/gl_compat.cpp - texture definitions (asset loads) this
 // frame, and the time spent in them.
 extern int g_ProfTexDefineCount;
@@ -9534,9 +9562,78 @@ static void RunAndroidGameFrame()
                 g_ProfWorstDrawCalls = frameDrawCalls;
             }
 
+            // Accumulate the text pipeline over the log window, then clear it
+            // for the next frame. Done here rather than in the overlay so it
+            // still happens with the overlay switched off.
+            g_DriftTextExtentMs += static_cast<double>(g_ProfTextExtentTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
+            g_DriftTextOutMs += static_cast<double>(g_ProfTextOutTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
+            g_DriftTextUpMs += static_cast<double>(g_ProfTextUploadTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
+            g_DriftTextCalls += g_ProfTextCalls;
+            g_ProfTextExtentTicks = 0;
+            g_ProfTextOutTicks = 0;
+            g_ProfTextWriteTicks = 0;
+            g_ProfTextUploadTicks = 0;
+            g_ProfTextCalls = 0;
+            g_ProfTextCacheHits = 0;
+            g_ProfTextCacheMisses = 0;
+
             // Reset the per-frame asset-load counters for the next frame.
             g_ProfTexDefineCount = 0;
             g_ProfTexDefineTicks = 0;
+
+            // Drift log: one line every 10s to mu_drift_log.txt in the app's
+            // external files dir (the process chdir's there at startup). This
+            // is how a long run is measured without an on-screen overlay
+            // distorting the very thing being measured.
+            {
+                g_DriftFrames++;
+                g_DriftSceneMsSum += frameMs;
+                if (frameMs > g_DriftWorstMs) g_DriftWorstMs = frameMs;
+                if ((g_DriftFrames > 30) && (frameMs > (g_DriftSceneMsSum / g_DriftFrames) * 2.0))
+                {
+                    g_DriftHitches++;
+                }
+
+                const double nowSec =
+                    static_cast<double>(MU_MobilePerfNow()) / static_cast<double>(MU_MobilePerfFrequency());
+                if (g_DriftStartSec <= 0.0) g_DriftStartSec = nowSec;
+                if (g_DriftLastLogSec <= 0.0) g_DriftLastLogSec = nowSec;
+
+                if ((nowSec - g_DriftLastLogSec) >= 10.0)
+                {
+                    const double windowSec = nowSec - g_DriftLastLogSec;
+                    if (FILE* f = fopen("mu_drift_log.txt", "a"))
+                    {
+                        fprintf(f,
+                            "t=%.0fs fps=%.1f scnAvg=%.1f worst=%.0f hitch=%d/%d obj=%.1f chr=%.1f ui=%.1f objN=%d draws=%d text=%.1f(ext%.1f out%.1f up%.1f)/%d overlay=%d\n",
+                            nowSec - g_DriftStartSec,
+                            g_DriftFrames / windowSec,
+                            g_DriftSceneMsSum / (g_DriftFrames > 0 ? g_DriftFrames : 1),
+                            g_DriftWorstMs,
+                            g_DriftHitches, g_DriftFrames,
+                            static_cast<double>(g_ProfObjRenderTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfCharRenderTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfUiTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            g_ProfObjRendered, frameDrawCalls,
+                            (g_DriftTextExtentMs + g_DriftTextOutMs + g_DriftTextUpMs) / (g_DriftFrames > 0 ? g_DriftFrames : 1),
+                            g_DriftTextExtentMs / (g_DriftFrames > 0 ? g_DriftFrames : 1),
+                            g_DriftTextOutMs / (g_DriftFrames > 0 ? g_DriftFrames : 1),
+                            g_DriftTextUpMs / (g_DriftFrames > 0 ? g_DriftFrames : 1),
+                            (g_DriftFrames > 0) ? (g_DriftTextCalls / g_DriftFrames) : 0,
+                            g_ShowPerfOverlay ? 1 : 0);
+                        fclose(f);
+                    }
+                    g_DriftLastLogSec = nowSec;
+                    g_DriftFrames = 0;
+                    g_DriftSceneMsSum = 0.0;
+                    g_DriftWorstMs = 0.0;
+                    g_DriftHitches = 0;
+                    g_DriftTextExtentMs = 0.0;
+                    g_DriftTextOutMs = 0.0;
+                    g_DriftTextUpMs = 0.0;
+                    g_DriftTextCalls = 0;
+                }
+            }
 
             // Roll the window so a single startup stall does not dominate the
             // reading forever.

@@ -2977,7 +2977,42 @@ void MainScene(HDC hDC)
 #endif // defined(_DEBUG) || defined(LDS_FOR_DEVELOPMENT_TESTMODE) || defined(LDS_UNFIXED_FIXEDFRAME_FORDEBUG)
 
 #if defined(__ANDROID__) || defined(MU_IOS)
-		if (g_pRenderText != nullptr)
+		// The overlay is scaffolding and is not free: ~8 long strings a frame,
+		// all of which change every frame and so can never be cached. On Mali
+		// that measured ~4-5ms/frame. Set false to run clean - metrics still
+		// go to mu_drift_log.txt (android_main.cpp).
+		extern bool g_ShowPerfOverlay;
+		extern bool g_ShowFpsOnly;
+
+		// Plain frame-rate readout, without the profiling scaffolding. One
+		// short string a frame instead of eight long ones - the full overlay
+		// measured ~10ms/frame on Mali, which is a quarter of the frame.
+		if (g_ShowFpsOnly && !g_ShowPerfOverlay && g_pRenderText != nullptr)
+		{
+			BeginBitmap();
+
+			unicode::t_char szFpsOnly[64];
+			unicode::_sprintf(szFpsOnly, "FPS %.1f", FPS_AVG);
+
+			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
+			g_pRenderText->SetBgColor(0, 0, 0, 140);
+			g_pRenderText->SetTextColor(255, 255, 255, 255);
+
+			SIZE sizeFpsOnly = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szFpsOnly, lstrlen(szFpsOnly), &sizeFpsOnly);
+			const int hudWidthFpsOnly = (DisplayWinReal > 0) ? DisplayWinReal : DisplayWin;
+			const int fpsOnlyX =
+				(((hudWidthFpsOnly - sizeFpsOnly.cx) - 12) > 10)
+					? ((hudWidthFpsOnly - sizeFpsOnly.cx) - 12)
+					: 10;
+			g_pRenderText->RenderText(fpsOnlyX, DisplayHeight - 26, szFpsOnly);
+
+			g_pRenderText->SetFont(g_hFont);
+			EndBitmap();
+		}
+
+		if (g_ShowPerfOverlay && g_pRenderText != nullptr)
 		{
 			BeginBitmap();
 
@@ -3300,15 +3335,8 @@ void MainScene(HDC hDC)
 			const int prof7X = (((hudWidth - size7.cx) - 12) > 10) ? ((hudWidth - size7.cx) - 12) : 10;
 			g_pRenderText->RenderText(prof7X, DisplayHeight - 98, szProf7);
 
-			// Reset here, at the end of the overlay, so the overlay's own text
-			// lines are not counted against the next frame's game UI.
-			g_ProfTextExtentTicks = 0;
-			g_ProfTextOutTicks = 0;
-			g_ProfTextWriteTicks = 0;
-			g_ProfTextUploadTicks = 0;
-			g_ProfTextCalls = 0;
-			g_ProfTextCacheHits = 0;
-			g_ProfTextCacheMisses = 0;
+			// The per-frame reset lives in android_main.cpp so that it still
+			// happens when this overlay is switched off.
 
 #endif
 
