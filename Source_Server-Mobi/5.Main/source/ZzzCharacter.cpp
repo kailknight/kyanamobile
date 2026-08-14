@@ -3442,10 +3442,23 @@ bool AttackStage(CHARACTER* c, OBJECT* o)
 		{
 			BMD *b = &Models[o->Type];
 
-            if ( b->Bones[c->Weapon[Hand].LinkBone].Dummy || c->Weapon[Hand].LinkBone>=b->NumBones )
-            {
-                break;
-            }
+			// The bounds check was written after the array access, so
+			// b->Bones[LinkBone] was read before LinkBone had been validated.
+			// An out of range or negative LinkBone therefore read whatever
+			// happened to be past the end of the bone array, and a non zero
+			// garbage Dummy silently skipped the whole Death Stab effect.
+			// Validate the index first, then look at the bone.
+			int iLinkBone = c->Weapon[Hand].LinkBone;
+
+			if ( iLinkBone < 0 || iLinkBone >= b->NumBones || b->Bones == NULL )
+			{
+				break;
+			}
+
+			if ( b->Bones[iLinkBone].Dummy )
+			{
+				break;
+			}
 
 			if ( 8 == c->AttackTime)
 			{

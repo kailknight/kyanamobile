@@ -971,8 +971,14 @@ void GCCharacterInfoRecv(BYTE* ReceiveBuffer) // OK
 		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.DWMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
 		break;
 	case 1:
+		// Was followed by a second assignment using SUMaxAttackSpeed, which
+		// overwrote this one - a copy/paste slip, since every other case
+		// assigns exactly once. It made DK take the Summoner value, and when
+		// that resolved to 0x02 the attack loop's
+		// "|| g_iLimitAttackTimeSet == 0x02" branch reset AttackTime to 0 every
+		// frame. AttackTime then never passed 1, so no attack animation stage
+		// past that point ever ran - which is why Death Stab drew no wind.
 		g_iLimitAttackTimeSet =  ((gProtect.m_MainInfo.DKMaxAttackSpeed >= 0xFFFF) ? 0x06 : 0x0F);
-		g_iLimitAttackTimeSet =  ((gProtect.m_MainInfo.SUMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
 		break;
 	case 2:
 		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.FEMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
