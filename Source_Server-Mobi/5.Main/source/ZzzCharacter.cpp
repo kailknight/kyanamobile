@@ -5797,8 +5797,16 @@ void MoveCharacter(CHARACTER *c,OBJECT *o)
 				CreateArrows(c,o,to,0,0);
             }
 
-			if(tc->Hit >= 1)
+			// Was: if(tc->Hit >= 1). Hit holds the last damage taken and is
+			// never cleared, so once a target had been damaged this spawned 10
+			// blood particles on every subsequent attack animation, building up
+			// blood that only cleared on relog. Monsters hid the bug because
+			// their character slots get recycled; players persist. Consume a
+			// one-shot flag instead so blood appears once per actual hit.
+			if(tc->BloodPending)
 			{
+				tc->BloodPending = false;
+
                 if ( to->Type != MODEL_MONSTER01+7 )
                 {
 					for(int i=0; i<10; i++)
@@ -13159,6 +13167,7 @@ void CreateCharacterPointer(CHARACTER *c,int Type,unsigned char PositionX,unsign
 	o->EnableShadow     = false;
 	c->Dead             = false;
 	c->Blood            = false;
+	c->BloodPending     = false;
 	c->GuildTeam        = 0;
 	c->Run              = 0;
 	c->GuildMarkIndex         = -1;

@@ -262,6 +262,16 @@ bool CDirection::MoveCreatedMonster(int Index, int x, int y, float Angle, int Sp
 	{
 		int iResult = 0;
 
+		// NOTE: this used to store the "is the monster facing the target"
+		// result in c->Blood. That field is the death blood effect guard
+		// (see CreateBlood / PlayerStopAnimationSetting), so writing it here
+		// corrupted the blood visuals: clearing it let an already bled corpse
+		// bleed again, and monsters that are meant never to bleed (ghosts,
+		// skeletons, which pre-set Blood = true) started bleeding. The value
+		// is always written before it is read within this call, so a local
+		// keeps the movement behaviour identical.
+		bool bFacingTarget = true;
+
 		if(stl_Monster[Index].m_bAngleCheck)
 		{
 			int	iAngle1 = (int)CalculateAngle(c, x, y, Angle);
@@ -269,18 +279,18 @@ bool CDirection::MoveCreatedMonster(int Index, int x, int y, float Angle, int Sp
 
 			if((iAngle1 - Angle) > 180)
 				iAngle1 = iAngle1 - 360;
-			
+
 			iResult = iAngle1 - iAngle2;
-			c->Blood  = false;
+			bFacingTarget = false;
 		}
 
 		if(iResult <= 3 && iResult >= -3)
 		{
-			c->Blood = true;
+			bFacingTarget = true;
 			stl_Monster[Index].m_bAngleCheck = false;
 		}
 
-		if(c->Blood)
+		if(bFacingTarget)
 		{
 			c->MoveSpeed = Speed;
 			SetAction(&c->Object,MONSTER01_WALK);

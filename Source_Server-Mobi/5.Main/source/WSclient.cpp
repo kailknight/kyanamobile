@@ -3161,6 +3161,7 @@ void ProcessDamageCastle( LPPRECEIVE_ATTACK Data)
 		CreatePoint(o->Position,rstDamage,Light,rstScale);
 	}
 	c->Hit = Damage;
+	c->BloodPending = (Damage >= 1);
 }
 
 void ReceiveAttackDamage( BYTE *ReceiveBuffer )
@@ -3389,7 +3390,8 @@ void ReceiveAttackDamage( BYTE *ReceiveBuffer )
 		}
 	}
 	c->Hit = Damage;
-	
+	c->BloodPending = (Damage >= 1);
+
 	g_ConsoleDebug->Write(MCD_RECEIVE, "0x15 [ReceiveAttackDamage(%d %d)]", AttackPlayer, Damage);
 }
 

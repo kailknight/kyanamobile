@@ -146,6 +146,11 @@ public:
 	bool			PostMoveProcess_IsProcessing();
 	bool			PostMoveProcess_Process();
 	bool			Blood;
+	// Set when a damage packet arrives, consumed once by the hit blood effect.
+	// Hit itself is never cleared, so it cannot be used to decide "was this
+	// character just hit" - doing so made the blood spawn on every attack
+	// animation forever once a target had taken any damage.
+	bool			BloodPending;
 	bool			Ride;
 	bool			SkillSuccess;
 	BOOL			m_bFixForm;

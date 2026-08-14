@@ -73,6 +73,7 @@ void CSPetSystem::CreatePetPointer ( int Type, unsigned char PositionX, unsigned
 	o->EnableShadow     = false;
 	c->Dead             = false;
 	c->Blood            = false;
+	c->BloodPending     = false;
 	c->GuildTeam        = 0;
 	c->Run              = 0;
 	c->GuildMarkIndex	= -1;

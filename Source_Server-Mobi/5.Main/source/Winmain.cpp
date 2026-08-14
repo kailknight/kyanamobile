@@ -1605,7 +1605,11 @@ MSG MainLoop()
 	
 		if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE))
 		{
-			if (!GetMessage(&msg, NULL, 0, 0))
+			// CustomMessage.h does "#undef GetMessage" so its class can declare a
+			// GetMessage() method, which removes the Win32 GetMessage ->
+			// GetMessageA macro for every file that includes it. Call the ANSI
+			// entry point directly, matching PeekMessage/DispatchMessage above.
+			if (!GetMessageA(&msg, NULL, 0, 0))
 			{
 				break;
 			}
