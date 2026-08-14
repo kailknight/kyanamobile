@@ -7339,7 +7339,7 @@ void Attack(CHARACTER *c)
 				int iReqEng = 0;
 				gSkillManager.GetSkillInformation_Energy(Skill, &iReqEng);
 				if (CharacterAttribute->Energy + CharacterAttribute->AddEnergy < iReqEng) return;
-				
+
 				MouseRButtonPress = 1;
 				Hero->Object.m_bySkillCount = 0;
 				Skill = AT_SKILL_BLAST_HELL_BEGIN;
@@ -7551,7 +7551,14 @@ int ExecuteSkill(CHARACTER* c, int Skill, float Distance)
 		return 0;
 	}
 
-	int iSkillIndex = g_pSkillList->GetSkillIndex(Skill);
+	// AT_SKILL_BLAST_HELL_BEGIN is the Nova charge-start request, not a skill the
+	// player owns - the skill list only ever holds Nova itself. Looking the
+	// begin id up directly returned -1 and bailed out here, so the charge
+	// request never reached AttackWizard and Nova could only ever fire its
+	// release. The server does the same normalisation in CSkillManager::GetSkill.
+	int iSkillLookup = ((Skill == AT_SKILL_BLAST_HELL_BEGIN) ? AT_SKILL_BLAST_HELL : Skill);
+
+	int iSkillIndex = g_pSkillList->GetSkillIndex(iSkillLookup);
 	if (iSkillIndex == -1)
 	{
 		return 0;

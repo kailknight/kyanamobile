@@ -965,37 +965,31 @@ void GCCharacterInfoRecv(BYTE* ReceiveBuffer) // OK
 
 	//*(BYTE*)(*(DWORD*)(MAIN_VIEWPORT_STRUCT)+0x30C) = 0;
 
-	switch (gCharacterManager.GetBaseClass(Hero->Class))
-	{
-	case 0:
-		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.DWMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
-		break;
-	case 1:
-		// Was followed by a second assignment using SUMaxAttackSpeed, which
-		// overwrote this one - a copy/paste slip, since every other case
-		// assigns exactly once. It made DK take the Summoner value, and when
-		// that resolved to 0x02 the attack loop's
-		// "|| g_iLimitAttackTimeSet == 0x02" branch reset AttackTime to 0 every
-		// frame. AttackTime then never passed 1, so no attack animation stage
-		// past that point ever ran - which is why Death Stab drew no wind.
-		g_iLimitAttackTimeSet =  ((gProtect.m_MainInfo.DKMaxAttackSpeed >= 0xFFFF) ? 0x06 : 0x0F);
-		break;
-	case 2:
-		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.FEMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
-		break;
-	case 3:
-		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.MGMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
-		break;
-	case 4:
-		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.DLMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
-		break;
-	case 5:
-		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.SUMaxAttackSpeed >= 0xFFFF) ? 0x02 : 0x0F);
-		break;
-	case 6:
-		g_iLimitAttackTimeSet = ((gProtect.m_MainInfo.RFMaxAttackSpeed >= 0xFFFF) ? 0x0F : 0x0F);
-		break;
-	}
+	// g_iLimitAttackTimeSet is how far AttackTime is allowed to advance through
+	// an attack, i.e. how much of the attack animation gets to run.
+	//
+	// This used to map "MaxAttackSpeed >= 0xFFFF" to 0x02 for most classes.
+	// That is fatal, because the attack loop ends with
+	//
+	//     if ( AttackTime >= g_iLimitAttackTimeSet || g_iLimitAttackTimeSet == 0x02 )
+	//         AttackTime = 0;
+	//
+	// so a value of 0x02 reset AttackTime to 0 on every single frame. AttackTime
+	// never got past 1, and every animation stage keyed off a later value simply
+	// never ran - no Death Stab wind, no Nova charge, no skill effects at all.
+	//
+	// MainInfo.ini ships all seven classes at 67000, which is >= 0xFFFF, so five
+	// of the seven classes were permanently in that broken state. Only RF was
+	// unaffected (its branches were both 0x0F) and DK had been given 0x06. That
+	// pattern looks like classes being patched one at a time as bugs surfaced.
+	//
+	// MaxAttackSpeed is not read anywhere else in the client, so it was not
+	// acting as a real attack speed cap - it only selected this value. Use the
+	// full animation length for every class, which is what RF already did.
+	//
+	// (The Android build zeroes m_MainInfo, so mobile always took the 0x0F path.
+	// That is why this only ever showed up on the PC client.)
+	g_iLimitAttackTimeSet = 0x0F;
 }
 
 void GCNewCharacterInfoRecv(BYTE* ReceiveBuffer)
