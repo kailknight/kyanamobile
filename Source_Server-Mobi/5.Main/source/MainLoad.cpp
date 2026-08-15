@@ -75,6 +75,18 @@ bool MainLoad::Load()
 
 	}
 	
+	ApplyProtectData();
+
+#if (CB_ANTIHACKGGNEW)
+	gAPICB.Init();
+#endif
+	SetTargetFps(gProtect.m_MainInfo.FpsLimit);
+
+	return 1;
+}
+
+void MainLoad::ApplyProtectData()
+{
 	gCustomMessage.LoadEng(gProtect.m_MainInfo.EngCustomMessageInfo);
 	gCustomMessage.LoadVtm(gProtect.m_MainInfo.VtmCustomMessageInfo);
 
@@ -115,14 +127,8 @@ bool MainLoad::Load()
 	GInfo.loadnInformationSet(gProtect.m_TextInfo.m_TRSTooltipSetData);
 	GInfo.loadnText(gProtect.m_TextInfo.m_TRSTooltipText);
 
-	gCustomBuyVip.Load(gProtect.m_MainInfo.CustomBuyVipInfo); 
-
-#if (CB_ANTIHACKGGNEW)
-	gAPICB.Init();
-#endif
-	SetTargetFps(gProtect.m_MainInfo.FpsLimit);
+	gCustomBuyVip.Load(gProtect.m_MainInfo.CustomBuyVipInfo);
 
 	gCustomCommandInfo.Load(gProtect.m_MainInfo.CustomCommandInfo);
 	gCustomDmgColor.Load(gProtect.m_MainInfo.CustomDmgColor); //Dmg Color
-	return 1;
 }

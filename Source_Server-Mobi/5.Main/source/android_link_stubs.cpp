@@ -13,11 +13,14 @@
 #include "ExternalObject/Leaf/xstreambuf.h"
 #include "ExternalObject/curl/curl.h"
 #include "TrayMode.h"
+#include "Reconnect.h"
+#include "ZzzScene.h"
 #include "android/SimpleModulusCrypt.h"
 
 #include <SDL_mixer.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -255,6 +258,10 @@ namespace
 
     std::mutex g_androidSocketMutex;
     std::unordered_map<int32_t, CWsctlc*> g_androidSocketOwners;
+
+    // Set on the receive thread when the GameServer connection drops, drained
+    // on the main thread by AndroidPumpPendingReconnect.
+    std::atomic<bool> g_androidReconnectOnClosePending{ false };
 
     std::wstring ToWideString(const char* text)
     {
@@ -535,8 +542,37 @@ void CWsctlc::AndroidOnDisconnect(int32_t handle)
         if (client->m_bGame)
         {
             g_bGameServerConnected = FALSE;
+
+            // The Windows CWsctlc::Close() kicks the reconnect system here. This
+            // path never did, so losing the GameServer just dropped the player.
+            // It cannot be called from here though - this runs on the receive
+            // thread, under g_androidSocketMutex - so hand it to the main thread.
+            g_androidReconnectOnClosePending.store(true, std::memory_order_release);
         }
     }
+}
+
+// Drained once per frame from the main thread, next to ReconnectMainProc.
+void AndroidPumpPendingReconnect()
+{
+#if(UseReconnect)
+    if (!g_androidReconnectOnClosePending.exchange(false, std::memory_order_acq_rel))
+    {
+        return;
+    }
+
+    if (SceneFlag != MAIN_SCENE)
+    {
+        return;
+    }
+
+    // CheckSocketPort falls back to the port cached when the connection was
+    // made, so a socket that is already gone still passes.
+    if (g_pReconnect != nullptr && g_pReconnect->CheckSocketPort(INVALID_SOCKET))
+    {
+        g_pReconnect->ReconnectOnCloseSocket();
+    }
+#endif
 }
 
 SOCKET CWsctlc::GetSocket()

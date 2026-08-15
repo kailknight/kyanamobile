@@ -2718,6 +2718,15 @@ bool RenderMainScene()
 	BeginBitmap();
 
 #if(UseReconnect)
+#if defined(__ANDROID__)
+	// Android's socket layer notices the drop on its receive thread; this hands
+	// that over on the main thread, which is what CWsctlc::Close() does on PC.
+	{
+		extern void AndroidPumpPendingReconnect();
+		AndroidPumpPendingReconnect();
+	}
+#endif
+
 	g_pReconnect->ReconnectMainProc();  //Add
 #endif
 
@@ -2993,6 +3002,26 @@ void MainScene(HDC hDC)
 		// go to mu_drift_log.txt (android_main.cpp).
 		extern bool g_ShowPerfOverlay;
 		extern bool g_ShowFpsOnly;
+
+#if defined(__ANDROID__)
+		// ---- TEMPORARY GETMAIN STATUS - REMOVE WHEN CONFIRMED ----
+		// Drawn here rather than in the main scene so it is readable on the
+		// login and loading screens, without having to get in-world first.
+		if (g_pRenderText != nullptr)
+		{
+			extern char g_protectLoadStatus[96];
+
+			BeginBitmap();
+			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
+			g_pRenderText->SetBgColor(0, 0, 0, 200);
+			g_pRenderText->SetTextColor(0, 255, 0, 255);
+			g_pRenderText->RenderText(10, (DisplayHeight > 60) ? (DisplayHeight - 52) : 10,
+			                          g_protectLoadStatus);
+			g_pRenderText->SetFont(g_hFont);
+			EndBitmap();
+		}
+		// ---- END TEMPORARY ----
+#endif
 
 		// Plain frame-rate readout, without the profiling scaffolding. One
 		// short string a frame instead of eight long ones - the full overlay

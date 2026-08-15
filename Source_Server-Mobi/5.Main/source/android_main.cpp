@@ -79,6 +79,7 @@ static void android_set_data_dir_early()
 
 // Game systems
 #include "GameConfig/GameConfig.h"
+#include "MainLoad.h"
 #include "ZzzOpenglUtil.h"
 #include "ZzzTexture.h"
 #include "ZzzOpenData.h"
@@ -239,6 +240,10 @@ static void SetWorkingDirectoryToMobileDataRoot()
     LOGW("Failed to resolve a writable working directory for this mobile platform");
 }
 
+// ---- TEMPORARY: shows whether CBGetMain.bin was accepted, since logcat is
+// dead on these devices. Remove once confirmed. ----
+char g_protectLoadStatus[96] = "GETMAIN not run";
+
 static void InitializeTakumiProtectState()
 {
     static bool initialized = false;
@@ -269,39 +274,121 @@ static void InitializeTakumiProtectState()
             gProtect.m_MainInfo.ClientSerial);
     };
 
-#if defined(__ANDROID__)
-    applyFallbackMainInfo();
-    return;
-#endif
-
-    std::ifstream file(".\\Data\\Local\\CBGetMain.bin", std::ios::binary);
-    if (!file)
+    // Read exactly what GetMainInfo generates, the same way MainLoad::Load does
+    // on PC. Paths use forward slashes and go through fopen: on Android that is
+    // redirected to AndroidFopen, which fixes separators and retries with a
+    // case-insensitive lookup. std::ifstream gets none of that, which is why
+    // reading this file used to be skipped here entirely.
+    auto readProtectBlob = [](const char* path, void* dest, size_t size) -> bool
     {
-        LOGE("Open failed for Data\\Local\\CBGetMain.bin");
+        FILE* fp = fopen(path, "rb");
+
+        if (fp == nullptr)
+        {
+            LOGE("Open failed for %s", path);
+            return false;
+        }
+
+        std::fseek(fp, 0, SEEK_END);
+        const long fileSize = std::ftell(fp);
+        std::fseek(fp, 0, SEEK_SET);
+
+        if (fileSize != static_cast<long>(size))
+        {
+            LOGE("Size mismatch for %s: %ld, expected %zu", path, fileSize, size);
+            std::fclose(fp);
+            return false;
+        }
+
+        const size_t got = std::fread(dest, 1, size, fp);
+        std::fclose(fp);
+
+        if (got != size)
+        {
+            LOGE("Read failed for %s: %zu of %zu", path, got, size);
+            return false;
+        }
+
+        // Same two-step obfuscation GetMainInfo applies on the way out.
+        for (size_t n = 0; n < size; ++n)
+        {
+            reinterpret_cast<BYTE*>(dest)[n] -= static_cast<BYTE>(0x95 ^ HIBYTE(n));
+            reinterpret_cast<BYTE*>(dest)[n] ^= static_cast<BYTE>(0xCA ^ LOBYTE(n));
+        }
+
+        return true;
+    };
+
+    static MAIN_FILE_INFO mainInfo {};   // ~1MB; far too big for the stack
+
+    if (!readProtectBlob("Data/Local/CBGetMain.bin", &mainInfo, sizeof(mainInfo)))
+    {
+        snprintf(g_protectLoadStatus, sizeof(g_protectLoadStatus) - 1,
+                 "GETMAIN fallback (want %zu)", sizeof(MAIN_FILE_INFO));
         applyFallbackMainInfo();
         return;
     }
 
-    MAIN_FILE_INFO mainInfo {};
-    file.read(reinterpret_cast<char*>(&mainInfo), sizeof(mainInfo));
-    if (file.gcount() != static_cast<std::streamsize>(sizeof(mainInfo)))
+    // The size check above only proves the file is as long as this build thinks
+    // the struct is. If the layout disagreed anywhere in the middle, everything
+    // past that point is garbage - including the server address - so check the
+    // fields that would strand the player before trusting any of it.
+    const bool addressLooksSane =
+        (mainInfo.IpAddress[0] > 0x20) &&
+        (strnlen(mainInfo.IpAddress, sizeof(mainInfo.IpAddress)) < sizeof(mainInfo.IpAddress)) &&
+        (mainInfo.IpAddressPort > 0) &&
+        (mainInfo.GSPortMin > 0) &&
+        (mainInfo.GSPortMin <= mainInfo.GSPortMax);
+
+    if (!addressLooksSane)
     {
-        LOGE(
-            "Read failed for Data\\Local\\CBGetMain.bin size=%lld expected=%zu",
-            static_cast<long long>(file.gcount()),
-            sizeof(mainInfo));
+        LOGE("CBGetMain.bin decoded implausibly (ip='%s' port=%u gs=%u-%u); using fallback",
+             mainInfo.IpAddress,
+             static_cast<unsigned int>(mainInfo.IpAddressPort),
+             static_cast<unsigned int>(mainInfo.GSPortMin),
+             static_cast<unsigned int>(mainInfo.GSPortMax));
+        snprintf(g_protectLoadStatus, sizeof(g_protectLoadStatus) - 1, "GETMAIN bad layout");
         applyFallbackMainInfo();
         return;
-    }
-
-    for (int n = 0; n < static_cast<int>(sizeof(MAIN_FILE_INFO)); ++n)
-    {
-        reinterpret_cast<BYTE*>(&mainInfo)[n] -= static_cast<BYTE>(0x95 ^ HIBYTE(n));
-        reinterpret_cast<BYTE*>(&mainInfo)[n] ^= static_cast<BYTE>(0xCA ^ LOBYTE(n));
     }
 
     std::memcpy(&gProtect.m_MainInfo, &mainInfo, sizeof(MAIN_FILE_INFO));
     gProtect.LoadEncDec();
+
+    // Reading the file only fills gProtect. On PC, MainLoad::Load then hands
+    // that data to the managers that actually read it - custom messages, jewels,
+    // wings, pets, monsters, NPC names, VIP packages and so on. Winmain.cpp is
+    // not part of the Android build, so none of that ran here and every lookup
+    // came back empty ("Could not find message 0!"). SetTargetFps is left out on
+    // purpose: mobile does its own frame pacing.
+    gMainLoad.ApplyProtectData();
+
+    snprintf(g_protectLoadStatus, sizeof(g_protectLoadStatus) - 1,
+             "GETMAIN ok %s:%u rc=%u",
+             gProtect.m_MainInfo.IpAddress,
+             static_cast<unsigned int>(gProtect.m_MainInfo.IpAddressPort),
+             static_cast<unsigned int>(gProtect.m_MainInfo.ReconnectTime));
+
+    // Not fatal: the client still runs without it, only the custom text blocks
+    // are empty, so a missing file should not knock out the server address too.
+    static TEXT_FILE_INFO textInfo {};   // like mainInfo: far too big for the stack
+
+    if (readProtectBlob("Data/Local/CBTextInfo.bin", &textInfo, sizeof(textInfo)))
+    {
+        std::memcpy(&gProtect.m_TextInfo, &textInfo, sizeof(TEXT_FILE_INFO));
+    }
+    else
+    {
+        LOGW("CBTextInfo.bin not loaded; custom text will be empty");
+    }
+
+    LOGI(
+        "Protect extras: reconnect=%u fpsLimit=%u showName=%u zoom=%u-%u",
+        static_cast<unsigned int>(gProtect.m_MainInfo.ReconnectTime),
+        static_cast<unsigned int>(gProtect.m_MainInfo.FpsLimit),
+        static_cast<unsigned int>(gProtect.m_MainInfo.PlayerShowName),
+        static_cast<unsigned int>(gProtect.m_MainInfo.ZoomMin),
+        static_cast<unsigned int>(gProtect.m_MainInfo.ZoomMax));
 
     LOGI(
         "Protect loaded: gsPorts=%u-%u server=%s:%u clientVersion=%s serial=%s",
