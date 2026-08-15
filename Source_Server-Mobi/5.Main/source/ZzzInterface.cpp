@@ -8679,7 +8679,15 @@ void SelectObjects()
 	}
 	if(!MouseOnWindow && false == g_pNewUISystem->CheckMouseUse() && SEASON3B::CheckMouseIn(0, 0, BGetScreenWidth(), DisplayHeight) )
 	{
+		// MU gates dropped-item selection behind holding ALT. There is no ALT
+		// key on a touch device, so this branch never ran on Android and items
+		// could not be selected or picked up at all. Treat the modifier as
+		// always held there.
+#if defined(__ANDROID__) || defined(MU_IOS)
+		if(true)
+#else
 		if(HIBYTE(GetAsyncKeyState(VK_MENU))==128)
+#endif
 		{
 			if(SEASON3B::CNewUIInventoryCtrl::GetPickedItem() == NULL)
 				SelectedItem = SelectItem();
@@ -9673,6 +9681,18 @@ extern int g_iKeyPadEnable;
 
 void RenderCursor()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// On touch devices the pointer is the finger, so a floating arrow/hand
+	// following the synthetic mouse position is just noise - and the joystick
+	// parks that position away from the character while moving, which made it
+	// especially distracting. Keep it only while an item is on the cursor,
+	// where it is the drag feedback rather than a pointer.
+	if (SelectedItem == -1)
+	{
+		return;
+	}
+#endif
+
    	EnableAlphaTest();
 	glColor3f(1.f,1.f,1.f);
 	

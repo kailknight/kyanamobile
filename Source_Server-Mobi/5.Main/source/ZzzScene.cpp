@@ -2735,6 +2735,16 @@ bool RenderMainScene()
 
     RenderCursor();
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Drawn here rather than from RenderVirtualPad: text drawn in that phase
+	// never appeared on screen, while this UI phase is the one the cursor and
+	// the FPS overlay use, and those do render.
+	{
+		extern void AndroidRenderItemMenu();
+		AndroidRenderItemMenu();
+	}
+#endif
+
 	EndBitmap();
 #ifdef __ANDROID__
 	g_ProfUiCursorTicks = MainScenePerfElapsed(dbgPhaseStart);

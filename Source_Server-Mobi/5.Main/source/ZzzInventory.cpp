@@ -295,6 +295,18 @@ int RenderTextList(int sx,int sy,int TextNum,int Tab, int iSort = RT3_SORT_CENTE
 bool SetStatus = 0;
 float CacheY = 0;
 DWORD CacheTimeRenterTip1 = 0;
+
+// The rect the last tooltip actually occupied, in 640x480 UI space. The height
+// depends on how many lines the item produces, which is only known in here, so
+// the Android item menu reads it back to size the container it draws around the
+// tooltip. Set g_bTipSuppressBG when something else is already painting that
+// background, so the two do not stack up into a box inside a box.
+float g_fLastTipX = 0.f;
+float g_fLastTipY = 0.f;
+float g_fLastTipW = 0.f;
+float g_fLastTipH = 0.f;
+bool  g_bTipSuppressBG = false;
+
 void RenderTipTextList(const int sx, const int sy, int TextNum, int Tab, int iSort, int iRenderPoint, BOOL bUseBG, BOOL Render3DItem)
 {
 	SIZE TextSize = {0, 0};
@@ -397,7 +409,12 @@ void RenderTipTextList(const int sx, const int sy, int TextNum, int Tab, int iSo
 	CacheTimeRenterTip1 = GetTickCount()+50;
 	//===End Fix
 
-	if (bUseBG == TRUE && TextNum > 0)
+	g_fLastTipX = (float)iPos_x;
+	g_fLastTipY = (float)(fsy - FixHRender3DItem);
+	g_fLastTipW = (float)fWidth;
+	g_fLastTipH = (float)fHeight;
+
+	if (bUseBG == TRUE && TextNum > 0 && !g_bTipSuppressBG)
 	{
 		glColor4f(0.0f, 0.0f, 0.0f, 1.0f);
 		RenderColor ((float)iPos_x-1, (fsy- FixHRender3DItem) - 1, (float)fWidth + 1, (float)1);

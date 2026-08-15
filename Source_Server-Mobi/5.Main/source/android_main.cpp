@@ -126,6 +126,7 @@ bool AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel);
 #include "android/AndroidNetwork.h"
 #include "android/SimpleModulusCrypt.h"
 #include "wsclientinline.h"
+#include "Util.h"
 
 // stb_image 鑺掗埀顑解偓?implementation is in android_turbojpeg_stubs.cpp; only declare here.
 #include "stb_image.h"
@@ -490,6 +491,16 @@ extern int TargetX;
 extern int TargetY;
 extern int Attacking;
 void CGAutoMove(int Type);
+
+// Rect the client's tooltip last drew into, and the switch that stops it
+// painting its own background - both live in ZzzInventory.cpp. These must stay
+// at global scope: inside the anonymous namespace below they would declare new
+// internal symbols instead of referring to those.
+extern float g_fLastTipX;
+extern float g_fLastTipY;
+extern float g_fLastTipW;
+extern float g_fLastTipH;
+extern bool  g_bTipSuppressBG;
 
 namespace
 {
@@ -2251,6 +2262,15 @@ void ReleaseVirtualJoystickMouseDrive()
     MouseLButtonPush = false;
     MouseLButton = false;
     MouseLButtonPop = false;
+
+    // Put the cursor back on the character. While driving, the joystick parks
+    // the mouse out at driveRadius in the direction of travel; leaving it
+    // there on release means the next unrelated tap starts from a stale offset
+    // point, and anything that hit-tests the cursor still thinks the player is
+    // pointing away from themselves. The hero is always at screen centre,
+    // which is the same origin the drive code offsets from.
+    MouseX = 320;
+    MouseY = 180;
 }
 
 void ClearVirtualJoystick()
@@ -3449,6 +3469,452 @@ static int  g_novaChargeSkillIndex = -1;
 
 // Hotbar (bottom bar) Nova state: tap to start charging, tap again to release.
 bool g_novaTapCharging = false;
+
+// Two-tap item pickup: the first tap on a dropped item selects it so its
+// description is shown, the second tap on the same item performs the normal
+// walk-to-and-collect. Cleared when the player taps elsewhere, and also when
+// the item stops existing (someone else took it, or it timed out).
+int g_tappedItemKey = -1;
+
+void ClearTappedItemIfGone()
+{
+    if (g_tappedItemKey < 0)
+    {
+        return;
+    }
+
+    if (g_tappedItemKey >= MAX_ITEMS
+        || !Items[g_tappedItemKey].Object.Live
+        || !Items[g_tappedItemKey].Object.Visible)
+    {
+        g_tappedItemKey = -1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dropped item menu. Tapping an item opens this instead of interacting with the
+// world, so the character never walks just because you touched an item. Pick Up
+// runs MU's normal walk-to-it-and-collect; Cancel dismisses.
+// ---------------------------------------------------------------------------
+constexpr float kItemMenuIconSize = 34.0f;
+constexpr float kItemMenuWidth   = 168.0f + kItemMenuIconSize;
+constexpr float kItemMenuRowH    = 15.0f;
+constexpr float kItemMenuPad     = 4.0f;
+
+// Header bar is always drawn; the body below it is what the toggle hides.
+constexpr float kItemMenuHeaderH = kItemMenuRowH;
+constexpr float kItemMenuBodyH   = kItemMenuIconSize;
+constexpr float kItemMenuTextX   = kItemMenuPad + kItemMenuIconSize + 6.0f;
+
+bool  g_itemMenuOpen = false;
+int   g_itemMenuItemKey = -1;
+float g_itemMenuX = 0.0f;
+float g_itemMenuY = 0.0f;
+
+// Collapsed to just its title bar. Sticky across items so a player who wants
+// the screen clear keeps it clear as they walk over drop after drop.
+bool g_itemMenuCollapsed = false;
+
+// Every drop currently in range, nearest first, with one shown at a time. The
+// player pages through them rather than the menu guessing which one they meant.
+constexpr int kItemMenuMaxEntries = 16;
+
+int g_itemMenuList[kItemMenuMaxEntries] = {};
+int g_itemMenuCount = 0;
+int g_itemMenuPage  = 0;
+
+// How close a drop has to be, in tiles, before its menu appears.
+constexpr int kItemMenuRangeTiles = 5;
+
+float ItemMenuHeight()
+{
+    const float body = g_itemMenuCollapsed ? 0.0f : (kItemMenuBodyH + kItemMenuPad);
+
+    return (kItemMenuPad * 2.0f) + kItemMenuHeaderH + body;
+}
+
+void CloseItemMenu()
+{
+    g_itemMenuOpen = false;
+    g_itemMenuItemKey = -1;
+
+    // Otherwise the container is sized from a stale tooltip the next time a
+    // drop comes into range.
+    g_fLastTipW = 0.0f;
+    g_fLastTipH = 0.0f;
+}
+
+// Mirrors the click-to-pick-up path in ZzzInterface so the walk, the range
+// check and the inventory-full handling all behave exactly as on PC.
+void StartItemPickupFromMenu()
+{
+    const int itemKey = g_itemMenuItemKey;
+
+    CloseItemMenu();
+
+    if (itemKey < 0 || itemKey >= MAX_ITEMS || Hero == nullptr)
+    {
+        return;
+    }
+
+    if (!Items[itemKey].Object.Live)
+    {
+        return;
+    }
+
+    CHARACTER* c = Hero;
+    OBJECT*    o = &Hero->Object;
+
+    SelectedItem = itemKey;
+    c->MovementType = MOVEMENT_GET;
+    ItemKey = itemKey;
+    TargetX = (int)(Items[itemKey].Object.Position[0] / TERRAIN_SCALE);
+    TargetY = (int)(Items[itemKey].Object.Position[1] / TERRAIN_SCALE);
+
+    if (PathFinding2((c->PositionX), (c->PositionY), TargetX, TargetY, &c->Path))
+    {
+        SendMove(c, o);
+    }
+    else
+    {
+        Action(c, o, true);
+    }
+}
+
+// A dropped item is a few pixels of sprite, which is far too small to hit with
+// a fingertip. Rather than demand a pixel-exact tap, project every live item to
+// screen space and take the closest one within finger reach of where the player
+// actually touched.
+constexpr float kItemTapReachUi = 55.0f;
+
+int FindItemNearTap(float uiX, float uiY)
+{
+    int   bestItem = -1;
+    float bestDistSq = kItemTapReachUi * kItemTapReachUi;
+
+    for (int i = 0; i < MAX_ITEMS; ++i)
+    {
+        OBJECT* o = &Items[i].Object;
+
+        if (!o->Live || !o->Visible)
+        {
+            continue;
+        }
+
+        vec3_t position;
+        Vector(o->Position[0], o->Position[1], o->Position[2] + 20.0f, position);
+
+        int screenX = 0;
+        int screenY = 0;
+        Projection(position, &screenX, &screenY);
+
+        const float dx = static_cast<float>(screenX) - uiX;
+        const float dy = static_cast<float>(screenY) - uiY;
+        const float distSq = (dx * dx) + (dy * dy);
+
+        if (distSq < bestDistSq)
+        {
+            bestDistSq = distSq;
+            bestItem = i;
+        }
+    }
+
+    return bestItem;
+}
+
+// Returns true when the tap was inside the menu (and therefore consumed).
+bool HandleItemMenuTap(float uiX, float uiY)
+{
+    if (!g_itemMenuOpen)
+    {
+        return false;
+    }
+
+    if (uiX < g_itemMenuX || uiX > (g_itemMenuX + kItemMenuWidth)
+        || uiY < g_itemMenuY || uiY > (g_itemMenuY + ItemMenuHeight()))
+    {
+        // Outside the container the tap belongs to the game, so it falls
+        // through to normal movement and attacking.
+        return false;
+    }
+
+    const float localY = uiY - (g_itemMenuY + kItemMenuPad);
+
+    if (localY < kItemMenuHeaderH)
+    {
+        // Title bar doubles as the show/hide toggle.
+        g_itemMenuCollapsed = !g_itemMenuCollapsed;
+        return true;
+    }
+
+    if (g_itemMenuCollapsed)
+    {
+        return true;
+    }
+
+    const float bodyY = localY - kItemMenuHeaderH - kItemMenuPad;
+
+    if (bodyY < kItemMenuRowH)
+    {
+        // Page row: previous on the left third, next on the right third.
+        if (g_itemMenuCount > 1)
+        {
+            const float local = uiX - (g_itemMenuX + kItemMenuTextX);
+            const float navW  = kItemMenuWidth - kItemMenuTextX - kItemMenuPad;
+
+            if (local < (navW / 3.0f))
+            {
+                g_itemMenuPage = (g_itemMenuPage + g_itemMenuCount - 1) % g_itemMenuCount;
+            }
+            else if (local > (navW * 2.0f / 3.0f))
+            {
+                g_itemMenuPage = (g_itemMenuPage + 1) % g_itemMenuCount;
+            }
+
+            g_itemMenuItemKey = g_itemMenuList[g_itemMenuPage];
+        }
+    }
+    else
+    {
+        StartItemPickupFromMenu();
+    }
+
+    return true;
+}
+
+// Picks the nearest drop within kItemMenuRangeTiles of the character and shows
+// its menu automatically. Tying this to the character rather than to where the
+// finger landed means the player never has to aim at a sprite a few pixels
+// across - if something is on the ground next to them, the menu is simply there.
+void UpdateItemMenuNearCharacter()
+{
+    const int previousKey = g_itemMenuOpen ? g_itemMenuItemKey : -1;
+
+    g_itemMenuCount = 0;
+
+    if (Hero == nullptr)
+    {
+        CloseItemMenu();
+        return;
+    }
+
+    // Rebuilt every frame rather than cached: drops appear, get taken by other
+    // players and expire on their own, and the character is usually moving.
+    int dist[kItemMenuMaxEntries] = {};
+
+    for (int i = 0; i < MAX_ITEMS; ++i)
+    {
+        const OBJECT* o = &Items[i].Object;
+
+        if (!o->Live || !o->Visible)
+        {
+            continue;
+        }
+
+        const int dx = static_cast<int>(o->Position[0] / TERRAIN_SCALE) - Hero->PositionX;
+        const int dy = static_cast<int>(o->Position[1] / TERRAIN_SCALE) - Hero->PositionY;
+        const int distSq = (dx * dx) + (dy * dy);
+
+        if (distSq > (kItemMenuRangeTiles * kItemMenuRangeTiles))
+        {
+            continue;
+        }
+
+        // Insertion sort by distance, nearest first, so page 1 is always the
+        // drop the player is standing on.
+        int slot = g_itemMenuCount;
+
+        if (slot >= kItemMenuMaxEntries)
+        {
+            if (distSq >= dist[kItemMenuMaxEntries - 1])
+            {
+                continue;
+            }
+
+            slot = kItemMenuMaxEntries - 1;
+        }
+        else
+        {
+            ++g_itemMenuCount;
+        }
+
+        while (slot > 0 && dist[slot - 1] > distSq)
+        {
+            dist[slot] = dist[slot - 1];
+            g_itemMenuList[slot] = g_itemMenuList[slot - 1];
+            --slot;
+        }
+
+        dist[slot] = distSq;
+        g_itemMenuList[slot] = i;
+    }
+
+    if (g_itemMenuCount == 0)
+    {
+        CloseItemMenu();
+        return;
+    }
+
+    // Keep showing whatever the player had paged to, even as nearer items come
+    // and go around it; only fall back to page 1 when that item is really gone.
+    g_itemMenuPage = 0;
+
+    if (previousKey >= 0)
+    {
+        for (int i = 0; i < g_itemMenuCount; ++i)
+        {
+            if (g_itemMenuList[i] == previousKey)
+            {
+                g_itemMenuPage = i;
+                break;
+            }
+        }
+    }
+
+    // Fixed, always-visible spot rather than following the item around. Kept
+    // clear of the skill pad down the right edge, since the tooltip that hangs
+    // below the box is centred on it and is wider than the box itself.
+    g_itemMenuOpen = true;
+    g_itemMenuItemKey = g_itemMenuList[g_itemMenuPage];
+    g_itemMenuX = 640.0f - kItemMenuWidth - 90.0f;
+    g_itemMenuY = 60.0f;
+}
+
+void RenderItemMenu()
+{
+    UpdateItemMenuNearCharacter();
+
+    if (!g_itemMenuOpen)
+    {
+        return;
+    }
+
+    // Ground drops only ever get Type, Level, Durability, Option1 and ExtOption
+    // filled in (see CreateItem in ZzzObject.cpp) - the excellent options, the
+    // damage and the requirements are all derived, and inventory items get them
+    // by way of ItemConvert. Doing the same on a copy leaves the world item
+    // untouched while giving the tooltip everything it needs.
+    ITEM item = Items[g_itemMenuItemKey].Item;
+
+    if (item.Type != ITEM_POTION + 15)      // not money, whose Level is an amount
+    {
+        ItemConvert(&item, static_cast<BYTE>(item.Level), item.Option1, item.ExtOption);
+    }
+
+    const float menuH = ItemMenuHeight();
+
+    // One container around the whole thing - header, buttons and item info. The
+    // tooltip's height is only known inside RenderTipTextList, which records the
+    // rect it drew into, so the box is sized from the previous frame's values.
+    // Content only changes when the player pages, so the lag is never visible.
+    float boxX = g_itemMenuX;
+    float boxY = g_itemMenuY;
+    float boxR = g_itemMenuX + kItemMenuWidth;
+    float boxB = g_itemMenuY + menuH;
+
+    const bool haveTip = (!g_itemMenuCollapsed && g_fLastTipW > 1.0f && g_fLastTipH > 1.0f);
+
+    if (haveTip)
+    {
+        boxX = std::min(boxX, g_fLastTipX - kItemMenuPad);
+        boxR = std::max(boxR, g_fLastTipX + g_fLastTipW + kItemMenuPad);
+        boxB = std::max(boxB, g_fLastTipY + g_fLastTipH + kItemMenuPad);
+    }
+
+    const float boxW = boxR - boxX;
+    const float boxH = boxB - boxY;
+
+    // Drawn first so everything else sits on top of it.
+    glColor4f(0.0f, 0.0f, 0.0f, 0.78f);
+    RenderColor(boxX, boxY, boxW, boxH);
+    glColor4f(0.55f, 0.45f, 0.2f, 1.0f);
+    RenderColor(boxX, boxY, boxW, 1.0f);
+    RenderColor(boxX, boxB - 1.0f, boxW, 1.0f);
+    RenderColor(boxX, boxY, 1.0f, boxH);
+    RenderColor(boxR - 1.0f, boxY, 1.0f, boxH);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glEnable(GL_TEXTURE_2D);
+
+    // The menu rect lives in the same 640x480 space as MouseX/MouseY so the tap
+    // hit-test is direct, but g_pRenderText draws in display pixels - scale on
+    // the way out. TextDraw was used here originally and never appeared, so
+    // this mirrors the FPS overlay, which does render.
+    const int   hudWidth = (DisplayWin > 0) ? DisplayWin : 640;
+    const float sx = static_cast<float>(hudWidth) / 640.0f;
+    const float sy = static_cast<float>((DisplayHeight > 0) ? DisplayHeight : 480) / 480.0f;
+
+    const int x = static_cast<int>((g_itemMenuX + kItemMenuTextX) * sx);
+    const int rowStep = static_cast<int>(kItemMenuRowH * sy);
+
+    char szLine[128];
+
+    g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
+
+    // Header, which is also the show/hide toggle.
+    g_pRenderText->SetBgColor(0, 0, 0, 0);
+    g_pRenderText->SetTextColor(255, 208, 0, 255);
+    snprintf(szLine, sizeof(szLine) - 1, "%s  Items (%d)",
+             g_itemMenuCollapsed ? "[+]" : "[-]", g_itemMenuCount);
+    szLine[sizeof(szLine) - 1] = '\0';
+    g_pRenderText->RenderText(static_cast<int>((g_itemMenuX + kItemMenuPad) * sx),
+                              static_cast<int>((g_itemMenuY + kItemMenuPad) * sy),
+                              szLine);
+
+    if (g_itemMenuCollapsed)
+    {
+        return;
+    }
+
+    const float bodyTop = g_itemMenuY + kItemMenuPad + kItemMenuHeaderH + kItemMenuPad;
+    const int   y = static_cast<int>(bodyTop * sy);
+
+    // Item picture on the left, text to its right. RenderItem3DFree draws the
+    // item's own model and takes 640x480 UI coordinates directly, so it needs
+    // none of the scaling the text below does. It swaps in a perspective
+    // projection to draw the model, which is why it has to step outside the 2D
+    // bitmap state this is called from - the disabled EndBitmap() at the top of
+    // that function is the same thing, done by whoever wrote it.
+    EndBitmap();
+    g_pNewUISystem->RenderItem3DFree(g_itemMenuX + kItemMenuPad, bodyTop,
+                                     kItemMenuIconSize, kItemMenuIconSize,
+                                     item.Type, item.Level,
+                                     item.Option1, item.ExtOption,
+                                     false, 1.2f);
+    BeginBitmap();
+
+    // Page row. Arrows only mean anything with more than one drop in range, but
+    // the count is worth showing either way so the player knows there is no
+    // second item hiding behind the first.
+    g_pRenderText->SetBgColor(0, 0, 0, 0);
+    g_pRenderText->SetTextColor(255, 208, 0, 255);
+
+    if (g_itemMenuCount > 1)
+    {
+        snprintf(szLine, sizeof(szLine) - 1, "[ < ]   %d/%d   [ > ]",
+                 g_itemMenuPage + 1, g_itemMenuCount);
+    }
+    else
+    {
+        snprintf(szLine, sizeof(szLine) - 1, "1/1");
+    }
+
+    szLine[sizeof(szLine) - 1] = '\0';
+    g_pRenderText->RenderText(x, y, szLine);
+
+    g_pRenderText->SetBgColor(30, 90, 30, 220);
+    g_pRenderText->SetTextColor(255, 255, 255, 255);
+    g_pRenderText->RenderText(x, y + rowStep, "[ Pick Up ]");
+
+    // The client's own tooltip, so the name, level, excellent options, sockets
+    // and requirements all read exactly as they do in the inventory. It draws
+    // in 640x480 UI space, centred on sx with its top at sy. Its background is
+    // suppressed because the container above already covers it.
+    g_bTipSuppressBG = true;
+    RenderItemInfo(static_cast<int>(g_itemMenuX + kItemMenuWidth * 0.5f),
+                   static_cast<int>(g_itemMenuY + menuH),
+                   &item, false, 0, false, false);
+    g_bTipSuppressBG = false;
+}
 
 void ReleaseVirtualNovaCharge()
 {
@@ -6474,21 +6940,40 @@ void RenderVirtualPad()
     const bool joystickActive = g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1);
     EnsureUITextures();
 
-    const float joystickCenterX = GetVirtualJoystickRenderCenterX();
-    const float joystickCenterY = GetVirtualJoystickRenderCenterY();
-    const float joystickThumbX = std::round(joystickCenterX + g_virtualJoystick.thumbOffsetX);
-    const float joystickThumbY = std::round(joystickCenterY + g_virtualJoystick.thumbOffsetY);
-    DrawIconButtonUv(
-        joystickThumbX - kVirtualJoystickKnobRenderW * 0.5f,
-        joystickThumbY - kVirtualJoystickKnobRenderH * 0.5f,
-        kVirtualJoystickKnobRenderW,
-        kVirtualJoystickKnobRenderH,
-        g_uiTex_joystick1,
-        kJoystickKnobU,
-        kJoystickKnobV,
-        kJoystickKnobUW,
-        kJoystickKnobVH,
-        joystickActive ? 1.0f : 0.90f);
+    // Floating joystick: only draw it while a finger is actually on it, and
+    // draw it wherever that finger landed inside the movement zone. It used to
+    // sit permanently in the corner at 0.90 alpha.
+    if (joystickActive)
+    {
+        const float joystickCenterX = GetVirtualJoystickRenderCenterX();
+        const float joystickCenterY = GetVirtualJoystickRenderCenterY();
+        const float joystickThumbX = std::round(joystickCenterX + g_virtualJoystick.thumbOffsetX);
+        const float joystickThumbY = std::round(joystickCenterY + g_virtualJoystick.thumbOffsetY);
+
+        DrawIconButtonUv(
+            joystickCenterX - kVirtualJoystickOuterRenderW * 0.5f,
+            joystickCenterY - kVirtualJoystickOuterRenderH * 0.5f,
+            kVirtualJoystickOuterRenderW,
+            kVirtualJoystickOuterRenderH,
+            g_uiTex_joystick2,
+            kJoystickRingU,
+            kJoystickRingV,
+            kJoystickRingUW,
+            kJoystickRingVH,
+            0.75f);
+
+        DrawIconButtonUv(
+            joystickThumbX - kVirtualJoystickKnobRenderW * 0.5f,
+            joystickThumbY - kVirtualJoystickKnobRenderH * 0.5f,
+            kVirtualJoystickKnobRenderW,
+            kVirtualJoystickKnobRenderH,
+            g_uiTex_joystick1,
+            kJoystickKnobU,
+            kJoystickKnobV,
+            kJoystickKnobUW,
+            kJoystickKnobVH,
+            1.0f);
+    }
     EndBitmap();
 
     DrawVirtualZoomButtons();
@@ -6968,6 +7453,14 @@ bool AndroidTriggerNormalAttackButton()
 bool AndroidTriggerHotKeySkillTap(int hotKeySkillIndex)
 {
     return AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex);
+}
+
+// RenderItemMenu lives in the anonymous namespace above, so it has internal
+// linkage and cannot be called from ZzzScene directly. Same wrapper pattern as
+// the trigger functions above.
+void AndroidRenderItemMenu()
+{
+    RenderItemMenu();
 }
 
 float AndroidGetCompactMiniMapTopY()
@@ -8416,6 +8909,20 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
         }
         g_iNoMouseTime = 0;
         UpdateMouseFromTouch(ev.tfinger, screenW, screenH);
+
+        // Dropped items open a menu rather than being interacted with directly,
+        // so touching an item never makes the character walk. The menu itself
+        // gets first refusal on the tap while it is open.
+        if (SceneFlag == MAIN_SCENE)
+        {
+            if (HandleItemMenuTap(static_cast<float>(MouseX), static_cast<float>(MouseY)))
+            {
+                break;
+            }
+
+            // The menu opens by itself when a drop is near the character, so a
+            // tap on the world no longer needs to hunt for items.
+        }
 #if defined(__ANDROID__) || defined(MU_IOS)
         if (kLogInputEvents)
         {
