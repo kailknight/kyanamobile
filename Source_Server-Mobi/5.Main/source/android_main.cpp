@@ -2965,6 +2965,8 @@ void StopVirtualNormalAttackHold()
     MouseRButtonPush = false;
 }
 
+void ReleaseVirtualNovaCharge();   // defined next to TriggerVirtualCombat below
+
 void ClearActiveVirtualTouchSlot(int slot)
 {
     if (slot < 0 || slot >= static_cast<int>(g_activeVirtualTouches.size()))
@@ -2975,6 +2977,12 @@ void ClearActiveVirtualTouchSlot(int slot)
     if (g_activeVirtualTouches[slot].button == kVirtualAttackButton)
     {
         StopVirtualNormalAttackHold();
+    }
+    else if (g_activeVirtualTouches[slot].button >= kVirtualSkillButtonBase)
+    {
+        // Finger lifted off a skill button - fire the Nova release if this
+        // press started a charge. No-op for every other skill.
+        ReleaseVirtualNovaCharge();
     }
 
     g_activeVirtualTouches[slot] = ActiveVirtualTouch{};
@@ -3427,6 +3435,52 @@ bool TriggerVirtualNormalAutoAttack()
     return true;
 }
 
+// Nova is the one skill on the virtual pad that needs press-and-hold rather
+// than a tap: the press starts the charge, the server ticks the charge counter
+// while the finger stays down, and the release fires damage scaled by it. The
+// pad fires every other skill as a single Attack() call, so the release half
+// never happened and Nova could not be used at all on Android.
+// We remember that a charge is running here and finish it in
+// ClearActiveVirtualTouchSlot() when the finger lifts. No per-frame pumping is
+// needed: MouseRButtonPress survives between the two calls, and the charge
+// itself accumulates server side.
+static bool g_novaChargeActive = false;
+static int  g_novaChargeSkillIndex = -1;
+
+// Hotbar (bottom bar) Nova state: tap to start charging, tap again to release.
+bool g_novaTapCharging = false;
+
+void ReleaseVirtualNovaCharge()
+{
+
+    if (!g_novaChargeActive)
+    {
+        return;
+    }
+
+    g_novaChargeActive = false;
+
+    if (Hero == nullptr || Hero->Dead > 0 || g_novaChargeSkillIndex < 0)
+    {
+        g_novaChargeSkillIndex = -1;
+        MouseRButtonPress = 0;
+        return;
+    }
+
+    // Attack() reads the skill from Hero->CurrentSkill, and TriggerVirtualCombat
+    // restores that to the previous slot when it returns, so point it back at
+    // Nova for the release.
+    const int previousSkillIndex = Hero->CurrentSkill;
+    Hero->CurrentSkill = static_cast<BYTE>(g_novaChargeSkillIndex);
+
+    MouseRButtonPop = true;
+    Attack(Hero);
+    MouseRButtonPop = false;
+
+    Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
+    g_novaChargeSkillIndex = -1;
+}
+
 void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
 {
     if (!IsVirtualPadAvailable() || Hero->Dead > 0)
@@ -3471,6 +3525,7 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
 
     LoadVirtualSkillSlots();
 
+
     if (skillSlot < 0 || skillSlot >= kVirtualSkillSlotCount)
     {
         return;
@@ -3486,6 +3541,16 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
             skillSlot,
             Hero->CurrentSkill,
             currentSkillType);
+        {
+            char szDbg[192];
+            wsprintf(szDbg, "NV exit: slot-empty raw=%d loaded=%d s0=%d s1=%d s2=%d",
+                     g_virtualSkillSlots[skillSlot],
+                     g_virtualSkillSlotsLoaded ? 1 : 0,
+                     g_virtualSkillSlots[0],
+                     g_virtualSkillSlots[1],
+                     g_virtualSkillSlots[2]);
+            g_pChatListBox->AddText("", szDbg, SEASON3B::TYPE_SYSTEM_MESSAGE);
+        }
         return;
     }
 
@@ -3495,6 +3560,11 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
     if (rawSkillType <= 0 || rawSkillType >= MAX_SKILLS)
     {
         LOGW("VirtualPad: invalid skillType=%d skillIndex=%d", rawSkillType, Hero->CurrentSkill);
+        if (g_pChatListBox != nullptr)
+        {
+            char szDbg[192];
+            wsprintf(szDbg, "NV exit: bad-type raw=%d", rawSkillType);
+        }
         Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
         return;
     }
@@ -3508,6 +3578,19 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
     else
     {
         // Buff/friendly skills are safer when explicitly bound to self target.
+        SelectedCharacter = GetHeroCharacterIndex();
+    }
+
+    // Nova is offensive but does not need a target: it is an area attack
+    // centred on the caster, and the PC path falls back to the hero's own key
+    // when nothing is selected. Without this the "offensive skills need a
+    // target" guard below returned before Attack() was ever called, so the
+    // charge could never start on the virtual pad.
+    if (!supportSkill
+        && SelectedCharacter < 0
+        && CharacterAttribute != nullptr
+        && CharacterAttribute->Skill[Hero->CurrentSkill] == AT_SKILL_BLAST_HELL)
+    {
         SelectedCharacter = GetHeroCharacterIndex();
     }
 
@@ -3530,6 +3613,11 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
             skillSlot,
             Hero->CurrentSkill,
             static_cast<int>(skillType));
+        if (g_pChatListBox != nullptr)
+        {
+            char szDbg[192];
+            wsprintf(szDbg, "NV exit: no-target skill=%d", (int)CharacterAttribute->Skill[Hero->CurrentSkill]);
+        }
         Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
         return;
     }
@@ -3555,12 +3643,30 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
             selectedBeforeAttack);
     }
 
+    // Any charge left over from a previous press would make Attack() take the
+    // release branch instead of starting a new one.
+    ReleaseVirtualNovaCharge();
+
+    const bool isNovaSkill = (CharacterAttribute != nullptr
+        && Hero->CurrentSkill >= 0
+        && CharacterAttribute->Skill[Hero->CurrentSkill] == AT_SKILL_BLAST_HELL);
+
     MouseRButtonPop = false;
     MouseRButtonPush = true;
     MouseRButton = true;
     Attack(Hero);
     MouseRButtonPush = false;
     MouseRButton = false;
+
+    // Attack() sets MouseRButtonPress when it starts a Nova charge. Leave that
+    // standing and finish it on finger-up rather than restoring state here, so
+    // the hold actually charges. Every other skill still behaves as a tap.
+    if (isNovaSkill && MouseRButtonPress != 0)
+    {
+        g_novaChargeActive = true;
+        g_novaChargeSkillIndex = Hero->CurrentSkill;
+    }
+
 
     Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
 }
@@ -3613,6 +3719,13 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
     const ActionSkillType skillType = static_cast<ActionSkillType>(rawSkillType);
     const bool supportSkill = IsSupportOrSelfSkill(skillType);
 
+    // Nova is a charge skill. The hotbar only ever gets a single tap event, so
+    // hold-to-charge is not available here; instead the first tap starts the
+    // charge and a second tap releases it early. If the player never taps
+    // again the server fires it at full charge by itself after 12 ticks
+    // (gObjSkillNovaCheckTime), so a single tap still gives a full Nova.
+    const bool isNovaSkill = (rawSkillType == AT_SKILL_BLAST_HELL);
+
     if (supportSkill)
     {
         SelectedCharacter = GetHeroCharacterIndex();
@@ -3620,6 +3733,14 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
     else
     {
         EnsureOffensiveSkillTarget();
+
+        // Nova is an area attack centred on the caster and does not need a
+        // target - the PC path falls back to the hero's own key. Without this
+        // the no-target check below rejected it whenever nothing was selected.
+        if (isNovaSkill && SelectedCharacter < 0)
+        {
+            SelectedCharacter = GetHeroCharacterIndex();
+        }
     }
 
     if (SelectedCharacter < 0)
@@ -3633,7 +3754,31 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
     }
 
     const float skillDistance = gSkillManager.GetSkillDistance(skillType, Hero);
-    const int executeResult = ExecuteSkill(Hero, skillType, skillDistance);
+
+    // Tap 1 sends the charge-start id, tap 2 sends the normal id to release.
+    // ExecuteSkill maps the charge-start id back to Nova when it looks the
+    // skill up, so both taps resolve to the same skill slot.
+    int skillToSend = static_cast<int>(skillType);
+
+    if (isNovaSkill)
+    {
+        if (!g_novaTapCharging)
+        {
+            skillToSend = AT_SKILL_BLAST_HELL_BEGIN;
+            g_novaTapCharging = true;
+        }
+        else
+        {
+            g_novaTapCharging = false;
+        }
+    }
+    else
+    {
+        // Using any other skill abandons a pending Nova charge.
+        g_novaTapCharging = false;
+    }
+
+    const int executeResult = ExecuteSkill(Hero, skillToSend, skillDistance);
     const bool startedSkillMove = Hero->Movement && Hero->MovementType == MOVEMENT_SKILL;
 
     LOGI(
