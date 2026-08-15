@@ -302,6 +302,29 @@ void CCharMakeWin::Show(bool bShow)
 	for (i = 0; i < 2; ++i)
 		m_aBtn[i].Show(bShow);
 
+	// SetPosition() only lays out the classes that the current RemoveClass
+	// layout actually uses, but the loop above shows all of them. The classes
+	// the layout skipped therefore kept their default position and rendered
+	// stacked in the top left corner of the screen - which is where the stray
+	// "Rage Fighter" button was coming from. Hide whatever the layout does not
+	// place, so "remove class" really removes it.
+	if (bShow)
+	{
+		int nLastClass;
+
+		switch (gProtect.m_MainInfo.RemoveClass)
+		{
+		case 1:		nLastClass = CLASS_DARK;		break;	// no DL, SU, RF
+		case 2:		nLastClass = CLASS_DARK_LORD;	break;	// no SU, RF
+		case 3:		nLastClass = CLASS_SUMMONER;	break;	// no RF
+		default:	nLastClass = MAX_CLASS - 1;		break;	// everything
+		}
+
+		for (i = nLastClass + 1; i < MAX_CLASS; ++i)
+			m_abtnJob[i].Show(false);
+
+	}
+
 	if (bShow)
 	{
 		InputTextWidth = 73;
@@ -567,6 +590,7 @@ void CCharMakeWin::RenderControls()
 	g_pRenderText->SetFont(g_hFixFont);
 	g_pRenderText->SetTextColor(CLRDW_WHITE);
 	g_pRenderText->SetBgColor(0);
+
 
 	const char* const* apszStat = GetCreateCharacterStats(m_nSelJob);
 	int nStatBaseX = m_asprBack[CMW_SPR_STAT].GetXPos() + 22;

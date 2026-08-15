@@ -269,10 +269,10 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 
 	const char* labels[TYPE_INPUT_DKTK::eMaxINPUT] =
 	{
-		"TAI KHOAN :",
-		"MAT KHAU :",
-		"7 SO BAO MAT :",
-		"SO DIEN THOAI :"
+		"ACCOUNT :",
+		"PASSWORD :",
+		"7 DIGIT PIN :",
+		"PHONE NUMBER :"
 	};
 
 	const int inputOptions[TYPE_INPUT_DKTK::eMaxINPUT] =
@@ -303,7 +303,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		kRegisterWindowWidth,
 		kRegisterWindowHeight,
 		eWindow_DangKyInGame,
-		"Dang Ky Tai Khoan");
+		"Register Account");
 
 	if (!gInterface.Data[eWindow_DangKyInGame].OnShow)
 	{
@@ -333,8 +333,8 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		RequsetDKTK();
 	};
 
-	RenderRegisterText(g_hFontBold, startX + 20.0f, startY + 48.0f, kRegisterWindowWidth - 40.0f, 14.0f, 3, "Tai khoan chi duoc su dung");
-	RenderRegisterText(g_hFontBold, startX + 20.0f, startY + 62.0f, kRegisterWindowWidth - 40.0f, 14.0f, 3, "cac ky tu 0-9, a-z");
+	RenderRegisterText(g_hFontBold, startX + 20.0f, startY + 48.0f, kRegisterWindowWidth - 40.0f, 14.0f, 3, "Account may only use the");
+	RenderRegisterText(g_hFontBold, startX + 20.0f, startY + 62.0f, kRegisterWindowWidth - 40.0f, 14.0f, 3, "characters 0-9, a-z");
 
 	startY += 30.0f;
 

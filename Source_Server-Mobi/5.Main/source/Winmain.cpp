@@ -9,6 +9,7 @@
 #include <zmouse.h>
 #include "UIWindows.h"
 #include "UIManager.h"
+#include "Reconnect.h"
 #include "ZzzOpenglUtil.h"
 #include "ZzzTexture.h"
 #include "ZzzOpenData.h"
@@ -670,7 +671,18 @@ LONG FAR PASCAL WndProc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 				gProtocolSend.DisconnectServer();
 			#endif	
 
-			CUIMng::Instance().PopUpMsgWin(MESSAGE_SERVER_LOST);
+			// SocketClient.Close() above hands off to ReconnectOnCloseSocket(),
+			// which puts the client into RECONNECT status. This popup used to
+			// fire unconditionally, so the "disconnected from the server" box
+			// appeared even while a reconnect was running - the other reconnect
+			// hooks were added around it but this one was missed. Only report
+			// the lost server when we are not about to reconnect.
+#if(UseReconnect)
+			if (g_pReconnect->s_Data.ReconnectStatus != CReconnect::RECONNECT_STATUS_RECONNECT)
+#endif
+			{
+				CUIMng::Instance().PopUpMsgWin(MESSAGE_SERVER_LOST);
+			}
 			break;
 		}
 		break;

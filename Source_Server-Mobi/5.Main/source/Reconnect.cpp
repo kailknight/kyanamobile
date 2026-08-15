@@ -161,7 +161,13 @@ void CReconnect::ReconnectOnCloseSocket()
 {
 	if (s_Data.ReconnectStatus != RECONNECT_STATUS_DISCONNECT)
 	{
-		ReconnectSetInfo(RECONNECT_STATUS_RECONNECT, RECONNECT_PROGRESS_NONE, 30000, gProtect.m_MainInfo.ReconnectTime);  //ReconnectTime
+		// ReconnectMaxWait is compared against GetTickCount(), so it must be in
+		// milliseconds. ReconnectTime is configured in seconds in MainInfo.ini
+		// ("ReconnectTime = 60"), and passing it raw meant the retry gave up
+		// after 60 MILLISECONDS - a few frames - and set itself to DISCONNECT.
+		// The status flip then let the MainScene poll show the "disconnected
+		// from the server" box, so reconnect never appeared to run at all.
+		ReconnectSetInfo(RECONNECT_STATUS_RECONNECT, RECONNECT_PROGRESS_NONE, 30000, (gProtect.m_MainInfo.ReconnectTime * 1000));  //ReconnectTime
 
 		s_Data.ReconnectAuthSend = 0;
 
@@ -347,6 +353,18 @@ bool CReconnect::CheckSocketPort(SOCKET s)
 
 	if (getpeername(s, (SOCKADDR*)& addr, &addr_len) == SOCKET_ERROR)
 	{
+		// The peer is already gone - which is exactly what happens when the
+		// GameServer process dies rather than closing the connection cleanly.
+		// Bailing out here meant ReconnectOnCloseSocket() was never called in
+		// the one case reconnect exists for, so the player just got the
+		// "disconnected from the server" box. Fall back to the port recorded
+		// in ReconnectCreateConnection when we connected.
+		if (s_Data.GameServerPort >= gProtect.m_MainInfo.GSPortMin
+			&& s_Data.GameServerPort <= gProtect.m_MainInfo.GSPortMax)
+		{
+			return true;
+		}
+
 		return false;
 	}
 	int port = ntohs(addr.sin_port);

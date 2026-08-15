@@ -269,9 +269,18 @@ BOOL CreateSocket(char *IpAddr, unsigned short Port)
 	{
 		g_ErrorReport.Write( "Failed to connect. ");
 		g_ErrorReport.WriteCurrentTime();
-		
-		CUIMng::Instance().PopUpMsgWin(MESSAGE_SERVER_LOST);
-		
+
+		// While a reconnect is running the server is expected to be down, so a
+		// failed connect is a normal retry, not an error to report. Popping the
+		// "disconnected from the server" box here killed the retry loop on its
+		// very first attempt, which is why reconnect never appeared to work.
+#if(UseReconnect)
+		if (g_pReconnect->s_Data.ReconnectStatus != CReconnect::RECONNECT_STATUS_RECONNECT)
+#endif
+		{
+			CUIMng::Instance().PopUpMsgWin(MESSAGE_SERVER_LOST);
+		}
+
 		bResult = FALSE;
 	}
 	g_byPacketSerialSend = 0;
