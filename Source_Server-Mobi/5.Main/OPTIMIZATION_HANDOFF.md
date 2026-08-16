@@ -258,6 +258,27 @@ wrong-but-harmless text.
 
 ## Unrelated bugs found along the way
 
+- **`NewUIGuildInfoWindow.cpp` opened the Guild window and FPS fell to ~6.**
+  Root cause: its decorative table borders draw the `IMAGE_GUILDINFO_*_PIXEL`
+  textures (1 texel across their short axis) by looping 1 destination pixel at
+  a time and issuing a fresh `RenderImage`/`RenderBitmap` call per pixel —
+  `RenderBitmap` is `glBegin`/`glEnd` immediate mode, so each of those is a
+  full driver round trip. The default tab alone (`Render_Guild_Enum`, shown on
+  open since `m_nCurrentTab` starts at 1) issued ~830 such calls every frame.
+  Fixed by collapsing each loop into a single stretched `RenderImage` call
+  spanning the same destination rect — visually identical since the source
+  texture is 1 texel wide/tall on that axis, and it's the same technique
+  `NewUIInventoryCtrl.cpp:970` already uses for the same texture ID. Only
+  `NewUIGuildInfoWindow.cpp` was touched; **other legacy windows may share the
+  same per-pixel-loop pattern and are worth a grep** (`for(int x=...x++)` /
+  `for(int y=...y++)` immediately followed by a 1-px-wide/tall `RenderImage`
+  call) if another window turns up slow. A `CreateGuildMark`-per-frame
+  `glTexImage2D` reupload on the same window's History tab was also noticed
+  but **not** cached — `BITMAP_GUILD` is a texture slot shared with the trade
+  window and the soccer scoreboard (each does create-then-immediately-draw),
+  so caching by mark index risks showing a stale mark if another window wrote
+  the slot in between frames. Left alone rather than risk that without a way
+  to verify it visually.
 - `CHARACTER::ID` is `char[32]` but `MonsterScript[].Name` is `char[64]`.
   Fixed with bounded copies; **long names now render truncated**. The cleaner
   fix is widening `CHARACTER::ID` to 64.

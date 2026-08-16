@@ -641,16 +641,17 @@ void SEASON3B::CNewUIGuildInfoWindow::Render_Text()
 void SEASON3B::CNewUIGuildInfoWindow::Render_Guild_History()
 {
 	// 42 42
-	for(int x=m_Pos.x+73; x<m_Pos.x+73+42; x++)
-	{
-		RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, x, m_Pos.y+104, 1, 14);
-		RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, x, m_Pos.y+104+34, 1, 14);
-	}
-	for(int y=m_Pos.y+104; y<m_Pos.y+104 +42; y++)
-	{
-		RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+70, y, 14, 1);
-		RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+105, y, 14, 1);
-	}
+	// The (Up)/(Dw)/(L)/(R) border textures are 1 texel across their short axis,
+	// so stretching one draw across the whole span looks identical to stamping
+	// it column-by-column - NewUIInventoryCtrl.cpp does the same border in one
+	// call. The per-pixel loop this replaced was issuing ~830 draw calls for
+	// this window alone, which is what was pinning the phone at 6 FPS with the
+	// window open - RenderBitmap is glBegin/glEnd immediate mode, so every one
+	// of those calls pays a full driver round trip.
+	RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, m_Pos.x+73, m_Pos.y+104, 42, 14);
+	RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, m_Pos.x+73, m_Pos.y+104+34, 42, 14);
+	RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+70, m_Pos.y+104, 14, 42);
+	RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+105, m_Pos.y+104, 14, 42);
 
 	RenderImage(IMAGE_GUILDINFO_TOP_LEFT, m_Pos.x+70, m_Pos.y+104, 14, 14);
 	RenderImage(IMAGE_GUILDINFO_TOP_RIGHT, m_Pos.x+105, m_Pos.y+104, 14, 14);
@@ -661,17 +662,10 @@ void SEASON3B::CNewUIGuildInfoWindow::Render_Guild_History()
 	RenderBitmap( BITMAP_GUILD, m_Pos.x+74, m_Pos.y+106, 39, 39 );
 
 
-	for(int x=m_Pos.x+12; x<m_Pos.x+12+166; x++)
-	{
-		RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, x, m_Pos.y+159, 1, 14);
-		RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, x, m_Pos.y+159+56, 1, 14);
-	}
-
-	for(int y=m_Pos.y+159; y<m_Pos.y+159 +65; y++)
-	{
-		RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+10, y, 14, 1);
-		RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+167, y, 14, 1);
-	}
+	RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, m_Pos.x+12, m_Pos.y+159, 166, 14);
+	RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, m_Pos.x+12, m_Pos.y+159+56, 166, 14);
+	RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+10, m_Pos.y+159, 14, 65);
+	RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+167, m_Pos.y+159, 14, 65);
 
 	RenderImage(IMAGE_GUILDINFO_TOP_LEFT, m_Pos.x+10, m_Pos.y+159, 14, 14);
 	RenderImage(IMAGE_GUILDINFO_TOP_RIGHT, m_Pos.x+167, m_Pos.y+159, 14, 14);
@@ -682,18 +676,19 @@ void SEASON3B::CNewUIGuildInfoWindow::Render_Guild_History()
 	RenderColor(m_Pos.x+11, m_Pos.y+260, 165, 84);
 	EndRenderColor();
 
-	for(int x=m_Pos.x+12; x<m_Pos.x+12+165; x++)
+	// Top strip used to skip columns at/below the absolute x=73 mark (clipping
+	// under box 1 above); same clip, just as one draw over the remaining span.
 	{
-		if(x > 73)
-		RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, x, m_Pos.y+260, 1, 14);
-		RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, x, m_Pos.y+260+74, 1, 14);
+		const float topPixelStartX = (m_Pos.x+12 > 73) ? (float)(m_Pos.x+12) : 74.0f;
+		const float topPixelEndX = (float)(m_Pos.x+12+165);
+		if (topPixelEndX > topPixelStartX)
+		{
+			RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, topPixelStartX, m_Pos.y+260, topPixelEndX - topPixelStartX, 14);
+		}
 	}
-
-	for(int y=m_Pos.y+260; y<m_Pos.y+260 +82; y++)
-	{
-		RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+10, y, 14, 1);
-		RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+167, y, 14, 1);
-	}
+	RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, m_Pos.x+12, m_Pos.y+260+74, 165, 14);
+	RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+10, m_Pos.y+260, 14, 82);
+	RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+167, m_Pos.y+260, 14, 82);
 	RenderImage(IMAGE_GUILDINFO_TOP_RIGHT, m_Pos.x+167, m_Pos.y+260, 14, 14);
 	RenderImage(IMAGE_GUILDINFO_BOTTOM_LEFT, m_Pos.x+10, m_Pos.y+334, 14, 14);
 	RenderImage(IMAGE_GUILDINFO_BOTTOM_RIGHT, m_Pos.x+167, m_Pos.y+334, 14, 14);
@@ -829,16 +824,10 @@ void SEASON3B::CNewUIGuildInfoWindow::Render_Guild_Info()
 		RenderColor(m_Pos.x+12, m_Pos.y+12+98, 165, 15);
 		EndRenderColor();
 
-		for(int x=m_Pos.x+12; x<m_Pos.x+12+166; x++)
-		{
-			RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, x, m_Pos.y+109, 1, 14);
-			RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, x, m_Pos.y+109+92, 1, 14);
-		}
-		for(int y=m_Pos.y+109; y<m_Pos.y+109 +100; y++)
-		{
-			RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+10, y, 14, 1);
-			RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+167, y, 14, 1);
-		}
+		RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, m_Pos.x+12, m_Pos.y+109, 166, 14);
+		RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, m_Pos.x+12, m_Pos.y+109+92, 166, 14);
+		RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+10, m_Pos.y+109, 14, 100);
+		RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+167, m_Pos.y+109, 14, 100);
 
 
 		RenderImage(IMAGE_GUILDINFO_TOP_LEFT, m_Pos.x+10, m_Pos.y+109, 14, 14);
@@ -867,16 +856,13 @@ void SEASON3B::CNewUIGuildInfoWindow::Render_Guild_Enum()
 	RenderColor(m_Pos.x+12, m_Pos.y+12+93, 165, 20);
 	EndRenderColor();
 
-	for(int x=m_Pos.x+12; x<m_Pos.x+177; x++)
-	{
-		RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, x, m_Pos.y+93+12, 1, 14);
-		RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, x, m_Pos.y+3+344, 1, 14);
-	}
-	for(int y=m_Pos.y+12+93; y<m_Pos.y+12 +344; y++)
-	{
-		RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+8, y, 14, 1);
-		RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+168, y, 14, 1);
-	}
+	// This tab is the default on open (m_nCurrentTab starts at 1), so these were
+	// the ~830 draw calls hitting every frame the window was up - see the note
+	// in Render_Guild_History for why a single stretched call is equivalent.
+	RenderImage(IMAGE_GUILDINFO_TOP_PIXEL, m_Pos.x+12, m_Pos.y+93+12, 165, 14);
+	RenderImage(IMAGE_GUILDINFO_BOTTOM_PIXEL, m_Pos.x+12, m_Pos.y+3+344, 165, 14);
+	RenderImage(IMAGE_GUILDINFO_LEFT_PIXEL, m_Pos.x+8, m_Pos.y+12+93, 14, 251);
+	RenderImage(IMAGE_GUILDINFO_RIGHT_PIXEL, m_Pos.x+168, m_Pos.y+12+93, 14, 251);
 
 	RenderImage(IMAGE_GUILDINFO_TOP_LEFT, m_Pos.x+8, m_Pos.y+105, 14, 14);
 	RenderImage(IMAGE_GUILDINFO_TOP_RIGHT, m_Pos.x+168, m_Pos.y+105, 14, 14);
