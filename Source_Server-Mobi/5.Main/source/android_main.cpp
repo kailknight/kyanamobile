@@ -4311,6 +4311,12 @@ void ClearTappedItemIfGone()
     }
 }
 
+// Defined further down, next to the rest of the shared virtual-UI drawing
+// helpers - forward-declared here so RenderItemMenu can match their look.
+void DrawVirtualRectFilled(float uiX, float uiY, float uiW, float uiH, float red, float green, float blue, float alpha);
+void DrawVirtualRectOutline(float uiX, float uiY, float uiW, float uiH, float red, float green, float blue, float alpha, float lineWidth);
+void DrawVirtualRightPanelButtonBox(const AndroidUiRect& rect, bool active);
+
 // ---------------------------------------------------------------------------
 // Dropped item menu. Tapping an item opens this instead of interacting with the
 // world, so the character never walks just because you touched an item. Pick Up
@@ -4644,56 +4650,54 @@ void RenderItemMenu()
     const float boxW = boxR - boxX;
     const float boxH = boxB - boxY;
 
-    // Drawn first so everything else sits on top of it.
-    glColor4f(0.0f, 0.0f, 0.0f, 0.78f);
-    RenderColor(boxX, boxY, boxW, boxH);
-    glColor4f(0.55f, 0.45f, 0.2f, 1.0f);
-    RenderColor(boxX, boxY, boxW, 1.0f);
-    RenderColor(boxX, boxB - 1.0f, boxW, 1.0f);
-    RenderColor(boxX, boxY, 1.0f, boxH);
-    RenderColor(boxR - 1.0f, boxY, 1.0f, boxH);
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    glEnable(GL_TEXTURE_2D);
+    // Same layered shadow/fill/border treatment as RenderAndroidTargetPicker,
+    // via TextDraw/DrawVirtual* instead of g_pRenderText - this is the family
+    // that operates directly in the same 640x480 space as the hit-test rects
+    // below, so unlike the old g_pRenderText path it needs no display-pixel
+    // rescale on the way out.
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // The menu rect lives in the same 640x480 space as MouseX/MouseY so the tap
-    // hit-test is direct, but g_pRenderText draws in display pixels - scale on
-    // the way out. TextDraw was used here originally and never appeared, so
-    // this mirrors the FPS overlay, which does render.
-    const int   hudWidth = (DisplayWin > 0) ? DisplayWin : 640;
-    const float sx = static_cast<float>(hudWidth) / 640.0f;
-    const float sy = static_cast<float>((DisplayHeight > 0) ? DisplayHeight : 480) / 480.0f;
+    DrawVirtualRectFilled(boxX - 3.0f, boxY - 3.0f, boxW + 6.0f, boxH + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+    DrawVirtualRectFilled(boxX, boxY, boxW, boxH, 0.10f, 0.04f, 0.05f, 0.78f);
+    DrawVirtualRectFilled(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
+    DrawVirtualRectFilled(boxX + 3.0f, boxY + 3.0f, boxW - 6.0f, kItemMenuHeaderH - 2.0f, 0.62f, 0.24f, 0.24f, 0.36f);
+    DrawVirtualRectOutline(boxX, boxY, boxW, boxH, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
+    DrawVirtualRectOutline(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
 
-    const int x = static_cast<int>((g_itemMenuX + kItemMenuTextX) * sx);
-    const int rowStep = static_cast<int>(kItemMenuRowH * sy);
+    HFONT headerFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+    HFONT rowFont    = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
 
     char szLine[128];
 
-    g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
-
     // Header, which is also the show/hide toggle.
-    g_pRenderText->SetBgColor(0, 0, 0, 0);
-    g_pRenderText->SetTextColor(255, 208, 0, 255);
-    snprintf(szLine, sizeof(szLine) - 1, "%s  Items (%d)",
+    snprintf(szLine, sizeof(szLine) - 1, "%s Items (%d)",
              g_itemMenuCollapsed ? "[+]" : "[-]", g_itemMenuCount);
     szLine[sizeof(szLine) - 1] = '\0';
-    g_pRenderText->RenderText(static_cast<int>((g_itemMenuX + kItemMenuPad) * sx),
-                              static_cast<int>((g_itemMenuY + kItemMenuPad) * sy),
-                              szLine);
+    TextDraw(headerFont,
+             static_cast<int>(g_itemMenuX + kItemMenuPad),
+             static_cast<int>(g_itemMenuY + kItemMenuPad),
+             0xFFFFFFFF, 0x0,
+             static_cast<int>(kItemMenuWidth - kItemMenuPad * 2.0f), 0, 3,
+             "%s", szLine);
 
     if (g_itemMenuCollapsed)
     {
+        EndBitmap();
         return;
     }
 
     const float bodyTop = g_itemMenuY + kItemMenuPad + kItemMenuHeaderH + kItemMenuPad;
-    const int   y = static_cast<int>(bodyTop * sy);
 
     // Item picture on the left, text to its right. RenderItem3DFree draws the
-    // item's own model and takes 640x480 UI coordinates directly, so it needs
-    // none of the scaling the text below does. It swaps in a perspective
-    // projection to draw the model, which is why it has to step outside the 2D
-    // bitmap state this is called from - the disabled EndBitmap() at the top of
-    // that function is the same thing, done by whoever wrote it.
+    // item's own model and takes 640x480 UI coordinates directly. It swaps in
+    // a perspective projection to draw the model, which is why it has to step
+    // outside the 2D bitmap state this is called from - the disabled
+    // EndBitmap() at the top of that function is the same thing, done by
+    // whoever wrote it.
     EndBitmap();
     g_pNewUISystem->RenderItem3DFree(g_itemMenuX + kItemMenuPad, bodyTop,
                                      kItemMenuIconSize, kItemMenuIconSize,
@@ -4701,39 +4705,50 @@ void RenderItemMenu()
                                      item.Option1, item.ExtOption,
                                      false, 1.2f);
     BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Page row. Arrows only mean anything with more than one drop in range, but
-    // the count is worth showing either way so the player knows there is no
-    // second item hiding behind the first.
-    g_pRenderText->SetBgColor(0, 0, 0, 0);
-    g_pRenderText->SetTextColor(255, 208, 0, 255);
-
+    // Page row. Arrows only mean anything with more than one drop in range,
+    // but the count is worth showing either way so the player knows there is
+    // no second item hiding behind the first. Split matches HandleItemMenuTap's
+    // thirds exactly, so the drawn buttons line up with what's tappable.
+    const float navW = kItemMenuWidth - kItemMenuTextX - kItemMenuPad;
     if (g_itemMenuCount > 1)
     {
-        snprintf(szLine, sizeof(szLine) - 1, "[ < ]   %d/%d   [ > ]",
-                 g_itemMenuPage + 1, g_itemMenuCount);
+        const AndroidUiRect prevRect{ g_itemMenuX + kItemMenuTextX, bodyTop, navW / 3.0f, kItemMenuRowH };
+        const AndroidUiRect nextRect{ g_itemMenuX + kItemMenuTextX + navW * 2.0f / 3.0f, bodyTop, navW / 3.0f, kItemMenuRowH };
+        DrawVirtualRightPanelButtonBox(prevRect, false);
+        DrawVirtualRightPanelButtonBox(nextRect, false);
+        TextDraw(rowFont, static_cast<int>(prevRect.x), static_cast<int>(prevRect.y + 2.0f), 0xFFFFFFFF, 0x0, static_cast<int>(prevRect.w), 0, 3, "%s", "<");
+        TextDraw(rowFont, static_cast<int>(nextRect.x), static_cast<int>(nextRect.y + 2.0f), 0xFFFFFFFF, 0x0, static_cast<int>(nextRect.w), 0, 3, "%s", ">");
+        snprintf(szLine, sizeof(szLine) - 1, "%d/%d", g_itemMenuPage + 1, g_itemMenuCount);
     }
     else
     {
         snprintf(szLine, sizeof(szLine) - 1, "1/1");
     }
-
     szLine[sizeof(szLine) - 1] = '\0';
-    g_pRenderText->RenderText(x, y, szLine);
+    TextDraw(rowFont, static_cast<int>(g_itemMenuX + kItemMenuTextX), static_cast<int>(bodyTop + 2.0f),
+             0xFFE8D8A0, 0x0, static_cast<int>(navW), 0, 3, "%s", szLine);
 
-    g_pRenderText->SetBgColor(30, 90, 30, 220);
-    g_pRenderText->SetTextColor(255, 255, 255, 255);
-    g_pRenderText->RenderText(x, y + rowStep, "[ Pick Up ]");
+    const AndroidUiRect pickRect{ g_itemMenuX + kItemMenuTextX, bodyTop + kItemMenuRowH, navW, kItemMenuRowH };
+    DrawVirtualRightPanelButtonBox(pickRect, true);
+    TextDraw(g_hFontBold != nullptr ? g_hFontBold : g_hFont,
+             static_cast<int>(pickRect.x), static_cast<int>(pickRect.y + 2.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(pickRect.w), 0, 3, "%s", "Pick Up");
 
     // The client's own tooltip, so the name, level, excellent options, sockets
-    // and requirements all read exactly as they do in the inventory. It draws
-    // in 640x480 UI space, centred on sx with its top at sy. Its background is
-    // suppressed because the container above already covers it.
+    // and requirements all read exactly as they do in the inventory. Its
+    // background is suppressed because the container above already covers it.
     g_bTipSuppressBG = true;
     RenderItemInfo(static_cast<int>(g_itemMenuX + kItemMenuWidth * 0.5f),
                    static_cast<int>(g_itemMenuY + menuH),
                    &item, false, 0, false, false);
     g_bTipSuppressBG = false;
+
+    EndBitmap();
 }
 
 void ReleaseVirtualNovaCharge()
@@ -12085,6 +12100,11 @@ static bool InitializeAndroidGame()
         g_hFontBig = AndroidCreateFont(fontSize * 2, 600);
         g_hFixFont = AndroidCreateFont((static_cast<int>(WindowHeight) <= 600) ? 13 : 14, 400);
         LOGI("GDI fonts created: size=%d big=%d", fontSize, fontSize * 2);
+
+        // See the matching block further down for why this matters - nameplate
+        // and chat-bubble line spacing divides by FontHeight, which otherwise
+        // stays at its zero default on Android.
+        FontHeight = fontSize + 1;
     }
 
     if (!g_hWnd) g_hWnd = reinterpret_cast<HWND>(0x1);
@@ -13074,6 +13094,13 @@ int SDL_main(int argc, char* argv[])
         g_hFixFont  = AndroidCreateFont(
             (int)WindowHeight <= 600 ? 13 : 14, 400);
         LOGI("GDI fonts created: size=%d big=%d", fontSize, fontSize*2);
+
+        // Winmain.cpp sets this from WindowWidth on desktop (never runs here,
+        // so it stayed at its zero-initialized default). RenderBoolean divides
+        // by it to space nameplate lines - name, guild, and any chat bubble
+        // text all landed on the same row and rendered as garbled overlapping
+        // text until this was set. Mirrors desktop's iFontSize = FontHeight-1.
+        FontHeight = fontSize + 1;
     }
 
     // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Init input system with actual screen size so dialogs position correctly

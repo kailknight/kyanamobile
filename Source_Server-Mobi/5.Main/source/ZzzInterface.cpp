@@ -9481,6 +9481,14 @@ void RenderHPBar()
 					sprintf(Text, "%d%%", c->InfoHealBar.Life);
 					sprintf(TextLV, "Lv %d", c->InfoHealBar.Level);
 					sprintf(SD, "%d%%", c->InfoHealBar.SD);
+					// g_hFontMini is a stub permanently stuck at NULL on Android
+					// (android_link_stubs.cpp) - android_main.cpp guards every
+					// other use of it with this same fallback. Left unguarded
+					// here, SetFont(NULL) fell through to a default-sized
+					// substitute font whose glyph metrics didn't match what
+					// this code assumed, which is what made the HP%/Level/SD
+					// numbers render as illegible dark smears.
+					HFONT hFontMiniSafe = g_hFontMini != NULL ? g_hFontMini : g_hFont;
 					if (o->Kind == KIND_MONSTER)
 					{
 						g_pRenderText->SetFont(g_hFontBold);
@@ -9488,10 +9496,10 @@ void RenderHPBar()
 					}
 					else if (o->Kind == KIND_PLAYER)
 					{
-						g_pRenderText->SetFont(g_hFontMini);
+						g_pRenderText->SetFont(hFontMiniSafe);
 						g_pRenderText->RenderText(ScreenX, ScreenY + 7.5, SD, Width + 6, 0, RT3_SORT_CENTER);
 					}
-					g_pRenderText->SetFont(g_hFontMini);
+					g_pRenderText->SetFont(hFontMiniSafe);
 					g_pRenderText->RenderText(ScreenX, ScreenY+0.5, Text, (o->Kind == KIND_PLAYER) ? Width + 6: Width, 0, (o->Kind == KIND_PLAYER)? RT3_SORT_CENTER:RT3_SORT_RIGHT); //% HP
 					if (o->Kind == KIND_MONSTER)
 					{
@@ -9555,6 +9563,14 @@ void RenderHPBar()
 					sprintf(Text, "%d%%", c->InfoHealBar.Life);
 					sprintf(TextLV, "Lv %d", c->InfoHealBar.Level);
 					sprintf(SD, "%d%%", c->InfoHealBar.SD);
+					// g_hFontMini is a stub permanently stuck at NULL on Android
+					// (android_link_stubs.cpp) - android_main.cpp guards every
+					// other use of it with this same fallback. Left unguarded
+					// here, SetFont(NULL) fell through to a default-sized
+					// substitute font whose glyph metrics didn't match what
+					// this code assumed, which is what made the HP%/Level/SD
+					// numbers render as illegible dark smears.
+					HFONT hFontMiniSafe = g_hFontMini != NULL ? g_hFontMini : g_hFont;
 					if (o->Kind == KIND_MONSTER)
 					{
 						g_pRenderText->SetFont(g_hFontBold);
@@ -9562,10 +9578,10 @@ void RenderHPBar()
 					}
 					else if (o->Kind == KIND_PLAYER)
 					{
-						g_pRenderText->SetFont(g_hFontMini);
+						g_pRenderText->SetFont(hFontMiniSafe);
 						g_pRenderText->RenderText(ScreenX, ScreenY + 7.5, SD, Width + 6, 0, RT3_SORT_CENTER);
 					}
-					g_pRenderText->SetFont(g_hFontMini);
+					g_pRenderText->SetFont(hFontMiniSafe);
 					g_pRenderText->RenderText(ScreenX, ScreenY + 0.5, Text, (o->Kind == KIND_PLAYER) ? Width + 6 : Width, 0, (o->Kind == KIND_PLAYER) ? RT3_SORT_CENTER : RT3_SORT_RIGHT); //HP
 					if (o->Kind == KIND_MONSTER)
 					{

@@ -255,6 +255,21 @@ wrong-but-harmless text.
   appearing mid-capture invalidated one flicker measurement. Check for it.
 - **Git Bash mangles `adb` device paths.** Use `MSYS_NO_PATHCONV=1` for
   `adb push` / `adb pull`.
+- **`glColor4fv` is a silent no-op stub on Android** (`Platform/PlatformDefs.h`),
+  and `glGetFloatv(GL_CURRENT_COLOR, ...)` is not a valid GLES query either
+  (leaves its output buffer uninitialized). `CUIRenderTextOriginal::UploadText`
+  used exactly that pair to save/restore the pre-shadow color around a
+  `SetShadowText` glyph draw — on Android the restore did nothing, so `glColor`
+  stayed black from the shadow pass and every shadowed string rendered solid
+  black regardless of `SetTextColor`. Fixed (`UIControls.cpp`, both the live
+  path and the disabled text-section-cache path) by resetting to
+  `glColor4f(1,1,1,1)` directly instead of round-tripping through the broken
+  pair — the text color is already baked into the glyph texture, so the draw
+  only ever needed a neutral white multiplier. Took three attempts to find
+  because most on-screen text compiles under `#if(ShadowText)` with the macro
+  at `0` (`Defined_Global.h`), so it never hits this path and looks fine;
+  `RenderHPBar`/`RenderHPBarNew` call `SetShadowText` directly, unguarded,
+  which is what made them the visible symptom.
 
 ## Unrelated bugs found along the way
 

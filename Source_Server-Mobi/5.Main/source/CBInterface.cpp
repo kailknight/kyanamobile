@@ -1775,7 +1775,12 @@ int Interface::RenderHPBarNew(CHARACTER* c)
 	g_pRenderText->SetShadowText(2);
 	g_pRenderText->SetFont(g_hFontBold);
 	g_pRenderText->RenderText(StartX - (WFame / 2), StartY-10, Name, WFame, 0, RT3_SORT_CENTER);
-	g_pRenderText->SetFont(g_hFontMini);
+	// g_hFontMini is a stub permanently stuck at NULL on Android
+	// (android_link_stubs.cpp) - android_main.cpp guards every other use of
+	// it with this same fallback. Left unguarded, SetFont(NULL) fell through
+	// to a default-sized substitute font whose glyph metrics didn't match
+	// what this code assumed, which is what made the HP% text illegible.
+	g_pRenderText->SetFont(g_hFontMini != NULL ? g_hFontMini : g_hFont);
 	g_pRenderText->RenderText(StartX - (WFame / 2), StartY+3, TextLife, WFame, 0, RT3_SORT_CENTER);
 
 	g_pRenderText->SetFont(g_hFont);

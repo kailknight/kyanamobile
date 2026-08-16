@@ -2996,7 +2996,10 @@ namespace TextCache
 			RenderBitmap(tex, (float)sx - offset, (float)sy + offset, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
 			RenderBitmap(tex, (float)sx + offset, (float)sy - offset, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
 			RenderBitmap(tex, (float)sx + offset, (float)sy + offset, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
-			glColor4fv(ColorFont);
+			// glColor4fv is a no-op stub on Android (PlatformDefs.h) and the
+			// glGetFloatv above never populated ColorFont to begin with - see
+			// the matching fix in CUIRenderTextOriginal::UploadText.
+			glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 		}
 		RenderBitmap(tex, (float)sx, (float)sy, (float)width, (float)height, u, v, uWidth, vHeight, false, false);
 	}
@@ -3236,8 +3239,16 @@ void CUIRenderTextOriginal::UploadText(int sx,int sy,int Width,int Height)
 		//== Font GL
 		if (m_TypeShadow)
 		{
-			GLfloat ColorFont[4];
-			glGetFloatv(GL_CURRENT_COLOR, ColorFont);
+			// The glGetFloatv/glColor4fv pair this used to save and restore the
+			// pre-shadow color is a silent no-op on Android - GL_CURRENT_COLOR
+			// isn't a valid GLES query (leaves the buffer uninitialized) and
+			// glColor4fv is a stub that does nothing (PlatformDefs.h). So color
+			// stayed black for the real glyph draw below, which is why any text
+			// with shadow enabled rendered solid black regardless of
+			// SetTextColor. The color is already baked into the glyph texture
+			// (see the m_dwTextColor writes above), so the draw only needs a
+			// neutral white multiplier - the convention every working caller
+			// already follows by leaving glColor at white before text.
 			glColor4f(0.0, 0.0, 0.0, 0.75);
 			if (m_TypeShadow == 1)
 			{
@@ -3253,7 +3264,7 @@ void CUIRenderTextOriginal::UploadText(int sx,int sy,int Width,int Height)
 				RenderBitmap(BITMAP_FONT, (float)sx + 1.45, (float)sy - 1.45, (float)Width, (float)Height, TextureU, TextureV, TextureUWidth, TextureVHeight, false, false);
 				RenderBitmap(BITMAP_FONT, (float)sx + 1.45, (float)sy + 1.45, (float)Width, (float)Height, TextureU, TextureV, TextureUWidth, TextureVHeight, false, false);
 			}
-			glColor4fv(ColorFont);
+			glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 		}
 		RenderBitmap(BITMAP_FONT, (float)sx, (float)sy, (float)Width, (float)Height,TextureU, TextureV, TextureUWidth, TextureVHeight, false, false);
 	}
