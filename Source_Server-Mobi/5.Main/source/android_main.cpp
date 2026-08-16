@@ -589,6 +589,10 @@ extern float g_fLastTipW;
 extern float g_fLastTipH;
 extern bool  g_bTipSuppressBG;
 
+// The global teleport latch from WSclient. Declared here for the same reason as
+// the above - inside the namespace it becomes a separate internal symbol.
+extern bool Teleport;
+
 namespace
 {
 constexpr bool kUseLegacyMainHud = true;
@@ -597,6 +601,14 @@ constexpr int kVirtualAttackButton = 0;
 constexpr int kVirtualSkillButtonBase = 1;
 constexpr int kVirtualVisibleSkillButtonCount = 6;
 constexpr int kVirtualSkillSlotCount = kVirtualVisibleSkillButtonCount;
+
+// Of the six buttons in the arc, the first five hold skills (hotkeys 1-5) and
+// the sixth opens the skill picker so those five can be rebound. The big circle
+// in the middle of the arc is the attack button.
+//
+// Skill buttons select rather than fire: tap a skill to arm it, then tap attack.
+constexpr int kVirtualOverlaySkillSlotCount = 5;
+constexpr int kVirtualSkillSelectorVisualSlot = 5;
 constexpr int kVirtualUtilityButtonCount = 4;
 constexpr int kVirtualUtilityButtonChat = 3;
 constexpr int kVirtualRightPanelUtilityActionCount = 12;
@@ -607,6 +619,11 @@ constexpr int kVirtualZoomButtonMinus = 0;
 constexpr int kVirtualZoomButtonPlus = 1;
 constexpr uint32_t kVirtualMiniMapButtonCooldownMs = 220;
 constexpr uint32_t kVirtualAttackRepeatMs = 140;
+
+// Holding attack with the combo on steps through the three skills instead of
+// swinging repeatedly, and each step needs long enough to actually go off. The
+// 140ms weapon cadence would blow through all three before the first landed.
+constexpr uint32_t kVirtualComboRepeatMs = 420;
 constexpr uint32_t kVirtualUtilityButtonCooldownMs = 200;
 constexpr uint32_t kVirtualSkillAssignLongPressMs = 480;
 constexpr uint32_t kVirtualAssignModeTimeoutMs = 9000;
@@ -616,7 +633,9 @@ constexpr float kAndroidLongPressRightClickMoveCancelUi = 8.0f;
 constexpr uint32_t kAndroidTradeAutoMoveIntervalMs = 520;
 constexpr uint32_t kAndroidTradeAutoMoveTimeoutMs = 15000;
 constexpr const char* kVirtualSkillSlotsPath = "Data/Local/android_touch_skill_slots.cfg";
-constexpr float kVirtualPadInputMaxY = 426.0f;
+// Was 426 to keep the pad off the legacy bottom frame's button strip. The frame
+// is no longer drawn on mobile, so the pad owns the full height now.
+constexpr float kVirtualPadInputMaxY = 480.0f;
 constexpr float kInventoryWindowWidth = 190.0f;
 constexpr float kInventoryWindowHeight = 429.0f;
 constexpr float kVirtualAutoAcquireMaxDistance = 10.0f;
@@ -636,6 +655,17 @@ constexpr float kVirtualJoystickKnobRenderH = 54.0f;
 constexpr SDL_FingerID kPcMouseJoystickFingerId = static_cast<SDL_FingerID>(-2);
 constexpr bool kShowVirtualAttackButton = kEnableVirtualCombatOverlay;
 constexpr bool kShowVirtualSkillButtons = kEnableVirtualCombatOverlay;
+
+// Its draw call sits inside the disabled custom-HUD block, so the button is not
+// on screen; without this the hit test stayed live and a tap on empty ground
+// near the bottom of the screen would open the keyboard. Turn this back on in
+// the same change that gives the button somewhere visible to live.
+constexpr bool kShowVirtualChatQuickButton = false;
+
+// Prints the armed skill and the last ground-cast result over the HUD. Kept
+// because logcat does not come through on these devices, so this is the only
+// practical way to trace the cast path on hardware.
+constexpr bool kShowAndroidSkillDebug = false;
 
 struct VirtualButtonLayout
 {
@@ -711,6 +741,52 @@ constexpr std::array<const TCHAR*, kVirtualRightPanelUtilityActionCount> kVirtua
 };
 constexpr const TCHAR* kVirtualRightPanelModeButtonLabel = _T("CHG");
 
+// The always-visible labelled row along the top right. These are the five the
+// reference layout puts there; the remaining seven actions above stay reachable
+// through the CHG button, which still opens the full grid. The enum is the
+// switch key for both TriggerVirtualRightPanelUtilityAction and the lit-state
+// predicate, so it is deliberately left intact rather than trimmed to five.
+constexpr int kTopBarButtonCount = 5;
+
+constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
+    kVirtualRightPanelUtilityActionGuild,
+    kVirtualRightPanelUtilityActionHelper,
+    kVirtualRightPanelUtilityActionXShop,
+    kVirtualRightPanelUtilityActionSetting,
+    kVirtualRightPanelUtilityActionBag,
+};
+
+constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
+    _T("Guild"),
+    _T("Helper"),
+    _T("Shop"),
+    _T("Settings"),
+    _T("Bags"),
+};
+
+// Optional per-button art. Missing files are fine: DrawIconButton skips an
+// unloaded texture, and the box and label underneath are drawn regardless, so
+// the row stays usable until real icons exist.
+constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
+    "ui/topbar_guild.png",
+    "ui/topbar_helper.png",
+    "ui/topbar_shop.png",
+    "ui/topbar_settings.png",
+    "ui/topbar_bags.png",
+};
+
+constexpr float kTopBarButtonW = 52.0f;
+constexpr float kTopBarButtonH = 34.0f;
+constexpr float kTopBarButtonGap = 4.0f;
+constexpr float kTopBarMarginRight = 8.0f;
+constexpr float kTopBarY = 8.0f;
+
+// Currency and location chips sit under the row, matching the reference.
+constexpr float kTopBarChipH = 18.0f;
+constexpr float kTopBarChipGap = 4.0f;
+constexpr float kTopBarCoinChipW = 96.0f;
+constexpr float kTopBarLocationChipW = 128.0f;
+
 constexpr std::array<VirtualUiOffset, kVirtualRightPanelUtilityActionCount> kVirtualRightPanelButtonTopLefts = {
     VirtualUiOffset{ 546.0f, 298.0f },
     VirtualUiOffset{ 579.0f, 298.0f },
@@ -761,24 +837,45 @@ struct VirtualConsumableSlot {
 };
 std::array<VirtualConsumableSlot, kVirtualConsumableSlotCount> g_virtualConsumableSlots{};
 
-constexpr int kVirtualMirrorHotKeySlotCount = 2;
-constexpr float kVirtualMirrorHotKeyFrameW = kVirtualSkillFrameW;
-constexpr float kVirtualMirrorHotKeyFrameH = kVirtualSkillFrameH;
+// The four consumable buttons along the bottom left. These mirror the Q/W/E/R
+// hotkeys rather than being a separate binding: GetVirtualHotKeyBySlot already
+// maps slot 0..3 onto them, they persist to the options file, and the inventory
+// auto-binds into them, so a potion put on Q on the desktop client is on the
+// first button here.
+//
+// They sit inside the joystick's dynamic area, which is deliberate - the layout
+// wants them there, and HandleVirtualFingerDown tests these slots before it
+// falls through to the joystick, so a tap on a button never starts a walk.
+constexpr int kVirtualMirrorHotKeySlotCount = 4;
+
+// No longer borrowed from the skill boxes: these are the primary consumable
+// controls now and need to take a fingertip rather than a mouse pointer.
+constexpr float kVirtualMirrorHotKeyFrameW = 38.0f;
+constexpr float kVirtualMirrorHotKeyFrameH = 38.0f;
 constexpr float kVirtualMirrorHotKeyTouchPadding = 8.0f;
 constexpr std::array<int, kVirtualMirrorHotKeySlotCount> kVirtualMirrorHotKeys = {
     SEASON3B::HOTKEY_Q,
     SEASON3B::HOTKEY_W,
+    SEASON3B::HOTKEY_E,
+    SEASON3B::HOTKEY_R,
 };
 constexpr std::array<VirtualButtonLayout, kVirtualMirrorHotKeySlotCount> kVirtualMirrorHotKeySlots = {
-    VirtualButtonLayout{ 565.0f, 228.0f, 18.0f },
-    VirtualButtonLayout{ 610.0f, 228.0f, 18.0f },
+    VirtualButtonLayout{  38.0f, 447.0f, 19.0f },
+    VirtualButtonLayout{  86.0f, 447.0f, 19.0f },
+    VirtualButtonLayout{ 134.0f, 447.0f, 19.0f },
+    VirtualButtonLayout{ 182.0f, 447.0f, 19.0f },
 };
 constexpr std::array<const TCHAR*, kVirtualMirrorHotKeySlotCount> kVirtualMirrorHotKeyLabels = {
     _T("Q"),
     _T("W"),
+    _T("E"),
+    _T("R"),
 };
 
-constexpr float kTopRightButtonY = 12.0f;
+// Pushed down from 12 so the minimap/map stack clears the labelled top bar and
+// the coin/location chips that now occupy the corner above it.
+constexpr float kTopRightButtonY =
+    kTopBarY + kTopBarButtonH + kTopBarChipGap + kTopBarChipH + kTopBarChipGap + 4.0f;
 constexpr float kTopRightButtonSize = 44.0f;
 constexpr float kTopRightButtonGap = 6.0f;
 constexpr float kTopRightButtonMarginRight = 8.0f;
@@ -789,6 +886,39 @@ constexpr float kCompactMiniMapPanelGapToIcons = 10.0f;
 constexpr float kVirtualChatQuickButtonCx = 305.0f;
 constexpr float kVirtualChatQuickButtonCy = 413.0f;
 constexpr float kVirtualChatQuickButtonRadius = 18.0f;
+// Select-target: a button that opens a scrollable list of nearby enemies, and
+// locks onto whichever one is tapped. Tapping the button again releases the
+// lock rather than reopening the list.
+//
+// Range is 10 tiles to match kVirtualAutoAcquireMaxDistance rather than the
+// item menu's 5 - something worth deliberately targeting is usually further off
+// than dropped loot.
+constexpr float kTargetPickerRangeTiles = 10.0f;
+constexpr int kTargetPickerMaxEntries = 16;
+constexpr int kTargetPickerVisibleRows = 6;
+constexpr float kTargetPickerX = 300.0f;
+constexpr float kTargetPickerY = 90.0f;
+constexpr float kTargetPickerW = 180.0f;
+constexpr float kTargetPickerHeaderH = 26.0f;
+constexpr float kTargetPickerRowH = 28.0f;
+constexpr float kTargetPickerFooterH = 26.0f;
+
+// The scan walks every client character with a non-trivial predicate, so it is
+// throttled rather than run per frame. Finger down and finger up force a
+// refresh regardless, so a selection always matches what was on screen.
+constexpr uint32_t kTargetPickerRefreshMs = 200;
+
+constexpr float kTargetSelectButtonCx = 624.0f;
+constexpr float kTargetSelectButtonCy = 452.0f;
+constexpr float kTargetSelectButtonRadius = 18.0f;
+
+// Auto-combo toggle. Only drawn and only hit-tested for the Knight line, so it
+// costs nothing on classes that have no combo.
+constexpr float kComboToggleX = 596.0f;
+constexpr float kComboToggleY = 240.0f;
+constexpr float kComboToggleW = 40.0f;
+constexpr float kComboToggleH = 22.0f;
+
 constexpr int kAndroidTradePickerMaxEntries = MAX_CHARACTERS_CLIENT;
 constexpr int kAndroidTradePickerVisibleRows = 6;
 constexpr float kAndroidTradePickerX = 280.0f;
@@ -810,6 +940,11 @@ static UITexture g_uiTex_joystick2;
 static UITexture g_uiTex_balo;
 static UITexture g_uiTex_character;
 static UITexture g_uiTex_setting;
+
+// One per top bar button, in kTopBarActions order. Any that fail to load stay
+// at id 0, which DrawIconButton treats as "draw nothing" - the button keeps its
+// box and text label, so a missing file costs the icon and nothing else.
+static std::array<UITexture, kTopBarButtonCount> g_uiTex_topBar;
 static bool g_uiTexturesLoaded = false;
 
 constexpr float kSkillLineU = 157.0f / 677.0f;
@@ -846,6 +981,52 @@ AndroidUiRect GetVirtualMirrorHotKeyRect(int slot)
         layout.cy - (kVirtualMirrorHotKeyFrameH * 0.5f),
         kVirtualMirrorHotKeyFrameW,
         kVirtualMirrorHotKeyFrameH
+    };
+}
+
+// Right-anchored so the row keeps its edge margin regardless of how many
+// buttons it holds. Slot 0 is the leftmost.
+AndroidUiRect GetTopBarButtonRect(int slot)
+{
+    if (slot < 0 || slot >= kTopBarButtonCount)
+    {
+        return {};
+    }
+
+    const float rowW = (kTopBarButtonCount * kTopBarButtonW)
+                     + ((kTopBarButtonCount - 1) * kTopBarButtonGap);
+    const float rowLeft = 640.0f - kTopBarMarginRight - rowW;
+
+    return {
+        rowLeft + static_cast<float>(slot) * (kTopBarButtonW + kTopBarButtonGap),
+        kTopBarY,
+        kTopBarButtonW,
+        kTopBarButtonH
+    };
+}
+
+float GetTopBarBottomY()
+{
+    return kTopBarY + kTopBarButtonH;
+}
+
+AndroidUiRect GetTopBarCoinChipRect()
+{
+    return {
+        640.0f - kTopBarMarginRight - kTopBarCoinChipW,
+        GetTopBarBottomY() + kTopBarChipGap,
+        kTopBarCoinChipW,
+        kTopBarChipH
+    };
+}
+
+AndroidUiRect GetTopBarLocationChipRect()
+{
+    return {
+        640.0f - kTopBarMarginRight - kTopBarCoinChipW - kTopBarChipGap - kTopBarLocationChipW,
+        GetTopBarBottomY() + kTopBarChipGap,
+        kTopBarLocationChipW,
+        kTopBarChipH
     };
 }
 
@@ -978,7 +1159,10 @@ bool GetAndroidMoveMapWindowPositionInternal(int panelWidth, int panelHeight, in
 
     const int marginX = 12;
     const int topReserved = 72;
-    const int bottomReserved = 66;
+
+    // Was 66 to clear the legacy bottom frame. With the frame gone the window
+    // only has to stay off the very edge of the screen.
+    const int bottomReserved = 10;
     const int preferredY = 78;
     const int centeredX = (640 - panelWidth) / 2;
     const int maxX = std::max(marginX, 640 - panelWidth - marginX);
@@ -993,6 +1177,9 @@ bool GetAndroidMoveMapWindowPositionInternal(int panelWidth, int panelHeight, in
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Bottom HUD 鑺掗埀顑解偓?HP/MP/AG/EXP bars (1/3 screen width, numbers on bar) 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
 // Bars occupy the left 1/3 of the screen (鑺掗垾鍏?13 virtual units), stacked at bottom.
 // Numbers are drawn centered directly on each bar. No blending 鑺掗埀顑解偓?solid opaque.
+// NOTE: these kHud* values belong to the disabled custom-HUD block further down
+// and are not what the game draws. The live HP/MP/SD bars are the kPortrait*
+// block below. Do not add new code against these.
 constexpr float kHudStripY      = 432.0f;   // top of the HUD strip (virtual y)
 constexpr float kHudBarH        =  11.0f;   // height of one bar (tall enough for numbers)
 constexpr float kHudBarGap      =   2.0f;   // vertical gap between bars
@@ -1000,6 +1187,24 @@ constexpr float kHudBarLeft     =   4.0f;   // bar left edge (virtual x)
 constexpr float kHudBarRight    = 218.0f;   // bar right edge  (鑺掗垾鍏?1/3 of 640)
 // Number center X = center of the bar
 constexpr float kHudNumCenterX  = (kHudBarLeft + kHudBarRight) * 0.5f;  // 鑺掗垾鍏?111
+
+// Top-left status panel: portrait on the left, HP/MP/SD stacked to its right.
+// This replaces the orbs and gauges that used to live on the legacy bottom
+// frame, so it is the only place the player can read their health now.
+constexpr float kPortraitPanelX     = 6.0f;
+constexpr float kPortraitPanelY     = 6.0f;
+constexpr float kPortraitAvatarSize = 46.0f;
+constexpr float kPortraitBarLeft    = kPortraitPanelX + kPortraitAvatarSize + 6.0f;
+constexpr float kPortraitBarRight   = 246.0f;
+constexpr float kPortraitBarW       = kPortraitBarRight - kPortraitBarLeft;
+constexpr float kPortraitBarH       = 12.0f;
+constexpr float kPortraitBarGap     = 3.0f;
+constexpr float kPortraitBarTop     = kPortraitPanelY + 4.0f;
+
+// Pet sits under the portrait, matching the reference layout.
+constexpr float kPortraitPetSize    = 26.0f;
+constexpr float kPortraitPetX       = kPortraitPanelX + 2.0f;
+constexpr float kPortraitPetY       = kPortraitPanelY + kPortraitAvatarSize + 4.0f;
 
 // Disabled: the original MU mainframe skill box is back. Keep only joystick
 // custom on mobile and do not draw an extra Android-only skill box on top.
@@ -1009,7 +1214,11 @@ constexpr float kVirtualCurrentSkillBoxY = 431.0f;
 constexpr float kVirtualCurrentSkillBoxW = 32.0f;
 constexpr float kVirtualCurrentSkillBoxH = 38.0f;
 constexpr float kVirtualHudChatBoxX = 226.0f;
-constexpr float kVirtualHudChatBoxY = 400.0f;
+
+// Y was 400 so the box cleared the top of the legacy frame. That frame is gone,
+// so it can drop into the reclaimed strip and stop covering the play area; 418
+// keeps its 52px height just inside the 480 bottom edge.
+constexpr float kVirtualHudChatBoxY = 418.0f;
 constexpr float kVirtualHudChatBoxW = 170.0f;
 constexpr float kVirtualHudChatBoxH = 52.0f;
 
@@ -1114,6 +1323,31 @@ struct AndroidTradePickerState
     SHORT pressedKey = 0;
 };
 
+struct AndroidTargetPickerEntry
+{
+    int characterIndex = -1;
+    SHORT key = 0;
+    char id[MAX_ID_SIZE + 1] = {};
+    int distance2 = 0;
+};
+
+struct AndroidTargetPickerState
+{
+    bool visible = false;
+    int entryCount = 0;
+    std::array<AndroidTargetPickerEntry, kTargetPickerMaxEntries> entries{};
+    uint32_t lastRefreshMs = 0;
+    int scrollOffset = 0;
+    bool dragging = false;
+    bool dragMoved = false;
+    SDL_FingerID dragFingerId = static_cast<SDL_FingerID>(-1);
+    float dragStartY = 0.0f;
+    float dragLastY = 0.0f;
+    SHORT pressedKey = 0;
+};
+
+AndroidTargetPickerState g_androidTargetPicker{};
+
 std::array<ActiveVirtualTouch, 4> g_activeVirtualTouches{};
 std::array<int, kVirtualSkillSlotCount> g_virtualSkillSlots = []()
 {
@@ -1139,10 +1373,148 @@ uint32_t g_virtualLastAssignTapMs = 0;
 uint32_t g_virtualLastMiniMapTapMs = 0;
 uint32_t g_virtualLastZoomTapMs = 0;
 uint32_t g_virtualLastUtilityTapMs = 0;
+// Which arc slot is armed, or -1 for a plain weapon attack. Tapping a skill
+// button sets this; the attack button reads it.
+int g_virtualSelectedSkillSlot = -1;
+
+// Auto-combo. Each press of the attack button advances one step through arc
+// slots 1, 2 and 3, so the Knight combo can be played with a single button.
+// Step 0 is meant to hold the weapon skill.
+//
+// The chain restarts from the opener after a pause, so walking away mid-combo
+// and coming back does not start you halfway through the sequence.
+constexpr int kVirtualComboSlotCount = 3;
+constexpr uint32_t kVirtualComboResetMs = 2500;
+
+bool g_virtualComboEnabled = false;
+int g_virtualComboStep = 0;
+uint32_t g_virtualComboLastMs = 0;
+
+// What the last combo press actually did. Shown next to the toggle because
+// logcat does not come through on these devices, so an on-screen readout is the
+// only way to tell a blocked step from an unbound one.
+enum AndroidComboResult
+{
+    kAndroidComboResultNone = 0,
+    kAndroidComboResultCast,      // skill went out, step advanced
+    kAndroidComboResultWeapon,    // slot empty, swung the weapon instead
+    kAndroidComboResultBlocked,   // skill refused, step held for a retry
+};
+
+int g_androidComboLastResult = kAndroidComboResultNone;
+
+// Aiming a ground-targeted skill. On the desktop client these are cast by
+// pointing at the terrain and right-clicking - the skill reads the global
+// TargetX/TargetY that the mouse pick filled in. There is no pointer on a
+// phone, so the attack button doubles as an aim stick: press and drag to move
+// a reticle over the ground, release to cast there.
+struct AndroidGroundAim
+{
+    bool aiming = false;
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    int skillIndex = -1;
+
+    // Set on release. The cast itself has to wait for the scene phase, where
+    // the camera matrices the terrain pick needs are set up.
+    bool pendingCast = false;
+
+    // Frames still to wait before picking. MoveHero never builds the pick ray
+    // itself - it reads the MouseTarget the render phase produced from
+    // MouseX/MouseY on an earlier frame. So the aim point is parked in
+    // MouseX/MouseY and the pick waits for a render to turn it into a ray.
+    int settleFrames = 0;
+};
+
+AndroidGroundAim g_androidGroundAim{};
+
+// Why the last ground cast did or did not happen. On screen rather than in the
+// log, because logcat does not come through on these devices.
+enum AndroidGroundCastResult
+{
+    kGroundCastNone = 0,
+    kGroundCastOk,          // tile picked, skill sent
+    kGroundCastRefused,     // skill sent but the client refused it
+    kGroundCastNoTile,      // aim point hit no terrain
+    kGroundCastOffMap,      // picked tile outside the map
+    kGroundCastBadSkill,    // armed skill index no longer valid
+};
+
+int g_androidGroundCastResult = kGroundCastNone;
+int g_androidGroundCastTileX = -1;
+int g_androidGroundCastTileY = -1;
+
+// Wall attributes of the last destination tile, with ACTION and HEIGHT masked
+// off - the exact value the teleport branch requires to be zero.
+int g_androidGroundCastWall = -1;
+
+// Which of the client's own gates refused the cast, when one did.
+enum AndroidGroundReason
+{
+    kGroundReasonOk = 0,
+    kGroundReasonSafeZone,    // CanExecuteSkill refuses everything in a safe zone
+    kGroundReasonDemand,      // DemendConditionCheckSkill
+    kGroundReasonUseCond,     // CheckSkillUseCondition
+    kGroundReasonMana,        // CheckMana
+    kGroundReasonNoSkillIdx,  // skill type not present in the skill list
+};
+
+int g_androidGroundCastReason = kGroundReasonOk;
+
+// The screen point the last pick was taken from, so the readout can show
+// whether the drag is being captured separately from whether it resolved.
+int g_androidGroundAimX = -1;
+int g_androidGroundAimY = -1;
+
+// Hero state at the moment of the cast, captured because all three decide
+// whether the teleport branch is reachable at all.
+int g_androidGroundCastClass = -1;
+int g_androidGroundCastAction = -1;
+int g_androidGroundCastMoving = -1;
+int g_androidGroundCastTpState = -1;
+int g_androidGroundCastAlpha = -1;
+int g_androidGroundCastLatch = -1;
+int g_androidGroundCastLatchAfter = -1;
+int g_androidGroundCastDelay = -1;
+int g_androidGroundCastReqChar = -1;
+int g_androidGroundCastHaveChar = -1;
+int g_androidGroundCastReqEnergy = -1;
+int g_androidGroundCastHaveEnergy = -1;
+
+// When the global teleport latch was first seen set. Used to recognise one that
+// is never going to be cleared, because the reply that would clear it is not
+// coming.
+uint32_t g_androidTeleportLatchSinceMs = 0;
+constexpr uint32_t kAndroidTeleportLatchStuckMs = 4000;
+int g_androidGroundCastFromX = -1;
+int g_androidGroundCastFromY = -1;
+
 bool g_virtualRightPanelUtilityMode = false;
 bool g_virtualHudChatPinned = false;
 PendingAndroidLongPressRightClick g_androidLongPressRightClick{};
 AndroidTradePickerState g_androidTradePicker{};
+
+// An explicitly chosen combat target that survives between attacks.
+//
+// This cannot live in SelectedCharacter. SelectObjects() in ZzzInterface runs
+// every frame ahead of the overlay and unconditionally clears that global,
+// then re-derives it from a mouse ray - and on touch the "mouse" is wherever
+// the player last tapped. So the choice is kept here and pushed back into
+// SelectedCharacter at the moment each attack fires.
+//
+// Keyed on CHARACTER::Key rather than the array index, because client indices
+// are recycled as monsters die and respawn; cachedIndex is only a fast path and
+// is always revalidated against the key.
+struct AndroidTargetLock
+{
+    bool  active = false;
+    SHORT key = 0;
+    int   cachedIndex = -1;
+    char  id[MAX_ID_SIZE + 1] = {};
+};
+
+AndroidTargetLock g_androidTargetLock{};
 
 void CancelAndroidTradeAutoMove(const char* reason);
 
@@ -1792,6 +2164,17 @@ void LoadVirtualSkillSlots()
                         loadedVersion = version;
                         savedCountLoaded = savedCount;
                     }
+
+                    // Version 6 appends the auto-combo flag. Older files simply
+                    // stop here and leave it at its default of off.
+                    if (readOk && version >= 6)
+                    {
+                        int comboEnabled = 0;
+                        if (in >> comboEnabled)
+                        {
+                            g_virtualComboEnabled = (comboEnabled != 0);
+                        }
+                    }
                 }
             }
         }
@@ -1859,11 +2242,12 @@ void SaveVirtualSkillSlots()
     }
 
     RefreshVirtualSkillTypesFromSlots();
-    out << "5 " << kVirtualSkillSlotCount;
+    out << "6 " << kVirtualSkillSlotCount;
     for (int slot = 0; slot < kVirtualSkillSlotCount; ++slot)
     {
         out << ' ' << g_virtualSkillSlots[slot];
     }
+    out << ' ' << (g_virtualComboEnabled ? 1 : 0);
     out << '\n';
     g_virtualSkillSlotsDirty = false;
     const std::string slotText = BuildVirtualSkillArrayString(g_virtualSkillSlots);
@@ -2626,6 +3010,11 @@ bool IsVirtualUtilityButtonsAvailable();
 
 bool HitTestVirtualChatUtilityButton(float uiX, float uiY)
 {
+    if (!kShowVirtualChatQuickButton)
+    {
+        return false;
+    }
+
     if (!IsVirtualUtilityButtonsAvailable())
     {
         return false;
@@ -3132,6 +3521,266 @@ bool IsValidAutoCombatTarget(int characterIndex)
     return true;
 }
 
+// MU Helper rewrites SelectedCharacter from its own scan on a 250ms tick, so a
+// manual lock and the bot would pull against each other every frame. The bot
+// wins: it is an explicit "play for me" mode, and a lock the player cannot see
+// taking effect is worse than no lock at all.
+bool IsAndroidMuHelperRunning()
+{
+    if (g_pNewUISystem == nullptr)
+    {
+        return false;
+    }
+
+    SEASON3B::CNewUIMuHelper* helper = g_pNewUISystem->Get_pNewUIMuHelper();
+    return helper != nullptr && helper->DataAutoMu.Started;
+}
+
+void ClearAndroidTargetLock(const char* reason)
+{
+    if (!g_androidTargetLock.active)
+    {
+        return;
+    }
+
+    LOGI("TargetLock: cleared (%s) target=%s", reason != nullptr ? reason : "?", g_androidTargetLock.id);
+
+    g_androidTargetLock = AndroidTargetLock{};
+}
+
+// Returns the locked character's current index, or -1 once it is gone. Clears
+// itself in the latter case so a dead target does not keep being looked up.
+int ResolveAndroidLockedTargetIndex()
+{
+    if (!g_androidTargetLock.active)
+    {
+        return -1;
+    }
+
+    // Checked on resolve rather than only when the helper starts, so it also
+    // covers the helper being started by the server or by a hotkey.
+    if (IsAndroidMuHelperRunning())
+    {
+        ClearAndroidTargetLock("mu-helper-running");
+        return -1;
+    }
+
+    const int cached = g_androidTargetLock.cachedIndex;
+    if (cached >= 0
+        && cached < MAX_CHARACTERS_CLIENT
+        && CharactersClient != nullptr
+        && CharactersClient[cached].Key == g_androidTargetLock.key
+        && IsValidAutoCombatTarget(cached))
+    {
+        return cached;
+    }
+
+    const int resolved = FindCharacterIndex(g_androidTargetLock.key);
+    if (resolved >= 0 && resolved < MAX_CHARACTERS_CLIENT && IsValidAutoCombatTarget(resolved))
+    {
+        g_androidTargetLock.cachedIndex = resolved;
+        return resolved;
+    }
+
+    ClearAndroidTargetLock("target-gone");
+    return -1;
+}
+
+bool IsAndroidTargetLockActive()
+{
+    return ResolveAndroidLockedTargetIndex() >= 0;
+}
+
+void SetAndroidTargetLock(int characterIndex)
+{
+    if (!IsValidAutoCombatTarget(characterIndex) || IsAndroidMuHelperRunning())
+    {
+        return;
+    }
+
+    const CHARACTER* target = &CharactersClient[characterIndex];
+
+    g_androidTargetLock.active = true;
+    g_androidTargetLock.key = target->Key;
+    g_androidTargetLock.cachedIndex = characterIndex;
+
+    memcpy(g_androidTargetLock.id, target->ID, MAX_ID_SIZE);
+    g_androidTargetLock.id[MAX_ID_SIZE] = '\0';
+
+    LOGI("TargetLock: set target=%s key=%d index=%d",
+         g_androidTargetLock.id,
+         static_cast<int>(g_androidTargetLock.key),
+         characterIndex);
+}
+
+//========================= select-target picker =============================
+
+// Defined below, alongside the other targeting predicates.
+bool IsVirtualPkTargetingEnabled();
+
+int GetAndroidTargetPickerRowCount()
+{
+    if (g_androidTargetPicker.entryCount <= 0)
+    {
+        return 1;
+    }
+
+    return std::min(g_androidTargetPicker.entryCount, kTargetPickerVisibleRows);
+}
+
+AndroidUiRect GetAndroidTargetPickerRect()
+{
+    return {
+        kTargetPickerX,
+        kTargetPickerY,
+        kTargetPickerW,
+        kTargetPickerHeaderH
+            + (static_cast<float>(GetAndroidTargetPickerRowCount()) * kTargetPickerRowH)
+            + kTargetPickerFooterH
+    };
+}
+
+AndroidUiRect GetAndroidTargetPickerRowRect(int row)
+{
+    return {
+        kTargetPickerX + 6.0f,
+        kTargetPickerY + kTargetPickerHeaderH + (static_cast<float>(row) * kTargetPickerRowH),
+        kTargetPickerW - 12.0f,
+        kTargetPickerRowH - 2.0f
+    };
+}
+
+AndroidUiRect GetAndroidTargetPickerFooterRect()
+{
+    const AndroidUiRect rect = GetAndroidTargetPickerRect();
+    return {
+        rect.x + 6.0f,
+        rect.y + rect.h - kTargetPickerFooterH + 2.0f,
+        rect.w - 12.0f,
+        kTargetPickerFooterH - 6.0f
+    };
+}
+
+AndroidUiRect GetComboToggleRect()
+{
+    return { kComboToggleX, kComboToggleY, kComboToggleW, kComboToggleH };
+}
+
+AndroidUiRect GetTargetSelectButtonRect()
+{
+    return {
+        kTargetSelectButtonCx - kTargetSelectButtonRadius,
+        kTargetSelectButtonCy - kTargetSelectButtonRadius,
+        kTargetSelectButtonRadius * 2.0f,
+        kTargetSelectButtonRadius * 2.0f
+    };
+}
+
+void ClampAndroidTargetPickerScroll()
+{
+    const int maxOffset = std::max(0, g_androidTargetPicker.entryCount - kTargetPickerVisibleRows);
+    g_androidTargetPicker.scrollOffset = std::clamp(g_androidTargetPicker.scrollOffset, 0, maxOffset);
+}
+
+bool IsAndroidTargetPickerCandidate(int characterIndex)
+{
+    if (!IsValidAutoCombatTarget(characterIndex) || Hero == nullptr)
+    {
+        return false;
+    }
+
+    const CHARACTER* c = &CharactersClient[characterIndex];
+
+    // Other players only count when PK targeting is on, so the list does not
+    // offer targets an attack would refuse to hit.
+    if (c->Object.Kind == KIND_PLAYER && !IsVirtualPkTargetingEnabled())
+    {
+        return false;
+    }
+
+    const int dx = c->PositionX - Hero->PositionX;
+    const int dy = c->PositionY - Hero->PositionY;
+    const int dist2 = (dx * dx) + (dy * dy);
+
+    return dist2 <= static_cast<int>(kTargetPickerRangeTiles * kTargetPickerRangeTiles);
+}
+
+// Nearest first. Insertion into a fixed array rather than push_back plus sort:
+// this runs while the panel is open and 16 entries makes the shift trivial,
+// with no per-refresh allocation.
+void RefreshAndroidTargetPickerEntries(bool force)
+{
+    const uint32_t nowMs = MU_MobileGetTicks();
+    if (!force && (nowMs - g_androidTargetPicker.lastRefreshMs) < kTargetPickerRefreshMs)
+    {
+        return;
+    }
+    g_androidTargetPicker.lastRefreshMs = nowMs;
+
+    g_androidTargetPicker.entryCount = 0;
+
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return;
+    }
+
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        if (!IsAndroidTargetPickerCandidate(i))
+        {
+            continue;
+        }
+
+        const CHARACTER* c = &CharactersClient[i];
+        const int dx = c->PositionX - Hero->PositionX;
+        const int dy = c->PositionY - Hero->PositionY;
+
+        AndroidTargetPickerEntry entry;
+        entry.characterIndex = i;
+        entry.key = c->Key;
+        entry.distance2 = (dx * dx) + (dy * dy);
+        memcpy(entry.id, c->ID, MAX_ID_SIZE);
+        entry.id[MAX_ID_SIZE] = '\0';
+
+        int pos = g_androidTargetPicker.entryCount;
+        while (pos > 0 && g_androidTargetPicker.entries[pos - 1].distance2 > entry.distance2)
+        {
+            if (pos < kTargetPickerMaxEntries)
+            {
+                g_androidTargetPicker.entries[pos] = g_androidTargetPicker.entries[pos - 1];
+            }
+            --pos;
+        }
+
+        if (pos < kTargetPickerMaxEntries)
+        {
+            g_androidTargetPicker.entries[pos] = entry;
+            if (g_androidTargetPicker.entryCount < kTargetPickerMaxEntries)
+            {
+                ++g_androidTargetPicker.entryCount;
+            }
+        }
+    }
+
+    ClampAndroidTargetPickerScroll();
+}
+
+void HideAndroidTargetPicker()
+{
+    g_androidTargetPicker.visible = false;
+    g_androidTargetPicker.dragging = false;
+    g_androidTargetPicker.dragMoved = false;
+    g_androidTargetPicker.dragFingerId = static_cast<SDL_FingerID>(-1);
+    g_androidTargetPicker.pressedKey = 0;
+}
+
+void ShowAndroidTargetPicker()
+{
+    g_androidTargetPicker.visible = true;
+    g_androidTargetPicker.scrollOffset = 0;
+    RefreshAndroidTargetPickerEntries(true);
+}
+
 bool IsTargetAttackable(int characterIndex)
 {
     if (!IsValidAutoCombatTarget(characterIndex))
@@ -3278,6 +3927,16 @@ void EnsureCombatTarget()
         return;
     }
 
+    // An explicit lock outranks proximity. This has to come before the
+    // IsTargetAttackable early-out, or a stale SelectedCharacter that happens
+    // to still be valid would win over the player's actual choice.
+    const int lockedTarget = ResolveAndroidLockedTargetIndex();
+    if (lockedTarget >= 0)
+    {
+        SelectedCharacter = lockedTarget;
+        return;
+    }
+
     if (IsTargetAttackable(SelectedCharacter))
     {
         return;
@@ -3305,6 +3964,15 @@ void EnsureOffensiveSkillTarget()
     if (heroIdx >= 0 && SelectedCharacter == heroIdx)
     {
         SelectedCharacter = -1;
+    }
+
+    // After the hero-self sanitize above, but before the IsTargetAttackable
+    // early-out below, for the same reason as in EnsureCombatTarget.
+    const int lockedTarget = ResolveAndroidLockedTargetIndex();
+    if (lockedTarget >= 0)
+    {
+        SelectedCharacter = lockedTarget;
+        return;
     }
 
     if (IsTargetAttackable(SelectedCharacter))
@@ -3387,6 +4055,16 @@ void EnsureNormalAttackTarget()
     if (heroIdx >= 0 && SelectedCharacter == heroIdx)
     {
         SelectedCharacter = -1;
+    }
+
+    // Deliberately not range-limited the way the auto-acquire path below is: if
+    // the player picked this target on purpose, walking a little too far away
+    // should not silently swap them onto whatever is nearest.
+    const int lockedTarget = ResolveAndroidLockedTargetIndex();
+    if (lockedTarget >= 0)
+    {
+        SelectedCharacter = lockedTarget;
+        return;
     }
 
     if (IsTargetAttackable(SelectedCharacter)
@@ -4236,6 +4914,25 @@ bool AndroidTriggerNormalAttackButtonInternal()
     return SelectedCharacter != -1 || selectedBefore != SelectedCharacter;
 }
 
+// Skills that are cast at a point on the ground rather than at a character.
+// They read the global TargetX/TargetY, so they need the aim flow rather than
+// a selected target.
+bool IsGroundTargetedSkillType(int skillType)
+{
+    return skillType == AT_SKILL_TELEPORT
+        || skillType == AT_SKILL_TELEPORT_B;
+}
+
+bool IsGroundTargetedSkillIndex(int skillIndex)
+{
+    if (CharacterAttribute == nullptr || !IsValidSkillIndex(skillIndex))
+    {
+        return false;
+    }
+
+    return IsGroundTargetedSkillType(CharacterAttribute->Skill[skillIndex]);
+}
+
 bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
 {
     if (!IsVirtualPadAvailable()
@@ -4279,9 +4976,25 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
     // (gObjSkillNovaCheckTime), so a single tap still gives a full Nova.
     const bool isNovaSkill = (rawSkillType == AT_SKILL_BLAST_HELL);
 
+    const bool groundSkill = IsGroundTargetedSkillType(rawSkillType);
+
     if (supportSkill)
     {
         SelectedCharacter = GetHeroCharacterIndex();
+    }
+    else if (groundSkill)
+    {
+        // Must be -1, not the hero. AttackWizard calls CheckTarget before its
+        // switch, and CheckTarget overwrites TargetX/TargetY with the selected
+        // character's own position whenever one is set. Pointing it at the hero
+        // - which is what this used to do, to get past the no-target check
+        // below - silently replaced the aimed tile with the tile the player was
+        // already standing on, and the teleport then failed its wall test.
+        //
+        // With no selection, CheckTarget instead runs the terrain pick, which
+        // resolves the ray built from the aim point. That is the same path the
+        // desktop client takes on a right click.
+        SelectedCharacter = -1;
     }
     else
     {
@@ -4296,7 +5009,9 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
         }
     }
 
-    if (SelectedCharacter < 0)
+    // Ground skills are exempt: they cast at a map tile and having no character
+    // selected is the correct state for them, not a failure.
+    if (SelectedCharacter < 0 && !groundSkill)
     {
         LOGI(
             "VirtualPad: hotkey skill skipped skillIndex=%d skillType=%d reason=no-target support=%d",
@@ -4349,9 +5064,360 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
 
 }
 
+// Defined below, next to the other overlay slot helpers.
+int GetVirtualOverlayHotKeySkillIndex(int visualSlot);
+
+// The combo is a Knight mechanic, so the setting only takes effect on that
+// class line. Leaving it enabled on another character is harmless - it simply
+// does nothing.
+bool IsAndroidComboClass()
+{
+    return Hero != nullptr
+        && gCharacterManager.GetBaseClass(Hero->Class) == CLASS_KNIGHT;
+}
+
+bool IsAndroidComboActive()
+{
+    return g_virtualComboEnabled && IsAndroidComboClass();
+}
+
+// Paired with RenderComboToggle further down; defined here so the input chain,
+// which comes first in the file, can reach it.
+bool HitTestComboToggle(float uiX, float uiY)
+{
+    if (!IsVirtualPadAvailable() || !IsAndroidComboClass())
+    {
+        return false;
+    }
+
+    return HitTestAndroidUiRect(uiX, uiY, GetComboToggleRect());
+}
+
+void CancelAndroidGroundAim(const char* reason)
+{
+    if (!g_androidGroundAim.aiming && !g_androidGroundAim.pendingCast)
+    {
+        return;
+    }
+
+    LOGI("VirtualPad: ground aim cancelled (%s)", reason != nullptr ? reason : "?");
+    g_androidGroundAim = AndroidGroundAim{};
+}
+
+// Runs from the scene phase, straight after MoveHero, because it needs the same
+// camera matrices MoveHero's own terrain pick relies on. Doing this from the
+// touch handler would run it before the frame set those up.
+void UpdateAndroidGroundAimCast()
+{
+    if (!g_androidGroundAim.pendingCast)
+    {
+        return;
+    }
+
+    const int skillIndex = g_androidGroundAim.skillIndex;
+    const float aimUiX = g_androidGroundAim.uiX;
+    const float aimUiY = g_androidGroundAim.uiY;
+
+    if (!IsVirtualPadAvailable() || Hero == nullptr || !IsValidSkillIndex(skillIndex))
+    {
+        g_androidGroundCastResult = kGroundCastBadSkill;
+        g_androidGroundAim = AndroidGroundAim{};
+        return;
+    }
+
+    // MouseX/MouseY are in the same 640x480 space as the overlay on Android
+    // (UpdateAndroidScreenMetrics pins DisplayWin/DisplayHeight), so the aim
+    // point can be parked there directly.
+    //
+    // Building the ray here with CreateScreenVector does not work: this runs in
+    // the move phase, where the camera matrices it reads are not the ones the
+    // frame renders with, so every aim point collapsed onto the same tile. The
+    // ray has to come from the render phase, which is why the pick waits.
+    MouseX = static_cast<int>(aimUiX);
+    MouseY = static_cast<int>(aimUiY);
+
+    g_androidGroundAimX = MouseX;
+    g_androidGroundAimY = MouseY;
+
+    if (g_androidGroundAim.settleFrames > 0)
+    {
+        --g_androidGroundAim.settleFrames;
+        return;
+    }
+
+    g_androidGroundAim = AndroidGroundAim{};
+
+    // MouseX/MouseY are deliberately left at the aim point. No button is held,
+    // so a parked pointer does nothing, and restoring the old value here would
+    // undo the very thing the pick depends on.
+
+    // MouseTarget now describes the ray through the aim point. This pick is
+    // only to report where the shot is going - CheckTarget inside AttackWizard
+    // runs the identical pair of calls and is what actually sets TargetX/Y, so
+    // nothing here is load bearing.
+    RenderTerrain(true);
+    const bool picked = RenderTerrainTile(SelectXF, SelectYF, (int)SelectXF, (int)SelectYF, 1.f, 1, true);
+
+    if (picked)
+    {
+        const int tileX = static_cast<int>(CollisionPosition[0] / TERRAIN_SCALE);
+        const int tileY = static_cast<int>(CollisionPosition[1] / TERRAIN_SCALE);
+
+        g_androidGroundCastTileX = tileX;
+        g_androidGroundCastTileY = tileY;
+
+        if (tileX >= 0 && tileX < 256 && tileY >= 0 && tileY < 256)
+        {
+            TargetX = tileX;
+            TargetY = tileY;
+
+            // The teleport branch in AttackWizard drops the cast without a word
+            // unless the destination tile has no wall attributes left after
+            // ACTION and HEIGHT are masked off - so a safe zone, or any no-move
+            // ground, silently does nothing. Record the same value it tests so
+            // the readout can say that is what happened.
+            int wall = TerrainWall[TERRAIN_INDEX_REPEAT(tileX, tileY)];
+            if ((wall & TW_ACTION) == TW_ACTION) wall -= TW_ACTION;
+            if ((wall & TW_HEIGHT) == TW_HEIGHT) wall -= TW_HEIGHT;
+            g_androidGroundCastWall = wall;
+
+            // Evaluate the same gates CanExecuteSkill and ExecuteSkill apply, so
+            // a refusal names the reason instead of just failing. Read-only:
+            // these are all predicates, none of them change state.
+            const int skillType = (CharacterAttribute != nullptr)
+                ? CharacterAttribute->Skill[skillIndex]
+                : -1;
+
+            g_androidGroundCastReason = kGroundReasonOk;
+
+            if (Hero->SafeZone)
+            {
+                g_androidGroundCastReason = kGroundReasonSafeZone;
+            }
+            else if (skillType > 0 && !gSkillManager.DemendConditionCheckSkill(static_cast<WORD>(skillType)))
+            {
+                g_androidGroundCastReason = kGroundReasonDemand;
+            }
+            else if (skillType > 0 && !CheckSkillUseCondition(&Hero->Object, skillType))
+            {
+                g_androidGroundCastReason = kGroundReasonUseCond;
+            }
+            else if (skillType > 0 && !CheckMana(Hero, skillType))
+            {
+                g_androidGroundCastReason = kGroundReasonMana;
+            }
+            else if (g_pSkillList != nullptr && g_pSkillList->GetSkillIndex(skillType) == -1)
+            {
+                g_androidGroundCastReason = kGroundReasonNoSkillIdx;
+            }
+
+            // Captured before the cast. ExecuteSkill refuses outright unless the
+            // hero is in one of a list of standing actions, and its return value
+            // is SkillSuccess && !Movement - so a moving hero reports failure
+            // even when the skill did go out. Class matters too: the teleport
+            // branch lives in AttackWizard, which only runs for the wizard,
+            // dark and summoner lines.
+            g_androidGroundCastClass = gCharacterManager.GetBaseClass(Hero->Class);
+            g_androidGroundCastAction = Hero->Object.CurrentAction;
+            g_androidGroundCastMoving = Hero->Movement ? 1 : 0;
+
+            // The last two gates inside the teleport branch itself. A teleport
+            // state left over from an earlier attempt, or a faded character,
+            // both make it skip the send without a word.
+            g_androidGroundCastTpState = Hero->Object.Teleport;
+            g_androidGroundCastAlpha = static_cast<int>(Hero->Object.Alpha * 100.0f);
+
+            // Position before the cast, so the next frame can tell whether the
+            // hero actually moved. The return value below cannot: ExecuteSkill
+            // reports SkillSuccess, which only becomes true when the server
+            // replies, so it is always false for a skill sent this instant.
+            g_androidGroundCastFromX = Hero->PositionX;
+            g_androidGroundCastFromY = Hero->PositionY;
+
+            // The global teleport latch. SendRequestMagicTeleport sets it and
+            // refuses every later request while it is set; only a server reply
+            // (ReceiveTeleport / ReceiveMagic / ReceiveRevival / map change)
+            // clears it. If the server ever ignores a request - an unreachable
+            // destination, say - it stays set and teleport is dead for the rest
+            // of the session with no message of any kind.
+            //
+            // Clear it if it has been stuck well past any plausible round trip.
+            // A real reply would have arrived long before this.
+            {
+                const uint32_t nowMs = MU_MobileGetTicks();
+
+                if (!Teleport)
+                {
+                    g_androidTeleportLatchSinceMs = 0;
+                }
+                else
+                {
+                    if (g_androidTeleportLatchSinceMs == 0)
+                    {
+                        g_androidTeleportLatchSinceMs = nowMs;
+                    }
+                    else if ((nowMs - g_androidTeleportLatchSinceMs) > kAndroidTeleportLatchStuckMs)
+                    {
+                        LOGI("VirtualPad: clearing stuck teleport latch after %ums",
+                             nowMs - g_androidTeleportLatchSinceMs);
+                        Teleport = false;
+                        g_androidTeleportLatchSinceMs = 0;
+                    }
+                }
+
+                g_androidGroundCastLatch = Teleport ? 1 : 0;
+            }
+
+            // AttackWizard has its own gates before the teleport case, and they
+            // all return silently. CheckMana - which gate-ok above covers -
+            // checks mana and AG but NOT energy, so this one has been invisible
+            // the whole time.
+            if (skillType > 0 && CharacterAttribute != nullptr)
+            {
+                int reqEnergy = 0;
+                gSkillManager.GetSkillInformation_Energy(skillType, &reqEnergy);
+                g_androidGroundCastReqEnergy = reqEnergy;
+                g_androidGroundCastHaveEnergy =
+                    CharacterAttribute->Energy + CharacterAttribute->AddEnergy;
+            }
+
+            const bool sent = AndroidTriggerHotKeySkillTapInternal(skillIndex);
+            g_androidGroundCastResult = sent ? kGroundCastOk : kGroundCastRefused;
+
+            // CheckSkillDelay is the last silent return before AttackWizard's
+            // switch, and it fails for two reasons that nothing reports: the
+            // skill still being on cooldown, or a charisma requirement the
+            // character cannot meet. Both are read here rather than guessed.
+            if (CharacterAttribute != nullptr && skillType > 0)
+            {
+                g_androidGroundCastDelay = CharacterAttribute->SkillDelay[skillIndex];
+
+                int reqCharisma = 0;
+                gSkillManager.GetSkillInformation_Charisma(skillType, &reqCharisma);
+                g_androidGroundCastReqChar = reqCharisma;
+                g_androidGroundCastHaveChar =
+                    CharacterAttribute->Charisma + CharacterAttribute->AddCharisma;
+            }
+
+            // The one hard fact left. SendRequestMagicTeleport sets the latch
+            // as it writes the packet, so reading it immediately afterwards
+            // says whether a packet was actually produced:
+            //   1 -> the request went out, so anything wrong is server side
+            //   0 -> the macro refused, nothing was ever sent
+            g_androidGroundCastLatchAfter = Teleport ? 1 : 0;
+
+            LOGI("VirtualPad: ground cast skillIndex=%d type=%d tile=(%d,%d) wall=%d reason=%d sent=%d",
+                 skillIndex, skillType, TargetX, TargetY, wall, g_androidGroundCastReason, sent ? 1 : 0);
+        }
+        else
+        {
+            g_androidGroundCastResult = kGroundCastOffMap;
+            LOGI("VirtualPad: ground cast rejected, tile out of range (%d,%d)", tileX, tileY);
+        }
+    }
+    else
+    {
+        g_androidGroundCastResult = kGroundCastNoTile;
+        LOGI("VirtualPad: ground cast rejected, no terrain under aim point");
+    }
+}
+
+// Fires whatever the attack button should fire right now. Three cases, in
+// order: an active combo advances one step, an armed skill slot casts that
+// skill, and otherwise it is a plain weapon attack.
+//
+// Shared by the tap path and the hold-to-repeat path so both behave the same.
+bool TriggerVirtualAttackButtonPress()
+{
+    if (!kShowVirtualAttackButton)
+    {
+        return false;
+    }
+
+    if (IsAndroidComboActive())
+    {
+        const uint32_t nowMs = MU_MobileGetTicks();
+
+        // Lapsed since the last press, so the chain is cold - start from the
+        // opener rather than resuming halfway through. Updated on every press,
+        // including failed ones, so retrying a blocked step does not itself
+        // time the combo out.
+        if ((nowMs - g_virtualComboLastMs) > kVirtualComboResetMs)
+        {
+            g_virtualComboStep = 0;
+        }
+        g_virtualComboLastMs = nowMs;
+
+        const int step = g_virtualComboStep;
+        const int skillIndex = GetVirtualOverlayHotKeySkillIndex(step);
+
+        // Highlight follows the chain so the player can see which step is up.
+        g_virtualSelectedSkillSlot = step;
+
+        // An empty slot is the weapon step by design - slot 1 is meant to hold
+        // the weapon skill, and "no skill bound" means a plain swing.
+        if (!IsValidSkillIndex(skillIndex))
+        {
+            g_virtualComboStep = (step + 1) % kVirtualComboSlotCount;
+            g_androidComboLastResult = kAndroidComboResultWeapon;
+            return AndroidTriggerNormalAttackButtonInternal();
+        }
+
+        if (Hero != nullptr)
+        {
+            Hero->CurrentSkill = static_cast<BYTE>(skillIndex);
+        }
+
+        if (AndroidTriggerHotKeySkillTapInternal(skillIndex))
+        {
+            // Advance only once the skill actually went out.
+            g_virtualComboStep = (step + 1) % kVirtualComboSlotCount;
+            g_androidComboLastResult = kAndroidComboResultCast;
+            return true;
+        }
+
+        // The skill was refused - cooldown, out of range, or nothing targeted.
+        //
+        // Hold the step rather than advancing: burning it here is why the chain
+        // never finished, because the next press moved on while this skill had
+        // not landed. And deliberately do not swing the weapon instead, since a
+        // normal attack in the middle of a combo resets the server's chain.
+        g_androidComboLastResult = kAndroidComboResultBlocked;
+        LOGI("VirtualPad: combo step=%d skillIndex=%d refused, holding step", step, skillIndex);
+        return false;
+    }
+
+    const int slotToFire = g_virtualSelectedSkillSlot;
+
+    if (slotToFire >= 0 && slotToFire < kVirtualOverlaySkillSlotCount)
+    {
+        const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(slotToFire);
+
+        // Keep CurrentSkill in step too, so the legacy UI and anything else
+        // reading it agrees with the button that is lit.
+        if (Hero != nullptr && IsValidSkillIndex(hotKeySkillIndex))
+        {
+            Hero->CurrentSkill = static_cast<BYTE>(hotKeySkillIndex);
+        }
+
+        if (AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex))
+        {
+            return true;
+        }
+
+        TriggerVirtualCombat(false, slotToFire);
+        return true;
+    }
+
+    return AndroidTriggerNormalAttackButtonInternal();
+}
+
 int GetVirtualOverlayHotKeySlot(int visualSlot)
 {
-    if (visualSlot < 0 || visualSlot >= kVirtualVisibleSkillButtonCount)
+    // The last button in the arc is the skill selector, not a skill: it owns no
+    // hotkey. Returning -1 here is what keeps it out of the fire and assign
+    // paths, all of which route through this one function.
+    if (visualSlot < 0 || visualSlot >= kVirtualOverlaySkillSlotCount)
     {
         return -1;
     }
@@ -4412,6 +5478,31 @@ bool IsVirtualRightPanelUtilityActionActive(int button)
     default:
         return false;
     }
+}
+
+// True while any real MU window owns the screen. The whole touch overlay hides
+// behind this so its controls never sit on top of the bag, the character sheet
+// or an NPC window, and so taps go to that window instead.
+//
+// Deliberately lists only MU interfaces: the Android trade and target pickers
+// are themselves modal panels, and including them here would make each one hide
+// itself the moment it opened.
+bool IsAndroidGameWindowOpen()
+{
+    if (g_pNewUISystem == nullptr)
+    {
+        return false;
+    }
+
+    return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MuHelper)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MOVEMAP)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_OPTION)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_COMMAND)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND)
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO);
 }
 
 bool IsVirtualRightPanelUtilityWindowVisible()
@@ -4553,6 +5644,28 @@ void TriggerVirtualRightPanelUtilityAction(int button)
     }
 }
 
+// Paired with RenderVirtualTopBar. Returns the utility action for the button
+// under the finger, or -1. Note this gates on IsVirtualUtilityButtonsAvailable
+// rather than the combat/utility mode flag: the top bar is always on screen, it
+// does not belong to the CHG toggle.
+int HitTestVirtualTopBarButton(float uiX, float uiY)
+{
+    if (!IsVirtualUtilityButtonsAvailable() || !IsVirtualPadAvailable())
+    {
+        return -1;
+    }
+
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, GetTopBarButtonRect(slot)))
+        {
+            return kTopBarActions[slot];
+        }
+    }
+
+    return -1;
+}
+
 int HitTestVirtualRightPanelUtilityActionButton(float uiX, float uiY)
 {
     if (!g_virtualRightPanelUtilityMode || !IsVirtualPadAvailable())
@@ -4626,7 +5739,10 @@ bool HandleVirtualRightPanelTap(float uiX, float uiY)
 
 int HitTestVirtualMirrorHotKeySlot(float uiX, float uiY)
 {
-    if (!IsVirtualPadAvailable() || IsVirtualRightPanelUtilityWindowVisible())
+    // No local window guard: hiding the overlay while a MU window is open is
+    // handled once, centrally, by the IsAndroidGameWindowOpen checks in
+    // RenderVirtualPad and HandleVirtualFingerDown.
+    if (!IsVirtualPadAvailable())
     {
         return -1;
     }
@@ -5473,6 +6589,168 @@ bool ShowAndroidFriendPickerFromCommand()
     return ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode::Friend);
 }
 
+bool HandleAndroidTargetPickerFingerDown(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    if (!g_androidTargetPicker.visible)
+    {
+        return false;
+    }
+
+    // Forced, so a row tapped here is matched against what was actually drawn.
+    RefreshAndroidTargetPickerEntries(true);
+
+    const AndroidUiRect pickerRect = GetAndroidTargetPickerRect();
+    if (!HitTestAndroidUiRect(uiX, uiY, pickerRect))
+    {
+        HideAndroidTargetPicker();
+        return true;
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTargetPickerFooterRect()))
+    {
+        HideAndroidTargetPicker();
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
+    g_androidTargetPicker.dragging = false;
+    g_androidTargetPicker.dragMoved = false;
+    g_androidTargetPicker.dragFingerId = static_cast<SDL_FingerID>(-1);
+    g_androidTargetPicker.pressedKey = 0;
+
+    for (int row = 0; row < GetAndroidTargetPickerRowCount(); ++row)
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTargetPickerRowRect(row)))
+        {
+            const int entryIndex = g_androidTargetPicker.scrollOffset + row;
+            if (entryIndex < g_androidTargetPicker.entryCount)
+            {
+                g_androidTargetPicker.dragging = true;
+                g_androidTargetPicker.dragFingerId = touch.fingerId;
+                g_androidTargetPicker.dragStartY = uiY;
+                g_androidTargetPicker.dragLastY = uiY;
+                g_androidTargetPicker.pressedKey = g_androidTargetPicker.entries[entryIndex].key;
+            }
+            return true;
+        }
+    }
+
+    return true;
+}
+
+bool HandleAndroidTargetPickerFingerMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (!g_androidTargetPicker.visible
+        || !g_androidTargetPicker.dragging
+        || g_androidTargetPicker.dragFingerId != touch.fingerId)
+    {
+        return false;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+
+    // Past this much travel the gesture is a scroll, and finger-up must not
+    // also select the row it started on.
+    const float totalDy = uiY - g_androidTargetPicker.dragStartY;
+    if ((totalDy * totalDy) > 36.0f)
+    {
+        g_androidTargetPicker.dragMoved = true;
+    }
+
+    const float dy = uiY - g_androidTargetPicker.dragLastY;
+    const int steps = static_cast<int>(std::fabs(dy) / kTargetPickerRowH);
+    if (steps > 0)
+    {
+        if (dy < 0.0f)
+        {
+            g_androidTargetPicker.scrollOffset += steps;
+            g_androidTargetPicker.dragLastY -= static_cast<float>(steps) * kTargetPickerRowH;
+        }
+        else
+        {
+            g_androidTargetPicker.scrollOffset -= steps;
+            g_androidTargetPicker.dragLastY += static_cast<float>(steps) * kTargetPickerRowH;
+        }
+        ClampAndroidTargetPickerScroll();
+    }
+
+    return true;
+}
+
+bool HandleAndroidTargetPickerFingerUp(const SDL_TouchFingerEvent& touch)
+{
+    if (!g_androidTargetPicker.dragging
+        || g_androidTargetPicker.dragFingerId != touch.fingerId)
+    {
+        return false;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+
+    const SHORT pressedKey = g_androidTargetPicker.pressedKey;
+    const bool shouldSelect = !g_androidTargetPicker.dragMoved && pressedKey != 0;
+
+    g_androidTargetPicker.dragging = false;
+    g_androidTargetPicker.dragMoved = false;
+    g_androidTargetPicker.dragFingerId = static_cast<SDL_FingerID>(-1);
+    g_androidTargetPicker.pressedKey = 0;
+
+    if (!shouldSelect || !g_androidTargetPicker.visible)
+    {
+        return true;
+    }
+
+    RefreshAndroidTargetPickerEntries(true);
+
+    for (int row = 0; row < GetAndroidTargetPickerRowCount(); ++row)
+    {
+        const int entryIndex = g_androidTargetPicker.scrollOffset + row;
+        if (entryIndex >= g_androidTargetPicker.entryCount
+            || g_androidTargetPicker.entries[entryIndex].key != pressedKey)
+        {
+            continue;
+        }
+
+        // Only if the finger is still on the row it went down on.
+        if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTargetPickerRowRect(row)))
+        {
+            SetAndroidTargetLock(g_androidTargetPicker.entries[entryIndex].characterIndex);
+            HideAndroidTargetPicker();
+            PlayBuffer(SOUND_CLICK01);
+        }
+        return true;
+    }
+
+    return true;
+}
+
+// Tap with no lock opens the list; tap while locked releases it without
+// reopening, so a second tap is "let go" and a third starts a new choice.
+bool HandleTargetSelectButtonTap()
+{
+    if (IsAndroidTargetLockActive())
+    {
+        ClearAndroidTargetLock("button-toggle");
+        HideAndroidTargetPicker();
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
+    if (g_androidTargetPicker.visible)
+    {
+        HideAndroidTargetPicker();
+        return true;
+    }
+
+    ShowAndroidTargetPicker();
+    PlayBuffer(SOUND_CLICK01);
+    return true;
+}
+
 bool HandleAndroidTradePickerFingerDown(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
 {
     if (!g_androidTradePicker.visible)
@@ -5673,6 +6951,13 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Early, beside the trade picker: while the panel is open it owns every
+    // touch inside itself, before any world or pad control sees it.
+    if (g_androidTargetPicker.visible && HandleAndroidTargetPickerFingerDown(touch, uiX, uiY))
+    {
+        return true;
+    }
+
     if (g_androidTradePicker.autoMoving)
     {
         if (HitTestMiniMapToggleButton(uiX, uiY) || HitTestMapButton(uiX, uiY))
@@ -5688,10 +6973,33 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return false;
     }
 
+    // Paired with the same check in RenderVirtualPad. The controls are not on
+    // screen while a MU window is open, so returning false here hands the touch
+    // to that window instead of letting an invisible button eat it. This sits
+    // after the picker handlers above, which are windows themselves.
+    if (IsAndroidGameWindowOpen())
+    {
+        return false;
+    }
+
     const int zoomButton = HitTestVirtualZoomButton(uiX, uiY);
     if (zoomButton >= 0)
     {
         return HandleVirtualZoomButtonTap(zoomButton);
+    }
+
+    // Before the top control stack: the labelled bar sits above it in the
+    // corner, and both are in the same region of the screen.
+    const int topBarAction = HitTestVirtualTopBarButton(uiX, uiY);
+    if (topBarAction >= 0)
+    {
+        const uint32_t nowMs = MU_MobileGetTicks();
+        if ((nowMs - g_virtualLastUtilityTapMs) >= kVirtualUtilityButtonCooldownMs)
+        {
+            g_virtualLastUtilityTapMs = nowMs;
+            TriggerVirtualRightPanelUtilityAction(topBarAction);
+        }
+        return true;
     }
 
     if (HandleVirtualTopControlTap(uiX, uiY))
@@ -5711,6 +7019,24 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Ahead of the attack button: GetVirtualButtonHitRadius pads that circle by
+    // 8, so testing it first would let it claim taps meant for this one.
+    if (HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
+    {
+        return HandleTargetSelectButtonTap();
+    }
+
+    if (HitTestComboToggle(uiX, uiY))
+    {
+        g_virtualComboEnabled = !g_virtualComboEnabled;
+        g_virtualComboStep = 0;
+        g_virtualSkillSlotsDirty = true;
+        SaveVirtualSkillSlots();
+        PlayBuffer(SOUND_CLICK01);
+        LOGI("VirtualPad: auto-combo %s", g_virtualComboEnabled ? "on" : "off");
+        return true;
+    }
+
     if (!kShowVirtualAttackButton && !kShowVirtualSkillButtons)
     {
         return HandleVirtualJoystickFingerDown(touch);
@@ -5719,6 +7045,22 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     if (HitTestVirtualAttackButton(uiX, uiY) == kVirtualAttackButton)
     {
         const uint32_t nowMs = MU_MobileGetTicks();
+
+        // A ground-targeted skill needs a map position, which a button press
+        // alone cannot express. Turn the press into a drag-to-aim instead of
+        // firing: no touch slot is claimed, so the hold-repeat loop leaves it
+        // alone and the finger drives the reticle until it lifts.
+        const int armedSkillIndex = GetVirtualOverlayHotKeySkillIndex(g_virtualSelectedSkillSlot);
+        if (IsGroundTargetedSkillIndex(armedSkillIndex))
+        {
+            g_androidGroundAim.aiming = true;
+            g_androidGroundAim.pendingCast = false;
+            g_androidGroundAim.fingerId = touch.fingerId;
+            g_androidGroundAim.uiX = uiX;
+            g_androidGroundAim.uiY = uiY;
+            g_androidGroundAim.skillIndex = armedSkillIndex;
+            return true;
+        }
 
         const int slot = AcquireActiveVirtualTouchSlot(touch.fingerId);
         if (slot >= 0)
@@ -5729,7 +7071,7 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
             g_activeVirtualTouches[slot].lastRepeatMs = g_activeVirtualTouches[slot].downMs;
         }
 
-        AndroidTriggerNormalAttackButtonInternal();
+        TriggerVirtualAttackButtonPress();
         return true;
     }
 
@@ -5737,6 +7079,15 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     if (skillButton >= kVirtualSkillButtonBase)
     {
         const int skillSlot = skillButton - kVirtualSkillButtonBase;
+
+        // The last button in the arc is the picker, not a skill.
+        if (skillSlot == kVirtualSkillSelectorVisualSlot)
+        {
+            ToggleVirtualSkillPickerByTouch();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
         const int hotKeySlot = GetVirtualOverlayHotKeySlot(skillSlot);
         const uint32_t nowMs = MU_MobileGetTicks();
         const int pendingSkill = GetPendingVirtualAssignSkillIndex(nowMs);
@@ -5759,20 +7110,30 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         }
         else
         {
-            const int activeSlot = AcquireActiveVirtualTouchSlot(touch.fingerId);
-            if (activeSlot >= 0)
+            // Arms the slot instead of casting it. The skill only goes off when
+            // the attack button in the middle of the arc is pressed, so aiming
+            // and firing are two separate deliberate taps.
+            //
+            // No touch slot is claimed here: nothing is being held down, so the
+            // hold-to-repeat loop has no business tracking this finger.
+            if (g_virtualSelectedSkillSlot == skillSlot)
             {
-                g_activeVirtualTouches[activeSlot].fingerId = touch.fingerId;
-                g_activeVirtualTouches[activeSlot].button = skillButton;
-                g_activeVirtualTouches[activeSlot].downMs = nowMs;
-                g_activeVirtualTouches[activeSlot].lastRepeatMs = nowMs;
+                g_virtualSelectedSkillSlot = -1;   // tap again to go back to weapon
+            }
+            else
+            {
+                g_virtualSelectedSkillSlot = skillSlot;
+
+                // Mirror it onto CurrentSkill so the rest of the UI shows the
+                // same armed skill the overlay is highlighting.
+                const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
+                if (Hero != nullptr && IsValidSkillIndex(hotKeySkillIndex))
+                {
+                    Hero->CurrentSkill = static_cast<BYTE>(hotKeySkillIndex);
+                }
             }
 
-            const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
-            if (!AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex))
-            {
-                TriggerVirtualCombat(false, skillSlot);
-            }
+            PlayBuffer(SOUND_CLICK01);
         }
         return true;
     }
@@ -5784,6 +7145,19 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
 {
     if (HandleAndroidTradePickerFingerMotion(touch))
     {
+        return true;
+    }
+
+    if (HandleAndroidTargetPickerFingerMotion(touch))
+    {
+        return true;
+    }
+
+    // Ground aim owns its finger until it lifts, so the reticle follows the
+    // drag instead of the joystick picking the movement up.
+    if (g_androidGroundAim.aiming && g_androidGroundAim.fingerId == touch.fingerId)
+    {
+        TouchToVirtualUi(touch, g_androidGroundAim.uiX, g_androidGroundAim.uiY);
         return true;
     }
 
@@ -5799,6 +7173,29 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 {
     if (HandleAndroidTradePickerFingerUp(touch))
     {
+        return true;
+    }
+
+    if (HandleAndroidTargetPickerFingerUp(touch))
+    {
+        return true;
+    }
+
+    if (g_androidGroundAim.aiming && g_androidGroundAim.fingerId == touch.fingerId)
+    {
+        float upX = g_androidGroundAim.uiX;
+        float upY = g_androidGroundAim.uiY;
+        TouchToVirtualUi(touch, upX, upY);
+
+        g_androidGroundAim.uiX = upX;
+        g_androidGroundAim.uiY = upY;
+        g_androidGroundAim.aiming = false;
+
+        // Handed to the scene phase rather than cast here - see
+        // UpdateAndroidGroundAimCast. Two frames of settle so the render phase
+        // has definitely turned the parked MouseX/MouseY into a pick ray.
+        g_androidGroundAim.pendingCast = true;
+        g_androidGroundAim.settleFrames = 2;
         return true;
     }
 
@@ -6009,10 +7406,18 @@ void UpdateVirtualPadHolds()
             continue;
         }
 
-        if ((nowMs - active.lastRepeatMs) >= kVirtualAttackRepeatMs)
+        const uint32_t repeatMs = IsAndroidComboActive()
+            ? kVirtualComboRepeatMs
+            : kVirtualAttackRepeatMs;
+
+        if ((nowMs - active.lastRepeatMs) >= repeatMs)
         {
             active.lastRepeatMs = nowMs;
-            AndroidTriggerNormalAttackButtonInternal();
+
+            // Same entry point as a tap, so holding the button keeps casting the
+            // armed skill and keeps a combo advancing rather than reverting to
+            // bare weapon swings.
+            TriggerVirtualAttackButtonPress();
         }
     }
 
@@ -6221,6 +7626,21 @@ static void EnsureUITextures()
     g_uiTex_balo      = LoadUITextureAsset("ui/balo.png");
     g_uiTex_character = LoadUITextureAsset("ui/character.png");
     g_uiTex_setting   = LoadUITextureAsset("ui/setting.png");
+
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        g_uiTex_topBar[slot] = LoadUITextureAsset(kTopBarIconAssets[slot]);
+    }
+}
+
+const UITexture& GetTopBarIconTexture(int slot)
+{
+    static const UITexture kEmpty{};
+    if (slot < 0 || slot >= kTopBarButtonCount)
+    {
+        return kEmpty;
+    }
+    return g_uiTex_topBar[slot];
 }
 
 // Draw a PNG icon at the given UI rect 鑺掗埀顑解偓?NO background, NO border.
@@ -6349,6 +7769,11 @@ void RenderVirtualTopRightControls()
 
 void DrawVirtualChatUtilityButton()
 {
+    if (!kShowVirtualChatQuickButton)
+    {
+        return;
+    }
+
     if (SceneFlag != MAIN_SCENE || g_pNewUISystem == nullptr)
     {
         return;
@@ -6472,6 +7897,244 @@ void DrawVirtualRightPanelButtonBox(const AndroidUiRect& rect, bool active)
     DrawVirtualRectOutline(rect.x + 1.0f, rect.y + 1.0f, rect.w - 2.0f, rect.h - 2.0f, 0.03f, 0.05f, 0.12f, 0.96f, 1.0f);
 }
 
+// Reticle for a ground-targeted skill while the finger is dragging. Drawn at
+// the aim point itself, which is where the terrain pick will be taken from.
+void RenderAndroidGroundAim()
+{
+    if (!g_androidGroundAim.aiming || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const float cx = g_androidGroundAim.uiX;
+    const float cy = g_androidGroundAim.uiY;
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualCircle(cx, cy, 20.0f, 0.30f, 0.80f, 1.0f, 0.30f, true);
+    DrawVirtualCircle(cx, cy, 20.0f, 0.60f, 0.92f, 1.0f, 0.95f, false);
+    DrawVirtualCircle(cx, cy, 5.0f, 0.85f, 0.97f, 1.0f, 0.95f, true);
+
+    // Cross hairs, so the exact point is readable against busy terrain.
+    DrawVirtualRectFilled(cx - 30.0f, cy - 0.5f, 20.0f, 1.5f, 0.60f, 0.92f, 1.0f, 0.85f);
+    DrawVirtualRectFilled(cx + 10.0f, cy - 0.5f, 20.0f, 1.5f, 0.60f, 0.92f, 1.0f, 0.85f);
+    DrawVirtualRectFilled(cx - 0.5f, cy - 30.0f, 1.5f, 20.0f, 0.60f, 0.92f, 1.0f, 0.85f);
+    DrawVirtualRectFilled(cx - 0.5f, cy + 10.0f, 1.5f, 20.0f, 0.60f, 0.92f, 1.0f, 0.85f);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font,
+             static_cast<int>(cx - 40.0f),
+             static_cast<int>(cy + 24.0f),
+             0xFFFFFFFF, 0x0, 80, 0, 3,
+             "%s", "release to cast");
+
+    EndBitmap();
+}
+
+// Auto-combo toggle, Knight line only. Paired with HitTestComboToggle.
+void RenderComboToggle()
+{
+    if (!IsVirtualPadAvailable() || !IsAndroidComboClass())
+    {
+        return;
+    }
+
+    const AndroidUiRect rect = GetComboToggleRect();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRightPanelButtonBox(rect, g_virtualComboEnabled);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font,
+             static_cast<int>(rect.x),
+             static_cast<int>(rect.y + 6.0f),
+             g_virtualComboEnabled ? 0xFF80FFB0 : 0xFFFFFFFF,
+             0x0,
+             static_cast<int>(rect.w),
+             0, 3,
+             "%s", g_virtualComboEnabled ? "CMB ON" : "CMB");
+
+    // Which step of the chain comes next. Worth keeping in normal play - with
+    // the chain advancing only on a successful cast, the player needs to see
+    // where it actually is. Turns red while a step is being retried.
+    if (g_virtualComboEnabled)
+    {
+        TextDraw(font,
+                 static_cast<int>(rect.x),
+                 static_cast<int>(rect.y + rect.h + 2.0f),
+                 g_androidComboLastResult == kAndroidComboResultBlocked ? 0xFF8080FF : 0xFFD0D0FF,
+                 0x0,
+                 static_cast<int>(rect.w),
+                 0, 3,
+                 "%d/%d", g_virtualComboStep + 1, kVirtualComboSlotCount);
+    }
+
+    EndBitmap();
+}
+
+// The select-target button. Lit while a lock is held, and captioned with the
+// locked target's name so the player can see what they are committed to without
+// opening the list.
+void RenderTargetSelectButton()
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const AndroidUiRect rect = GetTargetSelectButtonRect();
+    const bool locked = IsAndroidTargetLockActive();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualCircle(
+        kTargetSelectButtonCx,
+        kTargetSelectButtonCy,
+        kTargetSelectButtonRadius,
+        locked ? 0.62f : 0.06f,
+        locked ? 0.16f : 0.12f,
+        locked ? 0.16f : 0.20f,
+        0.86f,
+        true);
+
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                           locked ? 0.98f : 0.42f,
+                           locked ? 0.54f : 0.60f,
+                           locked ? 0.30f : 0.86f,
+                           0.94f, 2.0f);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font,
+             static_cast<int>(rect.x),
+             static_cast<int>(rect.y + rect.h * 0.5f - 5.0f),
+             locked ? 0xFFB0B0FF : 0xFFFFFFFF,
+             0x0,
+             static_cast<int>(rect.w),
+             0, 3, "%s", locked ? "LOCK" : "TGT");
+
+    if (locked)
+    {
+        TextDraw(font,
+                 static_cast<int>(rect.x - 40.0f),
+                 static_cast<int>(rect.y - 12.0f),
+                 0xFFFFFFFF,
+                 0x0,
+                 static_cast<int>(rect.w + 40.0f),
+                 0, 3, "%s", g_androidTargetLock.id);
+    }
+
+    EndBitmap();
+}
+
+void RenderAndroidTargetPicker()
+{
+    if (!g_androidTargetPicker.visible || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    RefreshAndroidTargetPickerEntries(false);
+    const AndroidUiRect pickerRect = GetAndroidTargetPickerRect();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, 0.24f);
+    DrawVirtualRectFilled(pickerRect.x - 3.0f, pickerRect.y - 3.0f, pickerRect.w + 6.0f, pickerRect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+    DrawVirtualRectFilled(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.10f, 0.04f, 0.05f, 0.78f);
+    DrawVirtualRectFilled(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
+    DrawVirtualRectFilled(pickerRect.x + 3.0f, pickerRect.y + 3.0f, pickerRect.w - 6.0f, kTargetPickerHeaderH - 6.0f, 0.62f, 0.24f, 0.24f, 0.36f);
+    DrawVirtualRectOutline(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
+    DrawVirtualRectOutline(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
+
+    for (int row = 0; row < GetAndroidTargetPickerRowCount(); ++row)
+    {
+        const int entryIndex = g_androidTargetPicker.scrollOffset + row;
+        const bool isLocked = entryIndex < g_androidTargetPicker.entryCount
+            && g_androidTargetLock.active
+            && g_androidTargetPicker.entries[entryIndex].key == g_androidTargetLock.key;
+
+        DrawVirtualRightPanelButtonBox(GetAndroidTargetPickerRowRect(row), isLocked);
+    }
+
+    HFONT rowFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+    HFONT smallFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    if (g_androidTargetPicker.entryCount <= 0)
+    {
+        TextDraw(smallFont,
+                 static_cast<int>(pickerRect.x + 7.0f),
+                 static_cast<int>(pickerRect.y + kTargetPickerHeaderH + 8.0f),
+                 0xFFC0C0FF, 0x0,
+                 static_cast<int>(pickerRect.w - 14.0f), 0, 3,
+                 "%s", "No enemies nearby");
+    }
+    else
+    {
+        for (int row = 0; row < GetAndroidTargetPickerRowCount(); ++row)
+        {
+            const int entryIndex = g_androidTargetPicker.scrollOffset + row;
+            if (entryIndex >= g_androidTargetPicker.entryCount)
+            {
+                break;
+            }
+
+            const AndroidTargetPickerEntry& entry = g_androidTargetPicker.entries[entryIndex];
+            const AndroidUiRect rowRect = GetAndroidTargetPickerRowRect(row);
+            const bool isLocked = g_androidTargetLock.active && entry.key == g_androidTargetLock.key;
+
+            TextDraw(rowFont,
+                     static_cast<int>(rowRect.x + 7.0f),
+                     static_cast<int>(rowRect.y + 8.0f),
+                     isLocked ? 0xFF90FFB0 : 0xFFFFFFFF,
+                     0x0,
+                     static_cast<int>(rowRect.w - 40.0f), 0, 1,
+                     "%s", entry.id);
+
+            // Distance is squared in tiles; the sqrt is only for display.
+            TextDraw(smallFont,
+                     static_cast<int>(rowRect.x + rowRect.w - 34.0f),
+                     static_cast<int>(rowRect.y + 9.0f),
+                     0xFFC8C8FF, 0x0,
+                     30, 0, 3,
+                     "%dm", static_cast<int>(std::sqrt(static_cast<float>(entry.distance2))));
+        }
+    }
+
+    const AndroidUiRect footerRect = GetAndroidTargetPickerFooterRect();
+    TextDraw(smallFont,
+             static_cast<int>(footerRect.x + 4.0f),
+             static_cast<int>(footerRect.y + 6.0f),
+             0xFFE0A0FF, 0x0,
+             static_cast<int>(footerRect.w - 8.0f), 0, 3,
+             "%s", "Close");
+
+    TextDraw(rowFont,
+             static_cast<int>(pickerRect.x + 7.0f),
+             static_cast<int>(pickerRect.y + 7.0f),
+             0xFFFFFFFF, 0x0,
+             static_cast<int>(pickerRect.w - 14.0f), 0, 3,
+             "%s", "Select Target");
+
+    EndBitmap();
+}
+
 void RenderAndroidTradePicker()
 {
     if (!g_androidTradePicker.visible || !IsVirtualPadAvailable())
@@ -6591,6 +8254,82 @@ void RenderAndroidTradePicker()
         3,
         g_androidTradePicker.autoMoving ? "HUY MOVE" : "HUY");
     EndBitmap();
+}
+
+// The always-visible labelled row plus the coin and location chips beneath it.
+// Icons are optional: DrawIconButton skips a texture that failed to load, and
+// the box and label are drawn either way, so the row works before any art
+// exists. Once an icon is present it covers the label.
+void RenderVirtualTopBar()
+{
+    if (!IsVirtualUtilityButtonsAvailable())
+    {
+        return;
+    }
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        DrawVirtualRightPanelButtonBox(
+            GetTopBarButtonRect(slot),
+            IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]));
+    }
+
+    const AndroidUiRect coinRect = GetTopBarCoinChipRect();
+    const AndroidUiRect locRect = GetTopBarLocationChipRect();
+    DrawVirtualRectFilled(coinRect.x, coinRect.y, coinRect.w, coinRect.h, 0.05f, 0.05f, 0.08f, 0.62f);
+    DrawVirtualRectOutline(coinRect.x, coinRect.y, coinRect.w, coinRect.h, 0.55f, 0.45f, 0.18f, 0.90f, 1.0f);
+    DrawVirtualRectFilled(locRect.x, locRect.y, locRect.w, locRect.h, 0.05f, 0.05f, 0.08f, 0.62f);
+    DrawVirtualRectOutline(locRect.x, locRect.y, locRect.w, locRect.h, 0.22f, 0.36f, 0.62f, 0.90f, 1.0f);
+
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        RenderVirtualRightPanelButtonLabel(
+            GetTopBarButtonRect(slot),
+            kTopBarLabels[slot],
+            IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]));
+    }
+
+    HFONT chipFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    if (CharacterMachine != nullptr)
+    {
+        unicode::t_char goldText[256] = { 0, };
+        ConvertGold(static_cast<double>(CharacterMachine->Gold), goldText);
+        TextDraw(chipFont,
+                 static_cast<int>(coinRect.x + 4.0f),
+                 static_cast<int>(coinRect.y + 4.0f),
+                 0xFFFFFFFF,
+                 0x0,
+                 static_cast<int>(coinRect.w - 8.0f),
+                 0, 3, "%s", goldText);
+    }
+
+    const char* mapName = gMapManager.GetMapName(gMapManager.WorldActive);
+    if (mapName != nullptr && mapName[0] != '\0' && Hero != nullptr)
+    {
+        TextDraw(chipFont,
+                 static_cast<int>(locRect.x + 4.0f),
+                 static_cast<int>(locRect.y + 4.0f),
+                 0xFFFFFFFF,
+                 0x0,
+                 static_cast<int>(locRect.w - 8.0f),
+                 0, 3, "%s (%d, %d)", mapName, Hero->PositionX, Hero->PositionY);
+    }
+
+    EndBitmap();
+
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        const AndroidUiRect rect = GetTopBarButtonRect(slot);
+        DrawIconButton(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f,
+                       GetTopBarIconTexture(slot), 1.0f);
+    }
 }
 
 void RenderVirtualRightPanelUtilityMode()
@@ -6891,7 +8630,9 @@ ITEM* GetVirtualMirrorHotKeyItem(int slot)
 
 void RenderVirtualMirrorHotKeySlots()
 {
-    if (g_pMainFrame == nullptr || IsVirtualRightPanelUtilityWindowVisible())
+    // Window hiding is centralised in RenderVirtualPad; see the note on
+    // HitTestVirtualMirrorHotKeySlot.
+    if (g_pMainFrame == nullptr)
     {
         return;
     }
@@ -6998,6 +8739,168 @@ void RenderVirtualMirrorHotKeySlots()
     EndBitmap();
 }
 
+// Top-left status panel. Callers must already have passed IsVirtualPadAvailable,
+// which is what guarantees CharacterAttribute is non-null here.
+void RenderVirtualPortraitHud()
+{
+    // These are the same smoothed values the rest of the UI reads. The raw
+    // CharacterAttribute->Life/LifeMax pair disagrees with them during regen
+    // ticks, which would make the bar and the inventory show different numbers.
+    const PRINT_PLAYER_S6& view = CharacterAttribute->PrintPlayer;
+
+    const int maxHP = std::max(1, static_cast<int>(view.ViewMaxHP));
+    const int curHP = std::clamp(static_cast<int>(view.ViewCurHP), 0, maxHP);
+    const int maxMP = std::max(1, static_cast<int>(view.ViewMaxMP));
+    const int curMP = std::clamp(static_cast<int>(view.ViewCurMP), 0, maxMP);
+    const int maxSD = std::max(1, static_cast<int>(view.ViewMaxSD));
+    const int curSD = std::clamp(static_cast<int>(view.ViewCurSD), 0, maxSD);
+
+    // AG is carried in the BP fields, the same pair the legacy AG gauge read.
+    const int maxAG = std::max(1, static_cast<int>(view.ViewMaxBP));
+    const int curAG = std::clamp(static_cast<int>(view.ViewCurBP), 0, maxAG);
+
+    const float yHP = kPortraitBarTop;
+    const float yMP = yHP + kPortraitBarH + kPortraitBarGap;
+    const float ySD = yMP + kPortraitBarH + kPortraitBarGap;
+    const float yAG = ySD + kPortraitBarH + kPortraitBarGap;
+
+    BeginBitmap();
+    EnableAlphaBlend();
+    DisableTexture();
+
+    // Panel backing, so the bars stay readable over bright terrain.
+    DrawVirtualRectFilled(
+        kPortraitPanelX - 2.0f,
+        kPortraitPanelY - 2.0f,
+        (kPortraitBarRight - kPortraitPanelX) + 4.0f,
+        (yAG + kPortraitBarH) - kPortraitPanelY + 4.0f,
+        0.03f, 0.03f, 0.05f, 0.55f);
+
+    DrawVirtualBarH(kPortraitBarLeft, yHP, kPortraitBarW, kPortraitBarH,
+                    static_cast<float>(curHP) / static_cast<float>(maxHP),
+                    0.85f, 0.16f, 0.16f, 0.16f, 0.05f, 0.05f);
+
+    DrawVirtualBarH(kPortraitBarLeft, yMP, kPortraitBarW, kPortraitBarH,
+                    static_cast<float>(curMP) / static_cast<float>(maxMP),
+                    0.20f, 0.45f, 0.90f, 0.05f, 0.07f, 0.16f);
+
+    DrawVirtualBarH(kPortraitBarLeft, ySD, kPortraitBarW, kPortraitBarH,
+                    static_cast<float>(curSD) / static_cast<float>(maxSD),
+                    0.30f, 0.75f, 0.90f, 0.05f, 0.13f, 0.16f);
+
+    // AG. The legacy frame had a gauge for this and removing the frame took it
+    // with it - which matters because skills check it and refuse silently when
+    // it runs dry, leaving no way to tell why a cast did nothing.
+    DrawVirtualBarH(kPortraitBarLeft, yAG, kPortraitBarW, kPortraitBarH,
+                    static_cast<float>(curAG) / static_cast<float>(maxAG),
+                    0.90f, 0.78f, 0.30f, 0.16f, 0.13f, 0.04f);
+
+    EndBitmap();
+
+    // Placeholder art until per-class portraits are added: character.png is the
+    // icon the disabled HUD used for its character button. DrawIconButton leaves
+    // additive blend set, so nothing that needs alpha may follow it un-reset.
+    DrawIconButton(
+        kPortraitPanelX,
+        kPortraitPanelY,
+        kPortraitAvatarSize,
+        kPortraitAvatarSize,
+        g_uiTex_character,
+        1.0f,
+        0.06f, 0.06f, 0.09f);
+
+    if (Hero != nullptr && Hero->m_pPet != nullptr)
+    {
+        DrawIconButton(
+            kPortraitPetX,
+            kPortraitPetY,
+            kPortraitPetSize,
+            kPortraitPetSize,
+            g_uiTex_character,
+            0.85f,
+            0.06f, 0.06f, 0.09f);
+    }
+
+    // Numbers last, and inside their own bitmap pass: DrawIconButton above left
+    // additive blending set and the font atlas bound.
+    BeginBitmap();
+    EnableAlphaBlend();
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+    HFONT barFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    const int textX = static_cast<int>(kPortraitBarLeft);
+    const int textW = static_cast<int>(kPortraitBarW);
+
+    // Align 3 centres the string in textW, the same call shape the trade picker
+    // and the utility labels use.
+    TextDraw(barFont, textX, static_cast<int>(yHP + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
+             "%d/%d", curHP, maxHP);
+    TextDraw(barFont, textX, static_cast<int>(yMP + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
+             "%d/%d", curMP, maxMP);
+    TextDraw(barFont, textX, static_cast<int>(ySD + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
+             "%d/%d", curSD, maxSD);
+    TextDraw(barFont, textX, static_cast<int>(yAG + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
+             "%d/%d", curAG, maxAG);
+
+    // Skill/cast diagnostic. Off in normal play; flip kShowAndroidSkillDebug to
+    // bring it back when something in the cast path needs tracing again, since
+    // logcat does not reach these devices.
+    if (kShowAndroidSkillDebug)
+    {
+        const int slot = g_virtualSelectedSkillSlot;
+        const int skillIndex = GetVirtualOverlayHotKeySkillIndex(slot);
+        const int skillType = (CharacterAttribute != nullptr && IsValidSkillIndex(skillIndex))
+            ? CharacterAttribute->Skill[skillIndex]
+            : -1;
+        const bool ground = IsGroundTargetedSkillIndex(skillIndex);
+
+        const char* castText = "";
+        switch (g_androidGroundCastResult)
+        {
+        // "sent" not "ok"/"refused": ExecuteSkill's return value reflects a
+        // server reply that cannot have arrived yet, so it says nothing about
+        // whether the request went out.
+        case kGroundCastOk:       castText = "sent";     break;
+        case kGroundCastRefused:  castText = "sent";     break;
+        case kGroundCastNoTile:   castText = "notile";   break;
+        case kGroundCastOffMap:   castText = "offmap";   break;
+        case kGroundCastBadSkill: castText = "badskill"; break;
+        default:                  castText = "-";        break;
+        }
+
+        const char* reasonText = "";
+        switch (g_androidGroundCastReason)
+        {
+        case kGroundReasonSafeZone:   reasonText = "SAFEZONE"; break;
+        case kGroundReasonDemand:     reasonText = "DEMAND";   break;
+        case kGroundReasonUseCond:    reasonText = "USECOND";  break;
+        case kGroundReasonMana:       reasonText = "MANA";     break;
+        case kGroundReasonNoSkillIdx: reasonText = "NOIDX";    break;
+        default:                      reasonText = "gate-ok";  break;
+        }
+
+        TextDraw(barFont,
+                 static_cast<int>(kPortraitPanelX),
+                 static_cast<int>(yAG + kPortraitBarH + 3.0f),
+                 ground ? 0xFF80FFFF : 0xFFC8C8C8,
+                 0x0,
+                 static_cast<int>(kPortraitBarRight - kPortraitPanelX),
+                 0, 1,
+                 "SENT=%d dly%d chr%d/%d from(%d,%d) now(%d,%d)",
+                 g_androidGroundCastLatchAfter,
+                 g_androidGroundCastDelay,
+                 g_androidGroundCastReqChar,
+                 g_androidGroundCastHaveChar,
+                 g_androidGroundCastFromX,
+                 g_androidGroundCastFromY,
+                 Hero != nullptr ? Hero->PositionX : -1,
+                 Hero != nullptr ? Hero->PositionY : -1);
+    }
+
+    EndBitmap();
+}
+
 void RenderVirtualPad()
 {
     // Keep only the virtual joystick overlay on mobile.
@@ -7018,6 +8921,16 @@ void RenderVirtualPad()
                 g_pMainFrame != nullptr ? 1 : 0,
                 AndroidHasFocusedTextInput() ? 1 : 0);
         }
+        return;
+    }
+
+    // A bag, character sheet or any other MU window owns the screen: draw none
+    // of the touch controls over it. The two modal pickers still render, since
+    // they are windows in their own right rather than overlay controls.
+    if (IsAndroidGameWindowOpen())
+    {
+        RenderAndroidTradePicker();
+        RenderAndroidTargetPicker();
         return;
     }
 
@@ -7062,6 +8975,9 @@ void RenderVirtualPad()
             1.0f);
     }
     EndBitmap();
+
+    RenderVirtualPortraitHud();
+    RenderVirtualTopBar();
 
     DrawVirtualZoomButtons();
     RenderVirtualTopRightControls();
@@ -7110,9 +9026,21 @@ void RenderVirtualPad()
             const int buttonIndex = kVirtualSkillButtonBase + visualSlot;
             const VirtualButtonLayout& button = kVirtualButtons[buttonIndex];
             const bool pressed = IsVirtualButtonPressed(buttonIndex);
-            const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(visualSlot);
-            const bool selected = (Hero != nullptr && Hero->CurrentSkill == hotKeySkillIndex);
-            const GLuint frameImage = (pressed || selected || assignModeActive)
+            const bool isSelector = (visualSlot == kVirtualSkillSelectorVisualSlot);
+            const int hotKeySkillIndex = isSelector ? -1 : GetVirtualOverlayHotKeySkillIndex(visualSlot);
+
+            // Armed state comes from the overlay's own selection, not from
+            // Hero->CurrentSkill: two slots can hold the same skill, and the
+            // combo rewrites CurrentSkill as it steps.
+            const bool selected = (!isSelector && g_virtualSelectedSkillSlot == visualSlot);
+
+            // The picker button lights while the picker is open, so it reads as
+            // a toggle rather than another skill.
+            const bool selectorOpen = isSelector
+                && g_pSkillList != nullptr
+                && g_pSkillList->IsSkillPickerOpen();
+
+            const GLuint frameImage = (pressed || selected || selectorOpen || (assignModeActive && !isSelector))
                 ? SEASON3B::CNewUISkillList::IMAGE_SKILLBOX_USE
                 : SEASON3B::CNewUISkillList::IMAGE_SKILLBOX;
 
@@ -7124,7 +9052,7 @@ void RenderVirtualPad()
                 kVirtualSkillFrameW,
                 kVirtualSkillFrameH);
 
-            if (g_pSkillList != nullptr && hotKeySkillIndex >= 0)
+            if (!isSelector && g_pSkillList != nullptr && hotKeySkillIndex >= 0)
             {
                 g_pSkillList->RenderSkillIcon(
                     hotKeySkillIndex,
@@ -7136,6 +9064,27 @@ void RenderVirtualPad()
                     false);
             }
         }
+
+        // Labels last, so they sit over the frames rather than under the next
+        // one drawn. The picker has no skill icon of its own to identify it.
+        {
+            HFONT slotFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+            for (int visualSlot = 0; visualSlot < kVirtualVisibleSkillButtonCount; ++visualSlot)
+            {
+                const VirtualButtonLayout& button = kVirtualButtons[kVirtualSkillButtonBase + visualSlot];
+                const bool isSelector = (visualSlot == kVirtualSkillSelectorVisualSlot);
+
+                TextDraw(slotFont,
+                         static_cast<int>(button.cx - kVirtualSkillFrameW * 0.5f),
+                         static_cast<int>(button.cy + kVirtualSkillFrameH * 0.5f - 9.0f),
+                         isSelector ? 0xFFC0E0FF : 0xFFFFFFFF,
+                         0x0,
+                         static_cast<int>(kVirtualSkillFrameW),
+                         0, 3,
+                         "%s", isSelector ? "SKL" : std::to_string(visualSlot + 1).c_str());
+            }
+        }
+
         EndBitmap();
     }
 
@@ -7156,7 +9105,13 @@ void RenderVirtualPad()
     }
 
     RenderVirtualMirrorHotKeySlots();
+    RenderComboToggle();
+    RenderTargetSelectButton();
+    RenderAndroidGroundAim();
     RenderAndroidTradePicker();
+
+    // Last, so the panel and its dimming layer sit over every other control.
+    RenderAndroidTargetPicker();
 
 #if 0
     // Disabled: custom Android HUD. We keep this code commented for now so it
@@ -7505,6 +9460,25 @@ void RenderVirtualPad()
 bool IsAndroidVirtualJoystickDrivingMouse()
 {
     return g_virtualJoystickDrivingMouse;
+}
+
+// Called on map change and disconnect. The lock does clear itself once its
+// target can no longer be resolved, but character Keys are reused between maps,
+// so without an explicit reset a lock could survive a teleport and land on
+// whatever new monster inherited that Key.
+void AndroidClearTargetLock()
+{
+    ClearAndroidTargetLock("map-change");
+    CancelAndroidGroundAim("map-change");
+}
+
+// Called from the scene phase right after MoveHero. It has to run there rather
+// than from the touch handler: turning the aim point into a terrain tile uses
+// the same camera matrices and terrain pick that MoveHero relies on, and those
+// are only valid inside the frame.
+void AndroidUpdateGroundAimCast()
+{
+    UpdateAndroidGroundAimCast();
 }
 
 bool AndroidShowCommandTradePicker()

@@ -728,23 +728,33 @@ void SEASON3B::CNewUIMainFrameWindow::RenderButtonsSS2()
 		SEASON3B::RenderImage(IMAGE_iNewWinpush, x + 492, y - 20, 52, 20);
 	}
 }
+// The frame art, orbs and gauges are the desktop HUD; mobile draws its own from
+// the touch overlay. Two calls stay on both platforms. RenderUI2DEffect is left
+// alone so the 3D render manager keeps its z-order slot registered - its
+// callback is a no-op on mobile, since RenderItemCount returns early there. The
+// skill list still owns the touch skill-assign flow even though its boxes are no
+// longer visible.
 bool SEASON3B::CNewUIMainFrameWindow::RenderSS2()
 {
 	EnableAlphaTest();
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	RenderFrame();
+#endif
 
 	m_pNewUI3DRenderMng->RenderUI2DEffect(ITEMHOTKEYNUMBER_CAMERA_Z_ORDER, UI2DEffectCallback, this, 0, 0);
 
 	g_pSkillList->RenderCurrentSkillAndHotSkillList();
 	//
 	EnableAlphaTest();
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	RenderLifeManaSS2();
 	RenderGuageSDSS2();
 	RenderGuageAGSS2();
 	RenderButtonsSS2();
 	RenderExperienceSS2();
+#endif
 	DisableAlphaBlend();
 	return true;
 }
@@ -757,18 +767,22 @@ bool SEASON3B::CNewUIMainFrameWindow::Render()
 	EnableAlphaTest();
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	RenderFrame();
+#endif
 
 	m_pNewUI3DRenderMng->RenderUI2DEffect(ITEMHOTKEYNUMBER_CAMERA_Z_ORDER, UI2DEffectCallback, this, 0, 0);
 
 	g_pSkillList->RenderCurrentSkillAndHotSkillList();
 
 	EnableAlphaTest();
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	RenderLifeMana();
 	RenderGuageSD();
 	RenderGuageAG();
 	RenderButtons();
 	RenderExperience();
+#endif
 	DisableAlphaBlend();
 
 	
@@ -778,7 +792,13 @@ bool SEASON3B::CNewUIMainFrameWindow::Render()
 
 void SEASON3B::CNewUIMainFrameWindow::Render3D()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// These draw the hotkey potion models at y=443, which is underneath the
+	// virtual joystick now that the frame is gone. The overlay draws its own.
+	return;
+#else
 	m_ItemHotKey.RenderItems();
+#endif
 }
 
 void SEASON3B::CNewUIMainFrameWindow::UI2DEffectCallback(LPVOID pClass, DWORD dwParamA, DWORD dwParamB)
@@ -2141,6 +2161,11 @@ void SEASON3B::CNewUIItemHotKey::RenderItems()
 
 void SEASON3B::CNewUIItemHotKey::RenderItemCount()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Would leave quantity numbers floating at y=457 with no potion icons under
+	// them. The overlay prints its own count on each hotkey button instead.
+	return;
+#else
 	float x, y, width, height;
 
 	glColor4f(1.f, 1.f, 1.f, 1.f);
@@ -2163,10 +2188,18 @@ void SEASON3B::CNewUIItemHotKey::RenderItemCount()
 			SEASON3B::RenderNumber(x, y, iCount);
 		}
 	}
+#endif
 }
 
 void SEASON3B::CNewUIItemHotKey::UseItemRButton()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// These slots sit at y=445, underneath the virtual joystick, and touch has no
+	// real right button - the only way to reach this is the long-press emulation,
+	// so holding a finger down to walk would quietly drink a potion. Mobile uses
+	// the on-screen hotkey buttons instead.
+	return;
+#else
 	int x, y, width, height;
 
 	for (int i = 0; i < HOTKEY_COUNT; ++i)
@@ -2194,6 +2227,7 @@ void SEASON3B::CNewUIItemHotKey::UseItemRButton()
 			}
 		}
 	}
+#endif
 }
 
 SEASON3B::CNewUISkillList::CNewUISkillList()
@@ -2324,6 +2358,14 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 	{
 		FixX = 0;
 	}
+	// Everything from here to the skill picker below hit-tests the current-skill
+	// box and the five hotkey boxes along the bottom frame, at y 431..469. That
+	// frame is no longer drawn on mobile, so these would be invisible tap targets
+	// sitting under the joystick and the new HUD. The overlay covers both jobs:
+	// it fires hotkey skills from its own arc, and completes a skill assignment
+	// with the same SetHotKey call. The picker popup further down is still live
+	// on mobile and must keep running, so this guard stops short of it.
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	x = 385.f - FixX + DisplayWinExt;
 	y = 431.f + DisplayHeightExt;
 	width = 32.f; height = 38.f;
@@ -2510,6 +2552,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 		}
 		return false;
 	}
+#endif
 
 	if (m_bSkillList == false)
 		return true;

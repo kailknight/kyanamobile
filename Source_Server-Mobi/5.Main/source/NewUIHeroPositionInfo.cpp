@@ -895,6 +895,18 @@ bool CNewUIHeroPositionInfo::Render() {
   ShowInfoTitleWindow();
   MiniMapLoad();
   AutoMove();
+#if defined(__ANDROID__) || defined(MU_IOS)
+  // Everything below is the desktop info panel: the coordinate plate and the
+  // Menu / Show Name / Show HP Bar / Camera 3D / Config Auto / Active Auto
+  // buttons. The touch overlay has its own location chip and reaches those
+  // functions from the top bar, so drawing them here only covers the top-left
+  // corner where the portrait and bars now live.
+  //
+  // The three calls above are kept deliberately: MiniMapLoad owns the per-map
+  // bitmap the minimap window itself draws, and AutoMove drives auto-run.
+  // Neither is UI, and both would stop working if this returned any earlier.
+  return true;
+#endif
 #ifdef __ANDROID__
   const uint64_t dbgInitTicks = MU_MobilePerfNow() - dbgInitStart;
   const uint64_t dbgImgStart = MU_MobilePerfNow();

@@ -745,7 +745,16 @@ void InitGame()
 	SelectedOperate = -1;
 	SelectedCharacter = -1;
 	SelectedItem = -1;
-	
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// The touch target lock is held outside SelectedCharacter, so clearing that
+	// above does not release it.
+	{
+		extern void AndroidClearTargetLock();
+		AndroidClearTargetLock();
+	}
+#endif
+
 	Attacking = -1;
 	g_pOption->SetAutoAttack(true);
 	g_pOption->SetWhisperSound(false);

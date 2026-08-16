@@ -2362,6 +2362,15 @@ void MoveMainScene()
 	MoveChat();
 	UpdatePersonalShopTitleImp();
 	MoveHero();
+#if defined(__ANDROID__) || defined(MU_IOS)
+	{
+		// Casting a ground-targeted skill from the touch overlay needs the same
+		// terrain pick MoveHero does, so it runs here rather than from the
+		// touch handler, where the camera matrices are not set up yet.
+		extern void AndroidUpdateGroundAimCast();
+		AndroidUpdateGroundAimCast();
+	}
+#endif
     MoveCharactersClient();
 	ThePetProcess().UpdatePets();
     MovePoints();
@@ -3017,6 +3026,41 @@ void MainScene(HDC hDC)
 			g_pRenderText->SetTextColor(0, 255, 0, 255);
 			g_pRenderText->RenderText(10, (DisplayHeight > 60) ? (DisplayHeight - 52) : 10,
 			                          g_protectLoadStatus);
+
+			// ---- TEMPORARY CLASS DIAGNOSTIC ----
+			// Warping to some maps renders the hero as the wrong class. This
+			// says whether the class fields themselves changed (a packet or
+			// parsing problem) or only the model did (a model/skin problem).
+			//
+			// Off by default now that the overlay is the shipping UI - it drew
+			// over the bottom-left controls. Flip this to 1 to bring it back
+			// while chasing the class-on-warp bug.
+#define MU_SHOW_CLASS_DIAGNOSTIC 0
+#if MU_SHOW_CLASS_DIAGNOSTIC
+			if (Hero != nullptr && CharacterAttribute != nullptr)
+			{
+				extern char g_androidCurrentHost[64];
+				extern int  g_androidCurrentPort;
+				extern int  g_androidCurrentIsGame;
+				extern int  g_androidConnectCount;
+
+				unicode::t_char szCls[224];
+				unicode::_sprintf(szCls,
+					"NET %s:%d game=%d n=%d | CLS hero=%d attr=%d obj=%d map=%d",
+					g_androidCurrentHost,
+					g_androidCurrentPort,
+					g_androidCurrentIsGame,
+					g_androidConnectCount,
+					(int)Hero->Class,
+					(int)CharacterAttribute->Class,
+					(int)Hero->Object.Type,
+					(int)gMapManager.WorldActive);
+				g_pRenderText->SetTextColor(255, 255, 0, 255);
+				g_pRenderText->RenderText(10, (DisplayHeight > 90) ? (DisplayHeight - 78) : 30, szCls);
+			}
+#endif // MU_SHOW_CLASS_DIAGNOSTIC
+			// ---- END TEMPORARY ----
+
 			g_pRenderText->SetFont(g_hFont);
 			EndBitmap();
 		}

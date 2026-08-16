@@ -57,6 +57,14 @@ int mShowDanhHieu = 1;
 float g_androidZoomOverride = 0.0f;
 HFONT g_hFontMini = NULL;
 
+// ---- TEMPORARY CONNECTION DIAGNOSTIC - REMOVE WHEN SOLVED ----
+// Which server the client is actually talking to. Global scope on purpose so
+// the on-screen readout in ZzzScene.cpp can reach them.
+char g_androidCurrentHost[64] = "-";
+int  g_androidCurrentPort = 0;
+int  g_androidCurrentIsGame = 0;
+int  g_androidConnectCount = 0;
+
 class CChatRoomSocketList;
 CChatRoomSocketList* g_pChatRoomSocketList = nullptr;
 
@@ -695,6 +703,17 @@ BOOL CWsctlc::Connect(char* ipAddr, unsigned short port, DWORD)
 
     m_socket = static_cast<SOCKET>(handle);
     g_ErrorReport.Write("[Android Socket] connected ip=%s port=%d handle=%d\r\n", ipAddr, port, handle);
+
+    // Recorded for the on-screen diagnostic: m_socket here is a handle from the
+    // Android connection manager, not a real fd, so getpeername cannot report
+    // which server we ended up on. Capture it at the one place that knows.
+    {
+        std::lock_guard<std::mutex> lock(g_androidSocketMutex);
+        std::snprintf(g_androidCurrentHost, sizeof(g_androidCurrentHost), "%s", ipAddr);
+        g_androidCurrentPort = port;
+        g_androidCurrentIsGame = m_bGame ? 1 : 0;
+        ++g_androidConnectCount;
+    }
 
     if (IsConnectServerPort(port))
     {
