@@ -59,21 +59,51 @@ void SEASON3B::CNewUIItemEnduranceInfo::Release()
 	}
 }
 //=== HP PET
+// Pet HP goes just under the status panel on mobile. Both desktop forms anchor
+// it off the right edge at y=370, which is now the consumable row and the
+// skill arc. Item durability keeps its own right-hand spot.
+#if defined(__ANDROID__) || defined(MU_IOS)
+namespace
+{
+	// RenderHPUI draws its frame at (iX, iY - 368), so the value stored here is
+	// 368 below where the gauge actually appears. The desktop 370 lands it at
+	// y=2, hard against the top edge. Add the offset back to get the position
+	// asked for rather than something 368 pixels above it - the first attempt
+	// stored 98 directly and the gauge rendered off-screen at -270.
+	constexpr int kAndroidPetHpDrawX = 6;
+	constexpr int kAndroidPetHpDrawY = 98;
+	constexpr int kAndroidPetHpRenderYOffset = 368;
+
+	constexpr int kAndroidPetHpX = kAndroidPetHpDrawX;
+	constexpr int kAndroidPetHpY = kAndroidPetHpDrawY + kAndroidPetHpRenderYOffset;
+}
+#endif
+
 void SEASON3B::CNewUIItemEnduranceInfo::SetPos( int x, int y )
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	m_UIStartPos.x = kAndroidPetHpX;
+	m_UIStartPos.y = kAndroidPetHpY;
+#else
 	m_UIStartPos.x = (GetScreenWidth() + DisplayWinCDepthBox) - PETHP_BAR_WIDTH - 15;
 	m_UIStartPos.y = 370;
+#endif
 	m_ItemDurUIStartPos.x = (GetScreenWidth() + DisplayWinCDepthBox) - ITEM_DUR_WIDTH - 2;
 	m_ItemDurUIStartPos.y = 140;
-  	
+
 	m_iTextEndPosX = m_UIStartPos.x + PETHP_FRAME_WIDTH;
 }
 
 void SEASON3B::CNewUIItemEnduranceInfo::SetPos( int x )
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	m_UIStartPos.x = kAndroidPetHpX;
+	m_UIStartPos.y = kAndroidPetHpY;
+#else
 	m_UIStartPos.x = x - PETHP_BAR_WIDTH - 15;
 	m_UIStartPos.y = 370;
-	m_ItemDurUIStartPos.x = x - ITEM_DUR_WIDTH - 2; 
+#endif
+	m_ItemDurUIStartPos.x = x - ITEM_DUR_WIDTH - 2;
 	m_ItemDurUIStartPos.y = 140;
 }
 
@@ -293,6 +323,9 @@ void SEASON3B::CNewUIItemEnduranceInfo::RenderLeft()
 		iNextPosY += (UI_INTERVAL_HEIGHT + PETHP_FRAME_HEIGHT);
 	}
 #endif
+	// Dark Lord only, and correctly so: this reads Hero->m_pPet, which is only
+	// ever set for the Dark Raven. Fenrir is a helper item and goes through
+	// RenderEquipedHelperLife above.
 	if ( gCharacterManager.GetBaseClass(Hero->Class) == CLASS_DARK_LORD )
     {
 		if( RenderEquipedPetLife( m_UIStartPos.x, iNextPosY ) )
@@ -368,10 +401,15 @@ void SEASON3B::CNewUIItemEnduranceInfo::RenderHPUI( int iX, int iY, unicode::t_c
 	{
 		glColor4f( 0.2f, 0.f, 0.f, 0.7f );
 	}
+	// Shifts left to make room for the party list, which on the desktop sits to
+	// the right of this gauge. On mobile both were moved to the left edge, so
+	// the shift would push the gauge off-screen instead of clear of anything.
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	if (PartyNumber > 0)
 	{
 		iX = iX - 70.f;
 	}
+#endif
 
 	RenderColor(iX + 2, iY + 2 - 368, PETHP_FRAME_WIDTH - 4, PETHP_FRAME_HEIGHT - 10);
 	EndRenderColor();

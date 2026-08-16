@@ -84,7 +84,15 @@ void CNewUIPartyListWindow::SetPos(int x, int y)
 
 void CNewUIPartyListWindow::SetPos(int x)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Anchored down the left edge on mobile, clear of the status panel above it
+	// and the buffs beside it. The desktop form is right-aligned off the screen
+	// width, which put it under the new top bar.
+	(void)x;
+	SetPos(4, 185);
+#else
 	SetPos(x - (PARTY_LIST_WINDOW_WIDTH+2), m_Pos.y);
+#endif
 }
 
 int CNewUIPartyListWindow::GetSelectedCharacter()

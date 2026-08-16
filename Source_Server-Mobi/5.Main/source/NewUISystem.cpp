@@ -120,7 +120,13 @@ bool SEASON3B::CNewUISystem::Create()
 		return false;
 
 	m_pNewChatLogWindow = new CNewUIChatLogWindow;
+	// Bottom centre on mobile, under the tab strip the touch overlay draws, so
+	// the messages land inside that panel instead of along the left edge.
+#if defined(__ANDROID__) || defined(MU_IOS)
+	if(false == m_pNewChatLogWindow->Create(m_pNewUIMng, 215, 470, 6))
+#else
 	if(false == m_pNewChatLogWindow->Create(m_pNewUIMng, 0, 480-50-47, 6))
+#endif
 		return false;
 
 	m_pNewOptionWindow = new CNewUIOptionWindow;

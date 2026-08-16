@@ -746,9 +746,15 @@ constexpr const TCHAR* kVirtualRightPanelModeButtonLabel = _T("CHG");
 // through the CHG button, which still opens the full grid. The enum is the
 // switch key for both TriggerVirtualRightPanelUtilityAction and the lit-state
 // predicate, so it is deliberately left intact rather than trimmed to five.
-constexpr int kTopBarButtonCount = 5;
+// Not a utility action: this one opens the grid holding the other seven, and
+// used to be the CHG button parked in the bottom right corner.
+constexpr int kTopBarActionMenu = -2;
+constexpr int kTopBarActionNone = -1;
+
+constexpr int kTopBarButtonCount = 6;
 
 constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
+    kTopBarActionMenu,
     kVirtualRightPanelUtilityActionGuild,
     kVirtualRightPanelUtilityActionHelper,
     kVirtualRightPanelUtilityActionXShop,
@@ -757,6 +763,7 @@ constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
 };
 
 constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
+    _T("MEN"),
     _T("Guild"),
     _T("Helper"),
     _T("Shop"),
@@ -768,6 +775,7 @@ constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
 // unloaded texture, and the box and label underneath are drawn regardless, so
 // the row stays usable until real icons exist.
 constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
+    "ui/topbar_menu.png",
     "ui/topbar_guild.png",
     "ui/topbar_helper.png",
     "ui/topbar_shop.png",
@@ -911,6 +919,29 @@ constexpr uint32_t kTargetPickerRefreshMs = 200;
 constexpr float kTargetSelectButtonCx = 624.0f;
 constexpr float kTargetSelectButtonCy = 452.0f;
 constexpr float kTargetSelectButtonRadius = 18.0f;
+
+// Tabbed chat panel along the bottom centre. The channels already exist - the
+// chat log keeps a separate message vector per type and ChangeMessage switches
+// which one it renders - so these tabs are a selector over that, not a new
+// message store.
+constexpr float kChatTabsX = 215.0f;
+constexpr float kChatTabsY = 352.0f;
+constexpr float kChatTabW = 30.0f;
+constexpr float kChatTabH = 16.0f;
+constexpr float kChatTabGap = 1.0f;
+
+// Bottom edge of the log itself; it renders upward from here.
+constexpr float kChatLogX = 215.0f;
+constexpr float kChatLogBottomY = 470.0f;
+
+constexpr int kChatTabCount = 7;
+
+
+// Last entry is the overflow tab, which cycles the channels that have no tab of
+// their own rather than opening a menu.
+constexpr std::array<const char*, kChatTabCount> kChatTabLabels = {
+    "All", "Chat", "Party", "Guild", "Alliance", "System", "+"
+};
 
 // Auto-combo toggle. Only drawn and only hit-tested for the Knight line, so it
 // costs nothing on classes that have no combo.
@@ -1200,6 +1231,12 @@ constexpr float kPortraitBarW       = kPortraitBarRight - kPortraitBarLeft;
 constexpr float kPortraitBarH       = 12.0f;
 constexpr float kPortraitBarGap     = 3.0f;
 constexpr float kPortraitBarTop     = kPortraitPanelY + 4.0f;
+
+// Fenrir / helper durability bar, below the status panel.
+constexpr float kPetBarX = 6.0f;
+constexpr float kPetBarY = 98.0f;
+constexpr float kPetBarW = 50.0f;
+constexpr float kPetBarH = 10.0f;
 
 // Pet sits under the portrait, matching the reference layout.
 constexpr float kPortraitPetSize    = 26.0f;
@@ -3666,6 +3703,24 @@ AndroidUiRect GetComboToggleRect()
     return { kComboToggleX, kComboToggleY, kComboToggleW, kComboToggleH };
 }
 
+// Defined further down, next to the tab rendering.
+bool HandleAndroidChatTabTap(float uiX, float uiY);
+
+AndroidUiRect GetChatTabRect(int tab)
+{
+    if (tab < 0 || tab >= kChatTabCount)
+    {
+        return {};
+    }
+
+    return {
+        kChatTabsX + static_cast<float>(tab) * (kChatTabW + kChatTabGap),
+        kChatTabsY,
+        kChatTabW,
+        kChatTabH
+    };
+}
+
 AndroidUiRect GetTargetSelectButtonRect()
 {
     return {
@@ -5650,9 +5705,11 @@ void TriggerVirtualRightPanelUtilityAction(int button)
 // does not belong to the CHG toggle.
 int HitTestVirtualTopBarButton(float uiX, float uiY)
 {
+    // Not -1 for "nothing here": the menu entry uses a negative sentinel of its
+    // own, so the miss value has to be distinct from any real action.
     if (!IsVirtualUtilityButtonsAvailable() || !IsVirtualPadAvailable())
     {
-        return -1;
+        return kTopBarActionNone;
     }
 
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
@@ -5663,7 +5720,7 @@ int HitTestVirtualTopBarButton(float uiX, float uiY)
         }
     }
 
-    return -1;
+    return kTopBarActionNone;
 }
 
 int HitTestVirtualRightPanelUtilityActionButton(float uiX, float uiY)
@@ -5713,15 +5770,9 @@ bool HandleVirtualRightPanelTap(float uiX, float uiY)
         return false;
     }
 
-    if (HitTestVirtualRightPanelModeButton(uiX, uiY))
-    {
-        if ((nowMs - g_virtualLastUtilityTapMs) >= kVirtualUtilityButtonCooldownMs)
-        {
-            g_virtualLastUtilityTapMs = nowMs;
-            ToggleVirtualRightPanelMode();
-        }
-        return true;
-    }
+    // No CHG hit test here any more: its render was removed, and leaving the
+    // test behind would be an invisible tap target in the corner. The MEN entry
+    // on the top bar owns this toggle.
 
     const int utilityButton = HitTestVirtualRightPanelUtilityActionButton(uiX, uiY);
     if (utilityButton >= 0)
@@ -6982,6 +7033,13 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return false;
     }
 
+    // Before the pad controls: the tab strip sits above the chat log, clear of
+    // them, and a tap there should switch channel rather than fall through.
+    if (HandleAndroidChatTabTap(uiX, uiY))
+    {
+        return true;
+    }
+
     const int zoomButton = HitTestVirtualZoomButton(uiX, uiY);
     if (zoomButton >= 0)
     {
@@ -6991,13 +7049,21 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // Before the top control stack: the labelled bar sits above it in the
     // corner, and both are in the same region of the screen.
     const int topBarAction = HitTestVirtualTopBarButton(uiX, uiY);
-    if (topBarAction >= 0)
+    if (topBarAction != kTopBarActionNone)
     {
         const uint32_t nowMs = MU_MobileGetTicks();
         if ((nowMs - g_virtualLastUtilityTapMs) >= kVirtualUtilityButtonCooldownMs)
         {
             g_virtualLastUtilityTapMs = nowMs;
-            TriggerVirtualRightPanelUtilityAction(topBarAction);
+
+            if (topBarAction == kTopBarActionMenu)
+            {
+                ToggleVirtualRightPanelMode();
+            }
+            else
+            {
+                TriggerVirtualRightPanelUtilityAction(topBarAction);
+            }
         }
         return true;
     }
@@ -7935,6 +8001,144 @@ void RenderAndroidGroundAim()
     EndBitmap();
 }
 
+// Tab index -> chat channel. The overflow tab has no fixed channel of its own.
+SEASON3B::MESSAGE_TYPE GetChatTabMessageType(int tab)
+{
+    switch (tab)
+    {
+    case 0:  return SEASON3B::TYPE_ALL_MESSAGE;
+    case 1:  return SEASON3B::TYPE_CHAT_MESSAGE;
+    case 2:  return SEASON3B::TYPE_PARTY_MESSAGE;
+    case 3:  return SEASON3B::TYPE_GUILD_MESSAGE;
+    case 4:  return SEASON3B::TYPE_UNION_MESSAGE;   // alliance
+    case 5:  return SEASON3B::TYPE_SYSTEM_MESSAGE;
+    default: return SEASON3B::TYPE_ALL_MESSAGE;
+    }
+}
+
+SEASON3B::CNewUIChatLogWindow* GetAndroidChatLog()
+{
+    return (g_pNewUISystem != nullptr) ? g_pNewUISystem->GetUI_NewChatLogWindow() : nullptr;
+}
+
+bool IsChatTabActive(int tab)
+{
+    SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
+    if (pLog == nullptr || tab < 0 || tab >= kChatTabCount)
+    {
+        return false;
+    }
+
+    // The overflow tab lights whenever the active channel is one without a tab.
+    if (tab == kChatTabCount - 1)
+    {
+        const SEASON3B::MESSAGE_TYPE cur = pLog->GetCurrentMsgType();
+        for (int i = 0; i < kChatTabCount - 1; ++i)
+        {
+            if (GetChatTabMessageType(i) == cur)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return pLog->GetCurrentMsgType() == GetChatTabMessageType(tab);
+}
+
+void RenderAndroidChatTabs()
+{
+    if (!IsVirtualPadAvailable() || GetAndroidChatLog() == nullptr)
+    {
+        return;
+    }
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // Backing behind the log area so the text stays readable over terrain, the
+    // way the tabbed panel in the reference does.
+    DrawVirtualRectFilled(kChatLogX - 4.0f, kChatTabsY + kChatTabH,
+                          (kChatTabW + kChatTabGap) * kChatTabCount + 8.0f,
+                          kChatLogBottomY - (kChatTabsY + kChatTabH) + 2.0f,
+                          0.02f, 0.02f, 0.03f, 0.45f);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    for (int tab = 0; tab < kChatTabCount; ++tab)
+    {
+        const AndroidUiRect rect = GetChatTabRect(tab);
+        const bool active = IsChatTabActive(tab);
+
+        DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
+                              active ? 1.00f : 0.10f,
+                              active ? 0.82f : 0.09f,
+                              active ? 0.10f : 0.08f,
+                              active ? 1.00f : 0.75f);
+        DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                               active ? 1.00f : 0.35f,
+                               active ? 0.92f : 0.30f,
+                               active ? 0.40f : 0.22f,
+                               active ? 1.00f : 0.85f,
+                               active ? 1.5f : 1.0f);
+
+        TextDraw(font,
+                 static_cast<int>(rect.x),
+                 static_cast<int>(rect.y + 4.0f),
+                 active ? 0xFFFFFFFF : 0xFFC8C8C8,
+                 0x0,
+                 static_cast<int>(rect.w),
+                 0, 3,
+                 "%s", kChatTabLabels[tab]);
+    }
+
+    EndBitmap();
+}
+
+bool HandleAndroidChatTabTap(float uiX, float uiY)
+{
+    SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
+    if (pLog == nullptr || !IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    for (int tab = 0; tab < kChatTabCount; ++tab)
+    {
+        if (!HitTestAndroidUiRect(uiX, uiY, GetChatTabRect(tab)))
+        {
+            continue;
+        }
+
+        if (tab == kChatTabCount - 1)
+        {
+            // Overflow: step through the channels with no tab of their own.
+            static const SEASON3B::MESSAGE_TYPE kExtra[] = {
+                SEASON3B::TYPE_WHISPER_MESSAGE,
+                SEASON3B::TYPE_GM_MESSAGE,
+                SEASON3B::TYPE_GENS_MESSAGE,
+                SEASON3B::TYPE_ERROR_MESSAGE,
+            };
+            static int s_extraIndex = 0;
+
+            pLog->ChangeMessage(kExtra[s_extraIndex]);
+            s_extraIndex = (s_extraIndex + 1) % (sizeof(kExtra) / sizeof(kExtra[0]));
+        }
+        else
+        {
+            pLog->ChangeMessage(GetChatTabMessageType(tab));
+        }
+
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
+    return false;
+}
+
 // Auto-combo toggle, Knight line only. Paired with HitTestComboToggle.
 void RenderComboToggle()
 {
@@ -8256,6 +8460,23 @@ void RenderAndroidTradePicker()
     EndBitmap();
 }
 
+// Lit state for a top bar slot. The menu entry tracks whether the grid it opens
+// is showing; the rest track their own window.
+bool IsTopBarSlotActive(int slot)
+{
+    if (slot < 0 || slot >= kTopBarButtonCount)
+    {
+        return false;
+    }
+
+    if (kTopBarActions[slot] == kTopBarActionMenu)
+    {
+        return g_virtualRightPanelUtilityMode;
+    }
+
+    return IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]);
+}
+
 // The always-visible labelled row plus the coin and location chips beneath it.
 // Icons are optional: DrawIconButton skips a texture that failed to load, and
 // the box and label are drawn either way, so the row works before any art
@@ -8277,7 +8498,7 @@ void RenderVirtualTopBar()
     {
         DrawVirtualRightPanelButtonBox(
             GetTopBarButtonRect(slot),
-            IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]));
+            IsTopBarSlotActive(slot));
     }
 
     const AndroidUiRect coinRect = GetTopBarCoinChipRect();
@@ -8292,7 +8513,7 @@ void RenderVirtualTopBar()
         RenderVirtualRightPanelButtonLabel(
             GetTopBarButtonRect(slot),
             kTopBarLabels[slot],
-            IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]));
+            IsTopBarSlotActive(slot));
     }
 
     HFONT chipFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
@@ -8795,6 +9016,10 @@ void RenderVirtualPortraitHud()
                     static_cast<float>(curAG) / static_cast<float>(maxAG),
                     0.90f, 0.78f, 0.30f, 0.16f, 0.13f, 0.04f);
 
+    // No pet bar here: the game already draws a proper Fenrir/helper gauge in
+    // CNewUIItemEnduranceInfo, complete with the pet's name. It is repositioned
+    // there rather than duplicated here.
+
     EndBitmap();
 
     // Placeholder art until per-class portraits are added: character.png is the
@@ -8842,6 +9067,7 @@ void RenderVirtualPortraitHud()
              "%d/%d", curSD, maxSD);
     TextDraw(barFont, textX, static_cast<int>(yAG + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
              "%d/%d", curAG, maxAG);
+
 
     // Skill/cast diagnostic. Off in normal play; flip kShowAndroidSkillDebug to
     // bring it back when something in the cast path needs tracing again, since
@@ -8978,6 +9204,7 @@ void RenderVirtualPad()
 
     RenderVirtualPortraitHud();
     RenderVirtualTopBar();
+    RenderAndroidChatTabs();
 
     DrawVirtualZoomButtons();
     RenderVirtualTopRightControls();
@@ -9088,20 +9315,14 @@ void RenderVirtualPad()
         EndBitmap();
     }
 
-    if (kShowVirtualAttackButton || kShowVirtualSkillButtons)
+    // The CHG button that used to sit in the bottom right corner is gone - the
+    // MEN entry on the top bar toggles this grid now, so only the grid itself
+    // is drawn here.
+    if ((kShowVirtualAttackButton || kShowVirtualSkillButtons)
+        && g_virtualRightPanelUtilityMode
+        && !ShouldYieldVirtualRightPanelUtilityOverlay())
     {
-        if (g_virtualRightPanelUtilityMode)
-        {
-            if (!ShouldYieldVirtualRightPanelUtilityOverlay())
-            {
-                RenderVirtualRightPanelUtilityMode();
-                RenderVirtualRightPanelModeButton();
-            }
-        }
-        else
-        {
-            RenderVirtualRightPanelModeButton();
-        }
+        RenderVirtualRightPanelUtilityMode();
     }
 
     RenderVirtualMirrorHotKeySlots();

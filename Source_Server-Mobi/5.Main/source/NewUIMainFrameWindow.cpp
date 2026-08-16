@@ -745,7 +745,12 @@ bool SEASON3B::CNewUIMainFrameWindow::RenderSS2()
 
 	m_pNewUI3DRenderMng->RenderUI2DEffect(ITEMHOTKEYNUMBER_CAMERA_Z_ORDER, UI2DEffectCallback, this, 0, 0);
 
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	// The five hotkey boxes and the current-skill box along the bottom. Its
+	// input half was already disabled on mobile - the pad arc both fires and
+	// assigns these slots - so this only stopped drawing them.
 	g_pSkillList->RenderCurrentSkillAndHotSkillList();
+#endif
 	//
 	EnableAlphaTest();
 #if !defined(__ANDROID__) && !defined(MU_IOS)
@@ -773,7 +778,12 @@ bool SEASON3B::CNewUIMainFrameWindow::Render()
 
 	m_pNewUI3DRenderMng->RenderUI2DEffect(ITEMHOTKEYNUMBER_CAMERA_Z_ORDER, UI2DEffectCallback, this, 0, 0);
 
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	// The five hotkey boxes and the current-skill box along the bottom. Its
+	// input half was already disabled on mobile - the pad arc both fires and
+	// assigns these slots - so this only stopped drawing them.
 	g_pSkillList->RenderCurrentSkillAndHotSkillList();
+#endif
 
 	EnableAlphaTest();
 #if !defined(__ANDROID__) && !defined(MU_IOS)

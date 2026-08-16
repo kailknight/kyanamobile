@@ -809,6 +809,13 @@ void Interface::RenderCaptchaNumber(float PosX, float PosY, CUITextInputBox* a6,
 //=== Draw Menu Custom
 void Interface::DrawInfoMini()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// The social shortcuts and the Auto Reset / Auto HP / Auto PK toggles are
+	// desktop controls sized for a mouse, and they sit across the bottom of the
+	// screen where the touch overlay now lives. Drawing and hit testing are
+	// both inline below, so returning here removes the pair together.
+	return;
+#else
 	if (gInterface.CheckWindow(ObjWindow::CashShop)
 		|| gInterface.CheckWindow(ObjWindow::FriendList)
 		|| gInterface.CheckWindow(ObjWindow::MoveList)
@@ -980,7 +987,7 @@ void Interface::DrawInfoMini()
 	glColor3f(1.0f, 1.0f, 1.0f); //Xoa mau
 	DisableAlphaBlend();
 	EnableAlphaTest(0);
-
+#endif
 }
 
 void Interface::DrawWindowMuaVIP()

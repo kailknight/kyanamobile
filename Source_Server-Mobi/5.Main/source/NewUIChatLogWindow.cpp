@@ -90,11 +90,6 @@ bool SEASON3B::CNewUIChatLogWindow::RenderMessages(int Type)
 	int MaxShowLines = m_nShowingLines;
 	int GetTypeMsg = (Type != -1 ? TYPE_SYSTEM_MESSAGE : GetCurrentMsgType());
 
-	if (GetTypeMsg == TYPE_SYSTEM_MESSAGE)
-	{
-		fRenderPosY = 110;
-		MaxShowLines = 4;
-	}
 	type_vector_msgs* pvecMsgs = GetMsgs((MESSAGE_TYPE)GetTypeMsg);
 
 	if (pvecMsgs == nullptr)
@@ -367,6 +362,38 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 		return;
 	}
 
+	// Server announcements and GM broadcasts arrive typed as GM or error, not
+	// system, so the System tab came up empty while they filled All. Mirroring
+	// a copy into the system vector puts them under System without taking them
+	// out of All - retyping them at the source would do the latter, because
+	// ProcessAddText deliberately keeps system messages out of m_vecAllMsgs.
+	auto mirrorToSystem = [&](const type_string& id, const type_string& text)
+	{
+#if defined(__ANDROID__) || defined(MU_IOS)
+		if (MsgType != TYPE_GM_MESSAGE && MsgType != TYPE_ERROR_MESSAGE)
+		{
+			return;
+		}
+
+		if (m_VecSystemMsgs.size() >= MAX_NUMBER_OF_LINES)
+		{
+			RemoveFrontLine(TYPE_SYSTEM_MESSAGE);
+		}
+
+		const auto pSysText = new CMessageText;
+		if (!pSysText->Create(id, text, MsgType, MemoryData))
+		{
+			delete pSysText;
+		}
+		else
+		{
+			m_VecSystemMsgs.push_back(pSysText);
+		}
+#else
+		(void)id; (void)text;
+#endif
+	};
+
 	int nScrollLines = 0;
 	if (strText.size() >= 20)
 	{
@@ -389,8 +416,10 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 			}
 			else
 			{
-				if (MsgType != TYPE_SYSTEM_MESSAGE) m_vecAllMsgs.push_back(pAllMsgText);
+				m_vecAllMsgs.push_back(pAllMsgText);
 			}
+
+			mirrorToSystem(strID, strText1);
 
 			if ((MsgType == TYPE_ERROR_MESSAGE) && (ErrMsgType != TYPE_ERROR_MESSAGE && ErrMsgType != TYPE_ALL_MESSAGE))
 			{
@@ -430,8 +459,10 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 				delete pAllMsgText;
 			else
 			{
-				if (MsgType != TYPE_SYSTEM_MESSAGE) m_vecAllMsgs.push_back(pAllMsgText);
+				m_vecAllMsgs.push_back(pAllMsgText);
 			}
+
+			mirrorToSystem("", strText2);
 
 			if ((MsgType == TYPE_ERROR_MESSAGE) && (ErrMsgType != TYPE_ERROR_MESSAGE && ErrMsgType != TYPE_ALL_MESSAGE))
 			{
@@ -472,8 +503,10 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 			delete pAllMsgText;
 		else
 		{
-			if (MsgType != TYPE_SYSTEM_MESSAGE) 	m_vecAllMsgs.push_back(pAllMsgText);
+			m_vecAllMsgs.push_back(pAllMsgText);
 		}
+
+		mirrorToSystem(strID, strText);
 
 		if ((MsgType == TYPE_ERROR_MESSAGE)
 			&& (ErrMsgType != TYPE_ERROR_MESSAGE && ErrMsgType != TYPE_ALL_MESSAGE))
@@ -949,11 +982,6 @@ bool SEASON3B::CNewUIChatLogWindow::Render()
 	//}
 	if (m_bShowChatLog == true)
 	{
-		if (RenderMessages(1) == false)
-		{
-			return false;
-		}
-
 		if (RenderMessages() == false)
 		{
 			return false;
