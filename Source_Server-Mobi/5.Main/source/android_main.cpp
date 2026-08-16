@@ -9256,6 +9256,7 @@ void RenderVirtualPad()
     if (kShowVirtualSkillButtons && !g_virtualRightPanelUtilityMode)
     {
         BeginBitmap();
+        EnsureUITextures();
         const float skillIconScale = std::min(
             kVirtualSkillFrameW / kVirtualSkillBaseFrameW,
             kVirtualSkillFrameH / kVirtualSkillBaseFrameH);
@@ -9282,20 +9283,35 @@ void RenderVirtualPad()
                 && g_pSkillList != nullptr
                 && g_pSkillList->IsSkillPickerOpen();
 
-            const GLuint frameImage = (pressed || selected || selectorOpen || (assignModeActive && !isSelector))
-                ? SEASON3B::CNewUISkillList::IMAGE_SKILLBOX_USE
-                : SEASON3B::CNewUISkillList::IMAGE_SKILLBOX;
+            // Same circular frame as the attack button (DrawVirtualCombatButtonFrame
+            // is pure GL, no art needed) instead of the old desktop square skill-box
+            // art, so the skill row and the attack button read as one family of
+            // controls. assignGlow is the same "available to assign" ring the frame
+            // already supports, just never used here before.
+            DrawVirtualCombatButtonFrame(
+                button.cx,
+                button.cy,
+                button.radius,
+                pressed,
+                assignModeActive && !isSelector);
 
-            ConfigureVirtualSkillIconNoBlendState();
-            SEASON3B::RenderImage(
-                frameImage,
-                button.cx - (kVirtualSkillFrameW * 0.5f),
-                button.cy - (kVirtualSkillFrameH * 0.5f),
-                kVirtualSkillFrameW,
-                kVirtualSkillFrameH);
+            // Armed skill / open picker is a persistent state, not a touch flash,
+            // so it needs its own marker rather than sharing the frame's "pressed"
+            // feedback - that's only a slight alpha/scale nudge, too subtle to read
+            // as "this is the one currently in use" (this was lost when the old
+            // IMAGE_SKILLBOX_USE/IMAGE_SKILLBOX texture swap was replaced with the
+            // circular frame). Same gold as the active chat tab, for one consistent
+            // "this one's active" language across the touch UI.
+            if (selected || selectorOpen)
+            {
+                glLineWidth(2.6f);
+                DrawVirtualCircle(button.cx, button.cy, button.radius + 2.0f, 1.0f, 0.82f, 0.10f, 0.95f, false);
+                glLineWidth(1.0f);
+            }
 
             if (!isSelector && g_pSkillList != nullptr && hotKeySkillIndex >= 0)
             {
+                ConfigureVirtualSkillIconNoBlendState();
                 g_pSkillList->RenderSkillIcon(
                     hotKeySkillIndex,
                     button.cx - renderSkillIconW * 0.5f,
@@ -9316,12 +9332,16 @@ void RenderVirtualPad()
                 const VirtualButtonLayout& button = kVirtualButtons[kVirtualSkillButtonBase + visualSlot];
                 const bool isSelector = (visualSlot == kVirtualSkillSelectorVisualSlot);
 
+                // Positioned off the circle's own radius now rather than the old
+                // rectangular frame's fixed width/height, so it stays anchored to
+                // the bottom of the (larger) circular frame instead of floating
+                // above it.
                 TextDraw(slotFont,
-                         static_cast<int>(button.cx - kVirtualSkillFrameW * 0.5f),
-                         static_cast<int>(button.cy + kVirtualSkillFrameH * 0.5f - 9.0f),
+                         static_cast<int>(button.cx - button.radius),
+                         static_cast<int>(button.cy + button.radius - 9.0f),
                          isSelector ? 0xFFC0E0FF : 0xFFFFFFFF,
                          0x0,
-                         static_cast<int>(kVirtualSkillFrameW),
+                         static_cast<int>(button.radius * 2.0f),
                          0, 3,
                          "%s", isSelector ? "SKL" : std::to_string(visualSlot + 1).c_str());
             }
