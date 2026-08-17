@@ -55,6 +55,6 @@ namespace CfgDefaults
     inline constexpr wchar_t CfgDefaultEncryptedUsername[] = L"";
     inline constexpr wchar_t CfgDefaultEncryptedPassword[] = L"";
 
-    inline constexpr wchar_t CfgDefaultServerIP[] = L"172.22.71.136";
+    inline constexpr wchar_t CfgDefaultServerIP[] = L"139.99.24.220";
     inline constexpr int CfgDefaultServerPort = 63000;
 }

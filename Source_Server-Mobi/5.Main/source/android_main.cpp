@@ -260,7 +260,7 @@ static void InitializeTakumiProtectState()
         gProtect.m_MainInfo.GSPortMin = 55901;
         gProtect.m_MainInfo.GSPortMax = 55999;
         std::strcpy(gProtect.m_MainInfo.CustomerName, "takumi12");
-        std::strcpy(gProtect.m_MainInfo.IpAddress, "172.22.71.136");
+        std::strcpy(gProtect.m_MainInfo.IpAddress, "139.99.24.220");
         gProtect.m_MainInfo.IpAddressPort = 63000;
         std::strcpy(gProtect.m_MainInfo.ClientVersion, "1.04.05");
         std::strcpy(gProtect.m_MainInfo.ClientSerial, "TbYehR2hFUPBKgZj");
@@ -12146,7 +12146,7 @@ static bool InitializeAndroidGame()
         static_cast<int>(m_RememberMe));
     LOGW("SDL audio runtime is disabled under NativeActivity; running muted");
 
-    static std::wstring serverIP = L"172.22.71.136";
+    static std::wstring serverIP = L"139.99.24.220";
     //static std::wstring serverIP = GameConfig::GetInstance().GetServerIP();
     int configuredPort = GameConfig::GetInstance().GetServerPort();
     // if (serverIP.empty() || serverIP == L"127.127.127.127" || serverIP == L"192.168.1.33" || serverIP == L"172.22.71.136")
@@ -13137,7 +13137,7 @@ int SDL_main(int argc, char* argv[])
     m_RememberMe = GameConfig::GetInstance().GetRememberMe() ? 1 : 0;
     LOGI("Audio config: sound=%d music=%d rememberMe=%d", (int)m_SoundOnOff, (int)m_MusicOnOff, (int)m_RememberMe);
 
-    static std::wstring serverIP = L"172.22.71.136";
+    static std::wstring serverIP = L"139.99.24.220";
     //static std::wstring serverIP = GameConfig::GetInstance().GetServerIP();
     int configuredPort = GameConfig::GetInstance().GetServerPort();
     // if (serverIP.empty() || serverIP == L"172.22.71.136")
