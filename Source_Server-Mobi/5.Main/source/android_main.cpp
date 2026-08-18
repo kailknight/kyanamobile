@@ -1414,6 +1414,30 @@ uint32_t g_virtualLastAssignTapMs = 0;
 uint32_t g_virtualLastMiniMapTapMs = 0;
 uint32_t g_virtualLastUtilityTapMs = 0;
 
+// Which Q/W/E/R slot is waiting to be filled, or -1. Tapping the '+' on an
+// empty slot opens the inventory and parks the slot here; the next consumable
+// tapped in there binds to it instead of the auto-chosen slot. Reusing the real
+// inventory beats building a parallel potion list - it already has the icons,
+// the stacks and the hit testing.
+int g_androidPendingHotKeyBindSlot = -1;
+
+// A press on a Q/W/E/R slot, resolved when the finger lifts: a quick tap drinks,
+// a hold rebinds. Deciding on release means no per-frame timer is needed, and
+// the alternative - acting on touch-down and then also firing a hold - would
+// drink a potion before opening the bag.
+constexpr uint32_t kHotKeyRebindHoldMs = 500;
+constexpr float kHotKeyPressMoveCancelUi = 14.0f;
+
+struct AndroidHotKeyPressState
+{
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    int slot = -1;
+    uint32_t downMs = 0;
+    float downX = 0.0f;
+    float downY = 0.0f;
+};
+AndroidHotKeyPressState g_androidHotKeyPress{};
+
 // Two-finger pinch zoom. fingerA is simply the first finger currently down -
 // it may well belong to the joystick or a button - and the gesture only starts
 // once a second one lands. startGap/startZoom are the reference the whole
@@ -2583,7 +2607,28 @@ bool TryAutoBindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
     }
 
     const int itemLevel = (item->Level >> 3) & 15;
-    if (!AndroidBindVirtualPotionSlotFromInventory(item->Type, itemLevel))
+
+    // A '+' on one of the Q/W/E/R slots sent us here, so honour that choice
+    // rather than letting the auto-binder pick a slot of its own.
+    if (g_androidPendingHotKeyBindSlot >= 0
+        && g_androidPendingHotKeyBindSlot < kVirtualMirrorHotKeySlotCount
+        && g_pMainFrame != nullptr)
+    {
+        g_pMainFrame->SetItemHotKey(
+            kVirtualMirrorHotKeys[g_androidPendingHotKeyBindSlot], item->Type, itemLevel);
+        LOGI("Android bind consumable type=%d level=%d -> requested slot=%d",
+             item->Type, itemLevel, g_androidPendingHotKeyBindSlot);
+        g_androidPendingHotKeyBindSlot = -1;
+
+        // The bag was opened purely to answer the '+', so dismiss it once that
+        // is done. Only on this path - browsing the inventory normally and
+        // tapping a consumable still auto-binds without closing anything.
+        if (g_pNewUISystem != nullptr)
+        {
+            g_pNewUISystem->Hide(SEASON3B::INTERFACE_INVENTORY);
+        }
+    }
+    else if (!AndroidBindVirtualPotionSlotFromInventory(item->Type, itemLevel))
     {
         return false;
     }
@@ -5896,6 +5941,9 @@ bool HandleVirtualRightPanelTap(float uiX, float uiY)
     return HitTestVirtualRightPanelFrame(uiX, uiY);
 }
 
+// Defined further down, next to the hotkey rendering.
+ITEM* GetVirtualMirrorHotKeyItem(int slot);
+
 int HitTestVirtualMirrorHotKeySlot(float uiX, float uiY)
 {
     // No local window guard: hiding the overlay while a MU window is open is
@@ -7191,7 +7239,13 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     const int mirrorHotKeySlot = HitTestVirtualMirrorHotKeySlot(uiX, uiY);
     if (mirrorHotKeySlot >= 0)
     {
-        UseVirtualMirrorHotKeySlot(mirrorHotKeySlot);
+        // Only recorded here - see HandleVirtualFingerUp, which decides between
+        // drinking and rebinding based on how long the finger stayed down.
+        g_androidHotKeyPress.fingerId = touch.fingerId;
+        g_androidHotKeyPress.slot = mirrorHotKeySlot;
+        g_androidHotKeyPress.downMs = MU_MobileGetTicks();
+        g_androidHotKeyPress.downX = uiX;
+        g_androidHotKeyPress.downY = uiY;
         return true;
     }
 
@@ -7326,6 +7380,22 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Sliding off a hotkey slot abandons the press, so a stray drag across the
+    // consumable row cannot drink anything.
+    if (g_androidHotKeyPress.slot >= 0 && g_androidHotKeyPress.fingerId == touch.fingerId)
+    {
+        float moveX = 0.0f;
+        float moveY = 0.0f;
+        TouchToVirtualUi(touch, moveX, moveY);
+        const float dx = moveX - g_androidHotKeyPress.downX;
+        const float dy = moveY - g_androidHotKeyPress.downY;
+        if (((dx * dx) + (dy * dy)) > (kHotKeyPressMoveCancelUi * kHotKeyPressMoveCancelUi))
+        {
+            g_androidHotKeyPress = AndroidHotKeyPressState{};
+        }
+        return true;
+    }
+
     if (HandleAndroidTradePickerFingerMotion(touch))
     {
         return true;
@@ -7358,6 +7428,33 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     // a live pinch, so ordinary releases still reach the handlers below.
     if (HandleAndroidPinchFingerUp(touch))
     {
+        return true;
+    }
+
+    // Resolve a Q/W/E/R press. Quick tap on a filled slot drinks it; holding, or
+    // tapping an empty '+' slot, arms that slot and opens the bag so the next
+    // consumable tapped in there is assigned to it.
+    if (g_androidHotKeyPress.slot >= 0 && g_androidHotKeyPress.fingerId == touch.fingerId)
+    {
+        const int slot = g_androidHotKeyPress.slot;
+        const uint32_t heldMs = MU_MobileGetTicks() - g_androidHotKeyPress.downMs;
+        g_androidHotKeyPress = AndroidHotKeyPressState{};
+
+        const bool isEmpty = (GetVirtualMirrorHotKeyItem(slot) == nullptr);
+        if (isEmpty || heldMs >= kHotKeyRebindHoldMs)
+        {
+            g_androidPendingHotKeyBindSlot = slot;
+            if (g_pNewUISystem != nullptr
+                && !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY))
+            {
+                g_pNewUISystem->Show(SEASON3B::INTERFACE_INVENTORY);
+            }
+            PlayBuffer(SOUND_CLICK01);
+        }
+        else
+        {
+            UseVirtualMirrorHotKeySlot(slot);
+        }
         return true;
     }
 
@@ -8963,18 +9060,18 @@ void RenderVirtualMirrorHotKeySlots()
         return;
     }
 
+
+    // Circular frames matching the attack button and the skill arc, rather than
+    // the legacy square IMAGE_SKILLBOX art. Pure GL, so no asset is involved.
     BeginBitmap();
-    EnableAlphaTest();
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
     {
-        const AndroidUiRect rect = GetVirtualMirrorHotKeyRect(slot);
-        SEASON3B::RenderImage(
-            SEASON3B::CNewUISkillList::IMAGE_SKILLBOX,
-            rect.x,
-            rect.y,
-            rect.w,
-            rect.h);
+        const VirtualButtonLayout& layout = kVirtualMirrorHotKeySlots[slot];
+        DrawVirtualCombatButtonFrame(layout.cx, layout.cy, layout.radius, false, false);
     }
     EndBitmap();
 
@@ -9056,6 +9153,25 @@ void RenderVirtualMirrorHotKeySlots()
             "%s",
             kVirtualMirrorHotKeyLabels[slot]);
 
+        // Empty slot: a '+' invites binding something, and doubles as the
+        // affordance for the picker - tapping it opens the inventory armed to
+        // assign whatever consumable is tapped next to this slot.
+        if (GetVirtualMirrorHotKeyItem(slot) == nullptr)
+        {
+            TextDraw(
+                g_hFontBold != nullptr ? g_hFontBold : g_hFont,
+                static_cast<int>(rect.x),
+                static_cast<int>(rect.y + rect.h * 0.5f - 6.0f),
+                (g_androidPendingHotKeyBindSlot == slot) ? 0xFF80FFB0 : 0xFFB0C4DE,
+                0x0,
+                static_cast<int>(rect.w),
+                0,
+                3,
+                "%s",
+                "+");
+            continue;
+        }
+
         const int itemCount = g_pMainFrame->GetItemHotKeyInventoryIndex(kVirtualMirrorHotKeys[slot], true);
         if (itemCount > 0)
         {
@@ -9091,7 +9207,11 @@ void RenderVirtualPortraitHud()
     const float yAG = ySD + kPortraitBarH + kPortraitBarGap;
 
     BeginBitmap();
-    EnableAlphaBlend();
+    // EnableAlphaTest, not EnableAlphaBlend: the latter sets glBlendFunc(GL_ONE,
+    // GL_ONE), so these bars were drawn additively and could never be opaque -
+    // whatever terrain sat behind them was added straight through, however
+    // solid the colour. Standard alpha makes them read as real bars.
+    EnableAlphaTest();
     DisableTexture();
 
     // Panel backing, so the bars stay readable over bright terrain.
@@ -9100,7 +9220,7 @@ void RenderVirtualPortraitHud()
         kPortraitPanelY - 2.0f,
         (kPortraitBarRight - kPortraitPanelX) + 4.0f,
         (yAG + kPortraitBarH) - kPortraitPanelY + 4.0f,
-        0.03f, 0.03f, 0.05f, 0.55f);
+        0.03f, 0.03f, 0.05f, 0.92f);
 
     DrawVirtualBarH(kPortraitBarLeft, yHP, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curHP) / static_cast<float>(maxHP),
@@ -9253,6 +9373,23 @@ void RenderVirtualPad()
                 AndroidHasFocusedTextInput() ? 1 : 0);
         }
         return;
+    }
+
+    // Cancel a pending Q/W/E/R bind once the bag closes again. Tracked as a
+    // transition rather than "is it shut now", because this runs on the frame
+    // the '+' was tapped too - before Show() has taken effect - and a plain
+    // check would disarm it immediately. Left armed, it would hijack whatever
+    // consumable the player tapped next, however much later.
+    {
+        static bool s_inventoryWasVisible = false;
+        const bool inventoryVisible = (g_pNewUISystem != nullptr)
+            && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY);
+
+        if (s_inventoryWasVisible && !inventoryVisible)
+        {
+            g_androidPendingHotKeyBindSlot = -1;
+        }
+        s_inventoryWasVisible = inventoryVisible;
     }
 
     // A bag, character sheet or any other MU window owns the screen: draw none
