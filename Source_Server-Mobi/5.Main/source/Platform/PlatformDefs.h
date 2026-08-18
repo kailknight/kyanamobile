@@ -2535,11 +2535,168 @@ inline DWORD GetModuleFileNameW(HMODULE, LPWSTR buf, DWORD n) {
 }
 #define GetModuleFileName GetModuleFileNameA
 
-// ── INI file API → no-op stubs (Android uses SDL prefs or json) ──────────
+// ── INI file API ─────────────────────────────────────────────────────────
+// The Int/W variants are still stubs that hand back the caller's default. The
+// Int one is deliberate rather than pending: its callers ask for
+// ".\\config.ini" with a backslash, which is not a path separator here, so a
+// real reader would have to normalise the path before it found anything - and
+// doing that would silently switch on a screenful of graphics options that have
+// never been active on this build. Left alone until someone wants that.
 inline UINT GetPrivateProfileIntW(LPCWSTR, LPCWSTR, INT def, LPCWSTR) { return (UINT)def; }
 inline UINT GetPrivateProfileIntA(LPCSTR, LPCSTR, INT def, LPCSTR) { return (UINT)def; }
 inline BOOL WritePrivateProfileStringW(LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR) { return FALSE; }
-inline DWORD GetPrivateProfileStringA(LPCSTR, LPCSTR key, LPCSTR def, LPSTR buf, DWORD n, LPCSTR) { if (!buf || n == 0) return 0; strncpy(buf, def ? def : "", n - 1); buf[n - 1] = 0; return (DWORD)strlen(buf); }
+
+// GetPrivateProfileStringA is real, because the game's entire localisation
+// table goes through it: Other::Load pulls every UI label out of
+// Data/Custom/Text_<lang>.ini this way. While this returned the default the
+// caller passed, that default was the literal string "Null", which is what the
+// character window rendered for every tab name, stat label and page number.
+namespace mu_ini
+{
+    // Win32 matches section and key case-insensitively, so both are folded on
+    // the way into the table and on the way back out.
+    inline std::string Fold(const std::string& text)
+    {
+        std::string out(text);
+        for (char& c : out)
+        {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        }
+        return out;
+    }
+
+    inline void Trim(std::string& text)
+    {
+        size_t begin = 0;
+        while (begin < text.size() && static_cast<unsigned char>(text[begin]) <= ' ') ++begin;
+
+        size_t end = text.size();
+        while (end > begin && static_cast<unsigned char>(text[end - 1]) <= ' ') --end;
+
+        text.assign(text, begin, end - begin);
+    }
+
+    // One matched pair of surrounding quotes comes off, as Win32 does. The text
+    // files rely on it - every entry is written Text0 = "Some label".
+    inline void Unquote(std::string& text)
+    {
+        if (text.size() >= 2
+            && (text.front() == '"' || text.front() == '\'')
+            && text.back() == text.front())
+        {
+            text.assign(text, 1, text.size() - 2);
+        }
+    }
+
+    typedef std::unordered_map<std::string, std::string> IniKeys;
+    typedef std::unordered_map<std::string, IniKeys> IniSections;
+
+    inline IniSections ParseIniFile(const char* path)
+    {
+        IniSections sections;
+
+        FILE* fp = std::fopen(path, "rb");
+        if (fp == NULL) return sections;
+
+        std::string text;
+        char chunk[4096];
+        size_t got;
+        while ((got = std::fread(chunk, 1, sizeof(chunk), fp)) > 0)
+        {
+            text.append(chunk, got);
+        }
+        std::fclose(fp);
+
+        // Safe to hold across insertions: unordered_map is node based, so
+        // rehashing invalidates iterators but never references to elements.
+        IniKeys* current = NULL;
+
+        size_t pos = 0;
+        while (pos <= text.size())
+        {
+            size_t end = text.find('\n', pos);
+            if (end == std::string::npos) end = text.size();
+
+            std::string line(text, pos, end - pos);
+            pos = end + 1;
+
+            Trim(line);
+            if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+            if (line.size() >= 2 && line[0] == '/' && line[1] == '/') continue;
+
+            if (line[0] == '[')
+            {
+                const size_t close = line.find(']');
+                if (close == std::string::npos) continue;
+
+                std::string name(line, 1, close - 1);
+                Trim(name);
+                current = &sections[Fold(name)];
+                continue;
+            }
+
+            if (current == NULL) continue;
+
+            const size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+
+            std::string key(line, 0, eq);
+            std::string value(line, eq + 1);
+            Trim(key);
+            Trim(value);
+            Unquote(value);
+
+            // emplace, not assign: a duplicate key keeps the first value, which
+            // is what Win32 does.
+            if (!key.empty()) current->emplace(Fold(key), value);
+        }
+
+        return sections;
+    }
+
+    // Parsed once per path and kept. Other::Load alone asks for around a
+    // thousand keys during startup, and re-reading the file for each of them
+    // would be a thousand opens of the same few KB. Nothing writes these files
+    // back - WritePrivateProfileString is a stub - so the cache cannot go
+    // stale. Not thread safe, and does not need to be: the callers are static
+    // init and the options window, both on the main thread.
+    inline const IniSections& CachedIniFile(const std::string& path)
+    {
+        static std::unordered_map<std::string, IniSections> cache;
+
+        std::unordered_map<std::string, IniSections>::iterator it = cache.find(path);
+        if (it == cache.end())
+        {
+            it = cache.emplace(path, ParseIniFile(path.c_str())).first;
+        }
+        return it->second;
+    }
+}
+
+inline DWORD GetPrivateProfileStringA(LPCSTR section, LPCSTR key, LPCSTR def, LPSTR buf, DWORD n, LPCSTR path)
+{
+    if (!buf || n == 0) return 0;
+
+    const char* value = def ? def : "";
+
+    if (section != NULL && key != NULL && path != NULL)
+    {
+        const mu_ini::IniSections& file = mu_ini::CachedIniFile(path);
+
+        mu_ini::IniSections::const_iterator s = file.find(mu_ini::Fold(section));
+        if (s != file.end())
+        {
+            mu_ini::IniKeys::const_iterator k = s->second.find(mu_ini::Fold(key));
+
+            // Points into the cache, which outlives every caller.
+            if (k != s->second.end()) value = k->second.c_str();
+        }
+    }
+
+    strncpy(buf, value, n - 1);
+    buf[n - 1] = 0;
+    return (DWORD)strlen(buf);
+}
 inline DWORD GetPrivateProfileStringW(LPCWSTR, LPCWSTR key, LPCWSTR def, LPWSTR buf, DWORD n, LPCWSTR) {
     if (buf && n > 0 && def) wcsncpy(buf, def, n-1), buf[n-1]=L'\0';
     return def ? (DWORD)wcslen(def) : 0;

@@ -443,8 +443,12 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderTableTexts()
 		g_pRenderText->SetFont(g_hFontBold);
 		g_pRenderText->SetTextColor(255, 138, 0, 255);
 		g_pRenderText->SetBgColor(0, 0, 0, 0);
-		g_pRenderText->RenderText(m_Pos.x + 18, m_Pos.y + 88, strLevelUpPoint);  //chinh cot point
-		//g_pRenderText->RenderText(m_Pos.x + 115, m_Pos.y + 58, strLevelUpPoint);  //chinh cot point
+		// Free stat points sit on the level line, right aligned into the space
+		// left over beside it. They used to be drawn at +88, which is the same
+		// line strPointProbability below already claims - so the moment a
+		// character actually had points to spend, the two strings printed over
+		// each other. The gap next to the level was empty in every layout.
+		g_pRenderText->RenderText(m_Pos.x + 100, m_Pos.y + 58, strLevelUpPoint, 75, 0, RT3_SORT_RIGHT);
 	}
 
 	g_pRenderText->SetFont(g_hFont);
@@ -1176,7 +1180,7 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderAttribute()
 				unicode::_sprintf(strBlocking, GlobalText[208], CharacterAttribute->PrintPlayer.ViewDefense, CharacterAttribute->PrintPlayer.ViewDefenseSuccessRate);
 			}
 #else //PBG_ADD_NEWCHAR_MONK_SKILL
-			// 208 "¹æ¾î·Â(À²): %d (%d)"
+			// 208 "ï¿½ï¿½ï¿½ï¿½(ï¿½ï¿½): %d (%d)"
 			unicode::_sprintf(strBlocking, GlobalText[208],
 				t_adjdef + maxdefense + iChangeRingAddDefense,
 				CharacterAttribute->SuccessfulBlocking
@@ -1355,7 +1359,7 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderAttribute()
 	if (iBaseClass == CLASS_RAGEFIGHTER)
 	{
 		iY += 13;
-		//¹°¸®°ø°Ý·Â
+		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý·ï¿½
 		unicode::_sprintf(strVitality, GlobalText[3155], CharacterAttribute->PrintPlayer.ViewRFDamageMultiplierA);
 		g_pRenderText->RenderText(m_Pos.x + 20, m_Pos.y + iY, strVitality);
 	}
@@ -1716,11 +1720,11 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderAttribute()
 #ifdef PBG_ADD_NEWCHAR_MONK
 	if (iBaseClass == CLASS_RAGEFIGHTER)
 	{
-		//¸¶¹ý°ø°Ý·Â
+		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý·ï¿½
 		unicode::_sprintf(strEnergy, GlobalText[3156], CharacterAttribute->PrintPlayer.ViewRFDamageMultiplierB);
 		g_pRenderText->RenderText(m_Pos.x + 20, m_Pos.y + iY, strEnergy);
 		iY += 13;
-		//¹üÀ§°ø°Ý·Â
+		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý·ï¿½
 		unicode::_sprintf(strEnergy, GlobalText[3157], CharacterAttribute->PrintPlayer.ViewRFDamageMultiplierC);
 		g_pRenderText->RenderText(m_Pos.x + 20, m_Pos.y + iY, strEnergy);
 	}
