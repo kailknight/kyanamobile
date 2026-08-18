@@ -593,6 +593,13 @@ extern bool  g_bTipSuppressBG;
 // the above - inside the namespace it becomes a separate internal symbol.
 extern bool Teleport;
 
+// ZzzOpenglUtil's shadows of real GL state: the bound texture, and which blend
+// mode the Enable*/Disable* helpers think is active. TextureEnable is already
+// declared in ZzzOpenglUtil.h. Same reason again for putting these here -
+// declared inside the namespace they link to nothing.
+extern int CachTexture;
+extern int AlphaBlendType;
+
 namespace
 {
 constexpr bool kUseLegacyMainHud = true;
@@ -4842,16 +4849,6 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
             skillSlot,
             Hero->CurrentSkill,
             currentSkillType);
-        {
-            char szDbg[192];
-            wsprintf(szDbg, "NV exit: slot-empty raw=%d loaded=%d s0=%d s1=%d s2=%d",
-                     g_virtualSkillSlots[skillSlot],
-                     g_virtualSkillSlotsLoaded ? 1 : 0,
-                     g_virtualSkillSlots[0],
-                     g_virtualSkillSlots[1],
-                     g_virtualSkillSlots[2]);
-            g_pChatListBox->AddText("", szDbg, SEASON3B::TYPE_SYSTEM_MESSAGE);
-        }
         return;
     }
 
@@ -4861,11 +4858,6 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
     if (rawSkillType <= 0 || rawSkillType >= MAX_SKILLS)
     {
         LOGW("VirtualPad: invalid skillType=%d skillIndex=%d", rawSkillType, Hero->CurrentSkill);
-        if (g_pChatListBox != nullptr)
-        {
-            char szDbg[192];
-            wsprintf(szDbg, "NV exit: bad-type raw=%d", rawSkillType);
-        }
         Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
         return;
     }
@@ -4914,11 +4906,6 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
             skillSlot,
             Hero->CurrentSkill,
             static_cast<int>(skillType));
-        if (g_pChatListBox != nullptr)
-        {
-            char szDbg[192];
-            wsprintf(szDbg, "NV exit: no-target skill=%d", (int)CharacterAttribute->Skill[Hero->CurrentSkill]);
-        }
         Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
         return;
     }
@@ -7757,6 +7744,16 @@ static void DrawIconButton(float uiX, float uiY, float uiW, float uiH,
 
     // Restore additive blend expected by the rest of the virtual pad
     glBlendFunc(GL_ONE, GL_ONE);
+
+    // Everything above drove GL directly, so ZzzOpenglUtil's shadows of that
+    // state are now lying: it still believes texturing is on, the old texture is
+    // bound and the blend mode is unchanged. Left stale, the next
+    // EnableAlphaTest() skips its glEnable(GL_TEXTURE_2D) and the next
+    // BindTexture() skips its bind - which is what drew the top bar labels as
+    // solid untextured blocks. Invalidate them so the helpers do real work.
+    TextureEnable  = false;
+    CachTexture    = 0x7FFFFFFF;
+    AlphaBlendType = -1;
 }
 
 static void DrawIconButtonUv(float uiX, float uiY, float uiW, float uiH,
@@ -8509,11 +8506,23 @@ void RenderVirtualTopBar()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+    // Plain semi-transparent black plate, drawn inline rather than through
+    // DrawVirtualRightPanelButtonBox - that one is shared with the utility grid,
+    // the target picker and the item menu, which all still want the decorated
+    // blue style. Now that the icons carry the meaning, these only need to hold
+    // the art clear of the world behind them. Active slots go more opaque, which
+    // is the whole state cue left once the labels are gone.
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
-        DrawVirtualRightPanelButtonBox(
-            GetTopBarButtonRect(slot),
-            IsTopBarSlotActive(slot));
+        const AndroidUiRect rect = GetTopBarButtonRect(slot);
+        const bool active = IsTopBarSlotActive(slot);
+        DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
+                              0.0f, 0.0f, 0.0f, active ? 0.78f : 0.45f);
+        if (active)
+        {
+            DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                                   0.85f, 0.85f, 0.90f, 0.85f, 1.0f);
+        }
     }
 
     const AndroidUiRect coinRect = GetTopBarCoinChipRect();
@@ -8522,14 +8531,6 @@ void RenderVirtualTopBar()
     DrawVirtualRectOutline(coinRect.x, coinRect.y, coinRect.w, coinRect.h, 0.55f, 0.45f, 0.18f, 0.90f, 1.0f);
     DrawVirtualRectFilled(locRect.x, locRect.y, locRect.w, locRect.h, 0.05f, 0.05f, 0.08f, 0.62f);
     DrawVirtualRectOutline(locRect.x, locRect.y, locRect.w, locRect.h, 0.22f, 0.36f, 0.62f, 0.90f, 1.0f);
-
-    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
-    {
-        RenderVirtualRightPanelButtonLabel(
-            GetTopBarButtonRect(slot),
-            kTopBarLabels[slot],
-            IsTopBarSlotActive(slot));
-    }
 
     HFONT chipFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
 
@@ -8558,14 +8559,44 @@ void RenderVirtualTopBar()
                  0, 3, "%s (%d, %d)", mapName, Hero->PositionX, Hero->PositionY);
     }
 
-    EndBitmap();
-
+    // Icons last so they sit over the box and its label - but still inside the
+    // BeginBitmap/EndBitmap pair. DrawIconButton emits raw glVertex2f in screen
+    // pixels, which only lands correctly under the 2D ortho projection
+    // BeginBitmap sets up; EndBitmap pops it, so drawing these afterwards put
+    // them under the world projection where nothing was visible.
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
         const AndroidUiRect rect = GetTopBarButtonRect(slot);
         DrawIconButton(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f,
                        GetTopBarIconTexture(slot), 1.0f);
     }
+
+    // Labels drawn by the engine rather than baked into the art, onto the empty
+    // nameplate at the bottom of each icon. Baked text cannot stay sharp here:
+    // UI space is 640x480 but the screen is not 4:3, so the two axes scale by
+    // different factors (3.875x vs 2.325x on a 2480x1116 panel) and any art is
+    // stretched sideways - fatal for letterforms, survivable for symbols. Engine
+    // text is rasterised at native pixel size and skips that entirely, which is
+    // why the map name and chat read cleanly in the same frame.
+    //
+    // Positioned off the bottom edge rather than rect.y like
+    // RenderVirtualRightPanelButtonLabel does, since that one centres in the
+    // whole button and is shared with the utility grid.
+    //
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        const AndroidUiRect rect = GetTopBarButtonRect(slot);
+        TextDraw(g_hFontMini != nullptr ? g_hFontMini : g_hFont,
+                 static_cast<int>(rect.x),
+                 static_cast<int>(rect.y + rect.h - 11.0f),
+                 IsTopBarSlotActive(slot) ? 0xFFFFF0C0 : 0xFFF0E4CC,
+                 0x0,
+                 static_cast<int>(rect.w),
+                 0, 3,
+                 "%s", kTopBarLabels[slot]);
+    }
+
+    EndBitmap();
 }
 
 void RenderVirtualRightPanelUtilityMode()
