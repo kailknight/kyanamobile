@@ -981,6 +981,21 @@ static UITexture g_uiTex_setting;
 // at id 0, which DrawIconButton treats as "draw nothing" - the button keeps its
 // box and text label, so a missing file costs the icon and nothing else.
 static std::array<UITexture, kTopBarButtonCount> g_uiTex_topBar;
+
+// Per-class portraits for the top-left panel, indexed by the CLASS_TYPE base
+// class. Any that fail to load stay at id 0 and fall back to character.png, so
+// the panel keeps working with a partial set.
+constexpr int kClassPortraitCount = 7;
+constexpr std::array<const char*, kClassPortraitCount> kClassPortraitAssets = {
+    "ui/portrait_dw.png",   // CLASS_WIZARD     - Dark Wizard
+    "ui/portrait_dk.png",   // CLASS_KNIGHT     - Dark Knight
+    "ui/portrait_fe.png",   // CLASS_ELF        - Fairy Elf
+    "ui/portrait_mg.png",   // CLASS_DARK       - Magic Gladiator
+    "ui/portrait_dl.png",   // CLASS_DARK_LORD  - Dark Lord
+    "ui/portrait_su.png",   // CLASS_SUMMONER   - Summoner
+    "ui/portrait_rf.png",   // CLASS_RAGEFIGHTER
+};
+static std::array<UITexture, kClassPortraitCount> g_uiTex_classPortrait;
 static bool g_uiTexturesLoaded = false;
 
 constexpr float kSkillLineU = 157.0f / 677.0f;
@@ -7918,6 +7933,28 @@ static void EnsureUITextures()
     {
         g_uiTex_topBar[slot] = LoadUITextureAsset(kTopBarIconAssets[slot]);
     }
+
+    for (int cls = 0; cls < kClassPortraitCount; ++cls)
+    {
+        g_uiTex_classPortrait[cls] = LoadUITextureAsset(kClassPortraitAssets[cls]);
+    }
+}
+
+// Portrait for the hero's current base class, or character.png while that class
+// has no art yet. GetBaseClass folds the evolutions down - a Soul Master still
+// answers CLASS_WIZARD - so one portrait per base class covers every character.
+const UITexture& GetClassPortraitTexture()
+{
+    if (Hero != nullptr)
+    {
+        const int baseClass = gCharacterManager.GetBaseClass(Hero->Class);
+        if (baseClass >= 0 && baseClass < kClassPortraitCount
+            && g_uiTex_classPortrait[baseClass].id != 0)
+        {
+            return g_uiTex_classPortrait[baseClass];
+        }
+    }
+    return g_uiTex_character;
 }
 
 const UITexture& GetTopBarIconTexture(int slot)
@@ -8003,6 +8040,12 @@ static void DrawIconButtonUv(float uiX, float uiY, float uiW, float uiH,
     glDisable(GL_TEXTURE_2D);
 
     glBlendFunc(GL_ONE, GL_ONE);
+
+    // Same shadow invalidation as DrawIconButton - this drives GL directly too,
+    // so ZzzOpenglUtil's trackers no longer match reality.
+    TextureEnable  = false;
+    CachTexture    = 0x7FFFFFFF;
+    AlphaBlendType = -1;
 }
 
 static void DrawVirtualTopRightTextButton(const AndroidUiRect& rect, const TCHAR* label, bool active)
@@ -9245,19 +9288,47 @@ void RenderVirtualPortraitHud()
     // CNewUIItemEnduranceInfo, complete with the pet's name. It is repositioned
     // there rather than duplicated here.
 
-    EndBitmap();
+    // Per-class portrait, falling back to character.png for any class without
+    // art yet. This has to stay inside the BeginBitmap/EndBitmap pair: like the
+    // top bar icons, DrawIconButton emits raw glVertex2f in screen pixels and
+    // only lands under the 2D ortho projection. There used to be an EndBitmap()
+    // right here, which is why the avatar never appeared at all.
+    //
+    // Fills the whole slot without distorting the face. A square UI rect is not
+    // square on screen - UI space is 640x480 on a panel that is rarely 4:3, so
+    // here the axes scale by 3.875x and 2.325x - and stretching a face by 67%
+    // is immediately obvious. Rather than shrink the portrait to fit (which
+    // left gaps either side), draw it at full size and sample a centred
+    // sub-rect of the texture instead: the slot is covered edge to edge, the
+    // proportions stay true, and the overflow is cropped rather than squashed.
+    {
+        const float sxScale = static_cast<float>(WindowWidth) / 640.0f;
+        const float syScale = static_cast<float>(WindowHeight) / 480.0f;
+        const float boxAspect = (syScale > 0.0f) ? (sxScale / syScale) : 1.0f;
 
-    // Placeholder art until per-class portraits are added: character.png is the
-    // icon the disabled HUD used for its character button. DrawIconButton leaves
-    // additive blend set, so nothing that needs alpha may follow it un-reset.
-    DrawIconButton(
-        kPortraitPanelX,
-        kPortraitPanelY,
-        kPortraitAvatarSize,
-        kPortraitAvatarSize,
-        g_uiTex_character,
-        1.0f,
-        0.06f, 0.06f, 0.09f);
+        float u0 = 0.0f, uW = 1.0f;
+        float v0 = 0.0f, vH = 1.0f;
+        if (boxAspect > 1.0f)
+        {
+            // Slot is wider than the square source: full width, crop height.
+            vH = 1.0f / boxAspect;
+            v0 = (1.0f - vH) * 0.5f;
+        }
+        else if (boxAspect < 1.0f)
+        {
+            uW = boxAspect;
+            u0 = (1.0f - uW) * 0.5f;
+        }
+
+        DrawIconButtonUv(
+            kPortraitPanelX,
+            kPortraitPanelY,
+            kPortraitAvatarSize,
+            kPortraitAvatarSize,
+            GetClassPortraitTexture(),
+            u0, v0, uW, vH,
+            1.0f);
+    }
 
     if (Hero != nullptr && Hero->m_pPet != nullptr)
     {
@@ -9270,6 +9341,8 @@ void RenderVirtualPortraitHud()
             0.85f,
             0.06f, 0.06f, 0.09f);
     }
+
+    EndBitmap();
 
     // Numbers last, and inside their own bitmap pass: DrawIconButton above left
     // additive blending set and the font atlas bound.
@@ -9468,7 +9541,10 @@ void RenderVirtualPad()
             pressed,
             false);
 
-        const float attackIconSize = attackButton.radius * 1.18f;
+        // Full diameter, so the art covers the button instead of floating in
+        // the middle of it - at 1.18x the radius it filled barely half the
+        // circle and left a thick empty ring.
+        const float attackIconSize = attackButton.radius * 2.0f;
         DrawIconButton(
             attackButton.cx - attackIconSize * 0.5f,
             attackButton.cy - attackIconSize * 0.5f,
