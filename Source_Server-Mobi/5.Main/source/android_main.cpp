@@ -622,8 +622,6 @@ constexpr int kVirtualRightPanelUtilityActionCount = 12;
 constexpr int kVirtualRightPanelGridColumns = 3;
 constexpr int kVirtualRightPanelGridRows = 4;
 constexpr int kVirtualRightPanelModeGridSlot = -1;
-constexpr int kVirtualZoomButtonMinus = 0;
-constexpr int kVirtualZoomButtonPlus = 1;
 constexpr uint32_t kVirtualMiniMapButtonCooldownMs = 220;
 constexpr uint32_t kVirtualAttackRepeatMs = 140;
 
@@ -1267,17 +1265,16 @@ constexpr float kVirtualHudChatBoxW = 170.0f;
 constexpr float kVirtualHudChatBoxH = 52.0f;
 
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Zoom +/- buttons: top-center beside the level badge 鑺掗垾婵冨亾鑺掗垾婵冨亾
-constexpr float kZoomButtonW = 44.0f;
-constexpr float kZoomButtonH = 28.0f;
-constexpr float kZoomButtonY = 28.0f;
-constexpr float kZoomButtonGap = 8.0f;
-constexpr float kZoomAnchorCenterX = 318.0f;
-constexpr float kZoomMinusX = kZoomAnchorCenterX - kZoomButtonGap * 0.5f - kZoomButtonW;
-constexpr float kZoomPlusX  = kZoomAnchorCenterX + kZoomButtonGap * 0.5f;
-constexpr float kZoomStep = 100.0f;   // distance per tap
 constexpr float kZoomMin  = 800.0f;
 constexpr float kZoomMax  = 1600.0f;
-constexpr uint32_t kZoomCooldownMs = 180;
+constexpr float kZoomDefault = 1200.0f;
+
+// Two-finger pinch. The gap has to open or close by this much, in real screen
+// pixels, before the camera moves at all - otherwise resting a second thumb on
+// the glass would jog the view. Measured in physical pixels rather than UI
+// units because UI space is stretched unevenly on non-4:3 panels, and a pinch
+// should feel the same whichever way the fingers happen to be oriented.
+constexpr float kPinchActivateSlopPx = 24.0f;
 constexpr float kMainFrameItemHotKeyX = 0.0f;
 constexpr float kMainFrameItemHotKeyY = 430.0f;
 constexpr float kMainFrameItemHotKeyW = 38.0f;
@@ -1415,8 +1412,24 @@ bool g_virtualAssignConsumedForPickerSkill = false;
 bool g_virtualAssignConsumedForPickerSession = false;
 uint32_t g_virtualLastAssignTapMs = 0;
 uint32_t g_virtualLastMiniMapTapMs = 0;
-uint32_t g_virtualLastZoomTapMs = 0;
 uint32_t g_virtualLastUtilityTapMs = 0;
+
+// Two-finger pinch zoom. fingerA is simply the first finger currently down -
+// it may well belong to the joystick or a button - and the gesture only starts
+// once a second one lands. startGap/startZoom are the reference the whole
+// gesture scales from, so the zoom tracks the fingers absolutely instead of
+// accumulating drift frame to frame.
+struct AndroidPinchZoomState
+{
+    SDL_FingerID fingerA = static_cast<SDL_FingerID>(-1);
+    SDL_FingerID fingerB = static_cast<SDL_FingerID>(-1);
+    float ax = 0.0f, ay = 0.0f;
+    float bx = 0.0f, by = 0.0f;
+    bool  active = false;
+    float startGap = 0.0f;
+    float startZoom = 0.0f;
+};
+AndroidPinchZoomState g_androidPinch{};
 // Which arc slot is armed, or -1 for a plain weapon attack. Tapping a skill
 // button sets this; the attack button reads it.
 int g_virtualSelectedSkillSlot = -1;
@@ -3168,66 +3181,159 @@ void ToggleMiniMapByVirtualButton()
     }
 }
 
-int HitTestVirtualZoomButton(float uiX, float uiY)
+// ---------------------------------------------------------------------------
+// Two-finger pinch zoom, replacing the old on-screen +/- buttons.
+// ---------------------------------------------------------------------------
+
+// Physical pixels, not UI units: pinch distance has to be measured in what the
+// fingers actually travel. UI space is 640x480 stretched onto a panel that is
+// rarely 4:3, so the same gap would read differently horizontally and
+// vertically if it were measured there.
+void TouchToScreenPx(const SDL_TouchFingerEvent& touch, float& outX, float& outY)
 {
-    if (!IsVirtualPadAvailable())
-    {
-        return -1;
-    }
-
-    if (uiY < kZoomButtonY || uiY > (kZoomButtonY + kZoomButtonH))
-    {
-        return -1;
-    }
-
-    if (uiX >= kZoomMinusX && uiX <= (kZoomMinusX + kZoomButtonW))
-    {
-        return kVirtualZoomButtonMinus;
-    }
-
-    if (uiX >= kZoomPlusX && uiX <= (kZoomPlusX + kZoomButtonW))
-    {
-        return kVirtualZoomButtonPlus;
-    }
-
-    return -1;
+    outX = std::clamp(touch.x, 0.0f, 1.0f) * static_cast<float>(WindowWidth);
+    outY = std::clamp(touch.y, 0.0f, 1.0f) * static_cast<float>(WindowHeight);
 }
 
-bool HandleVirtualZoomButtonTap(int button)
+float GetCurrentAndroidZoom()
 {
-    if (button != kVirtualZoomButtonMinus && button != kVirtualZoomButtonPlus)
+    float zoom = (g_androidZoomOverride > 0.0f) ? g_androidZoomOverride : CameraDistanceTarget;
+    if (zoom <= 0.0f)
+    {
+        zoom = kZoomDefault;
+    }
+    return std::clamp(zoom, kZoomMin, kZoomMax);
+}
+
+float GetPinchGap()
+{
+    const float dx = g_androidPinch.bx - g_androidPinch.ax;
+    const float dy = g_androidPinch.by - g_androidPinch.ay;
+    return std::sqrt((dx * dx) + (dy * dy));
+}
+
+void ClearAndroidPinch()
+{
+    g_androidPinch = AndroidPinchZoomState{};
+}
+
+bool IsAndroidPinchActive()
+{
+    return g_androidPinch.active;
+}
+
+// Called for every finger that goes down. Returns true only once the pinch has
+// actually begun, so a normal single touch falls through untouched.
+bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
+{
+    if (!IsVirtualPadAvailable())
     {
         return false;
     }
 
-    const uint32_t nowMs = MU_MobileGetTicks();
-    if ((nowMs - g_virtualLastZoomTapMs) < kZoomCooldownMs)
+    float px = 0.0f, py = 0.0f;
+    TouchToScreenPx(touch, px, py);
+
+    if (g_androidPinch.fingerA == static_cast<SDL_FingerID>(-1))
+    {
+        g_androidPinch.fingerA = touch.fingerId;
+        g_androidPinch.ax = px;
+        g_androidPinch.ay = py;
+        return false;
+    }
+
+    if (g_androidPinch.fingerB == static_cast<SDL_FingerID>(-1)
+        && touch.fingerId != g_androidPinch.fingerA)
+    {
+        g_androidPinch.fingerB = touch.fingerId;
+        g_androidPinch.bx = px;
+        g_androidPinch.by = py;
+        g_androidPinch.startGap = GetPinchGap();
+        g_androidPinch.startZoom = GetCurrentAndroidZoom();
+        g_androidPinch.active = true;
+
+        // The first finger was almost certainly already driving the joystick,
+        // and the character should not keep running through a pinch.
+        ClearVirtualJoystick();
+        return true;
+    }
+
+    return false;
+}
+
+bool HandleAndroidPinchFingerMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (touch.fingerId != g_androidPinch.fingerA && touch.fingerId != g_androidPinch.fingerB)
+    {
+        return false;
+    }
+
+    float px = 0.0f, py = 0.0f;
+    TouchToScreenPx(touch, px, py);
+    if (touch.fingerId == g_androidPinch.fingerA)
+    {
+        g_androidPinch.ax = px;
+        g_androidPinch.ay = py;
+    }
+    else
+    {
+        g_androidPinch.bx = px;
+        g_androidPinch.by = py;
+    }
+
+    if (!g_androidPinch.active)
+    {
+        // One finger down: not our gesture, let the joystick have the motion.
+        return false;
+    }
+
+    const float gap = GetPinchGap();
+    if (g_androidPinch.startGap <= 1.0f)
+    {
+        return true;
+    }
+    if (std::fabs(gap - g_androidPinch.startGap) < kPinchActivateSlopPx)
     {
         return true;
     }
 
-    float currentZoom = g_androidZoomOverride > 0.0f
-        ? g_androidZoomOverride
-        : CameraDistanceTarget;
-    if (currentZoom <= 0.0f)
-    {
-        currentZoom = 1200.0f;
-    }
+    // Fingers apart = zoom in = camera closer, so the ratio is inverted.
+    // Scaling from the gesture's own start rather than the previous frame keeps
+    // it absolute: put the fingers back where they began and the zoom returns
+    // exactly to where it began.
+    const float scale = g_androidPinch.startGap / std::max(gap, 1.0f);
+    const float nextZoom = std::clamp(g_androidPinch.startZoom * scale, kZoomMin, kZoomMax);
 
-    currentZoom = std::clamp(currentZoom, kZoomMin, kZoomMax);
-    const float delta = (button == kVirtualZoomButtonMinus) ? kZoomStep : -kZoomStep;
-    const float nextZoom = std::clamp(currentZoom + delta, kZoomMin, kZoomMax);
-
-    g_virtualLastZoomTapMs = nowMs;
     g_androidZoomOverride = nextZoom;
     CameraDistanceTarget = nextZoom;
-
-    LOGI(
-        "VirtualPad: zoom tap button=%s current=%.1f next=%.1f",
-        button == kVirtualZoomButtonMinus ? "minus" : "plus",
-        currentZoom,
-        nextZoom);
     return true;
+}
+
+bool HandleAndroidPinchFingerUp(const SDL_TouchFingerEvent& touch)
+{
+    if (touch.fingerId != g_androidPinch.fingerA && touch.fingerId != g_androidPinch.fingerB)
+    {
+        return false;
+    }
+
+    const bool wasActive = g_androidPinch.active;
+
+    // Promote the surviving finger to A so lifting one of two does not leave a
+    // stale slot behind, and a third pinch can start cleanly.
+    if (touch.fingerId == g_androidPinch.fingerA)
+    {
+        g_androidPinch.fingerA = g_androidPinch.fingerB;
+        g_androidPinch.ax = g_androidPinch.bx;
+        g_androidPinch.ay = g_androidPinch.by;
+    }
+    g_androidPinch.fingerB = static_cast<SDL_FingerID>(-1);
+    g_androidPinch.active = false;
+    g_androidPinch.startGap = 0.0f;
+    g_androidPinch.startZoom = 0.0f;
+
+    // Swallow the lift only if it ended a real pinch; otherwise the normal
+    // release path still needs to see it.
+    return wasActive;
 }
 
 bool HitTestVirtualCurrentSkillBox(float uiX, float uiY);
@@ -6950,6 +7056,14 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     float uiY = 0.0f;
     TouchToVirtualUi(touch, uiX, uiY);
 
+    // Before anything else: this registers every finger so the pinch tracker
+    // knows when a second one lands. It only claims the event on the frame the
+    // gesture actually starts, so single touches carry on as normal.
+    if (HandleAndroidPinchFingerDown(touch))
+    {
+        return true;
+    }
+
     {
         CCharMakeWin& charMakeWin = CUIMng::Instance().m_CharMakeWin;
         if (charMakeWin.IsShow())
@@ -7040,12 +7154,6 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     if (HandleAndroidChatTabTap(uiX, uiY))
     {
         return true;
-    }
-
-    const int zoomButton = HitTestVirtualZoomButton(uiX, uiY);
-    if (zoomButton >= 0)
-    {
-        return HandleVirtualZoomButtonTap(zoomButton);
     }
 
     // Before the top control stack: the labelled bar sits above it in the
@@ -7211,6 +7319,13 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
 
 bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
 {
+    // Keeps both tracked finger positions current, and owns the motion outright
+    // once the pinch is running so the joystick cannot also act on it.
+    if (HandleAndroidPinchFingerMotion(touch))
+    {
+        return true;
+    }
+
     if (HandleAndroidTradePickerFingerMotion(touch))
     {
         return true;
@@ -7239,6 +7354,13 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
 
 bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 {
+    // Unregisters the finger either way; only swallows the event when it ended
+    // a live pinch, so ordinary releases still reach the handlers below.
+    if (HandleAndroidPinchFingerUp(touch))
+    {
+        return true;
+    }
+
     if (HandleAndroidTradePickerFingerUp(touch))
     {
         return true;
@@ -8645,69 +8767,6 @@ void RenderVirtualRightPanelModeButton()
     RenderVirtualRightPanelModeButtonLabel(rect);
 }
 
-void DrawVirtualZoomButtons()
-{
-    BeginBitmap();
-    DisableTexture();
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    auto drawZoomBtn = [](float uiLeft, float uiTop, float uiW, float uiH, bool isMinus)
-    {
-        const float x = UiToScreenX(uiLeft);
-        const float yTop = UiToScreenY(uiTop);
-        const float w = UiToScreenX(uiW);
-        const float h = UiToScreenY(uiH);
-        const float y = static_cast<float>(WindowHeight) - yTop - h;
-
-        glColor4f(0.02f, 0.02f, 0.02f, 0.96f);
-        glBegin(GL_TRIANGLE_FAN);
-        glVertex2f(x, y);
-        glVertex2f(x + w, y);
-        glVertex2f(x + w, y + h);
-        glVertex2f(x, y + h);
-        glEnd();
-
-        glLineWidth(3.0f);
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        glBegin(GL_LINE_LOOP);
-        glVertex2f(x + 1.5f, y + 1.5f);
-        glVertex2f(x + w - 1.5f, y + 1.5f);
-        glVertex2f(x + w - 1.5f, y + h - 1.5f);
-        glVertex2f(x + 1.5f, y + h - 1.5f);
-        glEnd();
-
-        glLineWidth(1.0f);
-        glColor4f(0.15f, 0.15f, 0.15f, 1.0f);
-        glBegin(GL_LINE_LOOP);
-        glVertex2f(x + 4.0f, y + 4.0f);
-        glVertex2f(x + w - 4.0f, y + 4.0f);
-        glVertex2f(x + w - 4.0f, y + h - 4.0f);
-        glVertex2f(x + 4.0f, y + h - 4.0f);
-        glEnd();
-
-        const float cx = x + w * 0.5f;
-        const float cy = y + h * 0.5f;
-        const float armLen = std::min(w, h) * 0.28f;
-        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-        glLineWidth(4.0f);
-        glBegin(GL_LINES);
-        glVertex2f(cx - armLen, cy);
-        glVertex2f(cx + armLen, cy);
-        if (!isMinus)
-        {
-            glVertex2f(cx, cy - armLen);
-            glVertex2f(cx, cy + armLen);
-        }
-        glEnd();
-        glLineWidth(1.0f);
-    };
-
-    drawZoomBtn(kZoomMinusX, kZoomButtonY, kZoomButtonW, kZoomButtonH, true);
-    drawZoomBtn(kZoomPlusX,  kZoomButtonY, kZoomButtonW, kZoomButtonH, false);
-    EndBitmap();
-}
-
 // Helper: draw a solid filled axis-aligned rectangle in screen space (GL y-up).
 static void DrawFilledRect(float x, float y, float w, float h)
 {
@@ -9252,7 +9311,6 @@ void RenderVirtualPad()
     RenderVirtualTopBar();
     RenderAndroidChatTabs();
 
-    DrawVirtualZoomButtons();
     RenderVirtualTopRightControls();
 
     if (kUseLegacyMainHud && !kEnableVirtualCombatOverlay)
@@ -11184,12 +11242,6 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
         UpdateMouseFromPixel(ev.button.x, ev.button.y, screenW, screenH);
         if (ev.button.button == SDL_BUTTON_LEFT) {
             AndroidHideKeyboardForOutsideTap(static_cast<float>(MouseX), static_cast<float>(MouseY));
-            const int zoomButton = HitTestVirtualZoomButton(static_cast<float>(MouseX), static_cast<float>(MouseY));
-            if (zoomButton >= 0)
-            {
-                HandleVirtualZoomButtonTap(zoomButton);
-                break;
-            }
             if (IsVirtualPadAvailable() && HitTestVirtualJoystick(static_cast<float>(MouseX), static_cast<float>(MouseY)))
             {
                 g_joystickPcMouseCaptured = true;
