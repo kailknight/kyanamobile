@@ -1252,16 +1252,43 @@ constexpr float kPortraitBarH       = 12.0f;
 constexpr float kPortraitBarGap     = 3.0f;
 constexpr float kPortraitBarTop     = kPortraitPanelY + 4.0f;
 
+// Panel bounds, derived rather than written out at the draw call so the backing
+// and everything sized against it cannot drift apart. The backing sits one
+// inset outside the content on all four sides.
+constexpr float kPortraitPanelInset  = 2.0f;
+constexpr float kPortraitBarsBottom  = kPortraitBarTop + (4.0f * kPortraitBarH) + (3.0f * kPortraitBarGap);
+constexpr float kPortraitPanelLeft   = kPortraitPanelX - kPortraitPanelInset;
+constexpr float kPortraitPanelTop    = kPortraitPanelY - kPortraitPanelInset;
+constexpr float kPortraitPanelW      = (kPortraitBarRight - kPortraitPanelX) + (kPortraitPanelInset * 2.0f);
+constexpr float kPortraitPanelH      = (kPortraitBarsBottom - kPortraitPanelY) + (kPortraitPanelInset * 2.0f);
+constexpr float kPortraitPanelBottom = kPortraitPanelTop + kPortraitPanelH;
+
+// The portrait owns the panel's whole left column: flush to the backing's top,
+// left and bottom edges, and out to the gutter before the bars. Drawing it as a
+// square instead left the bottom third of that column showing bare backing,
+// because the bar stack is taller than the avatar was wide.
+constexpr float kPortraitAvatarX = kPortraitPanelLeft;
+constexpr float kPortraitAvatarY = kPortraitPanelTop;
+constexpr float kPortraitAvatarW = (kPortraitBarLeft - kPortraitPanelInset) - kPortraitPanelLeft;
+constexpr float kPortraitAvatarH = kPortraitPanelH;
+
 // Fenrir / helper durability bar, below the status panel.
 constexpr float kPetBarX = 6.0f;
 constexpr float kPetBarY = 98.0f;
 constexpr float kPetBarW = 50.0f;
 constexpr float kPetBarH = 10.0f;
 
-// Pet sits under the portrait, matching the reference layout.
+// Pet sits under the status panel, matching the reference layout. Anchored to
+// the panel's bottom edge, not to the old avatar square - the portrait reaches
+// all the way down now, so the previous offset would have put the pet on top of
+// the portrait's chest.
 constexpr float kPortraitPetSize    = 26.0f;
 constexpr float kPortraitPetX       = kPortraitPanelX + 2.0f;
-constexpr float kPortraitPetY       = kPortraitPanelY + kPortraitAvatarSize + 4.0f;
+constexpr float kPortraitPetY       = kPortraitPanelBottom + 4.0f;
+
+// Share of the portrait's vertical cover-crop taken off the bottom of the art.
+// 1.0 anchors the sampled window to the top of the image, 0.5 centres it.
+constexpr float kPortraitCropFromBottom = 1.0f;
 
 // Disabled: the original MU mainframe skill box is back. Keep only joystick
 // custom on mobile and do not draw an extra Android-only skill box on top.
@@ -5891,6 +5918,30 @@ int HitTestVirtualTopBarButton(float uiX, float uiY)
     return kTopBarActionNone;
 }
 
+// The portrait avatar doubles as the character sheet button. The top bar only
+// has room for six entries and stats did not make the cut, so tapping your own
+// face is the way in - the same gesture the reference layout uses. The rect is
+// the one RenderVirtualPortraitHud draws the avatar into, so what is visible is
+// exactly what is tappable; the bars to its right and the pet slot below stay
+// out of it. Same availability gate as the panel itself, which is what
+// guarantees the panel is on screen when this reports a hit.
+bool HitTestVirtualPortraitAvatar(float uiX, float uiY)
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    const AndroidUiRect rect{
+        kPortraitAvatarX,
+        kPortraitAvatarY,
+        kPortraitAvatarW,
+        kPortraitAvatarH
+    };
+
+    return HitTestAndroidUiRect(uiX, uiY, rect);
+}
+
 int HitTestVirtualRightPanelUtilityActionButton(float uiX, float uiY)
 {
     if (!g_virtualRightPanelUtilityMode || !IsVirtualPadAvailable())
@@ -7237,6 +7288,20 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
             {
                 TriggerVirtualRightPanelUtilityAction(topBarAction);
             }
+        }
+        return true;
+    }
+
+    // Portrait avatar opens the character sheet. Shares the top bar's cooldown
+    // because it is the same class of action - a window toggle that a double
+    // report from the touch stack would open and immediately shut again.
+    if (HitTestVirtualPortraitAvatar(uiX, uiY))
+    {
+        const uint32_t nowMs = MU_MobileGetTicks();
+        if ((nowMs - g_virtualLastUtilityTapMs) >= kVirtualUtilityButtonCooldownMs)
+        {
+            g_virtualLastUtilityTapMs = nowMs;
+            TriggerVirtualRightPanelUtilityAction(kVirtualRightPanelUtilityActionCharacter);
         }
         return true;
     }
@@ -9259,10 +9324,10 @@ void RenderVirtualPortraitHud()
 
     // Panel backing, so the bars stay readable over bright terrain.
     DrawVirtualRectFilled(
-        kPortraitPanelX - 2.0f,
-        kPortraitPanelY - 2.0f,
-        (kPortraitBarRight - kPortraitPanelX) + 4.0f,
-        (yAG + kPortraitBarH) - kPortraitPanelY + 4.0f,
+        kPortraitPanelLeft,
+        kPortraitPanelTop,
+        kPortraitPanelW,
+        kPortraitPanelH,
         0.03f, 0.03f, 0.05f, 0.92f);
 
     DrawVirtualBarH(kPortraitBarLeft, yHP, kPortraitBarW, kPortraitBarH,
@@ -9294,25 +9359,49 @@ void RenderVirtualPortraitHud()
     // only lands under the 2D ortho projection. There used to be an EndBitmap()
     // right here, which is why the avatar never appeared at all.
     //
-    // Fills the whole slot without distorting the face. A square UI rect is not
-    // square on screen - UI space is 640x480 on a panel that is rarely 4:3, so
-    // here the axes scale by 3.875x and 2.325x - and stretching a face by 67%
-    // is immediately obvious. Rather than shrink the portrait to fit (which
-    // left gaps either side), draw it at full size and sample a centred
-    // sub-rect of the texture instead: the slot is covered edge to edge, the
-    // proportions stay true, and the overflow is cropped rather than squashed.
+    // Fills the whole slot without distorting the face. Rather than shrink the
+    // portrait to fit, which left bare backing around it, draw it across the
+    // full slot and sample a sub-rect of the texture instead: the slot is
+    // covered edge to edge, the proportions stay true, and the overflow is
+    // cropped rather than squashed.
+    //
+    // The comparison is between the slot's shape *on screen* and the art's own
+    // shape. UI space is a fixed 640x480 stretched over a panel that is rarely
+    // 4:3, so a slot that looks square in UI units is not square in pixels -
+    // here the axes scale by 3.875x and 2.325x, and stretching a face by 67% is
+    // immediately obvious. Both terms are measured rather than assumed: the
+    // slot is no longer square in UI units either, and while the portraits are
+    // all 92x92 today, an oblong one would otherwise be silently distorted.
     {
-        const float sxScale = static_cast<float>(WindowWidth) / 640.0f;
-        const float syScale = static_cast<float>(WindowHeight) / 480.0f;
-        const float boxAspect = (syScale > 0.0f) ? (sxScale / syScale) : 1.0f;
+        const UITexture& portrait = GetClassPortraitTexture();
+
+        const float boxScreenW = UiToScreenX(kPortraitAvatarX + kPortraitAvatarW) - UiToScreenX(kPortraitAvatarX);
+        const float boxScreenH = UiToScreenY(kPortraitAvatarY + kPortraitAvatarH) - UiToScreenY(kPortraitAvatarY);
+        const float texAspect  = (portrait.h > 0)
+            ? (static_cast<float>(portrait.w) / static_cast<float>(portrait.h))
+            : 1.0f;
+
+        const float boxAspect = (boxScreenH > 0.0f && texAspect > 0.0f)
+            ? ((boxScreenW / boxScreenH) / texAspect)
+            : 1.0f;
 
         float u0 = 0.0f, uW = 1.0f;
         float v0 = 0.0f, vH = 1.0f;
         if (boxAspect > 1.0f)
         {
-            // Slot is wider than the square source: full width, crop height.
+            // Slot is wider than the source: full width, crop height.
+            //
+            // v runs bottom-up here - the loader calls
+            // stbi_set_flip_vertically_on_load - so v = 1 is the top of the
+            // art. Anchoring the sampled window there takes the whole crop off
+            // the bottom. Splitting it evenly, which is what (1 - vH) * 0.5
+            // did, shaved the hair as well as the chest, and on a 16:9 panel
+            // that is a fifth of the image gone at each end. The art carries a
+            // few pixels of headroom above the hair, so a hard top anchor keeps
+            // the head intact; the chest is the part that can go without the
+            // portrait reading as cut off.
             vH = 1.0f / boxAspect;
-            v0 = (1.0f - vH) * 0.5f;
+            v0 = (1.0f - vH) * kPortraitCropFromBottom;
         }
         else if (boxAspect < 1.0f)
         {
@@ -9321,11 +9410,11 @@ void RenderVirtualPortraitHud()
         }
 
         DrawIconButtonUv(
-            kPortraitPanelX,
-            kPortraitPanelY,
-            kPortraitAvatarSize,
-            kPortraitAvatarSize,
-            GetClassPortraitTexture(),
+            kPortraitAvatarX,
+            kPortraitAvatarY,
+            kPortraitAvatarW,
+            kPortraitAvatarH,
+            portrait,
             u0, v0, uW, vH,
             1.0f);
     }
