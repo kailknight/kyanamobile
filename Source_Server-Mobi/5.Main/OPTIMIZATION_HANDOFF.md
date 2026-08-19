@@ -647,6 +647,35 @@ engine's own count.
   positional equivalent worth the CPU on a client that is already CPU-bound.
   Sounds play centred.
 
+## FIXED: preload died with MALFORMED[1] on a fresh install (2026-08-19)
+
+Installing on a device with no data yet failed at the MU DATA SYNC step with
+`Preload failed / MALFORMED[1]`. It reproduced on a Huawei MatePad and not on
+the phones, which made it look device specific. It is not - the phones already
+had data extracted, so the freshness check skipped the archive entirely and it
+was never opened.
+
+`data.zip` contains exactly one entry whose name is CP949 Korean rather than
+UTF-8: `Data/Object34/Object01_<0xB0 0xA6>.bmd`. `0xB0` is a UTF-8 continuation
+byte with no lead byte, so decoding it yields
+`CoderResult.malformedForLength(1)`, whose `toString()` is literally
+`MALFORMED[1]`. `ZipCoder.toString` turns that into an
+`IllegalArgumentException`, and `PreloadActivity.inspectZip` was opening the
+archive with `new ZipFile(f)` - the single-argument constructor, which pins
+names to UTF-8. One bad name out of ~150k took the whole preload down.
+
+Both `ZipFile` sites now go through `openDataZip`, which passes
+`ISO_8859_1` on API 24+. Latin-1 maps all 256 byte values so no name can fail
+to decode. The odd entry lands on disk as mojibake, which is harmless: it is an
+unused leftover model and every file the game actually opens is ASCII.
+
+**Verified on the tablet**: downloaded 1.52 GB, extracted, and reached the login
+screen at 60 FPS.
+
+Worth remembering generally: **anything that only fails on a fresh install will
+not reproduce on a device that already has data.** Clear app data before
+concluding a preload bug is device specific.
+
 ## OPEN: data.zip updater - what landed and what did not
 
 Uploading a new `data.zip` now reaches devices automatically: a signature from
