@@ -158,6 +158,49 @@ it. The risk is visual, not structural: the blend maths for metal and chrome
 armour has to be reproduced exactly, so A/B it on device with a screenshot
 diff rather than reviewing the code.
 
+## OPEN: light sources flicker at distance (2026-08-19)
+
+**Diagnosed, partially fixed, still reproducing on the Lorencia bridge.**
+
+Terrain lighting is accumulated from scratch every frame. An object only lights
+the ground around it on the frames its own `MoveObject` actually runs —
+`AddTerrainLight` for `MODEL_STREET_LIGHT` / `MODEL_CANDLE` lives inside
+`MoveObject`, and `deferMove` is what gates the `MoveObject(o)` call.
+
+The adaptive throttle is distance-bucketed: Near clamps `updatePeriod` to 1-2,
+Mid to 2, Far to 3-4. So a deferred torch does not dim — it contributes
+**nothing** that frame. At period 3 it drops its light on 2 frames out of 3.
+That is the flicker, and it explains the user's key observation exactly:
+**stand next to the light and it is stable, walk away and it flickers hard.**
+
+Not caused by the text section cache — A/B'd with the cache off, still flickers.
+What the speed-up did was lift the client out of the region where the frame
+gates were latched on permanently, which is what made it visible.
+
+Fixed so far: `IsLightEmittingObjectType` in `ZzzObject.cpp` exempts
+`MODEL_STREET_LIGHT`, `MODEL_CANDLE`, `MODEL_BONFIRE`, `MODEL_FIRE_LIGHT01`,
+`MODEL_FIRE_LIGHT01+1` and `MODEL_DUNGEON_GATE` from the throttle entirely.
+
+**Still open:** the Lorencia bridge torches still flicker on the current build,
+so whatever model type they are is not in that list. Next step is one line of
+diagnostics — log `o->Type` for objects near the bridge braziers and add it.
+Do not assume the list is complete; it was derived by reading which `case`
+labels in `MoveObject` call `AddTerrainLight` or `CreateFire`, and map-specific
+props were clearly missed.
+
+If the exemption ever costs measurable time in `obj` (1.5-2.1 ms today), the
+fallback is to cache each emitter's last contribution and re-apply it on
+skipped frames, which keeps the CPU saving.
+
+Also in this area: `AdaptivePressureAbove` now latches the `movePressure`
+thresholds (90/140/150) the way `AdaptiveFpsBelow` latches the FPS ones. Those
+were bare comparisons on a per-frame-varying count. **This fixes nothing you can
+see** — it was added on a wrong theory about the flicker — but bare thresholds
+chattering is the exact bug `AdaptiveFpsBelow` exists to prevent, so it is worth
+keeping. Note `movePressure` is a *running count incremented as objects are
+iterated*, closer to an object index than a pressure reading; that semantics
+deserves a proper look.
+
 ## Method that worked
 
 `adb logcat` returns nothing on these retail "user" builds, and the engine's

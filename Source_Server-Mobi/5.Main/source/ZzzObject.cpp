@@ -650,6 +650,89 @@ namespace
         return latch->state;
     }
 
+    // Objects whose per-frame update is what puts light into the world.
+    //
+    // Terrain lighting is accumulated from scratch every frame: an object only
+    // lights the ground around it on the frames its own update actually runs,
+    // via AddTerrainLight (MODEL_STREET_LIGHT, MODEL_CANDLE) or by feeding the
+    // fire effect (MODEL_BONFIRE, MODEL_FIRE_LIGHT01, MODEL_DUNGEON_GATE).
+    // Deferring one of these does not dim it, it removes its contribution
+    // outright for that frame - so a torch on a two-frame period drops all its
+    // light every other frame, which is the light flicker. These have to update
+    // every frame regardless of load; they are a small fraction of the ~300
+    // objects, so the throttle keeps almost all of its saving.
+    inline bool IsLightEmittingObjectType(int type)
+    {
+        switch (type)
+        {
+        case MODEL_STREET_LIGHT:
+        case MODEL_CANDLE:
+        case MODEL_BONFIRE:
+        case MODEL_FIRE_LIGHT01:
+        case MODEL_FIRE_LIGHT01 + 1:
+        case MODEL_DUNGEON_GATE:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    // The same latch for the crowd-pressure thresholds. These were bare
+    // comparisons - `movePressure > 90` - on a count that changes every frame
+    // as objects enter and leave the candidate set, which is exactly the
+    // chatter AdaptiveFpsBelow exists to prevent. Sitting near 90 or 140
+    // toggled the far-object update period between 2, 3 and 4 from one frame to
+    // the next, so torch objects animated their flame and light contribution on
+    // a cadence that changed constantly - the light source flicker.
+    //
+    // It stayed hidden while the client ran at ~17 FPS because the frame gates
+    // were latched on permanently and swamped it. Speeding the frame up moved
+    // the client into the band where these decide the outcome.
+    inline bool AdaptivePressureAbove(int pressure, int threshold, int margin = 12)
+    {
+        struct Latch
+        {
+            int threshold;
+            bool state;
+        };
+        static Latch latches[16] = {};
+        static int latchCount = 0;
+
+        Latch* latch = nullptr;
+        for (int i = 0; i < latchCount; ++i)
+        {
+            if (latches[i].threshold == threshold)
+            {
+                latch = &latches[i];
+                break;
+            }
+        }
+        if (latch == nullptr)
+        {
+            if (latchCount >= static_cast<int>(sizeof(latches) / sizeof(latches[0])))
+            {
+                return pressure > threshold;
+            }
+            latch = &latches[latchCount++];
+            latch->threshold = threshold;
+            latch->state = (pressure > threshold);
+            return latch->state;
+        }
+
+        if (latch->state)
+        {
+            if (pressure < threshold - margin)
+            {
+                latch->state = false;
+            }
+        }
+        else if (pressure > threshold + margin)
+        {
+            latch->state = true;
+        }
+        return latch->state;
+    }
+
     inline bool ShouldCullStaticObjectByImportance(const OBJECT* o,
         const AdaptiveDistanceBucket bucket,
         const float distSq,
@@ -6050,25 +6133,26 @@ void MoveObjects()
                             const int movePressure = g_objectPerfSnapshot.moveCandidates;
 
                             bool deferMove = false;
-                            if (IsObjectAdaptiveEnabled() && !fullObjectVisibility)
+                            if (IsObjectAdaptiveEnabled() && !fullObjectVisibility &&
+                                !IsLightEmittingObjectType(o->Type))
                             {
                                 uint32_t updatePeriod = 1u;
                                 if (bucket == AdaptiveDistanceBucket::Far)
                                 {
                                     updatePeriod = (distSq > adaptiveThresholds.veryFarSq) ? 4u : 2u;
-                                    if (movePressure > 90 || heavyFrame)
+                                    if (AdaptivePressureAbove(movePressure, 90) || heavyFrame)
                                     {
                                         ++updatePeriod;
                                     }
-                                    if (movePressure > 140 || severeFrame)
+                                    if (AdaptivePressureAbove(movePressure, 140) || severeFrame)
                                     {
                                         ++updatePeriod;
                                     }
                                 }
                                 else if (bucket == AdaptiveDistanceBucket::Mid)
                                 {
-                                    if ((movePressure > 150 && heavyFrame) ||
-                                        (movePressure > 90 && severeFrame))
+                                    if ((AdaptivePressureAbove(movePressure, 150) && heavyFrame) ||
+                                        (AdaptivePressureAbove(movePressure, 90) && severeFrame))
                                     {
                                         updatePeriod = 2u;
                                     }
