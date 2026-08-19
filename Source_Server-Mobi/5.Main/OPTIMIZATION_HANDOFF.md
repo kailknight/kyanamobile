@@ -489,67 +489,163 @@ wrong-but-harmless text.
   disabled. It is the `CCustomMessage` table, a different system from
   `GlobalText`.
 
-## OPEN: audio on Android (2026-08-19)
+## RESOLVED: audio on Android (2026-08-19)
 
-**Sound and music have never worked on Android.** Root cause is settled; the
-remaining fault is one link in the chain and is narrowed to a single function.
+**Sound and music now work.** The cause was not in the audio backend at all,
+which is why replacing the backend twice did not help.
 
-### What is proven
+### The actual bug
 
-**SDL cannot provide audio in this app, ever.** The client drives its window and
-GL through sokol_app rather than `SDL_main`, so SDL's Android Java bootstrap
-never runs. `SDL_InitSubSystem(SDL_INIT_AUDIO)` fails with SDL's *"application
-didn't initialize properly, did you include SDL_main.h"*, and `Mix_OpenAudio`
-therefore never opens a device. This is why `chans=0` in every log, and why
-`Mix_LoadMUS` has always silently failed. **Do not spend time on SDL_mixer.**
+`PlatformDefs.h` carried two inline no-op overloads, added early in the port to
+get it compiling:
 
-Anything else in this client reaching for SDL is suspect for the same reason -
-note `SDL_StartTextInput()` at `android_main.cpp:13930`, which is dead code.
+```cpp
+inline BOOL LoadWaveFile(const char*, int = 0) { return TRUE; }
+inline BOOL LoadWaveFile(int, const char*, int = 0, bool = false) { return TRUE; }
+```
 
-`LoadWaveFile` and `PlayBuffer` were empty stubs in `android_link_stubs.cpp`, so
-the ~826 WAVs in `Data/Sound` were never touched. Music was additionally gated
-off by `CfgDefaultMusicEnabled = false`, which on Android is not a default but a
-fixed value, since `ReadBool` goes through the `GetPrivateProfileIntW` stub.
-Both corrected.
+The real `LoadWaveFile` (`DSPlaySound.h`) takes a writable `TCHAR*`. Every one of
+the ~950 call sites passes a string literal, and since C++11 a literal will not
+bind to `char*` - so the real function was **not even a viable candidate** and
+the no-op won overload resolution everywhere. `OpenSounds()` compiled down to
+392 bytes containing only the three seasonal-event calls at its tail; all ~175
+`LoadWaveFile` calls inside it were gone before the linker ever saw them.
+
+That is why `registered=0` survived every change made below it: the count could
+not move, because the function doing the counting was never called.
+
+**How it was found, in case something similar turns up:** `llvm-nm` on the
+already-built `ZzzOpenData.cpp.o` showed `OpenSounds()` defined but **no
+undefined reference to `LoadWaveFile` at all**, which rules out a link-time
+problem and points at the preprocessor or overload resolution. Running the
+build's exact compile line with `-E` then showed both declarations in the
+preprocessed output, in that order. Two commands, no device, no guessing - and
+it contradicted the diagnostic plan that was written up here, which would have
+cost another build cycle. **Prefer interrogating the artifacts over adding a
+log.**
+
+The overloads now forward to the real function instead of swallowing the call.
+
+### Three further breaks in the same chain
+
+Fixing the overload alone would still have produced silence:
+
+1. **Paths were relative.** `SoundPool.load` and `MediaPlayer.setDataSource`
+   resolve a relative path against the JVM's `user.dir` - `/` for an app process
+   - not against the working directory the client `chdir`s to at startup.
+   `fopen()` on the same string succeeds, which makes this easy to miss.
+   Registration now makes every path absolute from `getcwd()`.
+2. **`SDL_main` is dead code.** `sokol_main` is the entry point and nothing
+   calls `SDL_main`, so the `Mix_Init`/`Mix_OpenAudio` block that lived there
+   never ran - hence no `MIXOPEN` line ever appearing in the log. Audio is now
+   brought up from `InitializeAndroidGame`, which is the real init path.
+3. **`g_AndroidAudioAvailable` was pinned false**, gating music off entirely and
+   forcing `m_SoundOnOff`/`m_MusicOnOff` to 0. It gated on an SDL mixer that
+   could never open. MuAudio needs no device handle, so it is now true.
 
 ### Current design
 
-Audio goes to `MuAudio.java` - `SoundPool` for effects, `MediaPlayer` for music.
-Neither needs SDL or an Activity context. The JNI bridge attaches from
-`nativeSetKeyboardBridge` in `MobilePlatform.cpp`.
+Audio is entirely Java side in `MuAudio.java` - `SoundPool` for effects,
+`MediaPlayer` for music. Neither needs SDL or an Activity context. All SDL_mixer
+code is gone from `android_link_stubs.cpp` and `android_main.cpp`.
+
+- `LoadWaveFile` -> `MuAudio.register` (path only; SoundPool decodes on first play)
+- `PlayBuffer` -> `MuAudio.play`, `StopBuffer` -> `MuAudio.stop` (per sound, so
+  stopping one looping ambient does not cut off everything else mixing)
+- `PlayMp3`/`StopMp3`/`IsEndMp3` -> `MuAudio.playMusic`/`stopMusic`/`isMusicPlaying`
+- Volume is converted from DirectSound's hundredths-of-a-decibel scale to a
+  0-100 percentage native side.
+
+**SDL can never supply audio here.** sokol_app replaces `SDL_main`, so SDL's
+Android Java bootstrap never runs and `SDL_InitSubSystem` fails outright. **Do
+not spend time on SDL_mixer.** Anything else in this client reaching for SDL is
+suspect for the same reason - note `SDL_StartTextInput()` in `android_main.cpp`,
+which is dead code.
 
 **Do not add a `JNI_OnLoad` to this library.** It had never defined one, and
 adding it at `System.loadLibrary` time broke the soft keyboard by disturbing the
-JNI setup the keyboard bridge depends on. That was tried and reverted.
+JNI setup the keyboard bridge depends on. The audio bridge attaches from
+`nativeSetKeyboardBridge` instead.
 
-### The one remaining unknown
+### What the log says on the next run
 
-`mu_sound_log.txt` reads `LAZY OPENSOUNDS registered=0 jvm=1 cls=1`. JNI is
-healthy, `MuAudio` resolves, and `OpenSounds()` is called **directly** on the
-line before - yet `LoadWaveFile` is never entered. `DSplaysound.cpp` is excluded
-from the build (`CMakeLists.txt` line 143), so a duplicate symbol is not it.
+logcat is dead on these devices, so `mu_sound_log.txt` in the data root is the
+readout. Expect, in order:
 
-**Next step is one diagnostic, not a fix:** log at the top of `OpenSounds()`
-(`ZzzOpenData.cpp:4779`) and after its first `LoadWaveFile` call (`:4783`).
-
-| result | meaning |
+| line | meaning |
 |---|---|
-| neither line | `OpenSounds()` is not the function being called - linkage |
-| first only | it returns or throws before registering |
-| both, still `registered=0` | a different `LoadWaveFile` is being linked |
+| `REGISTER id=… path=[/…/Data/Sound/…]` | first three registrations; path must be absolute |
+| `PUSHED registered=N pushed=N` | table handed to Java; both counts should be ~950 |
+| `OPENSOUNDS registered=N pushed=1 jvm=1 cls=1` | JNI healthy and the table went across |
+| `SOUNDFILES missing=0 of registered=N` | every registered file exists on disk |
+| `PLAY id=… registered=N` | play requests reaching the backend |
 
-Everything above that point is verified. Resist fixing the next layer up before
-this answers - that mistake cost eight builds.
+`missing=` being large means the shipped data does not match the case or layout
+the tables expect - that is a data problem, not a code one. `pushed=0` with
+`jvm=1` means the JNI bridge was not attached yet; the first `PlayBuffer` retries
+the push, so check whether a later `PUSHED` line appears.
 
-### Also open
+### The DirectSound rule you must keep: no sound overlaps itself
 
-- **Music is unwired.** `PlayMp3` still calls `Mix_LoadMUS` against a mixer that
-  never opens. Point it at `MuAudio.playMusic` once registration works.
-- **Dead SDL_mixer sound code** in `android_link_stubs.cpp` to remove.
-- **`SoundPool.load` is asynchronous**, so the first play of each distinct sound
-  may be dropped. Add an `OnLoadCompleteListener` if that is audible.
-- **Keyboard fix unconfirmed.** The JNI attach point was moved to fix a
-  regression; verify the soft keyboard opens on the account field.
+This one is not optional, and it is invisible until you hear it. The engine
+gives each sound **one** DirectSound buffer and never advances the channel
+index - `BufferChannel[Buffer]` is set to 0 in `DSplaysound.cpp:321` and only
+ever wrapped back to it - and DirectSound's `Play()` on a buffer that is already
+playing is a **no-op**. So a sound can never overlap itself, looped or not, and
+the engine is written assuming that:
+
+```cpp
+case WD_3NORIA:                                  // SceneManager.cpp
+    PlayBuffer(SOUND_WIND01, NULL, true);        // every frame, looped
+    if (rand_fps_check(512))
+        PlayBuffer(SOUND_FOREST01);              // repeatedly, one-shot
+```
+
+Both are re-requested while already sounding. SoundPool has no such rule - it
+starts a new stream per call - so this became ~30 overlapping copies of the same
+sample per second, phase-shifted against each other: an audible drone that also
+consumed all 24 stream slots, which is why other sounds went missing at the same
+time. **Fixing only the looped case is not enough** - Noria's forest bed is a
+repeated one-shot and droned on its own.
+
+`MuAudio` enforces the rule both ways: looping sounds are tracked by stream id
+and re-requests ignored, and one-shots are held off until the previous instance
+has run its length. The length comes from the WAV header, parsed native side in
+`AndroidWavDurationMs` and passed to `register()`; a header that will not parse
+yields 0, which leaves that sound free to retrigger rather than risk silencing
+it. `noheader=0` in the log means every file parsed.
+
+### Confirmed on device (NX729J, 2026-08-19)
+
+```
+REGISTER id=0 path=[/storage/emulated/0/Android/data/com.muonline.client/files/Data/Sound/aWind.wav]
+PUSHED registered=192 pushed=191
+OPENSOUNDS registered=192 pushed=1 jvm=1 cls=1
+SOUNDFILES missing=0 of registered=192
+PLAY id=25 enabled=1 registered=399
+```
+
+Paths absolute, JNI healthy, table across, every file present. `registered=192`
+is the whole of `OpenSounds` (175 `LoadWaveFile` calls, 6 commented out, plus the
+three seasonal-event loaders); it reaches 399 once `OpenBasicData` calls
+`OpenSounds` again and the map and event tables load. `pushed` is one below
+`registered` because `SOUND_FENRIR_DAMAGE_1` is registered twice in the game
+data (`pWpain1.wav` then `pWpain2.wav`), so two calls land in one slot.
+
+**A fourth break showed up here.** The slot array was a hardcoded 512, but the
+log carried play requests for `id=690..697`: every id above 512 was dropped at
+registration and could never sound. It is `MAX_BUFFER` (977) now, which is the
+engine's own count.
+
+### Still to verify on device
+
+- **First play of each sound may be dropped.** `SoundPool.load` is asynchronous.
+  Add an `OnLoadCompleteListener` if it is audible in practice.
+- **Keyboard fix unconfirmed.** The JNI attach point was moved to fix an earlier
+  regression; check the soft keyboard still opens on the account field.
+- **No positional audio.** `PlayBuffer`'s `OBJECT*` is ignored - SoundPool has no
+  positional equivalent worth the CPU on a client that is already CPU-bound.
+  Sounds play centred.
 
 ## OPEN: data.zip updater - what landed and what did not
 

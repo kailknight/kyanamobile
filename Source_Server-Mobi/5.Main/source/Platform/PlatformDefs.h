@@ -2831,8 +2831,26 @@ inline int TextDraw(HFONT font, int PosX, int PosY, DWORD color, DWORD bkcolor, 
 
     return SEASON3B::TextDraw(font, PosX, PosY, color, bkcolor, Width, Height, static_cast<BYTE>(Align), "%s", buffer);
 }
-inline BOOL LoadWaveFile(const char*, int = 0) { return TRUE; }
-inline BOOL LoadWaveFile(int, const char*, int = 0, bool = false) { return TRUE; }
+// LoadWaveFile's real declaration (DSPlaySound.h) is Windows-era and takes a
+// writable TCHAR*. Since C++11 a string literal will not bind to char*, so the
+// no-op overloads that used to sit here - added to keep the port compiling -
+// were an exact match and quietly won overload resolution at every one of the
+// ~950 call sites. Each sound registration compiled down to "return TRUE" and
+// the real LoadWaveFile was never entered, which is why the sound table stayed
+// empty no matter what the backend did. Forward to the real one instead.
+//
+// Declared without default arguments so DSPlaySound.h can still supply them.
+void LoadWaveFile(int Buffer, TCHAR* strFileName, int BufferChannel, bool Enable3DSound);
+
+// BufferChannel default mirrors MAX_CHANNEL in DSPlaySound.h, which is not
+// visible this early.
+inline BOOL LoadWaveFile(int Buffer, const char* strFileName, int BufferChannel = 4, bool Enable3DSound = false)
+{
+    // Picks the TCHAR* overload above: char* is an identity match there and
+    // only a qualification conversion here, so this cannot recurse.
+    LoadWaveFile(Buffer, const_cast<TCHAR*>(strFileName), BufferChannel, Enable3DSound);
+    return TRUE;
+}
 inline int CreateMessageBox(const char*, ...) { return 0; }
 inline int CreateMessageBox(int, const char*, ...) { return 0; }
 

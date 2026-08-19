@@ -19,7 +19,8 @@
 
 #include <jni.h>
 #include <android/log.h>
-#include <SDL_mixer.h>
+// SDL_mixer is deliberately absent: SDL never starts in this app (sokol_app
+// replaces SDL_main), so every Mix_ call here was a no-op. Audio is Java side.
 
 #include <algorithm>
 #include <atomic>
@@ -28,6 +29,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -128,7 +130,14 @@ constexpr long kAndroidDsVolumeMax = 0;
 bool g_androidSoundEnabled = true;
 long g_androidMasterVolume = 0;
 
-int ConvertDirectSoundVolumeToSdl(long volume)
+// Defined further down, next to the rest of the JNI bridge. Declared here
+// because the volume and enable/disable entry points sit above it and an
+// anonymous namespace is one namespace across the whole file.
+void CallMuAudioVoid(const char* method, const char* sig, ...);
+
+// The engine speaks DirectSound's scale: hundredths of a decibel, -10000
+// silent and 0 full. MuAudio wants a plain 0-100 percentage.
+int ConvertDirectSoundVolumeToPercent(long volume)
 {
     if (!g_androidSoundEnabled)
     {
@@ -144,19 +153,17 @@ int ConvertDirectSoundVolumeToSdl(long volume)
 
     if (volume >= kAndroidDsVolumeMax)
     {
-        return MIX_MAX_VOLUME;
+        return 100;
     }
 
     const double gain = std::pow(10.0, static_cast<double>(volume) / 2000.0);
-    const int sdlVolume = static_cast<int>(std::lround(gain * MIX_MAX_VOLUME));
-    return std::clamp(sdlVolume, 0, MIX_MAX_VOLUME);
+    return std::clamp(static_cast<int>(std::lround(gain * 100.0)), 0, 100);
 }
 
 void ApplyAndroidMasterVolume()
 {
-    const int sdlVolume = ConvertDirectSoundVolumeToSdl(g_androidMasterVolume);
-    Mix_Volume(-1, sdlVolume);
-    Mix_VolumeMusic(sdlVolume);
+    CallMuAudioVoid("setVolume", "(I)V",
+        static_cast<jint>(ConvertDirectSoundVolumeToPercent(g_androidMasterVolume)));
 }
 
 bool ShouldSuppressAndroidRuntimeLog(const char* format)
@@ -222,20 +229,17 @@ HRESULT InitDirectSound(HWND) { return S_OK; }
 void SetEnableSound(bool enabled)
 {
     g_androidSoundEnabled = enabled;
-    if (!enabled)
+    CallMuAudioVoid("setEnabled", "(Z)V", enabled ? JNI_TRUE : JNI_FALSE);
+    if (enabled)
     {
-        Mix_HaltChannel(-1);
-        Mix_Volume(-1, 0);
-        Mix_VolumeMusic(0);
-        return;
+        ApplyAndroidMasterVolume();
     }
-
-    ApplyAndroidMasterVolume();
 }
 void FreeDirectSound()
 {
-    Mix_HaltChannel(-1);
     g_androidSoundEnabled = false;
+    CallMuAudioVoid("stopAll", "()V");
+    CallMuAudioVoid("stopMusic", "()V");
 }
 // ---------------------------------------------------------------------------
 // JNI bridge to MuAudio (Java)
@@ -328,35 +332,35 @@ extern "C" void AndroidAudioAttachJni(JNIEnv* env)
 // ---------------------------------------------------------------------------
 // Sound effects
 //
-// These were stubs: LoadWaveFile did nothing and PlayBuffer returned S_OK
-// without playing anything, so every one of the ~826 WAVs shipped in
-// Data/Sound was extracted to the device and never touched. Music was real
-// (Mix_LoadMUS), which is why it worked while effects did not.
+// Two separate faults kept this silent, and the second hid the first.
 //
-// OpenSounds() registers every sound at startup. Loading all of them eagerly
-// would be ~826 decodes and their PCM held resident before the title screen,
-// so registration only records the path and the decode happens the first time
-// a sound is actually asked for. Most of the table is monsters the player
-// never meets in a given session.
+// LoadWaveFile and PlayBuffer were empty stubs, so the ~826 WAVs shipped in
+// Data/Sound were never touched. Implementing them was not enough, because
+// PlatformDefs.h also carried an inline no-op overload of LoadWaveFile taking
+// const char*. Every call site passes a string literal, which since C++11
+// cannot bind to the real function's writable TCHAR*, so the no-op was an
+// exact match and won overload resolution at all ~950 call sites: OpenSounds()
+// compiled down to almost nothing and the registration count stayed at 0 no
+// matter what happened below it. That overload now forwards here instead.
+//
+// Registration records the path only; SoundPool decodes on first play. Loading
+// all ~826 eagerly would put their PCM resident before the title screen, and
+// most of the table is monsters a given session never meets.
 // ---------------------------------------------------------------------------
 namespace
 {
-    constexpr int kAndroidSoundSlotCount = 512;
+    // MAX_BUFFER is the engine's own sound count (DSPlaySound.h). This was a
+    // hardcoded 512, which silently dropped every id above it at registration -
+    // the device log showed play requests for id=690..697 that could never have
+    // a path, so those sounds were mute even after the rest of the chain worked.
+    constexpr int kAndroidSoundSlotCount = MAX_BUFFER;
 
-    struct AndroidSoundSlot
-    {
-        std::string path;
-        Mix_Chunk*  chunk = nullptr;
-        bool        loadFailed = false;
-    };
-
-    AndroidSoundSlot g_androidSoundSlots[kAndroidSoundSlotCount];
-
-    // The tables use Windows paths - "Data\\Sound\\aWind.wav". Separators have
-    // to become '/', and the case has to be resolved against a case-sensitive
-    // filesystem: the directory names happen to match here, but relying on that
-    // is what left the music table's lowercase "data\\music\\" needing four
-    // fallback spellings.
+    // The tables use Windows paths - "Data\Sound\aWind.wav". Separators have
+    // to become '/', and the result has to be absolute: SoundPool.load resolves
+    // a relative path against the JVM's user.dir, which is "/" for an app
+    // process, not against the working directory the client chdir's to at
+    // startup. fopen() on the same relative string succeeds here, which is what
+    // makes this an easy one to miss.
     std::string NormalizeAndroidSoundPath(const TCHAR* raw)
     {
         if (raw == nullptr)
@@ -372,15 +376,31 @@ namespace
                 c = '/';
             }
         }
-        return path;
+
+        if (path.empty() || path[0] == '/')
+        {
+            return path;
+        }
+
+        char cwd[1024] = {};
+        if (getcwd(cwd, sizeof(cwd)) == nullptr)
+        {
+            return path;
+        }
+
+        std::string absolute(cwd);
+        if (absolute.empty() || absolute.back() != '/')
+        {
+            absolute.push_back('/');
+        }
+        absolute += path;
+        return absolute;
     }
 
     // logcat returns nothing on these retail devices, so the sound path reports
     // to a file instead. Same approach as mu_drift_log.txt.
     int g_androidSoundRegistered = 0;
     int g_androidSoundPlayRequests = 0;
-    int g_androidSoundLoadOk = 0;
-    int g_androidSoundLoadFail = 0;
 
     void AndroidSoundLog(const char* fmt, ...)
     {
@@ -402,93 +422,155 @@ namespace
         }
     }
 
-    // Startup never reaches the mixer init in android_main - no MIXOPEN line
-    // ever appears in the log - so audio brings itself up the first time a
-    // sound is asked for instead of depending on an init path that does not
-    // run. Mix_QuerySpec reports whether the device is already open, so this is
-    // a no-op when something else got there first.
-    void EnsureAndroidAudioReady()
+    // Length of a PCM WAV in milliseconds, read from its header.
+    //
+    // The engine gives each sound one DirectSound buffer and never advances the
+    // channel index (`BufferChannel[Buffer]` is set to 0 in DSplaysound.cpp and
+    // only ever wrapped back to it), and DirectSound's Play() on a buffer that
+    // is already playing is a no-op. So no sound can overlap itself, looped or
+    // not. SoundPool has no such rule - it starts a new stream per call - and
+    // the scene update asks for the ambient beds every frame, which is what
+    // turned Noria's forest and wind into a drone. Java needs the length to
+    // know when a sound has finished and may be triggered again.
+    //
+    // Returns 0 if the header cannot be parsed, which lets that sound retrigger
+    // freely rather than falling silent.
+    int AndroidWavDurationMs(const std::string& path)
     {
-        static bool s_tried = false;
-        if (s_tried)
+        FILE* f = fopen(path.c_str(), "rb");
+        if (f == nullptr)
         {
-            return;
+            return 0;
         }
-        s_tried = true;
 
-        int freq = 0, channels = 0;
-        Uint16 format = 0;
-        if (Mix_QuerySpec(&freq, &format, &channels) == 0)
+        unsigned char header[12];
+        if (fread(header, 1, sizeof(header), f) != sizeof(header)
+            || std::memcmp(header, "RIFF", 4) != 0
+            || std::memcmp(header + 8, "WAVE", 4) != 0)
         {
-            // The client runs its window and GL through sokol_app, not SDL_main,
-            // so SDL never came up as a whole and its audio subsystem was never
-            // initialised - Mix_OpenAudio was failing with SDL's "application
-            // didn't initialize properly" error. Bring up just the audio
-            // subsystem here; SDL_WasInit keeps it to once.
-            if (SDL_WasInit(SDL_INIT_AUDIO) == 0)
+            fclose(f);
+            return 0;
+        }
+
+        auto le32 = [](const unsigned char* p) -> uint32_t {
+            return static_cast<uint32_t>(p[0])
+                 | (static_cast<uint32_t>(p[1]) << 8)
+                 | (static_cast<uint32_t>(p[2]) << 16)
+                 | (static_cast<uint32_t>(p[3]) << 24);
+        };
+
+        uint32_t byteRate = 0;
+        int durationMs = 0;
+        unsigned char chunk[8];
+        while (fread(chunk, 1, sizeof(chunk), f) == sizeof(chunk))
+        {
+            const uint32_t size = le32(chunk + 4);
+
+            if (std::memcmp(chunk, "fmt ", 4) == 0)
             {
-                if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0)
+                unsigned char fmt[16];
+                const size_t want = (size < sizeof(fmt)) ? size : sizeof(fmt);
+                if (fread(fmt, 1, want, f) != want)
                 {
-                    AndroidSoundLog("LAZY SDL_InitSubSystem(AUDIO) failed err=%s", SDL_GetError());
-                    return;
+                    break;
                 }
-                AndroidSoundLog("LAZY SDL audio subsystem started");
+                if (want == sizeof(fmt))
+                {
+                    byteRate = le32(fmt + 8);
+                }
+                if (size > want)
+                {
+                    fseek(f, static_cast<long>(size - want), SEEK_CUR);
+                }
+            }
+            else if (std::memcmp(chunk, "data", 4) == 0)
+            {
+                if (byteRate > 0)
+                {
+                    durationMs = static_cast<int>((static_cast<uint64_t>(size) * 1000ULL) / byteRate);
+                }
+                break;
+            }
+            else
+            {
+                fseek(f, static_cast<long>(size), SEEK_CUR);
             }
 
-            Mix_Init(MIX_INIT_MP3);
-            if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0)
+            // RIFF chunks are word aligned.
+            if ((size & 1u) != 0)
             {
-                AndroidSoundLog("LAZY MIXOPEN FAILED err=%s", Mix_GetError());
-                return;
+                fseek(f, 1, SEEK_CUR);
             }
-            AndroidSoundLog("LAZY MIXOPEN OK");
         }
 
-        Mix_AllocateChannels(32);
-        ApplyAndroidMasterVolume();
-
-        OpenSounds();
-        AndroidSoundLog("LAZY OPENSOUNDS done registered=%d chans=%d",
-            g_androidSoundRegistered, Mix_AllocateChannels(-1));
+        fclose(f);
+        return durationMs;
     }
 
-    Mix_Chunk* AcquireAndroidSound(int buffer)
+    // The table is held here first and handed to Java in one pass, rather than
+    // each entry going across as it is registered. Registration runs on the
+    // render thread while the JNI bridge is attached from the activity's
+    // onCreate on the UI thread, so a per-entry push could land before the
+    // bridge exists and be dropped without trace - the same silent-failure
+    // shape as the overload bug this replaced.
+    std::string g_androidSoundPaths[kAndroidSoundSlotCount];
+    bool g_androidSoundTablePushed = false;
+
+    bool PushAndroidSoundTable()
     {
-        if (buffer < 0 || buffer >= kAndroidSoundSlotCount)
+        if (g_androidSoundTablePushed)
         {
-            return nullptr;
+            return true;
         }
 
-        AndroidSoundSlot& slot = g_androidSoundSlots[buffer];
-        if (slot.chunk != nullptr)
+        JNIEnv* env = AndroidAudioEnv();
+        if (env == nullptr || g_muAudioClass == nullptr)
         {
-            return slot.chunk;
-        }
-        // One failed load is enough; do not retry on every play attempt or a
-        // missing file turns into a stat() storm during combat.
-        if (slot.loadFailed || slot.path.empty())
-        {
-            return nullptr;
+            return false;
         }
 
-        // Mix_LoadWAV / Mix_PlayChannel are declared as functions by this header
-        // (SDL_mixer 2.6+) but the prebuilt libSDL2_mixer.so predates that and
-        // only exports the _RW / _Timed forms the macros used to expand to.
-        slot.chunk = Mix_LoadWAV_RW(SDL_RWFromFile(slot.path.c_str(), "rb"), 1);
-        if (slot.chunk == nullptr)
+        // One pass over the table: read each header for its length and treat a
+        // file that will not open as missing. SoundPool.load failures go to
+        // logcat, which returns nothing on these devices, so a bad path would
+        // otherwise look exactly like "no sound" all over again.
+        int pushed = 0;
+        int missing = 0;
+        for (int id = 0; id < kAndroidSoundSlotCount; ++id)
         {
-            slot.loadFailed = true;
-            ++g_androidSoundLoadFail;
-            AndroidSoundLog("LOADFAIL id=%d path=[%s] err=%s", buffer, slot.path.c_str(), Mix_GetError());
-            __android_log_print(ANDROID_LOG_WARN, "MuMain",
-                "Sound load failed [%s]: %s", slot.path.c_str(), Mix_GetError());
+            if (g_androidSoundPaths[id].empty())
+            {
+                continue;
+            }
+
+            const int durationMs = AndroidWavDurationMs(g_androidSoundPaths[id]);
+            if (durationMs == 0)
+            {
+                if (missing < 5)
+                {
+                    AndroidSoundLog("NOHEADER id=%d path=[%s]", id, g_androidSoundPaths[id].c_str());
+                }
+                ++missing;
+            }
+
+            jstring jpath = env->NewStringUTF(g_androidSoundPaths[id].c_str());
+            if (jpath == nullptr)
+            {
+                continue;
+            }
+            CallMuAudioVoid("register", "(ILjava/lang/String;I)V",
+                static_cast<jint>(id), jpath, static_cast<jint>(durationMs));
+            env->DeleteLocalRef(jpath);
+            ++pushed;
         }
-        else
-        {
-            ++g_androidSoundLoadOk;
-            AndroidSoundLog("LOADOK id=%d path=[%s]", buffer, slot.path.c_str());
-        }
-        return slot.chunk;
+
+        g_androidSoundTablePushed = true;
+        AndroidSoundLog("PUSHED registered=%d pushed=%d noheader=%d",
+            g_androidSoundRegistered, pushed, missing);
+
+        // The volume set during init would have been dropped for the same
+        // reason if the bridge was not up yet.
+        ApplyAndroidMasterVolume();
+        return true;
     }
 }
 
@@ -499,33 +581,18 @@ void LoadWaveFile(int Buffer, TCHAR* strFileName, int, bool)
         return;
     }
 
-    AndroidSoundSlot& slot = g_androidSoundSlots[Buffer];
+    g_androidSoundPaths[Buffer] = NormalizeAndroidSoundPath(strFileName);
     ++g_androidSoundRegistered;
     if (g_androidSoundRegistered <= 3)
     {
         AndroidSoundLog("REGISTER id=%d path=[%s] enabled=%d vol=%ld",
-            Buffer, NormalizeAndroidSoundPath(strFileName).c_str(),
+            Buffer, g_androidSoundPaths[Buffer].c_str(),
             g_androidSoundEnabled ? 1 : 0, g_androidMasterVolume);
     }
-    // Hand the path to Java; SoundPool decodes it on first play.
-    const std::string path = NormalizeAndroidSoundPath(strFileName);
-    JNIEnv* env = AndroidAudioEnv();
-    if (env == nullptr || g_muAudioClass == nullptr)
-    {
-        return;
-    }
-
-    jstring jpath = env->NewStringUTF(path.c_str());
-    if (jpath == nullptr)
-    {
-        return;
-    }
-    CallMuAudioVoid("register", "(ILjava/lang/String;)V", static_cast<jint>(Buffer), jpath);
-    env->DeleteLocalRef(jpath);
 }
 
 // Object is ignored: it carries the emitter's world position for the 3D mixing
-// the desktop client does, and SDL_mixer has no positional equivalent worth the
+// the desktop client does. SoundPool has no positional equivalent worth the
 // CPU here on a client that is already CPU-bound. Sounds play centred.
 HRESULT PlayBuffer(int Buffer, OBJECT*, BOOL bLooped)
 {
@@ -534,44 +601,33 @@ HRESULT PlayBuffer(int Buffer, OBJECT*, BOOL bLooped)
         return S_OK;
     }
 
-    // OpenSounds() is the last statement of a very long loader in OpenBasicData
-    // and demonstrably never runs on Android - registered stayed 0 across
-    // thousands of play requests. Register the table on first use instead, so
-    // it does not depend on that path completing.
+    // Normally a no-op: the table went across during init. This is the retry
+    // for the case where the JNI bridge was not attached yet at that point.
+    if (!PushAndroidSoundTable())
     {
-        static bool s_registered = false;
-        if (!s_registered)
-        {
-            s_registered = true;
-            CallMuAudioVoid("init", "()V");
-            OpenSounds();
-            AndroidSoundLog("LAZY OPENSOUNDS registered=%d jvm=%d cls=%d",
-                g_androidSoundRegistered,
-                g_androidJavaVm != nullptr ? 1 : 0,
-                g_muAudioClass != nullptr ? 1 : 0);
-        }
+        return S_OK;
     }
 
     ++g_androidSoundPlayRequests;
-    // First few plus a periodic sample: the opening requests happen at the
-    // title screen before OpenSounds and before the mixer opens, so a log that
-    // only captured those showed registered=0 chans=0 and told us nothing about
-    // steady state.
     if (g_androidSoundPlayRequests <= 3 || (g_androidSoundPlayRequests % 200) == 0)
     {
-        AndroidSoundLog("PLAY id=%d enabled=%d registered=%d ok=%d fail=%d chans=%d",
-            Buffer, g_androidSoundEnabled ? 1 : 0, g_androidSoundRegistered,
-            g_androidSoundLoadOk, g_androidSoundLoadFail, Mix_AllocateChannels(-1));
+        AndroidSoundLog("PLAY id=%d enabled=%d registered=%d",
+            Buffer, g_androidSoundEnabled ? 1 : 0, g_androidSoundRegistered);
     }
 
-    // Straight to Java: SoundPool owns the decoded samples and the mixing.
     CallMuAudioVoid("play", "(IZ)V", static_cast<jint>(Buffer),
         bLooped ? JNI_TRUE : JNI_FALSE);
     return S_OK;
 }
 
-void StopBuffer(int, BOOL) { Mix_HaltChannel(-1); }
-void AllStopSound(void) { Mix_HaltChannel(-1); }
+// Named sound, not everything: the looping ambient and walk sounds are stopped
+// individually, and halting the whole pool here would cut off every other sound
+// mixing at that moment.
+void StopBuffer(int Buffer, BOOL)
+{
+    CallMuAudioVoid("stop", "(I)V", static_cast<jint>(Buffer));
+}
+void AllStopSound(void) { CallMuAudioVoid("stopAll", "()V"); }
 void Set3DSoundPosition() {}
 HRESULT ReleaseBuffer(int) { return S_OK; }
 HRESULT RestoreBuffers(int, int) { return S_OK; }
@@ -584,6 +640,86 @@ void SetMasterVolume(long vol)
 {
     g_androidMasterVolume = std::clamp<long>(vol, kAndroidDsVolumeMin, kAndroidDsVolumeMax);
     ApplyAndroidMasterVolume();
+}
+
+// ---------------------------------------------------------------------------
+// Music
+//
+// PlayMp3/StopMp3 in android_main.cpp used to drive Mix_LoadMUS against a mixer
+// that never opened. These give it MediaPlayer instead. Paths arriving here are
+// already absolute - android_main resolves them against the data root.
+// ---------------------------------------------------------------------------
+extern "C" void AndroidAudioPlayMusic(const char* absolutePath, bool loop)
+{
+    if (absolutePath == nullptr || absolutePath[0] == '\0')
+    {
+        return;
+    }
+
+    JNIEnv* env = AndroidAudioEnv();
+    if (env == nullptr || g_muAudioClass == nullptr)
+    {
+        return;
+    }
+
+    jstring jpath = env->NewStringUTF(absolutePath);
+    if (jpath == nullptr)
+    {
+        return;
+    }
+    CallMuAudioVoid("playMusic", "(Ljava/lang/String;Z)V", jpath,
+        loop ? JNI_TRUE : JNI_FALSE);
+    env->DeleteLocalRef(jpath);
+}
+
+extern "C" void AndroidAudioStopMusic()
+{
+    CallMuAudioVoid("stopMusic", "()V");
+}
+
+extern "C" bool AndroidAudioIsMusicPlaying()
+{
+    JNIEnv* env = AndroidAudioEnv();
+    if (env == nullptr || g_muAudioClass == nullptr)
+    {
+        return false;
+    }
+
+    jmethodID id = env->GetStaticMethodID(g_muAudioClass, "isMusicPlaying", "()Z");
+    if (id == nullptr)
+    {
+        env->ExceptionClear();
+        return false;
+    }
+
+    const jboolean playing = env->CallStaticBooleanMethod(g_muAudioClass, id);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return false;
+    }
+    return playing == JNI_TRUE;
+}
+
+// Brings the Java side up and registers the whole sound table. Called from
+// android_main once the data root is in place.
+extern "C" void AndroidAudioInit()
+{
+    CallMuAudioVoid("init", "()V");
+
+    // Declared at the top of this file. Redeclaring it here would give it C
+    // linkage from the enclosing extern "C" and not match the definition.
+    OpenSounds();
+
+    const bool pushed = PushAndroidSoundTable();
+    AndroidSoundLog("OPENSOUNDS registered=%d pushed=%d jvm=%d cls=%d",
+        g_androidSoundRegistered,
+        pushed ? 1 : 0,
+        g_androidJavaVm != nullptr ? 1 : 0,
+        g_muAudioClass != nullptr ? 1 : 0);
+
+    // File presence is checked inside PushAndroidSoundTable, which already
+    // opens each one to read its length - see the noheader= count it logs.
 }
 
 static BYTE g_wsctlcReadMessage[MAX_RECVBUF] = {};

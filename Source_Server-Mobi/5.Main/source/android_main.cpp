@@ -6,7 +6,7 @@
 //   WinMain()              鑺掗垾鐘偓?sokol_main()/sapp callbacks
 //   CreateWindow / WGL     鑺掗垾鐘偓?sokol_app EGL/GLES3 context
 //   WndProc / PeekMessage  鑺掗垾鐘偓?sapp_event callbacks
-//   wzAudio + DirectSound  鑺掗垾鐘偓?SDL_mixer
+//   wzAudio + DirectSound  ->  MuAudio (SoundPool + MediaPlayer, Java side)
 //   SetTimer()             鑺掗垾鐘偓?SDL_AddTimer / std::thread
 //   wglSwapBuffers()       鑺掗垾鐘偓?sokol_app frame present
 //   HWND/HDC/HGLRC         鑺掗垾鐘偓?nullptr stubs (PlatformDefs.h)
@@ -52,7 +52,6 @@ static void android_set_data_dir_early()
 #endif
 
 #include <SDL.h>
-#include <SDL_mixer.h>
 #include <sokol_app.h>
 #include <android/input.h>
 #include <android/log.h>
@@ -10241,10 +10240,18 @@ BOOL Util_CheckOption(std::wstring /*lpszCommandLine*/, wchar_t /*cOption*/, std
 void DestroyWindow() {}
 
 // =============================================================================
-// Audio 鑺掗埀顑解偓?SDL_mixer replaces wzAudio + DirectSound
+// Audio - MuAudio (SoundPool + MediaPlayer) replaces wzAudio + DirectSound
+//
+// SDL_mixer used to sit here and could never work: sokol_app replaces SDL_main,
+// so SDL's Android bootstrap never runs and no subsystem will start. The
+// bridges below live in android_link_stubs.cpp next to the rest of the JNI.
 // =============================================================================
 
-static Mix_Music* g_pCurrentMusic = nullptr;
+extern "C" void AndroidAudioInit();
+extern "C" void AndroidAudioPlayMusic(const char* absolutePath, bool loop);
+extern "C" void AndroidAudioStopMusic();
+extern "C" bool AndroidAudioIsMusicPlaying();
+
 static char g_LastFailedMp3Name[256] = {};
 static uint32_t g_LastFailedMp3Tick = 0;
 static bool g_AndroidAudioAvailable = false;
@@ -10420,11 +10427,12 @@ void StopMp3(char* Name, BOOL bEnforce)
 {
     if (!g_AndroidAudioAvailable) return;
     if (!m_MusicOnOff && !bEnforce) return;
+    if (!Name) return;
+
     if (Mp3FileName[0] != '\0' && strcmp(Name, Mp3FileName) == 0)
     {
-        // Keep current music handle cached so frequent stop/play calls for the
-        // same track can resume without expensive reloading.
-        Mix_HaltMusic();
+        AndroidAudioStopMusic();
+        Mp3FileName[0] = '\0';
     }
 }
 
@@ -10434,20 +10442,13 @@ void PlayMp3(char* Name, BOOL bEnforce)
     if (Destroy) return;
     if (!Name || Name[0] == '\0') return;
     if (!m_MusicOnOff && !bEnforce) return;
-    if (strcmp(Name, Mp3FileName) == 0)
-    {
-        // Same track requested again: if it was halted, just resume.
-        if (g_pCurrentMusic && !Mix_PlayingMusic())
-        {
-            Mix_PlayMusic(g_pCurrentMusic, -1);
-        }
 
-        // If previous load failed, g_pCurrentMusic is null; continue below so
-        // retry logic can attempt to load it again.
-        if (g_pCurrentMusic)
-        {
-            return;
-        }
+    // Same track already running: nothing to do. MediaPlayer loops on its own,
+    // so unlike the old mixer path there is no halted-but-loaded state to
+    // resume from.
+    if (strcmp(Name, Mp3FileName) == 0 && AndroidAudioIsMusicPlaying())
+    {
+        return;
     }
 
     const uint32_t now = MU_MobileGetTicks();
@@ -10459,51 +10460,49 @@ void PlayMp3(char* Name, BOOL bEnforce)
         return;
     }
 
-    Mix_HaltMusic();
-    if (g_pCurrentMusic) { Mix_FreeMusic(g_pCurrentMusic); g_pCurrentMusic = nullptr; }
-
+    // ResolveMusicPath returns an absolute path, which MediaPlayer requires:
+    // it resolves a relative one against the JVM's user.dir ("/"), not against
+    // the working directory this process chdir'd to.
     const std::string path = ResolveMusicPath(Name);
 
-    g_pCurrentMusic = Mix_LoadMUS(path.c_str());
-    if (g_pCurrentMusic) {
-        Mix_PlayMusic(g_pCurrentMusic, -1);
-        static int s_playOkLogCount = 0;
-        if (s_playOkLogCount < 8)
-        {
-            LOGI("PlayMp3 OK requested=[%s] resolved=[%s]", Name, path.c_str());
-            ++s_playOkLogCount;
-        }
-        strncpy(Mp3FileName, Name, sizeof(Mp3FileName) - 1);
-        Mp3FileName[sizeof(Mp3FileName) - 1] = '\0';
-        g_LastFailedMp3Name[0] = '\0';
-        g_LastFailedMp3Tick = 0;
-    } else {
-        if (strcmp(Name, g_LastFailedMp3Name) != 0 || (now - g_LastFailedMp3Tick) >= kFailedRetryMs)
+    if (!std::filesystem::exists(path))
+    {
+        static int s_missLogCount = 0;
+        if (s_missLogCount < 8)
         {
             char cwd[512] = {};
             const char* cwdPtr = getcwd(cwd, sizeof(cwd));
-            const bool requestedExists = std::filesystem::exists(NormalizeMusicPath(Name));
-            const bool resolvedExists = std::filesystem::exists(path);
-            LOGE("PlayMp3 failed requested=[%s] resolved=[%s] reqExists=%d resolvedExists=%d cwd=[%s]: %s",
-                Name,
-                path.c_str(),
-                requestedExists ? 1 : 0,
-                resolvedExists ? 1 : 0,
-                cwdPtr ? cwdPtr : "(getcwd failed)",
-                Mix_GetError());
+            LOGE("PlayMp3 missing requested=[%s] resolved=[%s] cwd=[%s]",
+                Name, path.c_str(), cwdPtr ? cwdPtr : "(getcwd failed)");
+            ++s_missLogCount;
         }
         strncpy(g_LastFailedMp3Name, Name, sizeof(g_LastFailedMp3Name) - 1);
         g_LastFailedMp3Name[sizeof(g_LastFailedMp3Name) - 1] = '\0';
         g_LastFailedMp3Tick = now;
 
-        // Mark as current request to avoid expensive reload attempts every frame.
+        // Record it as current anyway so this does not retry every frame.
         strncpy(Mp3FileName, Name, sizeof(Mp3FileName) - 1);
         Mp3FileName[sizeof(Mp3FileName) - 1] = '\0';
+        return;
     }
+
+    AndroidAudioPlayMusic(path.c_str(), true);
+
+    static int s_playOkLogCount = 0;
+    if (s_playOkLogCount < 8)
+    {
+        LOGI("PlayMp3 requested=[%s] resolved=[%s]", Name, path.c_str());
+        ++s_playOkLogCount;
+    }
+
+    strncpy(Mp3FileName, Name, sizeof(Mp3FileName) - 1);
+    Mp3FileName[sizeof(Mp3FileName) - 1] = '\0';
+    g_LastFailedMp3Name[0] = '\0';
+    g_LastFailedMp3Tick = 0;
 }
 
-bool IsEndMp3()           { return !g_AndroidAudioAvailable || !Mix_PlayingMusic(); }
-int  GetMp3PlayPosition() { return (g_AndroidAudioAvailable && Mix_PlayingMusic()) ? 50 : 100; }
+bool IsEndMp3()           { return !g_AndroidAudioAvailable || !AndroidAudioIsMusicPlaying(); }
+int  GetMp3PlayPosition() { return (g_AndroidAudioAvailable && AndroidAudioIsMusicPlaying()) ? 50 : 100; }
 
 // =============================================================================
 // Stubs for Windows-only features
@@ -10901,11 +10900,9 @@ void DestroySound()
         return;
     }
 
-    Mix_HaltMusic();
-    Mix_HaltChannel(-1);
-    if (g_pCurrentMusic) { Mix_FreeMusic(g_pCurrentMusic); g_pCurrentMusic = nullptr; }
-    Mix_CloseAudio();
-    Mix_Quit();
+    AndroidAudioStopMusic();
+    AllStopSound();
+    Mp3FileName[0] = '\0';
     g_AndroidAudioAvailable = false;
     LOGI("Audio destroyed");
 }
@@ -12459,7 +12456,11 @@ static bool InitializeAndroidGame()
     SetWorkingDirectoryToMobileDataRoot();
     InitializeTakumiProtectState();
     InitializeTakumiPacketKeys();
-    g_AndroidAudioAvailable = false;
+    // Audio is available: MuAudio (SoundPool + MediaPlayer) needs neither SDL
+    // nor a device handle. This was false because the SDL_mixer path it used to
+    // gate could never open, which switched sound and music off here before
+    // anything downstream had a chance.
+    g_AndroidAudioAvailable = true;
 
     const char* backendEnv = std::getenv("MU_RENDER_BACKEND");
     const RenderBackendType requestedBackend = ParseRenderBackendType(backendEnv);
@@ -12562,7 +12563,13 @@ static bool InitializeAndroidGame()
         static_cast<int>(m_SoundOnOff),
         static_cast<int>(m_MusicOnOff),
         static_cast<int>(m_RememberMe));
-    LOGW("SDL audio runtime is disabled under NativeActivity; running muted");
+
+    // Brings up SoundPool and registers the sound table. The working directory
+    // is already the data root (SetWorkingDirectoryToMobileDataRoot above), and
+    // registration makes each path absolute from it, which is what SoundPool
+    // needs - it resolves relative paths against the JVM's user.dir, not ours.
+    AndroidAudioInit();
+    SetEnableSound(m_SoundOnOff != 0);
 
     static std::wstring serverIP = L"139.99.24.220";
     //static std::wstring serverIP = GameConfig::GetInstance().GetServerIP();
@@ -13643,50 +13650,10 @@ int SDL_main(int argc, char* argv[])
     g_strSelectedML = g_aszMLSelection;
     pMultiLanguage  = new CMultiLanguage(g_strSelectedML);
 
-    // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Audio: SDL_mixer replaces wzAudio + DirectSound 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
-    if (m_MusicOnOff || m_SoundOnOff)
-    {
-        const int mixerFlags = MIX_INIT_MP3;
-        const int loadedFlags = Mix_Init(mixerFlags);
-        LOGI("Mix_Init requested=0x%x loaded=0x%x", mixerFlags, loadedFlags);
-        if ((loadedFlags & MIX_INIT_MP3) == 0)
-        {
-            LOGW("MP3 decoder unavailable in SDL_mixer runtime");
-        }
-
-        // logcat is unreachable on these devices, so the outcome goes to a file
-        // next to the other diagnostics. chans=0 in mu_sound_log.txt means this
-        // failed or never ran, and the reason was invisible until now.
-        if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
-            LOGW("Mix_OpenAudio failed: %s", Mix_GetError());
-            if (FILE* sf = fopen("mu_sound_log.txt", "a")) {
-                fprintf(sf, "MIXOPEN FAILED err=%s music=%d sound=%d
-",
-                    Mix_GetError(), m_MusicOnOff, m_SoundOnOff);
-                fclose(sf);
-            }
-        } else {
-            Mix_AllocateChannels(32);
-            LOGI("SDL_mixer initialized (32 channels)");
-            if (FILE* sf = fopen("mu_sound_log.txt", "a")) {
-                fprintf(sf, "MIXOPEN OK chans=%d music=%d sound=%d
-",
-                    Mix_AllocateChannels(-1), m_MusicOnOff, m_SoundOnOff);
-                fclose(sf);
-            }
-            extern void OpenSounds();
-            // Register the sound table here rather than trusting OpenBasicData
-            // to reach OpenSounds(): that call is the last thing in a very long
-            // loader, so any earlier return leaves the table empty - which is
-            // what registered=0 in the log has been saying all along.
-            OpenSounds();
-            if (FILE* sf = fopen("mu_sound_log.txt", "a")) {
-                fprintf(sf, "OPENSOUNDS called explicitly
-");
-                fclose(sf);
-            }
-        }
-    }
+    // Audio is brought up in InitializeAndroidGame, not here. This function is
+    // unreachable: sokol_main is the entry point and nothing calls SDL_main, so
+    // the Mix_Init/Mix_OpenAudio that used to sit here never ran - which is why
+    // no MIXOPEN line ever appeared in mu_sound_log.txt.
 
     // Text loaded by OpenTextData() -> GlobalText.Load(text_eng.bmd) in OpenBasicData()
 
