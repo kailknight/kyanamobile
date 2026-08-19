@@ -201,6 +201,47 @@ keeping. Note `movePressure` is a *running count incremented as objects are
 iterated*, closer to an object index than a pressure reading; that semantics
 deserves a proper look.
 
+## The pass collapse — measured target and where it lives (2026-08-19)
+
+Counted, not inferred. `pass[...]` in the drift log buckets every `RenderMesh`
+call by the branch it takes. Busy Lorencia, 12-13 characters:
+
+```
+pass[shd0 chr241 brt93 tex330 oth1]   skin=612  draws=950
+```
+
+- `tex` 330 — the base texture pass.
+- `chr` 241 — chrome/metal/oil. **The prize.**
+- `brt` 93 — bright without chrome.
+- `shd` **0** — no shadow passes at all for these models, so the second
+  `RenderMesh` call in `RenderBody` for TScript shadow meshes is irrelevant
+  here. Do not design around it.
+
+**~334 of 665 skinned draws are overlays re-rendering meshes the base pass
+already drew — 38% of all draws in the frame**, against `chr` at 5.7-8.3 ms.
+
+**Where they come from:** `ZzzCharacter.cpp` issues an extra *whole-body* pass
+per equipped item with a glow/excellent option —
+`RenderPartObjectBodyColor(..., RENDER_CHROME|RENDER_BRIGHT, ...)` at ~10055,
+10060, 10064, 10157, 10167, 10202, 10249. Chrome and bright arrive **together**
+in one flag set, so they are not separable work items; the `brt` 93 is a
+different, smaller set.
+
+**What the collapse means:** fold the chrome contribution into the base pass
+instead of re-rendering the body. The two passes differ in three ways, all of
+which have to be reproduced in one shader:
+- **texture** — chrome binds `BITMAP_CHROME` / `BITMAP_SHINY`, base binds the
+  item texture;
+- **UVs** — chrome generates them per vertex from the transformed normal into
+  `g_chrome[]`, and there are several variants (`CHROME2`..`CHROME7`, `METAL`,
+  `OIL`) with different formulas, one animated off `WorldTime`;
+- **blend** — the overlay is additive over the base.
+
+Read every `g_chrome` variant before starting; they are not one formula. The
+risk is visual, not structural: get the UV generation or the blend slightly
+wrong and all chrome and metal armour looks wrong. A/B on device with a
+screenshot of a character in chrome/metal gear, not a code review.
+
 ## Method that worked
 
 `adb logcat` returns nothing on these retail "user" builds, and the engine's
