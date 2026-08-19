@@ -17,6 +17,7 @@
 #include "ZzzScene.h"
 #include "android/SimpleModulusCrypt.h"
 
+#include <android/log.h>
 #include <SDL_mixer.h>
 
 #include <algorithm>
@@ -40,6 +41,10 @@ extern "C" int32_t ConnectionManager_Connect(
 extern "C" void ConnectionManager_Disconnect(int32_t handle);
 extern "C" void ConnectionManager_Send(int32_t handle, const uint8_t* data, int32_t size);
 extern "C" void SendServerListRequest(int32_t handle);
+
+// Declared at file scope on purpose: inside the anonymous namespace below an
+// extern declaration picks up internal linkage and cannot resolve.
+void OpenSounds();
 
 extern BOOL g_bGameServerConnected;
 
@@ -231,8 +236,233 @@ void FreeDirectSound()
     Mix_HaltChannel(-1);
     g_androidSoundEnabled = false;
 }
-void LoadWaveFile(int, TCHAR*, int, bool) {}
-HRESULT PlayBuffer(int, OBJECT*, BOOL) { return S_OK; }
+// ---------------------------------------------------------------------------
+// Sound effects
+//
+// These were stubs: LoadWaveFile did nothing and PlayBuffer returned S_OK
+// without playing anything, so every one of the ~826 WAVs shipped in
+// Data/Sound was extracted to the device and never touched. Music was real
+// (Mix_LoadMUS), which is why it worked while effects did not.
+//
+// OpenSounds() registers every sound at startup. Loading all of them eagerly
+// would be ~826 decodes and their PCM held resident before the title screen,
+// so registration only records the path and the decode happens the first time
+// a sound is actually asked for. Most of the table is monsters the player
+// never meets in a given session.
+// ---------------------------------------------------------------------------
+namespace
+{
+    constexpr int kAndroidSoundSlotCount = 512;
+
+    struct AndroidSoundSlot
+    {
+        std::string path;
+        Mix_Chunk*  chunk = nullptr;
+        bool        loadFailed = false;
+    };
+
+    AndroidSoundSlot g_androidSoundSlots[kAndroidSoundSlotCount];
+
+    // The tables use Windows paths - "Data\\Sound\\aWind.wav". Separators have
+    // to become '/', and the case has to be resolved against a case-sensitive
+    // filesystem: the directory names happen to match here, but relying on that
+    // is what left the music table's lowercase "data\\music\\" needing four
+    // fallback spellings.
+    std::string NormalizeAndroidSoundPath(const TCHAR* raw)
+    {
+        if (raw == nullptr)
+        {
+            return std::string();
+        }
+
+        std::string path(raw);
+        for (char& c : path)
+        {
+            if (c == '\\')
+            {
+                c = '/';
+            }
+        }
+        return path;
+    }
+
+    // logcat returns nothing on these retail devices, so the sound path reports
+    // to a file instead. Same approach as mu_drift_log.txt.
+    int g_androidSoundRegistered = 0;
+    int g_androidSoundPlayRequests = 0;
+    int g_androidSoundLoadOk = 0;
+    int g_androidSoundLoadFail = 0;
+
+    void AndroidSoundLog(const char* fmt, ...)
+    {
+        static int s_lines = 0;
+        if (s_lines >= 60)
+        {
+            return;
+        }
+        ++s_lines;
+
+        if (FILE* f = fopen("mu_sound_log.txt", "a"))
+        {
+            va_list args;
+            va_start(args, fmt);
+            vfprintf(f, fmt, args);
+            va_end(args);
+            fputc('\n', f);
+            fclose(f);
+        }
+    }
+
+    // Startup never reaches the mixer init in android_main - no MIXOPEN line
+    // ever appears in the log - so audio brings itself up the first time a
+    // sound is asked for instead of depending on an init path that does not
+    // run. Mix_QuerySpec reports whether the device is already open, so this is
+    // a no-op when something else got there first.
+    void EnsureAndroidAudioReady()
+    {
+        static bool s_tried = false;
+        if (s_tried)
+        {
+            return;
+        }
+        s_tried = true;
+
+        int freq = 0, channels = 0;
+        Uint16 format = 0;
+        if (Mix_QuerySpec(&freq, &format, &channels) == 0)
+        {
+            // The client runs its window and GL through sokol_app, not SDL_main,
+            // so SDL never came up as a whole and its audio subsystem was never
+            // initialised - Mix_OpenAudio was failing with SDL's "application
+            // didn't initialize properly" error. Bring up just the audio
+            // subsystem here; SDL_WasInit keeps it to once.
+            if (SDL_WasInit(SDL_INIT_AUDIO) == 0)
+            {
+                if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0)
+                {
+                    AndroidSoundLog("LAZY SDL_InitSubSystem(AUDIO) failed err=%s", SDL_GetError());
+                    return;
+                }
+                AndroidSoundLog("LAZY SDL audio subsystem started");
+            }
+
+            Mix_Init(MIX_INIT_MP3);
+            if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0)
+            {
+                AndroidSoundLog("LAZY MIXOPEN FAILED err=%s", Mix_GetError());
+                return;
+            }
+            AndroidSoundLog("LAZY MIXOPEN OK");
+        }
+
+        Mix_AllocateChannels(32);
+        ApplyAndroidMasterVolume();
+
+        OpenSounds();
+        AndroidSoundLog("LAZY OPENSOUNDS done registered=%d chans=%d",
+            g_androidSoundRegistered, Mix_AllocateChannels(-1));
+    }
+
+    Mix_Chunk* AcquireAndroidSound(int buffer)
+    {
+        if (buffer < 0 || buffer >= kAndroidSoundSlotCount)
+        {
+            return nullptr;
+        }
+
+        AndroidSoundSlot& slot = g_androidSoundSlots[buffer];
+        if (slot.chunk != nullptr)
+        {
+            return slot.chunk;
+        }
+        // One failed load is enough; do not retry on every play attempt or a
+        // missing file turns into a stat() storm during combat.
+        if (slot.loadFailed || slot.path.empty())
+        {
+            return nullptr;
+        }
+
+        // Mix_LoadWAV / Mix_PlayChannel are declared as functions by this header
+        // (SDL_mixer 2.6+) but the prebuilt libSDL2_mixer.so predates that and
+        // only exports the _RW / _Timed forms the macros used to expand to.
+        slot.chunk = Mix_LoadWAV_RW(SDL_RWFromFile(slot.path.c_str(), "rb"), 1);
+        if (slot.chunk == nullptr)
+        {
+            slot.loadFailed = true;
+            ++g_androidSoundLoadFail;
+            AndroidSoundLog("LOADFAIL id=%d path=[%s] err=%s", buffer, slot.path.c_str(), Mix_GetError());
+            __android_log_print(ANDROID_LOG_WARN, "MuMain",
+                "Sound load failed [%s]: %s", slot.path.c_str(), Mix_GetError());
+        }
+        else
+        {
+            ++g_androidSoundLoadOk;
+            AndroidSoundLog("LOADOK id=%d path=[%s]", buffer, slot.path.c_str());
+        }
+        return slot.chunk;
+    }
+}
+
+void LoadWaveFile(int Buffer, TCHAR* strFileName, int, bool)
+{
+    if (Buffer < 0 || Buffer >= kAndroidSoundSlotCount)
+    {
+        return;
+    }
+
+    AndroidSoundSlot& slot = g_androidSoundSlots[Buffer];
+    ++g_androidSoundRegistered;
+    if (g_androidSoundRegistered <= 3)
+    {
+        AndroidSoundLog("REGISTER id=%d path=[%s] enabled=%d vol=%ld",
+            Buffer, NormalizeAndroidSoundPath(strFileName).c_str(),
+            g_androidSoundEnabled ? 1 : 0, g_androidMasterVolume);
+    }
+    slot.path = NormalizeAndroidSoundPath(strFileName);
+    slot.loadFailed = false;
+    if (slot.chunk != nullptr)
+    {
+        Mix_FreeChunk(slot.chunk);
+        slot.chunk = nullptr;
+    }
+}
+
+// Object is ignored: it carries the emitter's world position for the 3D mixing
+// the desktop client does, and SDL_mixer has no positional equivalent worth the
+// CPU here on a client that is already CPU-bound. Sounds play centred.
+HRESULT PlayBuffer(int Buffer, OBJECT*, BOOL bLooped)
+{
+    if (!g_androidSoundEnabled)
+    {
+        return S_OK;
+    }
+
+    EnsureAndroidAudioReady();
+    ++g_androidSoundPlayRequests;
+    // First few plus a periodic sample: the opening requests happen at the
+    // title screen before OpenSounds and before the mixer opens, so a log that
+    // only captured those showed registered=0 chans=0 and told us nothing about
+    // steady state.
+    if (g_androidSoundPlayRequests <= 3 || (g_androidSoundPlayRequests % 200) == 0)
+    {
+        AndroidSoundLog("PLAY id=%d enabled=%d registered=%d ok=%d fail=%d chans=%d",
+            Buffer, g_androidSoundEnabled ? 1 : 0, g_androidSoundRegistered,
+            g_androidSoundLoadOk, g_androidSoundLoadFail, Mix_AllocateChannels(-1));
+    }
+
+    Mix_Chunk* chunk = AcquireAndroidSound(Buffer);
+    if (chunk == nullptr)
+    {
+        return S_OK;
+    }
+
+    // -1 picks any free channel, so overlapping effects mix instead of cutting
+    // each other off. A full channel set drops the new sound, which is the
+    // right failure for something like a crowded fight.
+    Mix_PlayChannelTimed(-1, chunk, bLooped ? -1 : 0, -1);
+    return S_OK;
+}
+
 void StopBuffer(int, BOOL) { Mix_HaltChannel(-1); }
 void AllStopSound(void) { Mix_HaltChannel(-1); }
 void Set3DSoundPosition() {}

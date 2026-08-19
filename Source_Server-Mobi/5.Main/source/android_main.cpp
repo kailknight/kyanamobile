@@ -13654,11 +13654,37 @@ int SDL_main(int argc, char* argv[])
             LOGW("MP3 decoder unavailable in SDL_mixer runtime");
         }
 
+        // logcat is unreachable on these devices, so the outcome goes to a file
+        // next to the other diagnostics. chans=0 in mu_sound_log.txt means this
+        // failed or never ran, and the reason was invisible until now.
         if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
             LOGW("Mix_OpenAudio failed: %s", Mix_GetError());
+            if (FILE* sf = fopen("mu_sound_log.txt", "a")) {
+                fprintf(sf, "MIXOPEN FAILED err=%s music=%d sound=%d
+",
+                    Mix_GetError(), m_MusicOnOff, m_SoundOnOff);
+                fclose(sf);
+            }
         } else {
             Mix_AllocateChannels(32);
             LOGI("SDL_mixer initialized (32 channels)");
+            if (FILE* sf = fopen("mu_sound_log.txt", "a")) {
+                fprintf(sf, "MIXOPEN OK chans=%d music=%d sound=%d
+",
+                    Mix_AllocateChannels(-1), m_MusicOnOff, m_SoundOnOff);
+                fclose(sf);
+            }
+            extern void OpenSounds();
+            // Register the sound table here rather than trusting OpenBasicData
+            // to reach OpenSounds(): that call is the last thing in a very long
+            // loader, so any earlier return leaves the table empty - which is
+            // what registered=0 in the log has been saying all along.
+            OpenSounds();
+            if (FILE* sf = fopen("mu_sound_log.txt", "a")) {
+                fprintf(sf, "OPENSOUNDS called explicitly
+");
+                fclose(sf);
+            }
         }
     }
 

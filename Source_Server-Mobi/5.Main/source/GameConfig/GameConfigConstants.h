@@ -45,7 +45,12 @@ namespace CfgDefaults
     inline constexpr int  CfgDefaultColorDepth = 0;
 
     inline constexpr bool CfgDefaultSoundEnabled = true;
-    inline constexpr bool CfgDefaultMusicEnabled = false;
+    // Was false, which on Android is not a default but a hard setting: ReadBool
+    // goes through GetPrivateProfileIntW, and that is a stub returning whatever
+    // default it is handed, so config.ini can never switch music on. Music was
+    // silent for that reason alone - and with sound the only thing left, the
+    // whole mixer init hung off one flag.
+    inline constexpr bool CfgDefaultMusicEnabled = true;
     inline constexpr int  CfgDefaultVolumeLevel  = 5;
 
     inline constexpr int CfgDefaultRenderTextType = 0;
