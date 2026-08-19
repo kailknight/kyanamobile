@@ -3069,8 +3069,15 @@ void MainScene(HDC hDC)
 		{
 			BeginBitmap();
 
-			unicode::t_char szFpsOnly[64];
-			unicode::_sprintf(szFpsOnly, "FPS %.1f", FPS_AVG);
+			unicode::t_char szFpsOnly[128];
+			// TEMP: joystick world heading and hero tile, for calibrating the
+			// screen-to-world rotation in ApplyVirtualJoystickMovement.
+			extern float g_ProfJoyWorldX;
+			extern float g_ProfJoyWorldY;
+			extern int g_ProfJoyTileX;
+			extern int g_ProfJoyTileY;
+			unicode::_sprintf(szFpsOnly, "FPS %.1f | joy %.2f,%.2f tile %d,%d",
+				FPS_AVG, g_ProfJoyWorldX, g_ProfJoyWorldY, g_ProfJoyTileX, g_ProfJoyTileY);
 
 			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
 			g_pRenderText->SetBgColor(0, 0, 0, 140);

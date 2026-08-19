@@ -480,6 +480,15 @@ extern float CameraDistanceTarget;
 extern float g_androidZoomOverride;   // defined in CameraUtility.cpp
 extern float CameraAngle[3];
 
+// TEMP calibration for the joystick world heading, read by the FPS overlay in
+// ZzzScene.cpp. Defined here at file scope deliberately - the other g_Prof
+// counters further down sit inside an anonymous namespace, which gives them
+// internal linkage and makes them unreachable from another translation unit.
+float g_ProfJoyWorldX = 0.0f;
+float g_ProfJoyWorldY = 0.0f;
+int g_ProfJoyTileX = 0;
+int g_ProfJoyTileY = 0;
+
 // =============================================================================
 // Globals (defined here on Android 鑺掗埀顑解偓?in Winmain.cpp on Windows)
 // =============================================================================
@@ -667,6 +676,35 @@ constexpr float kVirtualJoystickMouseMaxRadius = 132.0f;
 // why up was the one direction that never looked wrong.
 constexpr float kVirtualJoystickDriveOriginX = 320.0f;
 constexpr float kVirtualJoystickDriveOriginY = 240.0f;
+
+// How far ahead of the character the joystick aims, in tiles. Long enough that
+// one path keeps the character walking for a while, short enough that the
+// pathfinder cannot route around a building when you only asked to go left.
+constexpr int kVirtualJoystickStepTiles = 2;
+
+// Minimum gap between re-paths while the stick is held. Time, deliberately, not
+// frames: the engine's own move gate is MouseUpdateTime, which increments once
+// per frame against a limit of 6, so it lets a move through every 100 ms at 60
+// FPS but only every 400 ms at 15. Combined with a destination that was derived
+// from a screen point on a camera that follows the character, that is what made
+// the character wander off at low frame rates - by the time the gate opened the
+// same screen offset meant a completely different tile.
+constexpr uint32_t kVirtualJoystickRepathMs = 150;
+
+// Turning the stick this far cuts the wait and re-paths immediately, so a
+// direction change is not held up by the throttle above.
+constexpr float kVirtualJoystickHeadingChangeDot = 0.85f;
+
+// Beat between cutting the old walk and starting the new one on a direction
+// change, so the character finishes its tile, stops and turns rather than
+// curving into the new heading. Short enough to read as a turn, not a stall.
+constexpr uint32_t kVirtualJoystickTurnPauseMs = 90;
+
+// Screen-space stick direction is rotated by the camera yaw to get a world
+// heading. This trims that rotation; the projection the old code relied on did
+// it implicitly. Calibrate by walking one direction and watching the coordinate
+// readout in the top bar.
+constexpr float kVirtualJoystickWorldYawOffsetDeg = 0.0f;
 constexpr float kVirtualJoystickDynamicAreaMinY = 210.0f;
 constexpr float kVirtualJoystickDynamicAreaMaxX = 212.0f;
 constexpr float kVirtualJoystickOuterRenderW = 115.0f;
@@ -2904,8 +2942,38 @@ void ReleaseVirtualJoystickMouseDrive()
     MouseY = static_cast<int>(kVirtualJoystickDriveOriginY);
 }
 
+// True while this code is the thing walking the character, so releasing the
+// stick only ever stops a joystick walk - a tap-to-move destination the player
+// chose must not be cancelled by letting go of an unrelated control.
+static bool g_virtualJoystickWalking = false;
+
+// Stop after the step already in progress. MU walks tile to tile and neither
+// side can stop mid-tile, so this drops every queued step past the one being
+// taken rather than snapping the character to a halt.
+void StopVirtualJoystickWalk()
+{
+    if (!g_virtualJoystickWalking)
+    {
+        return;
+    }
+    g_virtualJoystickWalking = false;
+
+    CHARACTER* c = Hero;
+    if (c == nullptr)
+    {
+        return;
+    }
+
+    const int stopAt = static_cast<int>(c->Path.CurrentPath) + 1;
+    if (static_cast<int>(c->Path.PathNum) > stopAt)
+    {
+        c->Path.PathNum = static_cast<unsigned char>(stopAt);
+    }
+}
+
 void ClearVirtualJoystick()
 {
+    StopVirtualJoystickWalk();
     g_virtualJoystick = ActiveVirtualJoystick{};
     ReleaseVirtualJoystickMouseDrive();
 }
@@ -3024,54 +3092,125 @@ void ApplyVirtualJoystickMovement()
 
     if (g_virtualJoystick.moveStrength <= 0.001f)
     {
+        // Stick centred but still held - same as letting go, stop walking.
+        StopVirtualJoystickWalk();
         ReleaseVirtualJoystickMouseDrive();
         return;
     }
 
-    const float driveRadius = kVirtualJoystickMouseMinRadius
-        + (kVirtualJoystickMouseMaxRadius - kVirtualJoystickMouseMinRadius) * g_virtualJoystick.moveStrength;
-    const int targetMouseX = std::clamp(
-        static_cast<int>(kVirtualJoystickDriveOriginX + g_virtualJoystick.moveDirX * driveRadius),
-        0,
-        640);
-    const int targetMouseY = std::clamp(
-        static_cast<int>(kVirtualJoystickDriveOriginY - g_virtualJoystick.moveDirY * driveRadius),
-        0,
-        480);
-
-    MouseX = targetMouseX;
-    MouseY = targetMouseY;
-    g_iNoMouseTime = 0;
-
-    // A meaningful direction change should take effect immediately rather
-    // than waiting out the previous path's cooldown (MouseUpdateTimeMax is
-    // set proportional to how long that path was) - otherwise the character
-    // keeps walking the old direction for a beat before the new one lands.
+    // The joystick used to walk by parking a synthetic cursor out in the
+    // direction of travel, holding a fake left button, and letting click-to-move
+    // pathfind to whatever ground tile that screen point projected onto. That
+    // had two problems that only showed under load. The destination was defined
+    // in screen space against a camera that follows the character, so the same
+    // stick offset meant a different world tile every frame; and the engine's
+    // move gate counts frames rather than time, so at 15 FPS a new move was only
+    // accepted every ~400 ms - by which point the projected tile had moved a
+    // long way. Together they made the character wander at low frame rates.
+    //
+    // The heading is now turned into a world-space target directly, so the
+    // destination depends only on where the stick points. Nothing here touches
+    // the mouse any more, which is also what leaves tap-to-move working: taps go
+    // through the normal click path untouched instead of fighting a button this
+    // code was holding down permanently.
+    CHARACTER* c = Hero;
+    if (c == nullptr)
     {
-        static float s_lastAppliedDirX = 0.0f;
-        static float s_lastAppliedDirY = 0.0f;
-        const float dot = (g_virtualJoystick.moveDirX * s_lastAppliedDirX)
-            + (g_virtualJoystick.moveDirY * s_lastAppliedDirY);
-        if (dot < 0.85f)
-        {
-            MouseUpdateTime = MouseUpdateTimeMax;
-        }
-        s_lastAppliedDirX = g_virtualJoystick.moveDirX;
-        s_lastAppliedDirY = g_virtualJoystick.moveDirY;
+        return;
+    }
+    OBJECT* o = &c->Object;
+
+    // Mid-teleport the position is not meaningful to path from, and there is a
+    // known sticky latch in that path worth staying clear of.
+    if (o->Teleport != 0)
+    {
+        return;
     }
 
-    MouseLButtonPop = false;
-    if (!MouseLButton)
+    // Screen-space stick direction rotated into world space by the camera yaw.
+    // moveDirY already points up-screen (UpdateVirtualJoystickByUi negates the
+    // touch delta), so this is a plain 2D rotation.
+    // Negated: going from screen space to world space is the inverse of the
+    // camera rotation. Rotating the same way as the camera sent left and right
+    // to world headings that both rendered as "rightish" on screen, which is
+    // what a 90 degree error looks like from the player's side.
+    const float yaw =
+        -(CameraAngle[2] + kVirtualJoystickWorldYawOffsetDeg) * 0.01745329252f;
+    const float cosYaw = cosf(yaw);
+    const float sinYaw = sinf(yaw);
+    const float dirX = g_virtualJoystick.moveDirX;
+    const float dirY = g_virtualJoystick.moveDirY;
+    const float worldX = (dirX * cosYaw) - (dirY * sinYaw);
+    const float worldY = (dirX * sinYaw) + (dirY * cosYaw);
+
+    const int targetTileX = std::clamp(
+        c->PositionX + static_cast<int>(lroundf(worldX * kVirtualJoystickStepTiles)), 0, 255);
+    const int targetTileY = std::clamp(
+        c->PositionY + static_cast<int>(lroundf(worldY * kVirtualJoystickStepTiles)), 0, 255);
+
+    // Throttled on elapsed time, not frames, so the cadence is the same at 15
+    // FPS as at 60. A turn beyond the dot threshold skips the wait so steering
+    // still feels immediate.
+    static uint32_t s_lastMoveMs = 0;
+    static float s_lastWorldX = 0.0f;
+    static float s_lastWorldY = 0.0f;
+
+    const uint32_t nowMs = MU_MobileGetTicks();
+    const float headingDot = (worldX * s_lastWorldX) + (worldY * s_lastWorldY);
+    const bool headingChanged = (headingDot < kVirtualJoystickHeadingChangeDot);
+
+    // Turned hard enough to count as a new direction: stop the walk in progress
+    // at its current tile, then hold for a beat before setting off again. Going
+    // straight to a new path instead makes the character arc into the new
+    // heading, which reads as sloppy - the wanted feel is walk left, stop, face
+    // right, walk right.
+    static uint32_t s_turnResumeMs = 0;
+    if (headingChanged)
     {
-        MouseLButtonPush = true;
-        MouseLButton = true;
-    }
-    else
-    {
-        MouseLButtonPush = false;
+        StopVirtualJoystickWalk();
+        s_lastWorldX = worldX;
+        s_lastWorldY = worldY;
+        s_turnResumeMs = nowMs + kVirtualJoystickTurnPauseMs;
+        return;
     }
 
-    g_virtualJoystickDrivingMouse = true;
+    // Signed compare so a tick wrap cannot park this in the future forever.
+    if (static_cast<int32_t>(nowMs - s_turnResumeMs) < 0)
+    {
+        return;
+    }
+
+    if ((nowMs - s_lastMoveMs) < kVirtualJoystickRepathMs)
+    {
+        return;
+    }
+
+    s_lastMoveMs = nowMs;
+    s_lastWorldX = worldX;
+    s_lastWorldY = worldY;
+
+    // TEMP calibration: the screen-to-world rotation is the one thing here that
+    // cannot be settled by reading the code, so surface it. Push a direction and
+    // one screenshot gives the heading and whether the tile delta matches it.
+    g_ProfJoyWorldX = worldX;
+    g_ProfJoyWorldY = worldY;
+    g_ProfJoyTileX = c->PositionX;
+    g_ProfJoyTileY = c->PositionY;
+
+    if (targetTileX == c->PositionX && targetTileY == c->PositionY)
+    {
+        return;
+    }
+
+    c->MovementType = MOVEMENT_MOVE;
+    TargetX = targetTileX;
+    TargetY = targetTileY;
+
+    if (PathFinding2(c->PositionX, c->PositionY, TargetX, TargetY, &c->Path))
+    {
+        SendMove(c, o);
+        g_virtualJoystickWalking = true;
+    }
 
 #if defined(MU_ANDROID_PERF_LOG)
     {
@@ -11453,6 +11592,7 @@ int g_ProfVerts = 0;
 // left is state churn - this says which state.
 int g_ProfFlushCauses[12] = { 0 };
 int g_ProfDrawSites[10] = { 0 };
+
 
 static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reason)
 {
