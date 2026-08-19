@@ -1576,9 +1576,32 @@ void EnsureSkinRestPoseCache(Mesh_t& mesh)
 }
 #endif
 
+// TEMP: which render pass each mesh draw belongs to. The skinned path is 71%
+// of all draws at 3.64 passes per mesh, and collapsing those passes is only
+// worth designing once it is known which pass supplies the bulk of them.
+// 0 shadow  1 chrome/metal/oil  2 bright  3 plain texture  4 other
+int g_ProfMeshPass[5] = { 0, 0, 0, 0, 0 };
+
 void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendMeshLight,float BlendMeshTexCoordU,float BlendMeshTexCoordV,int MeshTexture)
 {
     if ( i>=NumMeshs || i<0 ) return;
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+    {
+        // Same order RenderMesh itself tests these in, so the bucket matches
+        // the branch actually taken below.
+        if ((RenderFlag & RENDER_SHADOWMAP) == RENDER_SHADOWMAP)      ++g_ProfMeshPass[0];
+        else if (((RenderFlag & RENDER_CHROME) == RENDER_CHROME) ||
+                 ((RenderFlag & RENDER_CHROME2) == RENDER_CHROME2) ||
+                 ((RenderFlag & RENDER_CHROME3) == RENDER_CHROME3) ||
+                 ((RenderFlag & RENDER_CHROME4) == RENDER_CHROME4) ||
+                 ((RenderFlag & RENDER_METAL) == RENDER_METAL) ||
+                 ((RenderFlag & RENDER_OIL) == RENDER_OIL))           ++g_ProfMeshPass[1];
+        else if ((RenderFlag & RENDER_BRIGHT) == RENDER_BRIGHT)       ++g_ProfMeshPass[2];
+        else if ((RenderFlag & RENDER_TEXTURE) == RENDER_TEXTURE)     ++g_ProfMeshPass[3];
+        else                                                          ++g_ProfMeshPass[4];
+    }
+#endif
 
 #if defined(__ANDROID__) || defined(MU_IOS)
 	// TEMP profiling: attribute this call to the GPU or CPU mesh path.

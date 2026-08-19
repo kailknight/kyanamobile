@@ -480,6 +480,11 @@ extern float CameraDistanceTarget;
 extern float g_androidZoomOverride;   // defined in CameraUtility.cpp
 extern float CameraAngle[3];
 
+// TEMP: per-render-pass mesh draw counts, defined in ZzzBMD.cpp. Says which
+// pass supplies the bulk of the skinned draws before any collapse is designed.
+extern int g_ProfMeshPass[5];
+int g_ProfMeshPassLast[5] = { 0, 0, 0, 0, 0 };
+
 // =============================================================================
 // Globals (defined here on Android 鑺掗埀顑解偓?in Winmain.cpp on Windows)
 // =============================================================================
@@ -12970,6 +12975,14 @@ static void RunAndroidGameFrame()
             g_ProfTextCalls = 0;
             g_ProfTextCacheHits = 0;
             g_ProfTextCacheMisses = 0;
+            // Snapshot then clear: the drift log prints further down in the same
+            // frame, so zeroing in place would always log zeros. Mirrors how
+            // g_ProfDrawSites holds the last frame is values at print time.
+            for (int mp = 0; mp < 5; ++mp)
+            {
+                g_ProfMeshPassLast[mp] = g_ProfMeshPass[mp];
+                g_ProfMeshPass[mp] = 0;
+            }
 
             // Reset the per-frame asset-load counters for the next frame.
             g_ProfTexDefineCount = 0;
@@ -13004,6 +13017,7 @@ static void RunAndroidGameFrame()
                             " path[im%d vaConv%d vaDir%d qIdx%d qExp%d]"
                             " site[bIM%d cli%d qi%d lva%d bIdx%d bTri%d skin%d]"
                             " skinTexSw%d charN%d"
+                            " pass[shd%d chr%d brt%d tex%d oth%d]"
                             " meshN%d"
                             " cut[tex%d up%d bl%d dep%d en%d af%d proj%d unb%d pm%d full%d oth%d]\n",
                             nowSec - g_DriftStartSec,
@@ -13040,6 +13054,8 @@ static void RunAndroidGameFrame()
                             g_ProfDrawSites[3], g_ProfDrawSites[4], g_ProfDrawSites[5],
                             g_ProfDrawSites[6],
                             g_ProfDrawSites[7], g_ProfCharRendered,
+                            g_ProfMeshPassLast[0], g_ProfMeshPassLast[1], g_ProfMeshPassLast[2],
+                            g_ProfMeshPassLast[3], g_ProfMeshPassLast[4],
                             g_ProfDrawSites[8],
                             g_ProfFlushCauses[1], g_ProfFlushCauses[2], g_ProfFlushCauses[3],
                             g_ProfFlushCauses[4], g_ProfFlushCauses[5], g_ProfFlushCauses[6],
