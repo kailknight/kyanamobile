@@ -3354,6 +3354,25 @@ void MainScene(HDC hDC)
 			const int profCullX = (((hudWidth - sizeCull.cx) - 12) > 10) ? ((hudWidth - sizeCull.cx) - 12) : 10;
 			g_pRenderText->RenderText(profCullX, DisplayHeight - 110, szProfCull);
 
+			// Batch flush causes. Consecutive glBegin/glEnd spans already merge
+			// into one draw, and a modelview change deliberately does not break
+			// that merge, so every number here is a batch that some state
+			// change cut short. Whichever of these is largest is where the
+			// remaining draw calls actually come from.
+			extern int g_ProfFlushCauses[12];
+			unicode::t_char szProfFlush[192];
+			unicode::_sprintf(szProfFlush,
+				"cut tex%d up%d bl%d dep%d en%d af%d proj%d frm%d oth%d",
+				g_ProfFlushCauses[1], g_ProfFlushCauses[2], g_ProfFlushCauses[3],
+				g_ProfFlushCauses[4], g_ProfFlushCauses[5], g_ProfFlushCauses[6],
+				g_ProfFlushCauses[7], g_ProfFlushCauses[8], g_ProfFlushCauses[0]);
+
+			SIZE sizeFlush = {};
+			g_pMultiLanguage->_GetTextExtentPoint32(
+				g_pRenderText->GetFontDC(), szProfFlush, lstrlen(szProfFlush), &sizeFlush);
+			const int profFlushX = (((hudWidth - sizeFlush.cx) - 12) > 10) ? ((hudWidth - sizeFlush.cx) - 12) : 10;
+			g_pRenderText->RenderText(profFlushX, DisplayHeight - 98, szProfFlush);
+
 			unicode::t_char szProf5[192];
 			unicode::_sprintf(szProf5,
 				"ui[sel %.1f ifc %.1f pty %.1f new %.1f inf %.1f cur %.1f] mv o%.1f c%.1f",

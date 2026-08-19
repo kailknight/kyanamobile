@@ -21,6 +21,8 @@ struct RenderBackendStats
     int vaConvertedDrawCalls = 0;
     int quadIndexedDrawCalls = 0;
     int quadExpandedDrawCalls = 0;
+    int flushCauses[12] = { 0 };
+    int drawSites[10] = { 0 };
 };
 
 class IRenderBackend

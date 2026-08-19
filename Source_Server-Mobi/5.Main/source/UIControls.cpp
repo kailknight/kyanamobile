@@ -2718,6 +2718,10 @@ unsigned long long g_ProfTextUploadTicks = 0;
 int g_ProfTextCalls = 0;
 int g_ProfTextCacheHits = 0;
 int g_ProfTextCacheMisses = 0;
+// Two live keys claiming the same atlas slot - the suspected cause of the
+// section cache rendering the wrong string. Zero here exonerates the slot
+// bookkeeping.
+int g_ProfTextSlotCollisions = 0;
 
 namespace
 {
@@ -2750,7 +2754,20 @@ extern int g_ProfGetColorCalls;
 // The two halves are separable so a regression can be bisected: the extent
 // cache only answers measurement, the section cache holds the composed pixels.
 bool g_TextExtentCacheEnabled = true;
-bool g_TextSectionCacheEnabled = false;
+// On since 2026-08-19, measured on device (RedMagic 8 Pro, Lorencia):
+// text 8.4 -> 1.4 ms/frame, the FreeType rasterise to 0.0, 11523 hits against
+// 5 misses, and the 24 texture-upload batch cuts it was causing in gl_compat
+// went to 0 with it. ~+10% FPS like for like.
+//
+// It was left off because Character Info stat lines were reported rendering as
+// whatever the profiling overlay last drew, blamed on two entries sharing an
+// atlas slot. That is not what happens: g_ProfTextSlotCollisions counts exactly
+// that condition and stayed at 0 for a whole session, and the text renders
+// correctly in town, in a window-heavy scene and on a freshly loaded map. The
+// stride and the CachTexture shadow - the other two candidates - were checked
+// and are both sound. If the corruption ever comes back it is something else,
+// and the counter is the first thing to read.
+bool g_TextSectionCacheEnabled = true;
 
 namespace TextCache
 {
@@ -3534,6 +3551,20 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 				(int)(RealBoxPos.x + LIMIT_WIDTH * i + iTab), (int)RealBoxPos.y,
 				RealSectionLine.cx, RealSectionLine.cy, m_TypeShadow);
 			g_ProfTextUploadTicks += TextProfNow() - profUploadStart;
+
+			// The reported corruption is stat lines showing whatever the
+			// profiling overlay last drew, which means some other key is
+			// uploading into this slot every frame. Rather than review the
+			// eviction logic again - that was already done twice without
+			// finding it - catch the moment it happens: taking a slot that a
+			// different live key still owns is exactly the aliasing, and if
+			// this counter stays at zero the theory is wrong and the fault is
+			// somewhere else entirely.
+			if (TextCache::s_slotOwner[slot] != 0 &&
+				TextCache::s_slotOwner[slot] != keys[i])
+			{
+				++g_ProfTextSlotCollisions;
+			}
 
 			TextCache::Section& entry = TextCache::s_sections[keys[i]];
 			entry.text.assign(pszText, textLen);

@@ -6,9 +6,23 @@ session (or another person) can resume without the original conversation.
 ## Where things stand
 
 Same Lorencia scene, RedMagic 8 Pro (NX729J), Adreno:
-**~8.5 → ~17 → 30-36 FPS in the busy town, 58-62 in open areas.**
+**~8.5 → ~17 → 30-36 → 42-46 FPS in the busy town, 58-62 in open areas.**
 The 26 FPS target is met **on this device**. See the MediaTek section below —
 it is not met everywhere.
+
+**2026-08-19 update.** The bucket ranking below is stale; the text cache landed
+and the profile moved. Current numbers, all with `overlay=0`:
+
+- Quiet spot, 214 objects: **42-46 FPS**, `scn` 14.9, `chr` 7.8, `text` 5.4
+  (before the cache), `obj` 2.7, `ui` 1.8, ~970-1000 draws.
+- Window-heavy scene, 137 objects: 26 FPS, `scn` 27.8, `chr` 7.3, `text` **1.4**
+  (after the cache), `obj` 2.2, `ui` 3.5, ~785 draws.
+- **Crowds are the real problem, not the town.** At ~300 objects the same
+  session measured **20.8-28.5 FPS** with `obj` at 7.0-9.6 ms — worse than
+  anything recorded above. Aim work there.
+
+Note fewer objects at lower FPS: geometry is not the driver, UI and text volume
+is. Doubling object count cost less than one open window did.
 
 Frame at the end of the session (busy town, `scn` ≈ 21 ms, `pres` 0 ms):
 
@@ -34,6 +48,10 @@ Ruled out by measurement (do not re-litigate):
 - **CPU skinning maths** — `BMD::Transform` is 0.8 ms of a ~110 ms frame.
 - **GPU back-pressure** — `pres` 0 ms, always.
 - **GPU skinning itself** — A/B on the same device/scene was neutral.
+  **Caveat added 2026-08-19:** that A/B compared GPU against CPU skinning and
+  found no difference. It does *not* mean the skinned path is cheap. It is now
+  the single largest thing in the frame — see "Where the draws actually come
+  from" below. Do not read this bullet as "skinning is ruled out".
 - **Missing frustum culling** — culling already runs at three levels in
   `RenderObjects` (per 16x16 block, per object, plus adaptive distance
   buckets). The `cull obj X/Y` overlay line shows what survives it.
@@ -105,6 +123,41 @@ about 5x more expensive. Two consequences:
    ~3 ms on Adreno. See the Text rendering section for the bug that has it
    disabled.
 
+## Where the draws actually come from (2026-08-19)
+
+Every `++s_drawCallCount` site in `gl_compat.cpp` is tagged and logged as
+`site[...]`. The seven sum to `draws` exactly, so this accounting is closed.
+Busy Lorencia, 16 characters on screen:
+
+| site | draws | share |
+|---|---|---|
+| `skin` — `GL_DrawSkinnedMesh` | **662** | **71%** |
+| `bIdx` — bulk indexed triangles | 82 | 9% |
+| `bIM` — batched immediate mode | 151 | 17% |
+| `qi` — quad indexed | 11 | 1% |
+| `cli`, `lva`, `bTri` | 0 | dead paths |
+
+**Read the counter names carefully before doing arithmetic on them.** `im` and
+`vaConv` in `path[...]` count *inputs* — `im` increments in `GL_End()`, once per
+glBegin/glEnd span, and routinely exceeds the total draw count. Two separate
+wrong conclusions came out of treating them as draw counts. Only `site[...]`
+counts draws.
+
+**The skinned path is 3.64 render passes over 11.4 meshes per character**
+(662 draws / 182 distinct meshes / 16 characters). The geometry count is normal
+for MU — helm, armour, pants, gloves, boots, weapon, shield, wings. The
+multiplier is overlay passes, each binding its own texture (base, chrome,
+lightmap), which is also why `skinTexSw` sat at 573 of 662: that is one texture
+per *pass*, not per mesh. An earlier reading of that number as "every mesh has
+unique art, so an atlas is needed first" was wrong — **no atlas is required.**
+
+Collapsing the passes into one multi-texture shader takes `skin` from ~662 to
+~182, about **480 fewer draws a frame, 53% of the total**, against `chr` at
+9.7-9.9 ms, the largest bucket in the frame. GLES3 has the texture units for
+it. The risk is visual, not structural: the blend maths for metal and chrome
+armour has to be reproduced exactly, so A/B it on device with a screenshot
+diff rather than reviewing the code.
+
 ## Method that worked
 
 `adb logcat` returns nothing on these retail "user" builds, and the engine's
@@ -158,13 +211,36 @@ strings. Two caches were written for it, behind separate kill switches in
 
 - **`g_TextExtentCacheEnabled` (ON, working).** Measuring is a pure function of
   (bytes, font). `ext` 2.8 → 0.8 ms.
-- **`g_TextSectionCacheEnabled` (OFF, buggy).** Caches composed pixels in a
-  persistent 1024x2048 atlas. **Do not turn this on without fixing it first.**
-  With it on, Character Info stat lines render as whatever the profiling overlay
-  last drew, changing every frame — two entries end up sharing one atlas slot.
-  The LRU eviction, stale-entry takeover and key derivation were all reviewed
-  without finding how. The pad labels (PK/CHAT/JWL) were a *different* bug and
-  are genuinely fixed (see below).
+- **`g_TextSectionCacheEnabled` (ON since 2026-08-19, working).** Caches
+  composed pixels in a persistent 1024x2048 atlas.
+
+  It was off because Character Info stat lines were seen rendering as whatever
+  the profiling overlay last drew, and that was attributed to two entries
+  sharing one atlas slot. **That attribution was wrong.** `g_ProfTextSlotCollisions`
+  in `UIControls.cpp` counts precisely that condition — claiming a slot a
+  different live key still owns — and it stayed at **0** across a full session
+  with the cache on. Text rendered correctly in town, in a window-heavy scene
+  and on a freshly loaded map. The two other candidates were checked and are
+  sound: `WriteText` composes at a 256-texel stride and `UploadSection` uploads
+  with `GL_UNPACK_ROW_LENGTH` 256, and `DrawSection` binds the atlas explicitly
+  rather than trusting the `CachTexture` shadow.
+
+  Measured on device (RedMagic 8 Pro, Lorencia), cache off → on:
+
+  | | off | on |
+  |---|---|---|
+  | `text` | 8.4 ms | **1.4 ms** |
+  | `out` (FreeType rasterise) | 3.0 ms | **0.0** |
+  | `up` (upload) | 5.4 ms | 1.3 ms |
+  | upload-caused batch cuts | 24 | **0** |
+  | FPS (same spot) | 23.7 | **26.2** |
+
+  Hit rate 11523/5. If the corruption ever reappears it is *not* slot aliasing —
+  read the collision counter first, and do not re-litigate the eviction logic,
+  which has now been reviewed twice and measured once.
+
+  The pad labels (PK/CHAT/JWL) were a *different* bug and are genuinely fixed
+  (see below).
 
 Two real bugs were found and fixed while doing this, both worth keeping:
 
@@ -202,12 +278,22 @@ wrong-but-harmless text.
 
 ## Next steps, in order
 
-1. **Fix the text section cache.** Highest value now: it is ~10 ms/frame on
-   Mali and ~3 ms on Adreno, and it is the one piece of work already written
-   but disabled. See the Text rendering section for the exact symptom.
-2. **Strip or gate the profiling overlay** before any further judgement of real
-   performance — it costs ~4-5 ms/frame on Mali.
-3. **`par` (particles) 4-7 ms** — the largest remaining bucket on Adreno.
+1. ~~Fix the text section cache.~~ **Done 2026-08-19** — it was not broken, see
+   the Text rendering section. 8.4 → 1.4 ms, ~+10% FPS.
+2. **Collapse the skinned-mesh render passes.** 71% of all draws, 3.64 passes
+   per mesh, ~480 draws a frame recoverable. One multi-texture shader instead
+   of base/chrome/lightmap as separate additive passes. See "Where the draws
+   actually come from". This is the biggest item on the board.
+3. **Batch cuts.** With text uploads fixed, what still cuts the immediate-mode
+   batch each frame is `tex` 44, `en` 44, `pm` 42, `dep` 14, `proj` 10, `bl` 3.
+   `pm` (primitive-mode switches) is the cheapest to attack — hold a TRIANGLES
+   and a LINES batch instead of one — but it reorders lines against triangles,
+   so A/B it on device rather than reviewing it.
+4. **Strip or gate the profiling overlay** before any further judgement of real
+   performance — it costs ~4-5 ms/frame on Mali. Note `overlay=0` in the drift
+   log confirms every number above was taken with it off.
+5. **`par` (particles) 4-7 ms** — was the largest bucket on Adreno when the doc
+   was written; the 2026-08-19 profile has `chr` and `obj` ahead of it.
    `ZzzEffectBlurSpark.cpp`, `ZzzEffectMagicSkill.cpp`, `Sprite.cpp`,
    `ShadowVolume.cpp`, `SideHair.cpp`, `PhysicsManager.cpp`,
    `CSWaterTerrain.cpp` still use `glBegin` immediate mode.
@@ -227,6 +313,21 @@ wrong-but-harmless text.
   The overlay itself costs ~1-2 ms and pollutes the text cache with strings that
   change every frame.
 - `g_TextExtentCacheEnabled` / `g_TextSectionCacheEnabled` (`UIControls.cpp`).
+  Both are ON and both are wins — these are kill switches to keep for A/B, not
+  code to delete. `g_ProfTextSlotCollisions` next to them is one integer compare
+  on the cache-miss path and is the tripwire for the corruption that was once
+  blamed on the section cache; cheap enough to keep.
+- Draw accounting in `gl_compat.cpp`: `s_drawSite[]`, `s_flushCauseCounts[]` and
+  the `site[...]` / `cut[...]` / `path[...]` / `txt[...]` fields in the drift
+  log (`android_main.cpp`). All are plain increments on paths that already do
+  GL work. The one expensive counter (a hash insert per skinned draw, to count
+  distinct meshes) has already been removed — see the note in
+  `GL_DrawSkinnedMesh` for how to restore it.
+  Both are ON and both are wins — these are the A/B switches, not the feature.
+- `g_ProfTextSlotCollisions` (`UIControls.cpp`) and the `GLFlushCause` counters
+  (`gl_compat.cpp`, surfaced as `path[...]`/`cut[...]`/`txt[...]` in the drift
+  log). One integer compare on the text miss path and one increment per batch
+  flush, so cheap enough to leave in while the draw-call work continues.
 - `g_GpuSkinningTestEnabled` kill switch (`ZzzBMD.cpp`).
 - `g_RenderScaleX/Y` in `android_main.cpp` (currently 0.75). `1.0` = off.
 

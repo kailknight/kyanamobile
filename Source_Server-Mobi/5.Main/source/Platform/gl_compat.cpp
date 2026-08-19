@@ -162,6 +162,38 @@ static int    s_quadIndexedDrawCalls = 0;
 static int    s_quadExpandedDrawCalls = 0;
 static bool   s_preferDirectVertexArrays = kDefaultPreferDirectVertexArrays;
 
+// Why the pending immediate batch got cut short. Batching itself already works
+// - consecutive glBegin/glEnd spans merge, and modelview changes deliberately
+// do not break a batch because GL_Vertex3f bakes the modelview into the
+// position. What is left is state changes, and this says which ones actually
+// cost us, so the fix goes where the draws are instead of where they look like
+// they should be. Temporary scaffolding, same as the g_Prof* counters.
+enum GLFlushCause {
+    kFlushCauseOther = 0,
+    kFlushCauseTexBind,     // glBindTexture with a different texture
+    kFlushCauseTexUpload,   // glTexImage2D / glTexSubImage2D
+    kFlushCauseBlend,       // glBlendFunc
+    kFlushCauseDepth,       // glDepthFunc / glDepthMask
+    kFlushCauseEnable,      // glEnable / glDisable of texturing or alpha test
+    kFlushCauseAlphaRef,    // glAlphaFunc reference value
+    kFlushCauseProjection,  // projection matrix mutation
+    kFlushCauseFrame,       // end of frame / explicit GL_FlushPending
+    kFlushCauseUnbatchable, // primitive that cannot be merged at all
+    kFlushCausePrimMode,    // different primitive mode than the pending batch
+    kFlushCauseBatchFull,   // pending batch hit its vertex limit
+    kFlushCauseCount
+};
+static int s_flushCauseCounts[kFlushCauseCount] = { 0 };
+
+// Which GL draw-call site each draw came from. Two rounds of inferring the
+// draw-path split from aggregate counters produced two wrong answers - im/vaConv
+// count inputs (glEnd spans, mesh appends), not draws - so this counts the
+// actual glDraw* calls where they happen.
+// 0 batched immediate (DrawPreparedVerts)   1 client-array direct
+// 2 quad indexed   3 legacy vertex-array   4 bulk indexed tris
+// 5 bulk tris      6 skinned mesh
+static int s_drawSite[10] = { 0 };
+
 // State flags
 static bool   s_texture2DEnabled = true;
 static bool   s_alphaTestEnabled = false;
@@ -231,7 +263,7 @@ static std::vector<uint16_t> s_quadIndices;
 static size_t s_quadIndexCapacityQuads = 0;
 
 static void DrawVertexList(const std::vector<IMVertex>& inputVerts, GLenum primMode, bool modelViewBaked);
-static void FlushPendingImmediateBatch();
+static void FlushPendingImmediateBatch(GLFlushCause cause = kFlushCauseOther);
 
 static inline bool IsProjectionMatrixActive() {
     return s_matrixMode == static_cast<int>(kCompatProjectionMode);
@@ -386,7 +418,7 @@ void GL_TrackBindTexture(GLenum target, GLuint tex) {
         if (s_boundTexture == tex) {
             return;
         }
-        FlushPendingImmediateBatch();
+        FlushPendingImmediateBatch(kFlushCauseTexBind);
         s_boundTexture = tex;
     }
     glBindTexture(target, tex);
@@ -446,7 +478,7 @@ void GL_TexImage2D_Compat(GLenum target, GLint level, GLint internalformat,
     } profTexScope = { profTexStart };
 
     if (target == GL_TEXTURE_2D) {
-        FlushPendingImmediateBatch();
+        FlushPendingImmediateBatch(kFlushCauseTexUpload);
     }
 #if defined(__ANDROID__) || defined(MU_IOS)
     if (format == GL_RGB || format == GL_RGBA) {
@@ -465,7 +497,7 @@ void GL_TexSubImage2D_Compat(GLenum target, GLint level,
                              GLsizei width, GLsizei height,
                              GLenum format, GLenum type, const void* pixels) {
     if (target == GL_TEXTURE_2D) {
-        FlushPendingImmediateBatch();
+        FlushPendingImmediateBatch(kFlushCauseTexUpload);
     }
     glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
 }
@@ -474,7 +506,7 @@ void GL_BlendFunc_Compat(GLenum sfactor, GLenum dfactor) {
     if (s_lastBlendSrc == sfactor && s_lastBlendDst == dfactor) {
         return;
     }
-    FlushPendingImmediateBatch();
+    FlushPendingImmediateBatch(kFlushCauseBlend);
     glBlendFunc(sfactor, dfactor);
     s_lastBlendSrc = sfactor;
     s_lastBlendDst = dfactor;
@@ -484,7 +516,7 @@ void GL_DepthFunc_Compat(GLenum func) {
     if (s_lastDepthFunc == func) {
         return;
     }
-    FlushPendingImmediateBatch();
+    FlushPendingImmediateBatch(kFlushCauseDepth);
     glDepthFunc(func);
     s_lastDepthFunc = func;
 }
@@ -493,7 +525,7 @@ void GL_DepthMask_Compat(GLboolean flag) {
     if (s_lastDepthMask == flag) {
         return;
     }
-    FlushPendingImmediateBatch();
+    FlushPendingImmediateBatch(kFlushCauseDepth);
     glDepthMask(flag);
     s_lastDepthMask = flag;
 }
@@ -826,12 +858,15 @@ void GL_Compat_Init() {
 
     LOGI("GL_Compat_Init: OK (prog=%u, progOpaque=%u, vbo=%u, ebo=%u)", s_prog, s_progOpaque, s_vbo, s_ebo);
 
-    // GPU skinning: compiles/links the shader and allocates its UBO so this
-    // gets verified on every app launch, but GL_SkinIsReady() being false is
-    // non-fatal - nothing calls GL_DrawSkinnedMesh yet, so a failure here
-    // does not affect any current rendering.
+    // GPU skinning: compiles/links the shader and allocates its UBO.
+    //
+    // This used to say GL_DrawSkinnedMesh was never called and a failure here
+    // affected nothing. That has not been true for a while: measured
+    // 2026-08-19, the skinned path is 662 of 906 draws a frame, 71% of the
+    // total, and the largest single cost in the frame. A failure here is a
+    // fallback to the CPU path, not a no-op.
     if (!GL_SkinInit()) {
-        LOGE("GL_Compat_Init: GL_SkinInit failed (non-fatal, skinning unused so far)");
+        LOGE("GL_Compat_Init: GL_SkinInit failed (non-fatal, falls back to the CPU mesh path)");
     }
 }
 
@@ -840,7 +875,21 @@ void GL_GetDrawStats(int* drawCalls, int* vertices) {
     if (drawCalls) *drawCalls = s_drawCallCount;
     if (vertices)  *vertices  = s_totalVertices;
 }
+void GL_GetFlushCauseStats(int* out, int count) {
+    if (!out) return;
+    const int n = (count < kFlushCauseCount) ? count : kFlushCauseCount;
+    for (int i = 0; i < n; ++i) out[i] = s_flushCauseCounts[i];
+}
+
+void GL_GetDrawSiteStats(int* out, int count) {
+    if (!out) return;
+    const int n = (count < 10) ? count : 10;
+    for (int i = 0; i < n; ++i) out[i] = s_drawSite[i];
+}
+
 void GL_ResetDrawStats() {
+    for (int i = 0; i < 10; ++i) s_drawSite[i] = 0;
+    for (int i = 0; i < kFlushCauseCount; ++i) s_flushCauseCounts[i] = 0;
     s_drawCallCount = 0;
     s_totalVertices = 0;
     s_imDrawCalls = 0;
@@ -1058,7 +1107,7 @@ static void DrawPreparedVerts(const IMVertex* verts, size_t vertCount, GLenum dr
     BindImmediateVertexAttribLayout();
 
     glDrawArrays(drawMode, 0, (GLsizei)vertCount);
-    ++s_drawCallCount;
+    ++s_drawCallCount; ++s_drawSite[0];
     s_totalVertices += (int)vertCount;
 }
 
@@ -1108,7 +1157,7 @@ static bool DrawPreparedVertsDirect(const IMVertex* verts,
 
     glDrawArrays(drawMode, 0, static_cast<GLsizei>(vertCount));
 
-    ++s_drawCallCount;
+    ++s_drawCallCount; ++s_drawSite[1];
     s_totalVertices += static_cast<int>(vertCount);
     ++s_vaDirectDrawCalls;
     return true;
@@ -1134,7 +1183,7 @@ static bool DrawPreparedQuadsIndexed(const IMVertex* verts, size_t vertCount, bo
 
     BindElementArrayBufferCached(s_ebo);
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(quadCount * 6u), GL_UNSIGNED_SHORT, 0);
-    ++s_drawCallCount;
+    ++s_drawCallCount; ++s_drawSite[2];
     s_totalVertices += (int)(quadCount * 6u);
     ++s_quadIndexedDrawCalls;
     return true;
@@ -1226,6 +1275,7 @@ static void AppendVertsToPendingImmediateBatch(const std::vector<IMVertex>& inpu
     if (!ConvertPrimitiveForBatching(inputVerts, primMode, convertedVerts, convertedCount, convertedMode)
         || convertedCount == 0) {
         if (s_hasBatch) {
+            ++s_flushCauseCounts[kFlushCauseUnbatchable];
             DrawVertexList(s_batchVerts, s_batchPrimMode, true);
             s_batchVerts.clear();
             s_hasBatch = false;
@@ -1237,6 +1287,7 @@ static void AppendVertsToPendingImmediateBatch(const std::vector<IMVertex>& inpu
 
     // Primitive mode khác → flush batch hiện tại trước
     if (s_hasBatch && s_batchPrimMode != convertedMode) {
+        ++s_flushCauseCounts[kFlushCausePrimMode];
         DrawVertexList(s_batchVerts, s_batchPrimMode, true);
         s_batchVerts.clear();
         s_hasBatch = false;
@@ -1247,6 +1298,7 @@ static void AppendVertsToPendingImmediateBatch(const std::vector<IMVertex>& inpu
     const size_t limit = MaxBatchVertsForMode(convertedMode);
     if (s_batchVerts.size() + convertedCount > limit) {
         if (s_hasBatch) {
+            ++s_flushCauseCounts[kFlushCauseBatchFull];
             DrawVertexList(s_batchVerts, s_batchPrimMode, true);
             s_batchVerts.clear();
             s_hasBatch = false;
@@ -1270,9 +1322,15 @@ static void FlushIM() {
     s_verts.clear();
 }
 
-static void FlushPendingImmediateBatch() {
+static void FlushPendingImmediateBatch(GLFlushCause cause) {
     if (!s_hasBatch || s_batchVerts.empty()) {
         return;
+    }
+    // Counted only when a batch was actually cut. The call sites fire on every
+    // state change whether or not anything is pending, and counting those would
+    // report state churn rather than lost batching.
+    if (cause >= 0 && cause < kFlushCauseCount) {
+        ++s_flushCauseCounts[cause];
     }
     // Draw toàn bộ batch tích lũy bằng 1 draw call (modelViewBaked=true vì MV đã baked vào verts)
     DrawVertexList(s_batchVerts, s_batchPrimMode, true);
@@ -1282,7 +1340,7 @@ static void FlushPendingImmediateBatch() {
 }
 
 void GL_FlushPending() {
-    FlushPendingImmediateBatch();
+    FlushPendingImmediateBatch(kFlushCauseFrame);
 }
 
 // =============================================================================
@@ -1294,7 +1352,7 @@ void GL_MatrixMode(GLenum mode) {
             s_matrixMode == static_cast<int>(kCompatProjectionMode) ||
             mode == kCompatProjectionMode;
         if (!kBakeModelViewForImmediate || touchesProjection) {
-            FlushPendingImmediateBatch();
+            FlushPendingImmediateBatch(kFlushCauseProjection);
         }
         s_matrixMode = (int)mode;
     }
@@ -1526,13 +1584,13 @@ void GL_Enable_Compat(GLenum cap) {
     switch (cap) {
     case 0x0DE1: // GL_TEXTURE_2D — not a real GLES2 state but we track it
         if (!s_texture2DEnabled) {
-            FlushPendingImmediateBatch();
+            FlushPendingImmediateBatch(kFlushCauseEnable);
             s_texture2DEnabled = true;
         }
         break;
     case 0x0BC0: // GL_ALPHA_TEST
         if (!s_alphaTestEnabled) {
-            FlushPendingImmediateBatch();
+            FlushPendingImmediateBatch(kFlushCauseEnable);
             s_alphaTestEnabled = true;
         }
         break;
@@ -1544,13 +1602,13 @@ void GL_Enable_Compat(GLenum cap) {
         const uint32_t mask = CapToMask(cap);
         if (mask != 0) {
             if (!(s_capBitsKnown & mask) || !(s_capBits & mask)) {
-                FlushPendingImmediateBatch();
+                FlushPendingImmediateBatch(kFlushCauseEnable);
                 glEnable(cap);
                 s_capBits |= mask;
                 s_capBitsKnown |= mask;
             }
         } else {
-            FlushPendingImmediateBatch();
+            FlushPendingImmediateBatch(kFlushCauseEnable);
             glEnable(cap);
         }
         break;
@@ -1561,13 +1619,13 @@ void GL_Disable_Compat(GLenum cap) {
     switch (cap) {
     case 0x0DE1: // GL_TEXTURE_2D
         if (s_texture2DEnabled) {
-            FlushPendingImmediateBatch();
+            FlushPendingImmediateBatch(kFlushCauseEnable);
             s_texture2DEnabled = false;
         }
         break;
     case 0x0BC0: // GL_ALPHA_TEST
         if (s_alphaTestEnabled) {
-            FlushPendingImmediateBatch();
+            FlushPendingImmediateBatch(kFlushCauseEnable);
             s_alphaTestEnabled = false;
         }
         break;
@@ -1579,13 +1637,13 @@ void GL_Disable_Compat(GLenum cap) {
         const uint32_t mask = CapToMask(cap);
         if (mask != 0) {
             if (!(s_capBitsKnown & mask) || (s_capBits & mask)) {
-                FlushPendingImmediateBatch();
+                FlushPendingImmediateBatch(kFlushCauseEnable);
                 glDisable(cap);
                 s_capBits &= ~mask;
                 s_capBitsKnown |= mask;
             }
         } else {
-            FlushPendingImmediateBatch();
+            FlushPendingImmediateBatch(kFlushCauseEnable);
             glDisable(cap);
         }
         break;
@@ -1598,7 +1656,7 @@ void GL_Disable_Compat(GLenum cap) {
 // =============================================================================
 void GL_AlphaFunc(GLenum func, float ref) {
     if (s_alphaFunc != func || s_alphaRef != ref) {
-        FlushPendingImmediateBatch();
+        FlushPendingImmediateBatch(kFlushCauseAlphaRef);
     }
     s_alphaFunc = func;
     s_alphaRef  = ref;
@@ -1739,7 +1797,7 @@ static bool TryDrawArraysDirect(GLenum mode, int first, int count) {
     // Draw trực tiếp
     glDrawArrays(mode, 0, count);
 
-    ++s_drawCallCount;
+    ++s_drawCallCount; ++s_drawSite[3];
     s_totalVertices += count;
     ++s_vaDirectDrawCalls;
 
@@ -2054,7 +2112,7 @@ void GL_DrawQuadsBulk(const float* vertexData, int quadCount) {
     BindElementArrayBufferCached(s_ebo);
     const GLsizei indexCount = quadCount * 6;
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
-    ++s_drawCallCount;
+    ++s_drawCallCount; ++s_drawSite[4];
     s_totalVertices += indexCount;
 }
 
@@ -2075,7 +2133,7 @@ void GL_DrawTrisBulk(const float* vertexData, int triCount) {
 
     BindElementArrayBufferCached(0);
     glDrawArrays(GL_TRIANGLES, 0, vertCount);
-    ++s_drawCallCount;
+    ++s_drawCallCount; ++s_drawSite[5];
     s_totalVertices += vertCount;
 }
 
@@ -2614,6 +2672,28 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     } else {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
     }
+    // Does the mesh ahead use a different texture than the one before it?
+    // This decides whether the 689 skinned draws a frame can be merged at all:
+    // the meshes of one character share a skeleton, so texture is the only
+    // thing forcing them apart. Switches far below the draw count means
+    // consecutive meshes share art and merging is mostly free; switches equal
+    // to the draw count means every mesh has its own texture and merging needs
+    // an atlas first. Slot 7 of s_drawSite is otherwise unused.
+    {
+        static GLuint s_lastSkinTex = 0xFFFFFFFFu;
+        if (s_boundTexture != s_lastSkinTex) {
+            ++s_drawSite[7];
+            s_lastSkinTex = s_boundTexture;
+        }
+
+        // Distinct-mesh counting lived here and has been removed: it cost a
+        // hash insert per skinned draw, ~600 a frame, and it has already
+        // answered its question. 662 draws over 182 distinct meshes with 16
+        // characters on screen = 3.64 passes per mesh and 11.4 meshes per
+        // character. Restore it with an unordered_set keyed on vboInOut if the
+        // pass count ever needs re-measuring.
+    }
+
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
@@ -2629,7 +2709,7 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     // re-sync instead of trusting stale cached values on the next call.
     GL_InvalidateCachedGLState();
 
-    ++s_drawCallCount;
+    ++s_drawCallCount; ++s_drawSite[6];
     s_totalVertices += vertexCount;
 }
 

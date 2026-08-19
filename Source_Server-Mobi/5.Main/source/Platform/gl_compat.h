@@ -93,6 +93,13 @@ void GL_GetDrawPathStats(int* imDrawCalls,
                          int* quadIndexedDrawCalls,
                          int* quadExpandedDrawCalls);
 
+// TEMP profiling: how many times the pending immediate batch was cut short, by
+// cause. Order matches GLFlushCause in gl_compat.cpp: other, texbind, texup,
+// blend, depth, enable, alpharef, proj, frame.
+#define GL_FLUSH_CAUSE_COUNT 12
+void GL_GetFlushCauseStats(int* out, int count);
+void GL_GetDrawSiteStats(int* out, int count);
+
 // Runtime toggle for legacy VA draw path:
 // true  -> prefer direct client-array path when compatible
 // false -> force converted/batched VBO upload path

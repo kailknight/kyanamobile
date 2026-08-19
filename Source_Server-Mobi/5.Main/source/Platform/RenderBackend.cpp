@@ -81,6 +81,8 @@ public:
                             &stats.vaConvertedDrawCalls,
                             &stats.quadIndexedDrawCalls,
                             &stats.quadExpandedDrawCalls);
+        GL_GetFlushCauseStats(stats.flushCauses, 12);
+        GL_GetDrawSiteStats(stats.drawSites, 10);
         GL_ResetDrawStats();
         return stats;
     }

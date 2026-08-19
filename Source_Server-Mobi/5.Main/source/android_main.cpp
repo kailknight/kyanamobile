@@ -651,6 +651,22 @@ constexpr float kVirtualJoystickDeadZone = 10.0f;
 constexpr float kVirtualJoystickKnobRadius = 22.0f;
 constexpr float kVirtualJoystickMouseMinRadius = 36.0f;
 constexpr float kVirtualJoystickMouseMaxRadius = 132.0f;
+
+// The joystick walks the character by parking the mouse cursor out in the
+// direction of travel and letting the normal click-to-move pathing chase it, so
+// this origin is the point every drive offset is measured from. It has to be
+// where the hero actually sits on screen, and in this 640x480 mouse space that
+// is the exact centre.
+//
+// It used to be (320, 180), which is 60 units above the hero, and that bias is
+// what made the character set off upward before turning: at low deflection the
+// drive radius is only 36, so pushing down put the cursor at y=216 - still
+// above the hero - and pushing left or right put it up-left or up-right. Only
+// once the stick passed roughly a quarter deflection did the radius exceed the
+// bias and the intended direction win. Pushing up was always correct, which is
+// why up was the one direction that never looked wrong.
+constexpr float kVirtualJoystickDriveOriginX = 320.0f;
+constexpr float kVirtualJoystickDriveOriginY = 240.0f;
 constexpr float kVirtualJoystickDynamicAreaMinY = 210.0f;
 constexpr float kVirtualJoystickDynamicAreaMaxX = 212.0f;
 constexpr float kVirtualJoystickOuterRenderW = 115.0f;
@@ -2884,8 +2900,8 @@ void ReleaseVirtualJoystickMouseDrive()
     // point, and anything that hit-tests the cursor still thinks the player is
     // pointing away from themselves. The hero is always at screen centre,
     // which is the same origin the drive code offsets from.
-    MouseX = 320;
-    MouseY = 180;
+    MouseX = static_cast<int>(kVirtualJoystickDriveOriginX);
+    MouseY = static_cast<int>(kVirtualJoystickDriveOriginY);
 }
 
 void ClearVirtualJoystick()
@@ -3015,11 +3031,11 @@ void ApplyVirtualJoystickMovement()
     const float driveRadius = kVirtualJoystickMouseMinRadius
         + (kVirtualJoystickMouseMaxRadius - kVirtualJoystickMouseMinRadius) * g_virtualJoystick.moveStrength;
     const int targetMouseX = std::clamp(
-        static_cast<int>(320.0f + g_virtualJoystick.moveDirX * driveRadius),
+        static_cast<int>(kVirtualJoystickDriveOriginX + g_virtualJoystick.moveDirX * driveRadius),
         0,
         640);
     const int targetMouseY = std::clamp(
-        static_cast<int>(180.0f - g_virtualJoystick.moveDirY * driveRadius),
+        static_cast<int>(kVirtualJoystickDriveOriginY - g_virtualJoystick.moveDirY * driveRadius),
         0,
         480);
 
@@ -11344,6 +11360,8 @@ double g_DriftTextExtentMs = 0.0;
 double g_DriftTextOutMs = 0.0;
 double g_DriftTextUpMs = 0.0;
 int g_DriftTextCalls = 0;
+int g_DriftTextHits = 0;
+int g_DriftTextMisses = 0;
 
 extern unsigned long long g_ProfTextExtentTicks;
 extern unsigned long long g_ProfTextOutTicks;
@@ -11352,6 +11370,7 @@ extern unsigned long long g_ProfTextUploadTicks;
 extern int g_ProfTextCalls;
 extern int g_ProfTextCacheHits;
 extern int g_ProfTextCacheMisses;
+extern int g_ProfTextSlotCollisions;
 
 // Defined in Platform/gl_compat.cpp - texture definitions (asset loads) this
 // frame, and the time spent in them.
@@ -11424,7 +11443,16 @@ unsigned long long g_ProfCharPostTicks = 0;
 int g_ProfDrawCalls = 0;
 int g_ProfImDrawCalls = 0;
 int g_ProfVaConvertedDrawCalls = 0;
+int g_ProfVaDirectDrawCalls = 0;
+int g_ProfQuadIndexedDrawCalls = 0;
+int g_ProfQuadExpandedDrawCalls = 0;
 int g_ProfVerts = 0;
+
+// TEMP profiling: batch flush causes for the frame. Immediate-mode batching
+// already merges consecutive spans and survives modelview changes, so what is
+// left is state churn - this says which state.
+int g_ProfFlushCauses[12] = { 0 };
+int g_ProfDrawSites[10] = { 0 };
 
 static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reason)
 {
@@ -12804,7 +12832,12 @@ static void RunAndroidGameFrame()
             g_ProfDrawCalls = stats.drawCalls;
             g_ProfImDrawCalls = stats.imDrawCalls;
             g_ProfVaConvertedDrawCalls = stats.vaConvertedDrawCalls;
+            g_ProfVaDirectDrawCalls = stats.vaDirectDrawCalls;
+            g_ProfQuadIndexedDrawCalls = stats.quadIndexedDrawCalls;
+            g_ProfQuadExpandedDrawCalls = stats.quadExpandedDrawCalls;
             g_ProfVerts = stats.vertices;
+            for (int fc = 0; fc < 12; ++fc) g_ProfFlushCauses[fc] = stats.flushCauses[fc];
+            for (int ds = 0; ds < 10; ++ds) g_ProfDrawSites[ds] = stats.drawSites[ds];
         }
         else
         {
@@ -12928,6 +12961,8 @@ static void RunAndroidGameFrame()
             g_DriftTextOutMs += static_cast<double>(g_ProfTextOutTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
             g_DriftTextUpMs += static_cast<double>(g_ProfTextUploadTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
             g_DriftTextCalls += g_ProfTextCalls;
+            g_DriftTextHits += g_ProfTextCacheHits;
+            g_DriftTextMisses += g_ProfTextCacheMisses;
             g_ProfTextExtentTicks = 0;
             g_ProfTextOutTicks = 0;
             g_ProfTextWriteTicks = 0;
@@ -12964,7 +12999,13 @@ static void RunAndroidGameFrame()
                     if (FILE* f = fopen("mu_drift_log.txt", "a"))
                     {
                         fprintf(f,
-                            "t=%.0fs fps=%.1f scnAvg=%.1f worst=%.0f hitch=%d/%d obj=%.1f chr=%.1f ui=%.1f objN=%d draws=%d text=%.1f(ext%.1f out%.1f up%.1f)/%d overlay=%d\n",
+                            "t=%.0fs fps=%.1f scnAvg=%.1f worst=%.0f hitch=%d/%d obj=%.1f chr=%.1f ui=%.1f objN=%d draws=%d text=%.1f(ext%.1f out%.1f up%.1f)/%d overlay=%d"
+                            " txt[hit%d miss%d coll%d]"
+                            " path[im%d vaConv%d vaDir%d qIdx%d qExp%d]"
+                            " site[bIM%d cli%d qi%d lva%d bIdx%d bTri%d skin%d]"
+                            " skinTexSw%d charN%d"
+                            " meshN%d"
+                            " cut[tex%d up%d bl%d dep%d en%d af%d proj%d unb%d pm%d full%d oth%d]\n",
                             nowSec - g_DriftStartSec,
                             g_DriftFrames / windowSec,
                             g_DriftSceneMsSum / (g_DriftFrames > 0 ? g_DriftFrames : 1),
@@ -12979,7 +13020,32 @@ static void RunAndroidGameFrame()
                             g_DriftTextOutMs / (g_DriftFrames > 0 ? g_DriftFrames : 1),
                             g_DriftTextUpMs / (g_DriftFrames > 0 ? g_DriftFrames : 1),
                             (g_DriftFrames > 0) ? (g_DriftTextCalls / g_DriftFrames) : 0,
-                            g_ShowPerfOverlay ? 1 : 0);
+                            g_ShowPerfOverlay ? 1 : 0,
+                            // Last frame of the window rather than a sum: these
+                            // are per-frame counts and a 10s total would just
+                            // scale with frame count.
+                            // Draw-path split. draws is the total; im is how
+                            // many of those came out of the immediate-mode
+                            // batcher. The remainder are per-mesh vertex-array
+                            // draws, which the batcher never sees - so this is
+                            // what says whether batching or instancing is the
+                            // job.
+                            // coll is cumulative, not per window: one occurrence is
+                            // the whole finding.
+                            g_DriftTextHits, g_DriftTextMisses, g_ProfTextSlotCollisions,
+                            g_ProfImDrawCalls, g_ProfVaConvertedDrawCalls,
+                            g_ProfVaDirectDrawCalls, g_ProfQuadIndexedDrawCalls,
+                            g_ProfQuadExpandedDrawCalls,
+                            g_ProfDrawSites[0], g_ProfDrawSites[1], g_ProfDrawSites[2],
+                            g_ProfDrawSites[3], g_ProfDrawSites[4], g_ProfDrawSites[5],
+                            g_ProfDrawSites[6],
+                            g_ProfDrawSites[7], g_ProfCharRendered,
+                            g_ProfDrawSites[8],
+                            g_ProfFlushCauses[1], g_ProfFlushCauses[2], g_ProfFlushCauses[3],
+                            g_ProfFlushCauses[4], g_ProfFlushCauses[5], g_ProfFlushCauses[6],
+                            g_ProfFlushCauses[7],
+                            g_ProfFlushCauses[9], g_ProfFlushCauses[10], g_ProfFlushCauses[11],
+                            g_ProfFlushCauses[0]);
                         fclose(f);
                     }
                     g_DriftLastLogSec = nowSec;
@@ -12991,6 +13057,8 @@ static void RunAndroidGameFrame()
                     g_DriftTextOutMs = 0.0;
                     g_DriftTextUpMs = 0.0;
                     g_DriftTextCalls = 0;
+                    g_DriftTextHits = 0;
+                    g_DriftTextMisses = 0;
                 }
             }
 
