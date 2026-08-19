@@ -488,3 +488,88 @@ wrong-but-harmless text.
   label/value strings. **Pre-existing** — verified identical with all caching
   disabled. It is the `CCustomMessage` table, a different system from
   `GlobalText`.
+
+## OPEN: audio on Android (2026-08-19)
+
+**Sound and music have never worked on Android.** Root cause is settled; the
+remaining fault is one link in the chain and is narrowed to a single function.
+
+### What is proven
+
+**SDL cannot provide audio in this app, ever.** The client drives its window and
+GL through sokol_app rather than `SDL_main`, so SDL's Android Java bootstrap
+never runs. `SDL_InitSubSystem(SDL_INIT_AUDIO)` fails with SDL's *"application
+didn't initialize properly, did you include SDL_main.h"*, and `Mix_OpenAudio`
+therefore never opens a device. This is why `chans=0` in every log, and why
+`Mix_LoadMUS` has always silently failed. **Do not spend time on SDL_mixer.**
+
+Anything else in this client reaching for SDL is suspect for the same reason -
+note `SDL_StartTextInput()` at `android_main.cpp:13930`, which is dead code.
+
+`LoadWaveFile` and `PlayBuffer` were empty stubs in `android_link_stubs.cpp`, so
+the ~826 WAVs in `Data/Sound` were never touched. Music was additionally gated
+off by `CfgDefaultMusicEnabled = false`, which on Android is not a default but a
+fixed value, since `ReadBool` goes through the `GetPrivateProfileIntW` stub.
+Both corrected.
+
+### Current design
+
+Audio goes to `MuAudio.java` - `SoundPool` for effects, `MediaPlayer` for music.
+Neither needs SDL or an Activity context. The JNI bridge attaches from
+`nativeSetKeyboardBridge` in `MobilePlatform.cpp`.
+
+**Do not add a `JNI_OnLoad` to this library.** It had never defined one, and
+adding it at `System.loadLibrary` time broke the soft keyboard by disturbing the
+JNI setup the keyboard bridge depends on. That was tried and reverted.
+
+### The one remaining unknown
+
+`mu_sound_log.txt` reads `LAZY OPENSOUNDS registered=0 jvm=1 cls=1`. JNI is
+healthy, `MuAudio` resolves, and `OpenSounds()` is called **directly** on the
+line before - yet `LoadWaveFile` is never entered. `DSplaysound.cpp` is excluded
+from the build (`CMakeLists.txt` line 143), so a duplicate symbol is not it.
+
+**Next step is one diagnostic, not a fix:** log at the top of `OpenSounds()`
+(`ZzzOpenData.cpp:4779`) and after its first `LoadWaveFile` call (`:4783`).
+
+| result | meaning |
+|---|---|
+| neither line | `OpenSounds()` is not the function being called - linkage |
+| first only | it returns or throws before registering |
+| both, still `registered=0` | a different `LoadWaveFile` is being linked |
+
+Everything above that point is verified. Resist fixing the next layer up before
+this answers - that mistake cost eight builds.
+
+### Also open
+
+- **Music is unwired.** `PlayMp3` still calls `Mix_LoadMUS` against a mixer that
+  never opens. Point it at `MuAudio.playMusic` once registration works.
+- **Dead SDL_mixer sound code** in `android_link_stubs.cpp` to remove.
+- **`SoundPool.load` is asynchronous**, so the first play of each distinct sound
+  may be dropped. Add an `OnLoadCompleteListener` if that is audible.
+- **Keyboard fix unconfirmed.** The JNI attach point was moved to fix a
+  regression; verify the soft keyboard opens on the account field.
+
+## OPEN: data.zip updater - what landed and what did not
+
+Uploading a new `data.zip` now reaches devices automatically: a signature from
+`Content-Length` + `ETag` + `Last-Modified` is recorded on download and compared
+each launch. An unreachable host returns null and is treated as "cannot tell",
+never "changed", so a dead network cannot wipe a working install.
+
+Downloads are parallel and resumable: 8 MB chunks handed out from a shared
+counter, three attempts each, resume state in a `.part.state` sidecar. Measured
+~630 KB/s single stream against ~3.8 MB/s across four - the limit is per
+connection, not the server uplink, and the host already answers ranges with 206.
+
+Chunks are deliberately small and work-stolen. Fixed per-worker ranges caused
+throughput to collapse around 830 MB of a 1.26 GB file: the quick streams
+finished and left one straggler carrying the tail alone.
+
+**Not done: incremental updates.** Any data change still re-downloads the whole
+1.26 GB. A manifest (path, size, hash per file) with per-file fetches is the
+real fix and is the only item here needing a server-side change.
+
+**Also:** uploads should be atomic - write `data.zip.tmp`, then rename - or a
+client mid-download can stitch bytes from two different archives.
