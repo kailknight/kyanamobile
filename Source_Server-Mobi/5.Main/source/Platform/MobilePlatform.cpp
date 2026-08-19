@@ -143,6 +143,10 @@ void MU_CallKeyboardBridge(const char* methodName)
 #endif
 } // namespace
 
+// Defined in android_link_stubs.cpp - see the note there on why the audio JNI
+// bridge attaches from here instead of a JNI_OnLoad.
+extern "C" void AndroidAudioAttachJni(JNIEnv*);
+
 #if defined(__ANDROID__)
 extern "C" JNIEXPORT void JNICALL
 Java_com_muonline_client_MuMainNativeActivity_nativeSetKeyboardBridge(
@@ -150,6 +154,11 @@ Java_com_muonline_client_MuMainNativeActivity_nativeSetKeyboardBridge(
     jobject activity)
 {
     MU_RegisterKeyboardBridge(env, activity);
+
+    // Piggyback the audio bridge on this: it runs during activity setup with a
+    // valid JNIEnv, and doing it here avoids adding a JNI_OnLoad to this
+    // library, which broke the soft keyboard when it was tried.
+    AndroidAudioAttachJni(env);
 }
 
 extern "C" JNIEXPORT void JNICALL

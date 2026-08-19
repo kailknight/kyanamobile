@@ -17,6 +17,7 @@
 #include "ZzzScene.h"
 #include "android/SimpleModulusCrypt.h"
 
+#include <jni.h>
 #include <android/log.h>
 #include <SDL_mixer.h>
 
@@ -237,6 +238,94 @@ void FreeDirectSound()
     g_androidSoundEnabled = false;
 }
 // ---------------------------------------------------------------------------
+// JNI bridge to MuAudio (Java)
+//
+// SDL_mixer cannot be used here - see MuAudio.java for why - so effects and
+// music go through SoundPool and MediaPlayer instead. JNI_OnLoad captures the
+// VM; the game thread is not a Java thread, so calls attach on demand.
+// ---------------------------------------------------------------------------
+namespace
+{
+    JavaVM*  g_androidJavaVm = nullptr;
+    jclass   g_muAudioClass = nullptr;
+
+    JNIEnv* AndroidAudioEnv()
+    {
+        if (g_androidJavaVm == nullptr)
+        {
+            return nullptr;
+        }
+
+        JNIEnv* env = nullptr;
+        if (g_androidJavaVm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK)
+        {
+            return env;
+        }
+        // The render thread is created by native code, so it is not attached.
+        if (g_androidJavaVm->AttachCurrentThread(&env, nullptr) == JNI_OK)
+        {
+            return env;
+        }
+        return nullptr;
+    }
+
+    void CallMuAudioVoid(const char* method, const char* sig, ...)
+    {
+        JNIEnv* env = AndroidAudioEnv();
+        if (env == nullptr || g_muAudioClass == nullptr)
+        {
+            return;
+        }
+
+        jmethodID id = env->GetStaticMethodID(g_muAudioClass, method, sig);
+        if (id == nullptr)
+        {
+            env->ExceptionClear();
+            return;
+        }
+
+        va_list args;
+        va_start(args, sig);
+        env->CallStaticVoidMethodV(g_muAudioClass, id, args);
+        va_end(args);
+
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+        }
+    }
+}
+
+// Attached from an existing JNI entry point rather than JNI_OnLoad.
+// Adding a JNI_OnLoad to this library broke the soft keyboard: the library had
+// never defined one, and introducing it at System.loadLibrary time disturbed
+// the JNI setup the keyboard bridge in MuMainNativeActivity depends on.
+// nativeSetKeyboardBridge already runs during activity setup and is known good,
+// so the VM and class reference are captured from there instead.
+extern "C" void AndroidAudioAttachJni(JNIEnv* env)
+{
+    if (env == nullptr || g_androidJavaVm != nullptr)
+    {
+        return;
+    }
+
+    if (env->GetJavaVM(&g_androidJavaVm) != JNI_OK)
+    {
+        g_androidJavaVm = nullptr;
+        return;
+    }
+
+    jclass local = env->FindClass("com/muonline/client/MuAudio");
+    if (local == nullptr)
+    {
+        env->ExceptionClear();
+        return;
+    }
+    g_muAudioClass = static_cast<jclass>(env->NewGlobalRef(local));
+    env->DeleteLocalRef(local);
+}
+
+// ---------------------------------------------------------------------------
 // Sound effects
 //
 // These were stubs: LoadWaveFile did nothing and PlayBuffer returned S_OK
@@ -418,13 +507,21 @@ void LoadWaveFile(int Buffer, TCHAR* strFileName, int, bool)
             Buffer, NormalizeAndroidSoundPath(strFileName).c_str(),
             g_androidSoundEnabled ? 1 : 0, g_androidMasterVolume);
     }
-    slot.path = NormalizeAndroidSoundPath(strFileName);
-    slot.loadFailed = false;
-    if (slot.chunk != nullptr)
+    // Hand the path to Java; SoundPool decodes it on first play.
+    const std::string path = NormalizeAndroidSoundPath(strFileName);
+    JNIEnv* env = AndroidAudioEnv();
+    if (env == nullptr || g_muAudioClass == nullptr)
     {
-        Mix_FreeChunk(slot.chunk);
-        slot.chunk = nullptr;
+        return;
     }
+
+    jstring jpath = env->NewStringUTF(path.c_str());
+    if (jpath == nullptr)
+    {
+        return;
+    }
+    CallMuAudioVoid("register", "(ILjava/lang/String;)V", static_cast<jint>(Buffer), jpath);
+    env->DeleteLocalRef(jpath);
 }
 
 // Object is ignored: it carries the emitter's world position for the 3D mixing
@@ -437,7 +534,24 @@ HRESULT PlayBuffer(int Buffer, OBJECT*, BOOL bLooped)
         return S_OK;
     }
 
-    EnsureAndroidAudioReady();
+    // OpenSounds() is the last statement of a very long loader in OpenBasicData
+    // and demonstrably never runs on Android - registered stayed 0 across
+    // thousands of play requests. Register the table on first use instead, so
+    // it does not depend on that path completing.
+    {
+        static bool s_registered = false;
+        if (!s_registered)
+        {
+            s_registered = true;
+            CallMuAudioVoid("init", "()V");
+            OpenSounds();
+            AndroidSoundLog("LAZY OPENSOUNDS registered=%d jvm=%d cls=%d",
+                g_androidSoundRegistered,
+                g_androidJavaVm != nullptr ? 1 : 0,
+                g_muAudioClass != nullptr ? 1 : 0);
+        }
+    }
+
     ++g_androidSoundPlayRequests;
     // First few plus a periodic sample: the opening requests happen at the
     // title screen before OpenSounds and before the mixer opens, so a log that
@@ -450,16 +564,9 @@ HRESULT PlayBuffer(int Buffer, OBJECT*, BOOL bLooped)
             g_androidSoundLoadOk, g_androidSoundLoadFail, Mix_AllocateChannels(-1));
     }
 
-    Mix_Chunk* chunk = AcquireAndroidSound(Buffer);
-    if (chunk == nullptr)
-    {
-        return S_OK;
-    }
-
-    // -1 picks any free channel, so overlapping effects mix instead of cutting
-    // each other off. A full channel set drops the new sound, which is the
-    // right failure for something like a crowded fight.
-    Mix_PlayChannelTimed(-1, chunk, bLooped ? -1 : 0, -1);
+    // Straight to Java: SoundPool owns the decoded samples and the mixing.
+    CallMuAudioVoid("play", "(IZ)V", static_cast<jint>(Buffer),
+        bLooped ? JNI_TRUE : JNI_FALSE);
     return S_OK;
 }
 
