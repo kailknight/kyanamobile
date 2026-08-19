@@ -185,20 +185,17 @@ if(MU_ENABLE_BGFX)
 endif()
 
 target_compile_options(main PRIVATE
-    -Wno-unknown-pragmas
-    -Wno-error=deprecated-declarations
-    -Wno-error=format-security
-    -Wno-format-security
-    -Wno-multichar
-    -Wno-narrowing
-    -fno-strict-aliasing
-    -fvisibility=hidden
-    -fvisibility-inlines-hidden
-    $<$<CONFIG:Debug>:-O2>
-    $<$<CONFIG:Debug>:-g1>
-    $<$<CONFIG:Release>:-O3>
-    $<$<CONFIG:RelWithDebInfo>:-O3>
-)
+        -Wno-unknown-pragmas
+        -Wno-error=deprecated-declarations
+        -Wno-error=format-security
+        -Wno-format-security
+        -Wno-multichar
+        -Wno-narrowing
+        -fno-strict-aliasing
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+        -O3
+        )
 
 target_link_options(main PRIVATE
     -Wl,-z,max-page-size=16384

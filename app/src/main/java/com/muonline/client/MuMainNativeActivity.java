@@ -220,8 +220,15 @@ public class MuMainNativeActivity extends NativeActivity {
 
         @Override
         public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
-            outAttrs.imeOptions |= EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN;
             final InputConnection baseConnection = super.onCreateInputConnection(outAttrs);
+
+            // After super, not before. TextView.onCreateInputConnection assigns
+            // outAttrs.imeOptions from the widget's own state, so flags set
+            // beforehand were being overwritten and thrown away. In landscape an
+            // IME defaults to fullscreen extract mode unless NO_FULLSCREEN
+            // survives, which is why the keyboard took over the whole screen.
+            outAttrs.imeOptions |= EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                | EditorInfo.IME_FLAG_NO_FULLSCREEN;
             return new InputConnectionWrapper(baseConnection, true) {
                 @Override
                 public boolean commitText(CharSequence text, int newCursorPosition) {
@@ -269,7 +276,15 @@ public class MuMainNativeActivity extends NativeActivity {
 
                 @Override
                 public boolean performEditorAction(int actionCode) {
-                    nativeOnTextInput("\n");
+                    // The keyboard's Done key arrives here, not as a key event,
+                    // because the bridge is single-line with IME_ACTION_DONE.
+                    // Sending it on as text gave the game a newline character
+                    // and never reached its SDLK_RETURN handler, so chat could
+                    // be typed but not submitted or closed. Forward a real
+                    // Enter key press instead - nativeOnKeyEvent already maps
+                    // AKEYCODE_ENTER to SDLK_RETURN.
+                    nativeOnKeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER, 0, 0, 0);
+                    nativeOnKeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER, 0, 0, 0);
                     return true;
                 }
             };
