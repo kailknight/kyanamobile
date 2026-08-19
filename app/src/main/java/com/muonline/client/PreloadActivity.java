@@ -48,7 +48,15 @@ public class PreloadActivity extends Activity {
 
     private static final String TAG = "MuPreload";
     private static final String[] DATA_ZIP_URL_CANDIDATES = {
-        "http://172.18.144.158:8888/data.zip"
+        // Plain HTTP is deliberate - do not "fix" this to https. 8888 is a
+        // cleartext vhost, and the only certificate this host has served on it
+        // is XAMPP's stock self-signed CN=localhost one (expired 2019), which
+        // HttpURLConnection rejects outright with SSLHandshakeException.
+        // Cleartext is permitted for this app by usesCleartextTraffic in
+        // AndroidManifest.xml. Moving to https would need a real CA-issued cert
+        // on a hostname resolving straight to the origin - not arik-mu.online,
+        // which is Cloudflare-fronted and does not proxy 8888 anyway.
+        "http://139.99.24.220:8888/data.zip"
     };
     private static final String BASIC_AUTH_USERNAME = "admin";
     private static final String BASIC_AUTH_PASSWORD = "openmu";
@@ -489,8 +497,61 @@ public class PreloadActivity extends Activity {
         }
     }
 
+    // Measured on the test device against the live host: one TCP stream gets
+    // ~630 KB/s, four parallel range requests aggregate to ~3.8 MB/s. The limit
+    // is per connection, not the server's uplink or the route (connect is 59
+    // ms), so splitting the file across sockets is worth roughly 6x - about 15
+    // minutes down to 2.5 for a 552 MB archive.
+    //
+    // Costs nothing server side: the host already answers Range requests with
+    // 206, which is stock Apache behaviour, and data.zip itself is unchanged.
+    private static final int DOWNLOAD_CHUNK_THREADS = 4;
+
+    // Work-stealing chunk size. Splitting the file into one big range per
+    // worker is wrong: the ranges are equal but the connections are not, so the
+    // quick streams finish and exit while one straggler is left to carry the
+    // rest of the file on its own. On a 1.26 GB archive that showed as fast
+    // progress to roughly 830 MB and then a collapse to single-stream speed for
+    // the remainder - parallelism retiring, not the network degrading.
+    //
+    // Many small chunks handed out from a shared counter instead: a fast
+    // connection simply takes more of them, every worker stays busy until the
+    // file is done, and an interrupted download loses at most one chunk rather
+    // than a quarter of the archive.
+    private static final long DOWNLOAD_CHUNK_BYTES = 8L * 1024L * 1024L;
+
+    // Attempts per chunk before the transfer is given up on. Read timeouts and
+    // dropped sockets are normal on mobile over a transfer this long; they
+    // should cost one chunk, not the download.
+    private static final int DOWNLOAD_CHUNK_ATTEMPTS = 3;
+
+    // Below this, the setup overhead outweighs the parallelism.
+    private static final long PARALLEL_DOWNLOAD_MIN_BYTES = 8L * 1024L * 1024L;
+
     private DownloadStats downloadZip(File outputZip) throws IOException {
         IOException lastError = null;
+
+        // Try the parallel path first; it falls back to the sequential one on
+        // any host that will not do ranges, or if anything goes wrong.
+        for (String urlCandidate : DATA_ZIP_URL_CANDIDATES) {
+            for (boolean withAuth : new boolean[] { false, true }) {
+                try {
+                    RemoteFileInfo info = probeRemoteFile(urlCandidate, withAuth);
+                    if (info == null) {
+                        continue;
+                    }
+                    if (!info.supportsRanges || info.totalBytes < PARALLEL_DOWNLOAD_MIN_BYTES) {
+                        break;
+                    }
+                    return downloadZipParallel(urlCandidate, withAuth, outputZip, info);
+                } catch (IOException parallelError) {
+                    Log.w(TAG, "Parallel download failed, falling back to single stream: "
+                        + parallelError.getMessage());
+                    lastError = parallelError;
+                }
+            }
+        }
+
         for (String urlCandidate : DATA_ZIP_URL_CANDIDATES) {
             try {
                 return downloadZipFromUrl(urlCandidate, false, outputZip);
@@ -513,6 +574,357 @@ public class PreloadActivity extends Activity {
             throw lastError;
         }
         throw new IOException("Unable to download data.zip from all configured URLs.");
+    }
+
+    private static final class RemoteFileInfo {
+        final long totalBytes;
+        final boolean supportsRanges;
+        final String signature;
+
+        RemoteFileInfo(long totalBytes, boolean supportsRanges, String signature) {
+            this.totalBytes = totalBytes;
+            this.supportsRanges = supportsRanges;
+            this.signature = signature;
+        }
+    }
+
+    // One small ranged GET rather than a HEAD: some hosts answer HEAD without
+    // Accept-Ranges even when they honour ranges, and a 206 here is proof
+    // rather than a promise. Content-Range also carries the true total length.
+    private RemoteFileInfo probeRemoteFile(String urlText, boolean withAuth) throws IOException {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(urlText);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
+            connection.setRequestProperty("Accept-Encoding", "identity");
+            connection.setRequestProperty("User-Agent", "MuMain-Android-Preload/1.0");
+            connection.setRequestProperty("Range", "bytes=0-0");
+            connection.setInstanceFollowRedirects(true);
+            if (withAuth) {
+                applyBasicAuthorization(connection, BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD);
+            }
+            connection.connect();
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                return null;
+            }
+
+            long total = -1L;
+            boolean ranges = false;
+            if (responseCode == HttpURLConnection.HTTP_PARTIAL) {
+                ranges = true;
+                String contentRange = connection.getHeaderField("Content-Range");
+                if (contentRange != null) {
+                    int slash = contentRange.lastIndexOf('/');
+                    if (slash >= 0 && slash + 1 < contentRange.length()) {
+                        try {
+                            total = Long.parseLong(contentRange.substring(slash + 1).trim());
+                        } catch (NumberFormatException ignored) {
+                            total = -1L;
+                        }
+                    }
+                }
+            } else if (responseCode >= 200 && responseCode < 300) {
+                total = connection.getContentLengthLong();
+            } else {
+                throw new HttpStatusException(responseCode,
+                    "HTTP " + responseCode + " while probing data.zip (" + urlText + ")");
+            }
+
+            String etag = connection.getHeaderField("ETag");
+            String lastModified = connection.getHeaderField("Last-Modified");
+            String signature = "len=" + total
+                + ";etag=" + (etag == null ? "" : etag.trim())
+                + ";mod=" + (lastModified == null ? "" : lastModified.trim());
+
+            if (total <= 0) {
+                return null;
+            }
+            Log.i(TAG, "Probe " + urlText + ": total=" + total + " ranges=" + ranges);
+            return new RemoteFileInfo(total, ranges, signature);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    // Splits the archive across DOWNLOAD_CHUNK_THREADS sockets writing into one
+    // pre-allocated file at their own offsets, and records finished chunks in a
+    // sidecar so an interrupted download resumes instead of starting the whole
+    // 552 MB again. The sidecar is keyed on the remote signature, so a data.zip
+    // replaced mid-download is detected and the partial file discarded rather
+    // than stitched together from two different archives.
+    private DownloadStats downloadZipParallel(String urlText, boolean withAuth, File outputZip,
+                                              RemoteFileInfo info) throws IOException {
+        final long startMs = SystemClock.elapsedRealtime();
+        final long total = info.totalBytes;
+
+        File partFile = new File(outputZip.getParentFile(), outputZip.getName() + ".part");
+        File stateFile = new File(outputZip.getParentFile(), outputZip.getName() + ".part.state");
+
+        final long chunkSize = DOWNLOAD_CHUNK_BYTES;
+        final int chunkCount = (int) ((total + chunkSize - 1) / chunkSize);
+
+        boolean[] chunkDone = new boolean[chunkCount];
+        long resumedBytes = 0L;
+        if (partFile.isFile() && partFile.length() == total) {
+            String storedState = readFirstLine(stateFile);
+            if (storedState != null && storedState.startsWith(info.signature + "|")) {
+                String flags = storedState.substring(info.signature.length() + 1);
+                for (int i = 0; i < chunkCount && i < flags.length(); i++) {
+                    if (flags.charAt(i) == '1') {
+                        chunkDone[i] = true;
+                        resumedBytes += chunkLength(i, chunkCount, chunkSize, total);
+                    }
+                }
+                Log.i(TAG, "Resuming download, " + resumedBytes + " of " + total + " already present.");
+            }
+        }
+        if (resumedBytes == 0L) {
+            deleteQuietly(stateFile);
+        }
+
+        final java.util.concurrent.atomic.AtomicLong progress =
+            new java.util.concurrent.atomic.AtomicLong(resumedBytes);
+        final java.util.concurrent.atomic.AtomicReference<IOException> failure =
+            new java.util.concurrent.atomic.AtomicReference<>(null);
+        final boolean[] doneFlags = chunkDone;
+
+        try (java.io.RandomAccessFile output = new java.io.RandomAccessFile(partFile, "rw")) {
+            output.setLength(total);
+        }
+
+        // Shared hand-out counter. Every worker keeps taking the next unclaimed
+        // chunk until the file is finished, so a slow connection holds up at
+        // most one chunk instead of a fixed quarter of the archive.
+        final java.util.concurrent.atomic.AtomicInteger nextChunk =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
+        List<Thread> workers = new ArrayList<>();
+        final int workerCount = Math.min(DOWNLOAD_CHUNK_THREADS, Math.max(1, chunkCount));
+        for (int w = 0; w < workerCount; w++) {
+            Thread worker = new Thread(() -> {
+                while (failure.get() == null && !cancelled) {
+                    final int chunkIndex = nextChunk.getAndIncrement();
+                    if (chunkIndex >= chunkCount) {
+                        return;
+                    }
+                    synchronized (doneFlags) {
+                        if (doneFlags[chunkIndex]) {
+                            continue;
+                        }
+                    }
+
+                    final long chunkStart = chunkIndex * chunkSize;
+                    final long chunkEnd = Math.min(chunkStart + chunkSize, total) - 1L;
+
+                    // Retry the chunk rather than failing the transfer. One
+                    // flaky connection out of 141 used to be terminal: the
+                    // chunk was abandoned, so the archive could never be
+                    // completed or renamed, and 1.17 GB of good data sat in a
+                    // .part file waiting on a single 8 MB hole.
+                    IOException lastChunkError = null;
+                    for (int attempt = 0; attempt < DOWNLOAD_CHUNK_ATTEMPTS && !cancelled; attempt++) {
+                        long attemptStartBytes = progress.get();
+                        try {
+                            downloadRange(urlText, withAuth, partFile, chunkStart, chunkEnd, progress);
+                            lastChunkError = null;
+                            break;
+                        } catch (IOException chunkError) {
+                            lastChunkError = chunkError;
+                            // A partial attempt already counted bytes towards
+                            // progress; roll them back so the bar and the rate
+                            // stay honest when the retry re-fetches them.
+                            progress.addAndGet(attemptStartBytes - progress.get());
+                            Log.w(TAG, "Chunk " + chunkIndex + " attempt " + (attempt + 1)
+                                + " failed: " + chunkError.getMessage());
+                            try {
+                                Thread.sleep(400L * (attempt + 1));
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                        }
+                    }
+
+                    if (lastChunkError != null) {
+                        failure.compareAndSet(null, lastChunkError);
+                        return;
+                    }
+
+                    synchronized (doneFlags) {
+                        doneFlags[chunkIndex] = true;
+                        writeChunkState(stateFile, info.signature, doneFlags);
+                    }
+                }
+            }, "mu-dl-" + w);
+            worker.start();
+            workers.add(worker);
+        }
+
+        long lastUiTick = 0L;
+        // Sliding one-second window, so the figure shown is the rate right now
+        // rather than the average since the start. Seeded past the resumed
+        // bytes so they are never counted as throughput.
+        long windowStartMs = startMs;
+        long windowStartBytes = resumedBytes;
+        double recentSpeed = 0.0;
+
+        while (true) {
+            boolean anyAlive = false;
+            for (Thread worker : workers) {
+                if (worker.isAlive()) {
+                    anyAlive = true;
+                    break;
+                }
+            }
+
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastUiTick >= UI_UPDATE_INTERVAL_MS) {
+                lastUiTick = now;
+                long soFar = progress.get();
+
+                long windowMs = now - windowStartMs;
+                if (windowMs >= 1000L) {
+                    recentSpeed = (soFar - windowStartBytes) / (windowMs / 1000.0);
+                    windowStartMs = now;
+                    windowStartBytes = soFar;
+                }
+
+                double overallPercent = Math.min(1.0, soFar / (double) total) * DOWNLOAD_WEIGHT;
+                updateDownloadUi(soFar, total, Math.max(1L, now - startMs), overallPercent, recentSpeed);
+            }
+
+            if (!anyAlive || cancelled) {
+                break;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        for (Thread worker : workers) {
+            try {
+                worker.join();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        if (cancelled) {
+            throw new IOException("Download cancelled");
+        }
+        IOException chunkFailure = failure.get();
+        if (chunkFailure != null) {
+            // The sidecar keeps whatever finished, so the retry resumes.
+            throw chunkFailure;
+        }
+
+        deleteQuietly(outputZip);
+        if (!partFile.renameTo(outputZip)) {
+            throw new IOException("Unable to finalise downloaded archive: " + partFile.getAbsolutePath());
+        }
+        deleteQuietly(stateFile);
+
+        long durationMs = Math.max(1L, SystemClock.elapsedRealtime() - startMs);
+        updateDownloadUi(total, total, durationMs, DOWNLOAD_WEIGHT);
+        Log.i(TAG, "Parallel download complete: " + total + " bytes in " + durationMs + " ms across "
+            + workers.size() + " streams (" + resumedBytes + " resumed)");
+        return new DownloadStats(total, total, durationMs);
+    }
+
+    private static long chunkLength(int index, int chunkCount, long chunkSize, long total) {
+        long start = index * chunkSize;
+        long end = Math.min(start + chunkSize, total);
+        return Math.max(0L, end - start);
+    }
+
+    private void downloadRange(String urlText, boolean withAuth, File partFile,
+                               long rangeStart, long rangeEnd,
+                               java.util.concurrent.atomic.AtomicLong progress) throws IOException {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(urlText);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(30000);
+            connection.setRequestProperty("Accept-Encoding", "identity");
+            connection.setRequestProperty("User-Agent", "MuMain-Android-Preload/1.0");
+            connection.setRequestProperty("Range", "bytes=" + rangeStart + "-" + rangeEnd);
+            connection.setInstanceFollowRedirects(true);
+            if (withAuth) {
+                applyBasicAuthorization(connection, BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD);
+            }
+            connection.connect();
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_PARTIAL) {
+                throw new HttpStatusException(responseCode,
+                    "HTTP " + responseCode + " for range " + rangeStart + "-" + rangeEnd);
+            }
+
+            byte[] buffer = new byte[BUFFER_SIZE];
+            try (InputStream input = new BufferedInputStream(connection.getInputStream(), BUFFER_SIZE);
+                 java.io.RandomAccessFile output = new java.io.RandomAccessFile(partFile, "rw")) {
+                output.seek(rangeStart);
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    if (cancelled) {
+                        throw new IOException("Download cancelled");
+                    }
+                    output.write(buffer, 0, read);
+                    progress.addAndGet(read);
+                }
+            }
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static void writeChunkState(File stateFile, String signature, boolean[] chunkDone) {
+        StringBuilder flags = new StringBuilder(signature).append('|');
+        for (boolean done : chunkDone) {
+            flags.append(done ? '1' : '0');
+        }
+        try (OutputStream output = new FileOutputStream(stateFile, false)) {
+            output.write(flags.toString().getBytes(StandardCharsets.UTF_8));
+            output.flush();
+        } catch (IOException stateError) {
+            Log.w(TAG, "Failed to write resume state: " + stateError.getMessage());
+        }
+    }
+
+    private static String readFirstLine(File file) {
+        if (file == null || !file.isFile()) {
+            return null;
+        }
+        try {
+            byte[] raw = new byte[(int) Math.min(file.length(), 4096L)];
+            try (FileInputStream input = new FileInputStream(file)) {
+                int read = input.read(raw);
+                if (read <= 0) {
+                    return null;
+                }
+                return new String(raw, 0, read, StandardCharsets.UTF_8).trim();
+            }
+        } catch (IOException readError) {
+            return null;
+        }
+    }
+
+    private static void deleteQuietly(File file) {
+        if (file != null && file.exists() && !file.delete()) {
+            Log.w(TAG, "Could not delete " + file.getAbsolutePath());
+        }
     }
 
     private DownloadStats downloadZipFromUrl(String urlText, boolean withAuth, File outputZip) throws IOException {
@@ -604,11 +1016,34 @@ public class PreloadActivity extends Activity {
         connection.setRequestProperty("Authorization", "Basic " + token);
     }
 
+    /**
+     * Opens data.zip in a way that cannot fail on its entry names.
+     *
+     * The archive carries at least one name that is CP949 Korean rather than
+     * UTF-8 - Data/Object34/Object01_<0xB0 0xA6>.bmd. ZipFile's single-argument
+     * constructor decodes names as UTF-8, and 0xB0 is a continuation byte with
+     * no lead byte, so it throws IllegalArgumentException("MALFORMED[1]") and
+     * takes the whole preload down. That only shows up on a device doing a
+     * fresh extract; anywhere the data is already present the step is skipped
+     * and the archive is never opened.
+     *
+     * ISO-8859-1 maps all 256 byte values, so no name can fail to decode. The
+     * odd name round-trips to mojibake on disk, which is harmless - it is an
+     * unused leftover model, and every file the game actually opens is ASCII.
+     */
+    private static ZipFile openDataZip(File zipFile) throws IOException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return new ZipFile(zipFile, StandardCharsets.ISO_8859_1);
+        }
+        // Pre-24 ZipFile decodes names leniently and does not throw here.
+        return new ZipFile(zipFile);
+    }
+
     private ZipMetrics inspectZip(File zipFile) throws IOException {
         long totalBytes = 0L;
         int fileCount = 0;
 
-        try (ZipFile zip = new ZipFile(zipFile)) {
+        try (ZipFile zip = openDataZip(zipFile)) {
             Enumeration<? extends ZipEntry> entries = zip.entries();
             while (entries.hasMoreElements()) {
                 ZipEntry entry = entries.nextElement();
@@ -632,7 +1067,7 @@ public class PreloadActivity extends Activity {
         int extractedFiles = 0;
         long lastUiTick = 0L;
 
-        try (ZipFile zip = new ZipFile(zipFile)) {
+        try (ZipFile zip = openDataZip(zipFile)) {
             Enumeration<? extends ZipEntry> entries = zip.entries();
             byte[] buffer = new byte[BUFFER_SIZE];
 
@@ -726,7 +1161,9 @@ public class PreloadActivity extends Activity {
             throw new IOException("downloaded Takumi data incomplete, missing: "
                 + joinMissingEntries(missingEntries));
         }
-        writeDataReadyMarker(externalRoot, targetDataDir);
+        // Record what the server was serving, so the next launch can tell
+        // whether this copy is still current instead of assuming it is.
+        writeDataReadyMarker(externalRoot, targetDataDir, fetchRemoteDataSignature());
 
         postUi(() -> progressBar.setProgress(1000));
     }
@@ -814,7 +1251,31 @@ public class PreloadActivity extends Activity {
     private boolean shouldSkipDownload(File existingDataDir, File externalRoot) {
         File marker = new File(externalRoot, DATA_READY_MARKER_FILE);
         if (isDataFolderUsable(existingDataDir)) {
-            writeDataReadyMarker(externalRoot, existingDataDir);
+            // Usable local data is not the same as current local data. This
+            // check used to end here, so once a device had any complete data
+            // folder it would never pick up a newer data.zip - the only way to
+            // update was to clear app data and re-download the lot.
+            //
+            // Ask the server what it is serving now and compare it with what
+            // was recorded when this folder was written. A missing stored
+            // signature means the data predates this check, so it is refreshed
+            // once and then tracked from then on.
+            String storedSignature = readStoredDataSignature(externalRoot);
+            String remoteSignature = fetchRemoteDataSignature();
+
+            if (remoteSignature != null && !remoteSignature.equals(storedSignature)) {
+                Log.i(TAG, "Remote data.zip changed, re-downloading. stored=" + storedSignature
+                    + " remote=" + remoteSignature);
+                return false;
+            }
+
+            // Unreachable server, or the host gave us nothing to compare on:
+            // keep playing with what is on disk rather than blocking startup.
+            if (remoteSignature == null) {
+                Log.i(TAG, "Could not read remote data.zip signature, keeping local data.");
+            }
+
+            writeDataReadyMarker(externalRoot, existingDataDir, storedSignature);
             Log.i(TAG, "Skip download, usable data exists: " + existingDataDir.getAbsolutePath()
                 + " markerWasPresent=" + marker.exists());
             return true;
@@ -950,14 +1411,108 @@ public class PreloadActivity extends Activity {
         }
     }
 
+    // Identity of the data.zip the server is serving, cheaply: a HEAD request
+    // for Content-Length plus whichever of ETag / Last-Modified the host sets.
+    // Any change to any of those means the archive was replaced.
+    //
+    // Returns null when nothing usable could be read - offline, host down, or a
+    // server that reports none of the three - and callers treat null as "cannot
+    // tell", never as "changed", so a broken network can never wipe a working
+    // install.
+    private String fetchRemoteDataSignature() {
+        for (String urlText : DATA_ZIP_URL_CANDIDATES) {
+            for (boolean withAuth : new boolean[] { false, true }) {
+                HttpURLConnection connection = null;
+                try {
+                    URL url = new URL(urlText);
+                    connection = (HttpURLConnection) url.openConnection();
+                    connection.setRequestMethod("HEAD");
+                    connection.setConnectTimeout(8000);
+                    connection.setReadTimeout(8000);
+                    connection.setRequestProperty("Accept-Encoding", "identity");
+                    connection.setRequestProperty("User-Agent", "MuMain-Android-Preload/1.0");
+                    connection.setInstanceFollowRedirects(true);
+                    if (withAuth) {
+                        applyBasicAuthorization(connection, BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD);
+                    }
+                    connection.connect();
+
+                    int responseCode = connection.getResponseCode();
+                    if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED && !withAuth) {
+                        continue;
+                    }
+                    if (responseCode < 200 || responseCode >= 300) {
+                        break;
+                    }
+
+                    long length = connection.getContentLengthLong();
+                    String etag = connection.getHeaderField("ETag");
+                    String lastModified = connection.getHeaderField("Last-Modified");
+
+                    if (length < 0 && etag == null && lastModified == null) {
+                        Log.i(TAG, "Host gave no length/etag/last-modified, cannot tell if data.zip changed.");
+                        return null;
+                    }
+
+                    return "len=" + length
+                        + ";etag=" + (etag == null ? "" : etag.trim())
+                        + ";mod=" + (lastModified == null ? "" : lastModified.trim());
+                } catch (IOException headError) {
+                    Log.i(TAG, "HEAD failed for " + urlText + " (auth=" + withAuth + "): "
+                        + headError.getMessage());
+                } finally {
+                    if (connection != null) {
+                        connection.disconnect();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private String readStoredDataSignature(File externalRoot) {
+        if (externalRoot == null) {
+            return null;
+        }
+
+        File marker = new File(externalRoot, DATA_READY_MARKER_FILE);
+        if (!marker.isFile()) {
+            return null;
+        }
+
+        try {
+            byte[] raw = new byte[(int) Math.min(marker.length(), 8192L)];
+            try (FileInputStream input = new FileInputStream(marker)) {
+                int read = input.read(raw);
+                if (read <= 0) {
+                    return null;
+                }
+                for (String line : new String(raw, 0, read, StandardCharsets.UTF_8).split("\n")) {
+                    if (line.startsWith("signature=")) {
+                        String value = line.substring("signature=".length()).trim();
+                        return value.isEmpty() ? null : value;
+                    }
+                }
+            }
+        } catch (IOException readError) {
+            Log.w(TAG, "Failed to read data marker: " + readError.getMessage());
+        }
+        return null;
+    }
+
     private void writeDataReadyMarker(File externalRoot, File dataDir) {
+        writeDataReadyMarker(externalRoot, dataDir, null);
+    }
+
+    private void writeDataReadyMarker(File externalRoot, File dataDir, String signature) {
         if (externalRoot == null || dataDir == null) {
             return;
         }
 
         File marker = new File(externalRoot, DATA_READY_MARKER_FILE);
         String payload = "ready_at=" + System.currentTimeMillis()
-            + "\npath=" + dataDir.getAbsolutePath() + "\n";
+            + "\npath=" + dataDir.getAbsolutePath()
+            + "\nsignature=" + (signature == null ? "" : signature) + "\n";
         try (OutputStream output = new FileOutputStream(marker, false)) {
             output.write(payload.getBytes(StandardCharsets.UTF_8));
             output.flush();
@@ -1109,7 +1664,21 @@ public class PreloadActivity extends Activity {
     }
 
     private void updateDownloadUi(long downloadedBytes, long totalBytes, long elapsedMs, double overallPercent) {
-        double speedBytesPerSecond = downloadedBytes / Math.max(0.001, elapsedMs / 1000.0);
+        updateDownloadUi(downloadedBytes, totalBytes, elapsedMs, overallPercent, -1.0);
+    }
+
+    // explicitSpeedBytesPerSecond < 0 keeps the old behaviour: bytes since the
+    // start divided by time since the start. That is an average, not a rate,
+    // and it is wrong for the parallel path in two ways - resumed chunks are
+    // counted as having arrived in zero seconds, and any fast opening seconds
+    // keep dragging the figure down for the rest of the transfer. A download
+    // running at a perfectly steady rate would show a number falling the whole
+    // way, which is exactly what it looked like.
+    private void updateDownloadUi(long downloadedBytes, long totalBytes, long elapsedMs,
+                                  double overallPercent, double explicitSpeedBytesPerSecond) {
+        double speedBytesPerSecond = explicitSpeedBytesPerSecond >= 0.0
+            ? explicitSpeedBytesPerSecond
+            : downloadedBytes / Math.max(0.001, elapsedMs / 1000.0);
         long etaMs = 0L;
         if (totalBytes > 0 && speedBytesPerSecond > 0.0) {
             etaMs = (long) (((double) (totalBytes - downloadedBytes) / speedBytesPerSecond) * 1000.0);
