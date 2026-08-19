@@ -145,6 +145,11 @@ namespace SEASON3B
 		int GetAndroidTouchAssignSkillIndex() const;
 		void SetAndroidTouchAssignSkillIndex(int skillIndex);
 		int HitTestAndroidTouchSkillPicker(float uiX, float uiY) const;
+		// -1 no hit, 0 previous page, 1 next page. Only ever hits when the
+		// character has more skills than one page holds.
+		int HitTestAndroidSkillPickerPageButton(float uiX, float uiY) const;
+		void StepAndroidSkillPickerPage(int delta);
+		void RenderAndroidSkillPickerPageControls();
 
 		bool IsSkillListUp();
 

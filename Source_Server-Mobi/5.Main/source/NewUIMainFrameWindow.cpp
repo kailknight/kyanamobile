@@ -51,8 +51,154 @@ extern int DisplayHeightExt;
 extern int DisplayWinExt;
 extern int DisplayWinReal;
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+// Touch layout for the skill picker: a fixed 6x2 grid sitting above the chat
+// tabs, paged when the character knows more than twelve castable skills.
+//
+// The desktop layout below fans the cells outward from a centre point in a
+// single row, then doubles back for orders 14+. On a 22:9 phone that spreads
+// the whole skill set across the width of the screen and straight through the
+// chat panel and hotkey bar, which is what this replaces. The desktop path is
+// left exactly as it was - this is only compiled for touch builds.
+constexpr int kAndroidPickerCols = 6;
+constexpr int kAndroidPickerRows = 2;
+constexpr int kAndroidPickerPageSize = kAndroidPickerCols * kAndroidPickerRows;
+constexpr float kAndroidPickerCellW = 32.0f;
+constexpr float kAndroidPickerCellH = 38.0f;
+constexpr float kAndroidPickerGridW = kAndroidPickerCols * kAndroidPickerCellW;
+constexpr float kAndroidPickerGridH = kAndroidPickerRows * kAndroidPickerCellH;
+// Centred over the chat panel, and lifted clear of the chat tabs at y=352.
+constexpr float kAndroidPickerGridX = 232.0f;
+constexpr float kAndroidPickerGridY = 352.0f - kAndroidPickerGridH - 6.0f;
+// Page arrows flank the grid so neither covers a cell.
+constexpr float kAndroidPickerPageBtnW = 22.0f;
+constexpr float kAndroidPickerPageBtnH = 28.0f;
+constexpr float kAndroidPickerPageBtnY =
+	kAndroidPickerGridY + ((kAndroidPickerGridH - kAndroidPickerPageBtnH) * 0.5f);
+constexpr float kAndroidPickerPrevBtnX = kAndroidPickerGridX - kAndroidPickerPageBtnW - 4.0f;
+constexpr float kAndroidPickerNextBtnX = kAndroidPickerGridX + kAndroidPickerGridW + 4.0f;
+// Cells outside the current page are parked off screen: the render and hit
+// test loops both walk every entry, so this is what keeps them from drawing or
+// answering taps without touching either loop.
+constexpr float kAndroidPickerHiddenXY = -10000.0f;
+
+static int g_androidSkillPickerPage = 0;
+
+int GetAndroidSkillPickerPage()
+{
+	return g_androidSkillPickerPage;
+}
+
+void SetAndroidSkillPickerPage(int page)
+{
+	g_androidSkillPickerPage = (page < 0) ? 0 : page;
+}
+
+constexpr int kAndroidPickerMaxEntries =
+	MAX_MAGIC + (AT_PET_COMMAND_END - AT_PET_COMMAND_DEFAULT);
+
+// The one ordered list of what the picker shows.
+//
+// Render, hit test and the page count each walked their own loop before, with
+// filters that did not match: the render pass additionally skipped
+// SKILL_USE_TYPE_MASTER and pet command skill types, and drew pet commands in a
+// separate fixed row while the hit test folded them into the same running
+// index. Those disagreements shifted the ordering, so a tap could select a
+// different skill than the one under the finger. On a grid that is far more
+// visible, so all three now walk this.
+//
+// Returns the number written; entry values are skill indices, or pet command
+// ids for the trailing pet entries, matching what the callers expect.
+int BuildAndroidSkillPickerEntries(int* outEntries, int maxEntries)
+{
+	if (outEntries == NULL || maxEntries <= 0 || CharacterAttribute == NULL)
+	{
+		return 0;
+	}
+
+	int count = 0;
+
+	for (int i = 0; i < MAX_MAGIC && count < maxEntries; ++i)
+	{
+		const int iSkillType = CharacterAttribute->Skill[i];
+
+		if (iSkillType == 0)
+		{
+			continue;
+		}
+		if (iSkillType >= AT_PET_COMMAND_DEFAULT && iSkillType < AT_PET_COMMAND_END)
+		{
+			continue;
+		}
+		if (iSkillType >= AT_SKILL_STUN && iSkillType <= AT_SKILL_REMOVAL_BUFF)
+		{
+			continue;
+		}
+
+		const BYTE bySkillUseType = SkillAttribute[iSkillType].SkillUseType;
+		if (bySkillUseType == SKILL_USE_TYPE_MASTER || bySkillUseType == SKILL_USE_TYPE_MASTERLEVEL)
+		{
+			continue;
+		}
+
+		outEntries[count++] = i;
+	}
+
+	if (Hero != NULL && Hero->m_pPet != NULL)
+	{
+		for (int i = AT_PET_COMMAND_DEFAULT; i < AT_PET_COMMAND_END && count < maxEntries; ++i)
+		{
+			outEntries[count++] = i;
+		}
+	}
+
+	return count;
+}
+
+int CountAndroidSkillPickerEntries()
+{
+	int entries[kAndroidPickerMaxEntries] = { 0 };
+	return BuildAndroidSkillPickerEntries(entries, kAndroidPickerMaxEntries);
+}
+
+int GetAndroidSkillPickerPageCount()
+{
+	const int entries = CountAndroidSkillPickerEntries();
+	if (entries <= 0)
+	{
+		return 1;
+	}
+	return (entries + kAndroidPickerPageSize - 1) / kAndroidPickerPageSize;
+}
+
+void GetAndroidSkillPickerPageButtonRects(float& prevX, float& nextX, float& y, float& w, float& h)
+{
+	prevX = kAndroidPickerPrevBtnX;
+	nextX = kAndroidPickerNextBtnX;
+	y = kAndroidPickerPageBtnY;
+	w = kAndroidPickerPageBtnW;
+	h = kAndroidPickerPageBtnH;
+}
+#endif // __ANDROID__ || MU_IOS
+
 static void GetLegacySkillPickerCellRect(int order, float& x, float& y, float& width, float& height)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	width = kAndroidPickerCellW;
+	height = kAndroidPickerCellH;
+
+	const int indexOnPage = order - (g_androidSkillPickerPage * kAndroidPickerPageSize);
+	if (indexOnPage < 0 || indexOnPage >= kAndroidPickerPageSize)
+	{
+		x = kAndroidPickerHiddenXY;
+		y = kAndroidPickerHiddenXY;
+		return;
+	}
+
+	x = kAndroidPickerGridX + static_cast<float>(indexOnPage % kAndroidPickerCols) * width;
+	y = kAndroidPickerGridY + static_cast<float>(indexOnPage / kAndroidPickerCols) * height;
+	return;
+#else
 	float fixX = 0.0f;
 	if (gProtect.m_MainInfo.IsVersion == 1)
 	{
@@ -91,6 +237,7 @@ static void GetLegacySkillPickerCellRect(int order, float& x, float& y, float& w
 	{
 		x = fOrigX - (12 * width) + ((order - 17) * width);
 	}
+#endif // __ANDROID__ || MU_IOS
 }
 
 static WORD GetCurrentSkillTypeForPrior()
@@ -2909,6 +3056,11 @@ void SEASON3B::CNewUISkillList::SetSkillPickerOpen(bool open)
 	if (open == true)
 	{
 		m_iAndroidTouchAssignSkillIndex = -1;
+#if defined(__ANDROID__) || defined(MU_IOS)
+		// Always open on the first page. Reopening on whatever page was last
+		// viewed hides the skills the player uses most behind an arrow.
+		SetAndroidSkillPickerPage(0);
+#endif
 	}
 }
 
@@ -2932,6 +3084,81 @@ void SEASON3B::CNewUISkillList::SetAndroidTouchAssignSkillIndex(int skillIndex)
 	m_iAndroidTouchAssignSkillIndex = skillIndex;
 }
 
+int SEASON3B::CNewUISkillList::HitTestAndroidSkillPickerPageButton(float uiX, float uiY) const
+{
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	return -1;
+#else
+	if (m_bSkillList == false || GetAndroidSkillPickerPageCount() <= 1)
+	{
+		return -1;
+	}
+
+	float prevX = 0.0f, nextX = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+	GetAndroidSkillPickerPageButtonRects(prevX, nextX, y, w, h);
+
+	if (uiY < y || uiY > (y + h))
+	{
+		return -1;
+	}
+	if (uiX >= prevX && uiX <= (prevX + w))
+	{
+		return 0;
+	}
+	if (uiX >= nextX && uiX <= (nextX + w))
+	{
+		return 1;
+	}
+	return -1;
+#endif
+}
+
+void SEASON3B::CNewUISkillList::StepAndroidSkillPickerPage(int delta)
+{
+#if defined(__ANDROID__) || defined(MU_IOS)
+	const int pageCount = GetAndroidSkillPickerPageCount();
+	int page = GetAndroidSkillPickerPage() + delta;
+	// Wrap, so a single arrow reaches every page on a two page set.
+	if (page < 0)
+	{
+		page = pageCount - 1;
+	}
+	else if (page >= pageCount)
+	{
+		page = 0;
+	}
+	SetAndroidSkillPickerPage(page);
+#else
+	(void)delta;
+#endif
+}
+
+void SEASON3B::CNewUISkillList::RenderAndroidSkillPickerPageControls()
+{
+#if defined(__ANDROID__) || defined(MU_IOS)
+	const int pageCount = GetAndroidSkillPickerPageCount();
+	if (pageCount <= 1)
+	{
+		return;	// everything fits on one page - no arrows to show
+	}
+
+	float prevX = 0.0f, nextX = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+	GetAndroidSkillPickerPageButtonRects(prevX, nextX, y, w, h);
+
+	SEASON3B::RenderImage(IMAGE_SKILLBOX, prevX, y, w, h);
+	SEASON3B::RenderImage(IMAGE_SKILLBOX, nextX, y, w, h);
+
+	// Page number above the grid rather than below it: the chat tabs start at
+	// y=352 and the grid already sits directly on top of them.
+	SEASON3B::RenderNumber(kAndroidPickerGridX + (kAndroidPickerGridW * 0.5f) - 12.0f,
+	                       kAndroidPickerGridY - 12.0f,
+	                       GetAndroidSkillPickerPage() + 1);
+	SEASON3B::RenderNumber(kAndroidPickerGridX + (kAndroidPickerGridW * 0.5f) + 6.0f,
+	                       kAndroidPickerGridY - 12.0f,
+	                       pageCount);
+#endif
+}
+
 int SEASON3B::CNewUISkillList::HitTestAndroidTouchSkillPicker(float uiX, float uiY) const
 {
 #if !defined(__ANDROID__) && !defined(MU_IOS)
@@ -2942,50 +3169,22 @@ int SEASON3B::CNewUISkillList::HitTestAndroidTouchSkillPicker(float uiX, float u
 		return -1;
 	}
 
-	int iSkillCount = 0;
+	int entries[kAndroidPickerMaxEntries] = { 0 };
+	const int entryCount = BuildAndroidSkillPickerEntries(entries, kAndroidPickerMaxEntries);
+
 	float x = 0.0f;
 	float y = 0.0f;
 	float width = 0.0f;
 	float height = 0.0f;
-	WORD bySkillType = 0;
 
-	for (int i = 0; i < MAX_MAGIC; ++i)
+	for (int order = 0; order < entryCount; ++order)
 	{
-		bySkillType = CharacterAttribute->Skill[i];
-
-		if (bySkillType == 0 || (bySkillType >= AT_SKILL_STUN && bySkillType <= AT_SKILL_REMOVAL_BUFF))
-		{
-			continue;
-		}
-
-		const BYTE bySkillUseType = SkillAttribute[bySkillType].SkillUseType;
-		if (bySkillUseType == SKILL_USE_TYPE_MASTERLEVEL)
-		{
-			continue;
-		}
-
-		GetLegacySkillPickerCellRect(iSkillCount, x, y, width, height);
-		iSkillCount++;
+		GetLegacySkillPickerCellRect(order, x, y, width, height);
 
 		if (uiX >= x && uiX <= (x + width)
 			&& uiY >= y && uiY <= (y + height))
 		{
-			return i;
-		}
-	}
-
-	if (Hero != NULL && Hero->m_pPet != NULL)
-	{
-		for (int i = AT_PET_COMMAND_DEFAULT; i < AT_PET_COMMAND_END; ++i)
-		{
-			GetLegacySkillPickerCellRect(iSkillCount, x, y, width, height);
-			iSkillCount++;
-
-			if (uiX >= x && uiX <= (x + width)
-				&& uiY >= y && uiY <= (y + height))
-			{
-				return i;
-			}
+			return entries[order];
 		}
 	}
 
@@ -3267,6 +3466,37 @@ bool SEASON3B::CNewUISkillList::Render()
 	{
 		if (m_bSkillList == true)
 		{
+#if defined(__ANDROID__) || defined(MU_IOS)
+			// Touch build: one 6x2 paged grid, positioned and ordered by the
+			// shared helpers so the cells, the taps and the page count agree.
+			// Pet commands are part of the same list here rather than being
+			// drawn in their own row by RenderPetSkill.
+			int entries[kAndroidPickerMaxEntries] = { 0 };
+			const int entryCount = BuildAndroidSkillPickerEntries(entries, kAndroidPickerMaxEntries);
+
+			for (int order = 0; order < entryCount; ++order)
+			{
+				GetLegacySkillPickerCellRect(order, x, y, width, height);
+				if (x <= kAndroidPickerHiddenXY)
+				{
+					continue;	// not on the current page
+				}
+
+				const int entry = entries[order];
+				if (entry == Hero->CurrentSkill)
+				{
+					SEASON3B::RenderImage(IMAGE_SKILLBOX_USE, x, y, width, height);
+				}
+				else
+				{
+					SEASON3B::RenderImage(IMAGE_SKILLBOX, x, y, width, height);
+				}
+
+				RenderSkillIcon(entry, x + 6, y + 6, 20, 28);
+			}
+
+			RenderAndroidSkillPickerPageControls();
+#else
 			x = 385 - FixX + DisplayWinExt; y = 390 + DisplayHeightExt; width = 32; height = 38;
 			float fOrigX = 385.f - FixX + DisplayWinExt;
 			int iSkillType = 0;
@@ -3331,6 +3561,7 @@ bool SEASON3B::CNewUISkillList::Render()
 				}
 			}
 			RenderPetSkill();
+#endif
 		}
 	}
 

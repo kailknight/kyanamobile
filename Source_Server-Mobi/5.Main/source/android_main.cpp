@@ -775,25 +775,38 @@ constexpr const TCHAR* kVirtualRightPanelModeButtonLabel = _T("CHG");
 // used to be the CHG button parked in the bottom right corner.
 constexpr int kTopBarActionMenu = -2;
 constexpr int kTopBarActionNone = -1;
+// Starts and stops the helper directly, without opening its window - the same
+// thing the desktop HOME key does. Negative like the menu sentinel because it
+// is not one of the utility actions the grid dispatches.
+constexpr int kTopBarActionHelperPlay = -3;
 
-constexpr int kTopBarButtonCount = 6;
+// The right-anchored row, and then two more stacked in the gap to its left:
+// Helper and, under it, the play toggle. Every loop over the buttons - draw,
+// label, hit test, lit state - runs to kTopBarButtonCount, so the pair is
+// picked up everywhere by GetTopBarButtonRect placing slots 5 and 6 off-row.
+constexpr int kTopBarRowButtonCount = 5;
+constexpr int kTopBarButtonCount = 7;
+constexpr int kTopBarSlotHelper = 5;
+constexpr int kTopBarSlotHelperPlay = 6;
 
 constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
     kTopBarActionMenu,
     kVirtualRightPanelUtilityActionGuild,
-    kVirtualRightPanelUtilityActionHelper,
     kVirtualRightPanelUtilityActionXShop,
     kVirtualRightPanelUtilityActionSetting,
     kVirtualRightPanelUtilityActionBag,
+    kVirtualRightPanelUtilityActionHelper,
+    kTopBarActionHelperPlay,
 };
 
 constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
-    _T("MEN"),
+    _T("Menu"),
     _T("Guild"),
-    _T("Helper"),
     _T("Shop"),
     _T("Settings"),
     _T("Bags"),
+    _T("Helper"),
+    _T("Play"),
 };
 
 // Optional per-button art. Missing files are fine: DrawIconButton skips an
@@ -802,10 +815,12 @@ constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
 constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_menu.png",
     "ui/topbar_guild.png",
-    "ui/topbar_helper.png",
     "ui/topbar_shop.png",
     "ui/topbar_settings.png",
     "ui/topbar_bags.png",
+    "ui/topbar_helper.png",
+    // Not drawn yet - the "Play" label carries it until the art exists.
+    "ui/topbar_helper_play.png",
 };
 
 constexpr float kTopBarButtonW = 52.0f;
@@ -813,6 +828,12 @@ constexpr float kTopBarButtonH = 34.0f;
 constexpr float kTopBarButtonGap = 4.0f;
 constexpr float kTopBarMarginRight = 8.0f;
 constexpr float kTopBarY = 8.0f;
+
+// X of the off-row Helper/Play column: flush against the right edge of the
+// HP/MP/SD/AG panel. That panel's constants are declared much further down, so
+// the value is written out here and static_assert'd against them at their
+// definition rather than being allowed to drift.
+constexpr float kTopBarSideX = 250.0f;
 
 // Currency and location chips sit under the row, matching the reference.
 constexpr float kTopBarChipH = 18.0f;
@@ -1064,9 +1085,24 @@ AndroidUiRect GetTopBarButtonRect(int slot)
         return {};
     }
 
-    const float rowW = (kTopBarButtonCount * kTopBarButtonW)
-                     + ((kTopBarButtonCount - 1) * kTopBarButtonGap);
+    const float rowW = (kTopBarRowButtonCount * kTopBarButtonW)
+                     + ((kTopBarRowButtonCount - 1) * kTopBarButtonGap);
     const float rowLeft = 640.0f - kTopBarMarginRight - rowW;
+
+    // Helper and its play toggle sit off the row, stacked immediately right of
+    // the HP/MP/SD/AG panel rather than against the row's left edge, so they
+    // read as belonging to the status block. Anchored to the panel so they
+    // follow it if its width ever changes.
+    if (slot >= kTopBarRowButtonCount)
+    {
+        const int stackIndex = slot - kTopBarRowButtonCount;
+        return {
+            kTopBarSideX,
+            kTopBarY + static_cast<float>(stackIndex) * (kTopBarButtonH + kTopBarButtonGap),
+            kTopBarButtonW,
+            kTopBarButtonH
+        };
+    }
 
     return {
         rowLeft + static_cast<float>(slot) * (kTopBarButtonW + kTopBarButtonGap),
@@ -1267,6 +1303,10 @@ constexpr float kPortraitPanelY     = 6.0f;
 constexpr float kPortraitAvatarSize = 46.0f;
 constexpr float kPortraitBarLeft    = kPortraitPanelX + kPortraitAvatarSize + 6.0f;
 constexpr float kPortraitBarRight   = 246.0f;
+// Keeps the off-row Helper/Play column flush against this panel; kTopBarSideX
+// has to be spelled out up there because it is used before this point.
+static_assert(kTopBarSideX == kPortraitBarRight + kTopBarButtonGap,
+              "Helper/Play column must sit flush against the status panel");
 constexpr float kPortraitBarW       = kPortraitBarRight - kPortraitBarLeft;
 constexpr float kPortraitBarH       = 12.0f;
 constexpr float kPortraitBarGap     = 3.0f;
@@ -1283,6 +1323,22 @@ constexpr float kPortraitPanelW      = (kPortraitBarRight - kPortraitPanelX) + (
 constexpr float kPortraitPanelH      = (kPortraitBarsBottom - kPortraitPanelY) + (kPortraitPanelInset * 2.0f);
 constexpr float kPortraitPanelBottom = kPortraitPanelTop + kPortraitPanelH;
 
+// Level / experience strip, in the gap between the status panel and the pet
+// gauge. The bar is aligned to the four stat bars above it rather than to the
+// panel edge, so the whole left column reads as one stack; the level text sits
+// in the portrait's column beside it, where nothing else draws. Everything
+// below - the pet icon and its durability bar - is anchored to this row's
+// bottom so adding it pushes them down instead of drawing over them.
+constexpr float kStatRowGap    = 3.0f;
+constexpr float kStatRowH      = 13.0f;
+constexpr float kStatRowY      = kPortraitPanelBottom + kStatRowGap;
+constexpr float kStatRowBottom = kStatRowY + kStatRowH;
+constexpr float kStatRowShift  = kStatRowH + kStatRowGap;
+constexpr float kStatLevelX    = kPortraitPanelLeft + 2.0f;
+constexpr float kStatLevelW    = (kPortraitBarLeft - 2.0f) - kStatLevelX;
+constexpr float kExpBarX       = kPortraitBarLeft;
+constexpr float kExpBarW       = kPortraitBarW;
+
 // The portrait owns the panel's whole left column: flush to the backing's top,
 // left and bottom edges, and out to the gutter before the bars. Drawing it as a
 // square instead left the bottom third of that column showing bare backing,
@@ -1294,7 +1350,8 @@ constexpr float kPortraitAvatarH = kPortraitPanelH;
 
 // Fenrir / helper durability bar, below the status panel.
 constexpr float kPetBarX = 6.0f;
-constexpr float kPetBarY = 98.0f;
+// Was a flat 98; shifted by the level/experience row now sitting above it.
+constexpr float kPetBarY = 98.0f + kStatRowShift;
 constexpr float kPetBarW = 50.0f;
 constexpr float kPetBarH = 10.0f;
 
@@ -1304,7 +1361,7 @@ constexpr float kPetBarH = 10.0f;
 // the portrait's chest.
 constexpr float kPortraitPetSize    = 26.0f;
 constexpr float kPortraitPetX       = kPortraitPanelX + 2.0f;
-constexpr float kPortraitPetY       = kPortraitPanelBottom + 4.0f;
+constexpr float kPortraitPetY       = kStatRowBottom + 4.0f;
 
 // Share of the portrait's vertical cover-crop taken off the bottom of the art.
 // 1.0 anchors the sampled window to the top of the image, 0.5 centres it.
@@ -2736,6 +2793,16 @@ bool HandleVirtualPickerFingerDown(const SDL_TouchFingerEvent& touch)
     float uiY = 0.0f;
     TouchToVirtualUi(touch, uiX, uiY);
 
+    // Page arrows first: they sit beside the grid, so a tap there is not a
+    // skill and must not fall through to the world underneath.
+    const int pageButton = g_pSkillList->HitTestAndroidSkillPickerPageButton(uiX, uiY);
+    if (pageButton >= 0)
+    {
+        g_pSkillList->StepAndroidSkillPickerPage(pageButton == 0 ? -1 : 1);
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
     const int skillIndex = g_pSkillList->HitTestAndroidTouchSkillPicker(uiX, uiY);
     if (skillIndex < 0)
     {
@@ -3793,6 +3860,29 @@ bool IsAndroidMuHelperRunning()
     return helper != nullptr && helper->DataAutoMu.Started;
 }
 
+// Start/stop the helper without opening its window, for the top bar play
+// button. StartMuHelper takes the *current* state - 0 starts, 1 stops - so
+// handing it the running flag flips it, exactly as the desktop HOME key does
+// (NewUIHotKey.cpp). It refuses to start with its own message box while the
+// helper window is open or the hero is in a safe zone, so there is nothing to
+// validate here.
+void ToggleAndroidMuHelperRunning()
+{
+    if (g_pNewUISystem == nullptr)
+    {
+        return;
+    }
+
+    SEASON3B::CNewUIMuHelper* helper = g_pNewUISystem->Get_pNewUIMuHelper();
+    if (helper == nullptr)
+    {
+        return;
+    }
+
+    StartMuHelper(helper->DataAutoMu.Started ? 1 : 0);
+    PlayBuffer(SOUND_CLICK01);
+}
+
 void ClearAndroidTargetLock(const char* reason)
 {
     if (!g_androidTargetLock.active)
@@ -3925,6 +4015,7 @@ AndroidUiRect GetComboToggleRect()
 
 // Defined further down, next to the tab rendering.
 bool HandleAndroidChatTabTap(float uiX, float uiY);
+bool HandleAndroidChatLogTap(float uiX, float uiY);
 
 AndroidUiRect GetChatTabRect(int tab)
 {
@@ -5847,6 +5938,20 @@ void TriggerVirtualRightPanelUtilityAction(int button)
         break;
 
     case kVirtualRightPanelUtilityActionXShop:
+        // Dead on Android, and not for a reason this file can fix. The in-game
+        // shop is disabled for this platform at two levels:
+        //
+        //   Defined_Global.h wraps KJH_PBG_ADD_INGAMESHOP_SYSTEM - which is
+        //   what defines KJH_ADD_INGAMESHOP_UI_SYSTEM and its siblings - in
+        //   #ifndef __ANDROID__, so every guarded body below compiles to
+        //   nothing here.
+        //
+        //   CMakeLists.txt line 128 excludes GameShop/*.cpp from the Android
+        //   build outright, so the implementation is not even linked in.
+        //
+        // Wiring the button harder cannot help while either of those holds;
+        // making it work means porting the IGS subsystem, not editing this
+        // case. Left as a no-op rather than pretending to dispatch.
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
         if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == false)
         {
@@ -7290,6 +7395,13 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Directly after the tabs: same region of the screen, and a tap in the log
+    // should start typing rather than fall through to the world behind it.
+    if (HandleAndroidChatLogTap(uiX, uiY))
+    {
+        return true;
+    }
+
     // Before the top control stack: the labelled bar sits above it in the
     // corner, and both are in the same region of the screen.
     const int topBarAction = HitTestVirtualTopBarButton(uiX, uiY);
@@ -7303,6 +7415,15 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
             if (topBarAction == kTopBarActionMenu)
             {
                 ToggleVirtualRightPanelMode();
+            }
+            else if (topBarAction == kTopBarActionHelperPlay)
+            {
+                // Same call the desktop HOME key makes: the argument is the
+                // current state, so passing it in flips the helper. Start is
+                // refused with its own message box while the helper window is
+                // open or the hero is in a safe zone, which is why this does
+                // not try to validate anything itself.
+                ToggleAndroidMuHelperRunning();
             }
             else
             {
@@ -8498,6 +8619,73 @@ bool HandleAndroidChatTabTap(float uiX, float uiY)
     return false;
 }
 
+// Tap anywhere in the chat log to start typing; tap a line that has a sender to
+// address it privately first.
+//
+// The desktop reaches the whisper through a right click on the line
+// (NewUIChatLogWindow::UpdateMouseEvent, the SetWhsprID call), which touch can
+// never produce - so the same thing is wired to a tap here.
+//
+// The keyboard is not raised directly: showing the input box and giving it
+// focus is enough, because the frame loop starts text input whenever a field
+// has focus. Opening is deliberate rather than a toggle, so a second tap while
+// typing does not dismiss the keyboard mid-message.
+bool HandleAndroidChatLogTap(float uiX, float uiY)
+{
+    SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
+    if (pLog == nullptr || g_pNewUISystem == nullptr || !IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    // Body of the log only. The tab strip directly above it is claimed by
+    // HandleAndroidChatTabTap, which runs first.
+    const float left = kChatLogX - 4.0f;
+    const float right = left + ((kChatTabW + kChatTabGap) * kChatTabCount) + 8.0f;
+    const float top = kChatTabsY + kChatTabH;
+    if (uiX < left || uiX > right || uiY < top || uiY > kChatLogBottomY)
+    {
+        return false;
+    }
+
+    // Whisper target follows the tap, and can always be cleared without extra
+    // UI: tapping the same name again drops it, and so does tapping any part of
+    // the log that is not a line with a sender. Without that there is no way
+    // back to normal chat once a name has been picked up.
+    std::string senderId;
+    const bool onSender = pLog->GetAndroidChatMessageIDAt(uiX, uiY, senderId) && !senderId.empty();
+
+    if (g_pChatInputBox != nullptr)
+    {
+        // Same type as CNewUIChatInputBox::type_string, spelled out because that
+        // typedef is not reachable from here.
+        std::basic_string<unicode::t_char> currentWhisper;
+        g_pChatInputBox->GetWhsprID(currentWhisper);
+        const std::string current(currentWhisper.begin(), currentWhisper.end());
+
+        if (!onSender || current == senderId)
+        {
+            g_pChatInputBox->SetWhsprID("");
+        }
+        else
+        {
+            g_pChatInputBox->SetWhsprID(senderId.c_str());
+        }
+    }
+
+    if (!g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX))
+    {
+        g_pNewUISystem->Show(SEASON3B::INTERFACE_CHATINPUTBOX);
+    }
+    if (g_pChatInputBox != nullptr && g_pChatInputBox->m_pChatInputBox != nullptr)
+    {
+        g_pChatInputBox->m_pChatInputBox->GiveFocus(TRUE);
+    }
+
+    PlayBuffer(SOUND_CLICK01);
+    return true;
+}
+
 // Auto-combo toggle, Knight line only. Paired with HitTestComboToggle.
 void RenderComboToggle()
 {
@@ -8831,6 +9019,13 @@ bool IsTopBarSlotActive(int slot)
     if (kTopBarActions[slot] == kTopBarActionMenu)
     {
         return g_virtualRightPanelUtilityMode;
+    }
+
+    // Lit while the helper is actually running, not while its window is open -
+    // that is what the Helper slot next to it already reports.
+    if (kTopBarActions[slot] == kTopBarActionHelperPlay)
+    {
+        return IsAndroidMuHelperRunning();
     }
 
     return IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]);
@@ -9309,6 +9504,75 @@ void RenderVirtualMirrorHotKeySlots()
     EndBitmap();
 }
 
+// Fraction of the way through the current level, 0..1.
+//
+// Experience and NextExperince are both totals accumulated since level 1, so
+// the naive Experience/NextExperince sits near 1.0 for most of the game and is
+// useless as a bar. The level's own span is the difference between the two
+// thresholds, so the previous level's total has to come off both. That is the
+// same arithmetic CGFxMainUi does for the desktop gauge, including the master
+// level case, which runs on a separate curve offset by 400 levels.
+float GetAndroidExperienceRatio()
+{
+    if (CharacterAttribute == nullptr)
+    {
+        return 0.0f;
+    }
+
+    const bool masterLevel = gCharacterManager.IsMasterLevel(CharacterAttribute->Class);
+
+    double current = 0.0;
+    double next = 0.0;
+    double prior = 0.0;
+
+    if (masterLevel)
+    {
+        current = static_cast<double>(Master_Level_Data.lMasterLevel_Experince);
+        next = static_cast<double>(Master_Level_Data.lNext_MasterLevel_Experince);
+
+        // Master levels continue the normal curve from 400, and the threshold
+        // for the level below is the base this level is measured from.
+        const __int64 total = static_cast<__int64>(Master_Level_Data.nMLevel) + 400;
+        const __int64 priorLevel = total - 1;
+        if (priorLevel > 0)
+        {
+            __int64 base = ((9 + priorLevel) * priorLevel * priorLevel * 10);
+            if (priorLevel > 255)
+            {
+                const __int64 over = priorLevel - 255;
+                base += (9 + over) * over * over * 1000;
+            }
+            prior = static_cast<double>((base - static_cast<__int64>(3892250000)) / 2);
+        }
+    }
+    else
+    {
+        current = static_cast<double>(CharacterAttribute->Experience);
+        next = static_cast<double>(CharacterAttribute->NextExperince);
+
+        const __int64 priorLevel = static_cast<__int64>(CharacterAttribute->Level) - 1;
+        if (priorLevel > 0)
+        {
+            __int64 base = (9 + priorLevel) * priorLevel * priorLevel * 10;
+            if (priorLevel > 255)
+            {
+                const __int64 over = priorLevel - 255;
+                base += (9 + over) * over * over * 1000;
+            }
+            prior = static_cast<double>(base);
+        }
+    }
+
+    const double span = next - prior;
+    if (span <= 0.0)
+    {
+        return 0.0;
+    }
+
+    const double gained = current - prior;
+    return static_cast<float>(std::clamp(gained / span, 0.0, 1.0));
+}
+
 // Top-left status panel. Callers must already have passed IsVirtualPadAvailable,
 // which is what guarantees CharacterAttribute is non-null here.
 void RenderVirtualPortraitHud()
@@ -9368,6 +9632,12 @@ void RenderVirtualPortraitHud()
     DrawVirtualBarH(kPortraitBarLeft, yAG, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curAG) / static_cast<float>(maxAG),
                     0.90f, 0.78f, 0.30f, 0.16f, 0.13f, 0.04f);
+
+    // Experience, in the strip under the panel. Light green, so it does not
+    // read as another resource gauge alongside the four above it.
+    DrawVirtualBarH(kExpBarX, kStatRowY, kExpBarW, kStatRowH,
+                    GetAndroidExperienceRatio(),
+                    0.55f, 0.92f, 0.45f, 0.10f, 0.20f, 0.10f);
 
     // No pet bar here: the game already draws a proper Fenrir/helper gauge in
     // CNewUIItemEnduranceInfo, complete with the pet's name. It is repositioned
@@ -9475,6 +9745,22 @@ void RenderVirtualPortraitHud()
     TextDraw(barFont, textX, static_cast<int>(yAG + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
              "%d/%d", curAG, maxAG);
 
+    // Percentage over the experience bar, and the level pair beside it. ML is
+    // only meaningful once the class has a master level, so it is left off
+    // entirely below 400 rather than shown as a permanent "ML:0".
+    const int expPercent =
+        static_cast<int>(GetAndroidExperienceRatio() * 100.0f + 0.5f);
+    TextDraw(barFont, static_cast<int>(kExpBarX), static_cast<int>(kStatRowY + 1.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(kExpBarW), 0, 3,
+             "EXP %d%%", expPercent);
+
+    TextDraw(barFont, static_cast<int>(kStatLevelX), static_cast<int>(kStatRowY + 1.0f),
+             0xFFF0E4CC, 0x0, static_cast<int>(kStatLevelW), 0, 3,
+             "LVL:%d | ML:%d",
+             CharacterAttribute->Level,
+             gCharacterManager.IsMasterLevel(CharacterAttribute->Class)
+                 ? Master_Level_Data.nMLevel
+                 : 0);
 
     // Skill/cast diagnostic. Off in normal play; flip kShowAndroidSkillDebug to
     // bring it back when something in the cast path needs tracing again, since
@@ -12777,6 +13063,17 @@ static void RunAndroidGameFrame()
     else if (MU_MobileIsTextInputActive())
     {
         MU_MobileStopTextInput();
+    }
+
+    // The chat bar has no business staying on screen once the keyboard is gone
+    // - on desktop it closes with the input, but here dismissing the keyboard
+    // only dropped focus and left the bar sitting over the hotkey row. Closing
+    // it on the same transition keeps the two together.
+    if (!hasFocusedTextInput
+        && g_pNewUISystem != nullptr
+        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX))
+    {
+        g_pNewUISystem->Hide(SEASON3B::INTERFACE_CHATINPUTBOX);
     }
 
     AndroidDrainPackets();

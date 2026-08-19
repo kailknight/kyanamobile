@@ -1166,6 +1166,66 @@ SEASON3B::MESSAGE_TYPE SEASON3B::CNewUIChatLogWindow::GetCurrentMsgType() const
 	return m_CurrentRenderMsgType;
 }
 
+bool SEASON3B::CNewUIChatLogWindow::GetAndroidChatMessageIDAt(float uiX, float uiY, std::string& outID)
+{
+	outID.clear();
+
+	type_vector_msgs* pvecMsgs = GetMsgs(GetCurrentMsgType());
+	if (pvecMsgs == nullptr || pvecMsgs->empty())
+	{
+		return false;
+	}
+
+	// Same geometry the render pass uses, so the line under the finger is the
+	// line that was drawn there. Kept as its own walk rather than folded into
+	// UpdateMouseEvent because that one is driven by MouseX/MouseY and runs
+	// every frame; this answers a single tap at explicit coordinates.
+	int iRenderStartLine = 0;
+	if (GetCurrentRenderEndLine() >= m_nShowingLines)
+	{
+		iRenderStartLine = GetCurrentRenderEndLine() - m_nShowingLines + 1;
+	}
+
+	const float fRenderPosX = m_WndPos.x;
+	float fRenderPosY = m_WndPos.y - m_WndSize.cy + SCROLL_TOP_BOTTOM_PART_HEIGHT;
+	if (GetCurrentRenderEndLine() < m_nShowingLines)
+	{
+		fRenderPosY = fRenderPosY + FONT_LEADING
+			+ (SCROLL_MIDDLE_PART_HEIGHT * (m_nShowingLines - GetCurrentRenderEndLine() - 1));
+	}
+
+	for (int i = iRenderStartLine, s = 0; i <= GetCurrentRenderEndLine(); i++, s++)
+	{
+		if (i < 0 || i >= static_cast<int>(pvecMsgs->size()))
+		{
+			continue;
+		}
+
+		CMessageText* pMsgText = (*pvecMsgs)[i];
+		if (pMsgText == nullptr)
+		{
+			continue;
+		}
+
+		const float lineX = fRenderPosX + WND_LEFT_RIGHT_EDGE;
+		const float lineY = fRenderPosY + FONT_LEADING + (SCROLL_MIDDLE_PART_HEIGHT * s);
+
+		if (uiX >= lineX && uiX <= (lineX + WND_WIDTH)
+			&& uiY >= lineY && uiY <= (lineY + SCROLL_MIDDLE_PART_HEIGHT))
+		{
+			const std::string strID = pMsgText->GetID();
+			if (strID.empty())
+			{
+				return false;
+			}
+			outID = strID;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void SEASON3B::CNewUIChatLogWindow::ShowChatLog()
 {
 	m_bShowChatLog = true;

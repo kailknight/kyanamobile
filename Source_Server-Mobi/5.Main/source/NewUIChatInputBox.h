@@ -171,11 +171,15 @@ namespace SEASON3B
 		void ClosingProcess();
 
 		void SetWhsprID(const char* strWhsprID);
+		// Public alongside its setter: the Android chat log tap needs to read
+		// the current target to decide whether a tap on a name is selecting it
+		// or clearing it. Reading was protected while writing was not, which
+		// was the only thing standing in the way.
+		void GetWhsprID(type_string& strWhsprID);
 
 		CUITextInputBox* m_pChatInputBox, * m_pWhsprIDInputBox;
 	protected:
 		void GetChatText(type_string& strText);
-		void GetWhsprID(type_string& strWhsprID);
 
 		void SetTextPosition(int x, int y);
 		void SetBuddyPosition(int x, int y);

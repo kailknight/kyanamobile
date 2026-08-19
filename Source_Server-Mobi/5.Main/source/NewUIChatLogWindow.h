@@ -178,6 +178,14 @@ namespace SEASON3B
 		size_t GetNumberOfLines(MESSAGE_TYPE MsgType);
 		MESSAGE_TYPE GetCurrentMsgType() const;
 
+		// Sender name of the log line under a point, in UI coordinates.
+		// The desktop reaches this through a right click inside UpdateMouseEvent
+		// (see the SetWhsprID call there), which touch can never produce, so the
+		// same walk is exposed here for the Android tap handler. Returns false
+		// when the point misses every line or the line has no sender - system
+		// and error lines carry no ID.
+		bool GetAndroidChatMessageIDAt(float uiX, float uiY, std::string& outID);
+
 		void ChangeMessage(MESSAGE_TYPE MsgType);
 
 		void ShowChatLog();
