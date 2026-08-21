@@ -8619,12 +8619,15 @@ bool HandleAndroidChatTabTap(float uiX, float uiY)
     return false;
 }
 
-// Tap anywhere in the chat log to start typing; tap a line that has a sender to
-// address it privately first.
+// Tap anywhere in the chat log to start typing; tap a player's name on a line to
+// address them privately first.
 //
 // The desktop reaches the whisper through a right click on the line
 // (NewUIChatLogWindow::UpdateMouseEvent, the SetWhsprID call), which touch can
-// never produce - so the same thing is wired to a tap here.
+// never produce - so the same thing is wired to a tap here. It is the name that
+// answers, not the whole line: GetAndroidChatMessageIDAt measures the drawn
+// "<name> : " and only reports a sender for a tap inside it, so tapping the
+// message text still just opens the keyboard.
 //
 // The keyboard is not raised directly: showing the input box and giving it
 // focus is enough, because the frame loop starts text input whenever a field
@@ -8653,7 +8656,15 @@ bool HandleAndroidChatLogTap(float uiX, float uiY)
     // the log that is not a line with a sender. Without that there is no way
     // back to normal chat once a name has been picked up.
     std::string senderId;
-    const bool onSender = pLog->GetAndroidChatMessageIDAt(uiX, uiY, senderId) && !senderId.empty();
+    bool onSender = pLog->GetAndroidChatMessageIDAt(uiX, uiY, senderId) && !senderId.empty();
+
+    // Your own chat lines carry your name as well, and whispering yourself does
+    // nothing, so a tap there counts as a tap on empty log - which clears the
+    // current target instead of replacing it with something unusable.
+    if (onSender && Hero != nullptr && senderId == Hero->ID)
+    {
+        onSender = false;
+    }
 
     if (g_pChatInputBox != nullptr)
     {

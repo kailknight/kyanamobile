@@ -1168,6 +1168,8 @@ SEASON3B::MESSAGE_TYPE SEASON3B::CNewUIChatLogWindow::GetCurrentMsgType() const
 
 bool SEASON3B::CNewUIChatLogWindow::GetAndroidChatMessageIDAt(float uiX, float uiY, std::string& outID)
 {
+	extern float g_fScreenRate_x;
+
 	outID.clear();
 
 	type_vector_msgs* pvecMsgs = GetMsgs(GetCurrentMsgType());
@@ -1210,17 +1212,73 @@ bool SEASON3B::CNewUIChatLogWindow::GetAndroidChatMessageIDAt(float uiX, float u
 		const float lineX = fRenderPosX + WND_LEFT_RIGHT_EDGE;
 		const float lineY = fRenderPosY + FONT_LEADING + (SCROLL_MIDDLE_PART_HEIGHT * s);
 
-		if (uiX >= lineX && uiX <= (lineX + WND_WIDTH)
-			&& uiY >= lineY && uiY <= (lineY + SCROLL_MIDDLE_PART_HEIGHT))
+		if (uiY < lineY || uiY > (lineY + SCROLL_MIDDLE_PART_HEIGHT))
 		{
-			const std::string strID = pMsgText->GetID();
-			if (strID.empty())
-			{
-				return false;
-			}
-			outID = strID;
-			return true;
+			continue;
 		}
+
+		// Only lines somebody actually said. System and error lines carry an ID
+		// as well, but it is the subject of the notice rather than a speaker -
+		// Hero->ID for "you cannot do that", a nearby character's ID for the
+		// party and trade notices in WSclient - so accepting them handed back a
+		// name nobody had chatted with. This is the list the desktop right click
+		// accepts in UpdateMouseEvent, minus those two types. GM stays in: that
+		// type is only used for a GM who is online and standing there
+		// (WSclient.cpp looks them up in CharactersClient first), so it is a
+		// real, whisperable player.
+		const MESSAGE_TYPE msgType = pMsgText->GetType();
+		if (msgType != TYPE_CHAT_MESSAGE
+			&& msgType != TYPE_WHISPER_MESSAGE
+			&& msgType != TYPE_PARTY_MESSAGE
+			&& msgType != TYPE_GUILD_MESSAGE
+			&& msgType != TYPE_UNION_MESSAGE
+			&& msgType != TYPE_GENS_MESSAGE
+			&& msgType != TYPE_GM_MESSAGE
+			&& msgType != TYPE_POST_ITEM)
+		{
+			return false;
+		}
+
+		// Empty on the wrapped remainder of a long message: SeparateText gives
+		// the second half no ID, so there is no name drawn on that row to tap.
+		const std::string strID = pMsgText->GetID();
+		if (strID.empty())
+		{
+			return false;
+		}
+
+		// The name, not the whole line. RenderMessages draws "<id> : <text>"
+		// starting at lineX, and RenderText places it at iPos_x * g_fScreenRate_x
+		// while drawing the glyphs at their unscaled pixel size, so a font extent
+		// converts to UI units by dividing by that same rate - the conversion
+		// SeparateText already depends on for wrapping. Measuring the " : "
+		// along with the ID puts the right edge exactly where the message text
+		// begins, which is both the correct boundary and a wider touch target
+		// than the name alone.
+		const type_string strIDPart = strID + " : ";
+		std::wstring wstrIDPart;
+		g_pMultiLanguage->ConvertCharToWideStr(wstrIDPart, strIDPart.c_str());
+
+		SIZE idSize = { 0, 0 };
+		g_pRenderText->SetFont((msgType == TYPE_GM_MESSAGE) ? g_hFontBold : g_hFont);
+		g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(),
+			wstrIDPart.c_str(), wstrIDPart.length(), &idSize);
+
+		const float fNameWidth = (g_fScreenRate_x > 0.0f)
+			? (static_cast<float>(idSize.cx) / g_fScreenRate_x)
+			: 0.0f;
+		if (fNameWidth <= 0.0f)
+		{
+			return false;
+		}
+
+		if (uiX < lineX || uiX > (lineX + fNameWidth))
+		{
+			return false;
+		}
+
+		outID = strID;
+		return true;
 	}
 
 	return false;
