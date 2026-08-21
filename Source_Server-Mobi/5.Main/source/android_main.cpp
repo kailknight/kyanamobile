@@ -667,10 +667,16 @@ constexpr float kVirtualJoystickRingDiameterPx = 300.0f;
 constexpr float kVirtualJoystickKnobDiameterPx = 138.0f;
 constexpr float kVirtualJoystickDeadZonePx = 40.0f;
 
-// Grab margin outside the ring - roughly a thumb's width, so the stick answers
-// without having to be hit exactly. Everything beyond it now falls through to
-// the world instead of walking the character.
-constexpr float kVirtualJoystickGrabMarginPx = 120.0f;
+// Grab margin outside the ring, so the stick answers without having to be hit
+// exactly.
+//
+// 120px was not enough in practice. A tap that missed it fell straight through to
+// the world, and a tap in the bottom left corner of the screen picks ground that
+// is always behind and to the left of the character - so a tap aimed at the right
+// side of the stick walked left, whichever side of the stick it was aimed at. That
+// is what "I tap right and it still goes left" was: not the stick choosing a
+// direction, the stick never being touched at all.
+constexpr float kVirtualJoystickGrabMarginPx = 200.0f;
 constexpr float kVirtualJoystickMaxScreenFraction = 0.30f;
 
 // A press shorter than this is a tap and gets exactly one tile, like a single
@@ -680,6 +686,13 @@ constexpr float kVirtualJoystickMaxScreenFraction = 0.30f;
 // being promoted to holds and walking two tiles or more. This has to sit above
 // how long a person holds a button they mean as a tap, not at the low end of it.
 constexpr uint32_t kVirtualJoystickHoldMs = 300;
+
+// How close to the middle of the tile it is entering the character has to be before
+// a direction change is acted on, in world units (a tile is TERRAIN_SCALE = 100).
+// MovePath swaps waypoints at a distance of 20, so anything at or under that is
+// effectively "the step is done"; 30 commits the turn a frame or two earlier without
+// cutting the step short enough to see.
+constexpr float kVirtualJoystickTurnCommitPx = 30.0f;
 
 // Floor between two path commands. A direction change is meant to be immediate,
 // and three frames is not noticeable, but without a floor a thumb sitting on the
@@ -2995,6 +3008,64 @@ float GetVirtualJoystickRenderCenterY()
     return std::round(GetVirtualJoystickGeometry().centerY);
 }
 
+// TEMPORARY diagnostic for the tap behaviour. Writes to mu_joystick_debug.txt in
+// the external files dir the process chdir's to at startup, because adb logcat
+// comes back empty on these phones. Remove with MU_JOYSTICK_TRACE once the tap
+// question is settled.
+#define MU_JOYSTICK_TRACE 1
+
+#if defined(MU_JOYSTICK_TRACE)
+void JoystickTrace(const char* what)
+{
+    FILE* f = fopen("mu_joystick_debug.txt", "a");
+    if (f == nullptr)
+    {
+        return;
+    }
+
+    if (Hero != nullptr)
+    {
+        const PATH_t& p = Hero->Path;
+        fprintf(f,
+            // Run is a float (w_CharacterInfo.h:244). Printing it with %d put it in an
+            // FP register with nothing reading it, and shifted every later %d one slot
+            // early - which is why the first pull of this log decoded as nonsense.
+            "%8u %-10s pos=(%3d,%3d) obj=(%7.1f,%7.1f) tile=(%6.2f,%6.2f) angle=%6.1f mv=%d mt=%d run=%5.1f act=%3d path=%d/%d/%d p0=(%3d,%3d) p1=(%3d,%3d) oct=%d issued=%d hold=%d\n",
+            MU_MobileGetTicks(),
+            what,
+            Hero->PositionX,
+            Hero->PositionY,
+            Hero->Object.Position[0],
+            Hero->Object.Position[1],
+            Hero->Object.Position[0] / TERRAIN_SCALE,
+            Hero->Object.Position[1] / TERRAIN_SCALE,
+            Hero->Object.Angle[2],
+            Hero->Movement ? 1 : 0,
+            Hero->MovementType,
+            Hero->Run,
+            Hero->Object.CurrentAction,
+            static_cast<int>(p.CurrentPath),
+            static_cast<int>(p.CurrentPathFloat),
+            static_cast<int>(p.PathNum),
+            p.PathNum > 0 ? p.PathX[0] : -1,
+            p.PathNum > 0 ? p.PathY[0] : -1,
+            p.PathNum > 1 ? p.PathX[1] : -1,
+            p.PathNum > 1 ? p.PathY[1] : -1,
+            g_virtualJoystick.octant,
+            g_virtualJoystick.issuedOctant,
+            g_virtualJoystick.issuedAsHold ? 1 : 0);
+    }
+    else
+    {
+        fprintf(f, "%8u %-10s (no hero)\n", MU_MobileGetTicks(), what);
+    }
+
+    fclose(f);
+}
+#else
+inline void JoystickTrace(const char*) {}
+#endif
+
 void ClearVirtualJoystick()
 {
     g_virtualJoystick = ActiveVirtualJoystick{};
@@ -3022,6 +3093,17 @@ bool IsInsideVirtualJoystickDynamicArea(float uiX, float uiY)
     }
 
     const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+
+    // The screen corner behind the stick belongs to the stick. Nobody taps the
+    // bottom-left corner to walk somewhere - and a tap there resolves to ground
+    // that is always down and to the left of the centred character, so missing the
+    // grab circle by a few pixels did not fall through harmlessly, it walked the
+    // character the wrong way with conviction.
+    if (uiX <= geometry.centerX && uiY >= geometry.centerY)
+    {
+        return true;
+    }
+
     const float pxX = (uiX - geometry.centerX) * geometry.pxPerUiX;
     const float pxY = (uiY - geometry.centerY) * geometry.pxPerUiY;
 
@@ -3118,6 +3200,7 @@ bool HandleVirtualJoystickFingerDown(const SDL_TouchFingerEvent& touch)
     }
 
     StartVirtualJoystick(touch.fingerId, uiX, uiY);
+    JoystickTrace("DOWN");
     return true;
 }
 
@@ -3182,12 +3265,15 @@ bool HandleVirtualJoystickFingerUp(const SDL_TouchFingerEvent& touch)
     // finger on the stick and the single tile never gets walked. Issue it here
     // instead. The truncation below is then a no-op - a one tile path is already
     // as short as it can be.
+    JoystickTrace("UP");
     if (g_virtualJoystick.issuedOctant < 0 && g_virtualJoystick.octant >= 0)
     {
         ApplyVirtualJoystickMovement();
+        JoystickTrace("UP-FLUSH");
     }
 
     StopVirtualJoystickMovementAtCurrentTile();
+    JoystickTrace("UP-TRUNC");
     ClearVirtualJoystick();
     return true;
 }
@@ -3330,6 +3416,37 @@ void ApplyVirtualJoystickMovement()
     const int octant = g_virtualJoystick.octant;
     const PATH_t& path = c->Path;
 
+    // Which way the live path says the current step is going, and whether the thumb
+    // is asking for the exact opposite. Read off the path rather than off this
+    // press's own last issue, so it is answerable on the first frame of a press.
+    const int stepOctant = GetVirtualJoystickStepOctant(path, c->Movement);
+    const bool doublingBack = c->Movement
+        && g_virtualJoystick.issuedOctant >= 0
+        && stepOctant >= 0
+        && (((octant - stepOctant) & 7) == 4);
+
+    // How far the model still has to travel to reach the middle of the tile it is
+    // walking into. Tile centres are at tile*TERRAIN_SCALE + half a tile, which the
+    // trace confirms: PositionX 176 sits at Position[0] 17650.
+    const float destX = (static_cast<float>(c->PositionX) + 0.5f) * TERRAIN_SCALE;
+    const float destY = (static_cast<float>(c->PositionY) + 0.5f) * TERRAIN_SCALE;
+    const float stepRemaining = std::sqrt(((destX - o->Position[0]) * (destX - o->Position[0]))
+        + ((destY - o->Position[1]) * (destY - o->Position[1])));
+
+    // "If you are mid-step you finish that one step" - and until now it did not.
+    // PathFinding2 resets CurrentPath and CurrentPathFloat to 0, and MovePath's
+    // first waypoint off a fresh path is only ~20% of the way from PathX[0] toward
+    // PathX[1], so re-pathing mid-step threw away the progress the model had made
+    // and restarted it from a tile it had not reached. Swinging the thumb round
+    // re-issued every ~100ms and the character stood still and vibrated: traced at
+    // 17 re-issues over 2.7s for 0.7 tiles of travel.
+    //
+    // So a turn waits for the step boundary. Standing still and doubling straight
+    // back are the two exceptions the spec calls out - both turn at once.
+    const bool turnCommitted = !c->Movement
+        || doublingBack
+        || stepRemaining <= kVirtualJoystickTurnCommitPx;
+
     bool reissue = false;
     if (g_virtualJoystick.issuedOctant < 0)
     {
@@ -3338,7 +3455,12 @@ void ApplyVirtualJoystickMovement()
     }
     else if (octant != g_virtualJoystick.issuedOctant)
     {
-        // The thumb crossed into another heading.
+        // The thumb crossed into another heading. Honour it at the end of the step
+        // in progress, not partway through it.
+        if (!turnCommitted)
+        {
+            return;
+        }
         reissue = true;
     }
     else if (holding && !g_virtualJoystick.issuedAsHold)
@@ -3397,12 +3519,6 @@ void ApplyVirtualJoystickMovement()
     // facing through 180 degrees mid-tile and walks it back the way it came. A tap
     // that reverses now finishes the tile it is entering and walks from there, the
     // same as any other tap.
-    const int stepOctant = GetVirtualJoystickStepOctant(path, c->Movement);
-    const bool doublingBack = c->Movement
-        && g_virtualJoystick.issuedOctant >= 0
-        && stepOctant >= 0
-        && (((octant - stepOctant) & 7) == 4);
-
     int startX = c->PositionX;
     int startY = c->PositionY;
     if (doublingBack && path.PathNum > 0)
@@ -3411,6 +3527,37 @@ void ApplyVirtualJoystickMovement()
         startX = path.PathX[current];
         startY = path.PathY[current];
     }
+
+    // ...but only while PositionX/Y still describes where the character is. It can
+    // run away from the model: a server position sync can snap it several tiles at
+    // once, and every re-issue while turning leaves it another tile ahead of the
+    // object, which never catches up because the next path is rooted on the stale
+    // value again. Traced at 4 tiles of drift, and the effect on screen is the
+    // character sliding sideways across the map to reach a path start it was never
+    // standing on.
+    //
+    // One tile of lead is the normal, wanted case - that is the tile being entered.
+    // More than that is drift, and the tile the model is actually in wins.
+    const int objectTileX = static_cast<int>(std::floor(c->Object.Position[0] / TERRAIN_SCALE));
+    const int objectTileY = static_cast<int>(std::floor(c->Object.Position[1] / TERRAIN_SCALE));
+    const bool drifted = std::abs(objectTileX - startX) > 1 || std::abs(objectTileY - startY) > 1;
+    if (drifted && objectTileX >= 0 && objectTileX <= 255 && objectTileY >= 0 && objectTileY <= 255)
+    {
+        startX = objectTileX;
+        startY = objectTileY;
+    }
+
+#if defined(MU_JOYSTICK_TRACE)
+    if (FILE* f = fopen("mu_joystick_debug.txt", "a"))
+    {
+        fprintf(f,
+            "%8u ISSUE-PRE  oct=%d stepOct=%d back=%d drift=%d hold=%d rem=%5.1f start=(%3d,%3d) pos=(%3d,%3d) objtile=(%3d,%3d) path=%d/%d\n",
+            nowMs, octant, stepOctant, doublingBack ? 1 : 0, drifted ? 1 : 0, holding ? 1 : 0,
+            stepRemaining, startX, startY, c->PositionX, c->PositionY, objectTileX, objectTileY,
+            static_cast<int>(path.CurrentPath), static_cast<int>(path.PathNum));
+        fclose(f);
+    }
+#endif
 
     const int heading = SlideVirtualJoystickOctant(startX, startY, octant);
     if (heading < 0)
@@ -3453,29 +3600,49 @@ void ApplyVirtualJoystickMovement()
     g_virtualJoystick.lastIssueMs = nowMs;
     g_virtualJoystick.ownsHeroPath = true;
 
-#if defined(MU_ANDROID_PERF_LOG)
+#if defined(MU_JOYSTICK_TRACE)
     if (FILE* f = fopen("mu_joystick_debug.txt", "a"))
     {
         fprintf(f,
-            "JOY octant=%d heading=%d hold=%d start=(%d,%d) target=(%d,%d) heroPos=(%d,%d) angle=%.1f movement=%d pathNum=%d currentPath=%d back=%d\n",
-            octant,
-            heading,
-            holding ? 1 : 0,
-            startX,
-            startY,
-            TargetX,
-            TargetY,
-            c->PositionX,
-            c->PositionY,
-            o->Angle[2],
-            c->Movement ? 1 : 0,
-            static_cast<int>(path.PathNum),
-            static_cast<int>(path.CurrentPath),
-            doublingBack ? 1 : 0);
+            "%8u ISSUE-OK   oct=%d head=%d hold=%d start=(%3d,%3d) target=(%3d,%3d) pos=(%3d,%3d) angle=%6.1f path=%d/%d\n",
+            nowMs, octant, heading, holding ? 1 : 0,
+            startX, startY, TargetX, TargetY,
+            c->PositionX, c->PositionY, o->Angle[2],
+            static_cast<int>(path.CurrentPath), static_cast<int>(path.PathNum));
         fclose(f);
     }
 #endif
 }
+
+#if defined(MU_JOYSTICK_TRACE)
+// One line whenever the tile the hero occupies changes, or movement starts or
+// stops, so the trace shows the walk itself and not only the commands. Runs from
+// UpdateVirtualPadHolds, which is every frame.
+void TraceHeroTileChanges()
+{
+    static int s_lastX = -1;
+    static int s_lastY = -1;
+    static int s_lastMovement = -1;
+
+    if (Hero == nullptr)
+    {
+        return;
+    }
+
+    const int movement = Hero->Movement ? 1 : 0;
+    if (Hero->PositionX == s_lastX && Hero->PositionY == s_lastY && movement == s_lastMovement)
+    {
+        return;
+    }
+
+    const bool tileChanged = (Hero->PositionX != s_lastX) || (Hero->PositionY != s_lastY);
+    s_lastX = Hero->PositionX;
+    s_lastY = Hero->PositionY;
+    s_lastMovement = movement;
+
+    JoystickTrace(tileChanged ? (movement ? "TILE-ENTER" : "TILE-STOP") : (movement ? "MOVE-ON" : "MOVE-OFF"));
+}
+#endif
 
 bool IsMiniMapToggleAvailable()
 {
@@ -8235,6 +8402,9 @@ void UpdateVirtualPadHolds()
     }
 
     ApplyVirtualJoystickMovement();
+#if defined(MU_JOYSTICK_TRACE)
+    TraceHeroTileChanges();
+#endif
 }
 
 float UiToScreenX(float uiX)
