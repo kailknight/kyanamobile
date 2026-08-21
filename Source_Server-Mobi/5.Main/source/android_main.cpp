@@ -3210,6 +3210,42 @@ bool IsVirtualJoystickTileOpen(int tileX, int tileY)
     return TW_CHARACTER > attribute;
 }
 
+// Which of the eight headings the character is walking right now, or -1 if it is
+// standing still or on a path that is not a single-tile step.
+//
+// Read off the path rather than off Object.Angle, which is a float that is part
+// way through turning, and rather than off whatever the stick last issued, which
+// says nothing about a path some other mover set - or about the previous tap,
+// since each press starts with no issued heading of its own.
+int GetVirtualJoystickStepOctant(const PATH_t& path, bool movement)
+{
+    if (!movement || path.PathNum < 2)
+    {
+        return -1;
+    }
+
+    const int current = static_cast<int>(path.CurrentPath);
+    if (current < 0 || (current + 1) > (static_cast<int>(path.PathNum) - 1))
+    {
+        return -1;
+    }
+
+    // PathX[CurrentPath] is the tile just left, PathX[CurrentPath+1] the one being
+    // entered.
+    const int stepX = static_cast<int>(path.PathX[current + 1]) - static_cast<int>(path.PathX[current]);
+    const int stepY = static_cast<int>(path.PathY[current + 1]) - static_cast<int>(path.PathY[current]);
+
+    for (int octant = 0; octant < 8; ++octant)
+    {
+        if (kVirtualJoystickOctantDX[octant] == stepX && kVirtualJoystickOctantDY[octant] == stepY)
+        {
+            return octant;
+        }
+    }
+
+    return -1;
+}
+
 // Nearest open heading to the one being pushed, so a wall is slid along rather
 // than walked into: straight on first, then one step to either side, then two.
 int SlideVirtualJoystickOctant(int tileX, int tileY, int octant)
@@ -3338,9 +3374,18 @@ void ApplyVirtualJoystickMovement()
     //
     // Doubling straight back is the exception: path from the tile just left, so the
     // character turns where it stands instead of walking the step out first.
+    //
+    // Which way it is doubling back from has to be read off the live path rather
+    // than off this press's own last issue, or a tap does not count as a reversal
+    // at all - a fresh press starts with issuedOctant at -1. Tapping right while a
+    // left step was still running then pathed one tile right OF THE LEFT TILE,
+    // which is the tile the character had just left: it walked the rest of the way
+    // left and came back for no net movement, and only the tap after that went
+    // right.
+    const int stepOctant = GetVirtualJoystickStepOctant(path, c->Movement);
     const bool doublingBack = c->Movement
-        && g_virtualJoystick.issuedOctant >= 0
-        && (((octant - g_virtualJoystick.issuedOctant) & 7) == 4);
+        && stepOctant >= 0
+        && (((octant - stepOctant) & 7) == 4);
 
     int startX = c->PositionX;
     int startY = c->PositionY;
