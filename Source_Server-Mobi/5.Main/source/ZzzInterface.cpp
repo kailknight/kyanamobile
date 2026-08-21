@@ -92,7 +92,7 @@ extern char *g_lpszMp3[NUM_MUSIC];
 
 extern vec3_t MousePosition, MouseTarget;
 #ifdef __ANDROID__
-extern bool IsAndroidVirtualJoystickDrivingMouse();
+extern bool IsAndroidVirtualJoystickHoldingMovement();
 #endif
 
 extern void RegisterBuff( eBuffState buff, OBJECT* o, const int bufftime = 0 );
@@ -7935,6 +7935,44 @@ void CheckGate()
 LONG FAR PASCAL WndProc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
 void MoveEffect( OBJECT *o, int iIndex);
 
+// Lifted verbatim out of the click-to-move branch below, which is its only
+// desktop caller and still reads exactly as it did (Success && this). The Android
+// movement stick needs the same answer before it hands the hero a path, and a
+// second hand-written copy of a whitelist this long would drift the first time
+// either side gained an animation.
+//
+// Reads as: not being shocked, not mid-teleport, not fading, and not in the
+// middle of an attack, a skill, a sleep or a recover - unless the action is one of
+// the two-hand, dark-lord/horse or Fenrir stand/walk/run ranges, which are
+// ordinary locomotion that happens to sit outside the first range.
+bool CanHeroAcceptMoveCommand(OBJECT* o)
+{
+	if (o == NULL)
+		return false;
+
+	return ( ( o->CurrentAction!=PLAYER_SHOCK && ( o->Teleport!=TELEPORT_BEGIN && o->Teleport!=TELEPORT && o->Alpha>=0.7f ) &&
+		( o->CurrentAction<PLAYER_ATTACK_FIST || o->CurrentAction>PLAYER_RIDE_SKILL )
+		&& ( o->CurrentAction<PLAYER_SKILL_SLEEP || o->CurrentAction>PLAYER_SKILL_LIGHTNING_SHOCK )
+		&& o->CurrentAction!=PLAYER_RECOVER_SKILL
+#ifdef PBG_ADD_NEWCHAR_MONK_SKILL
+		&& (o->CurrentAction<PLAYER_SKILL_THRUST ||
+#ifdef PBG_FIX_NEWCHAR_MONK_UNIANI
+		o->CurrentAction>PLAYER_RAGE_UNI_ATTACK_ONE_RIGHT
+#else //PBG_FIX_NEWCHAR_MONK_UNIANI
+		o->CurrentAction>PLAYER_SKILL_HP_UP_OURFORCES
+#endif //PBG_FIX_NEWCHAR_MONK_UNIANI
+		)
+#endif //PBG_ADD_NEWCHAR_MONK_SKILL
+		)
+		||( o->CurrentAction>=PLAYER_STOP_TWO_HAND_SWORD_TWO && o->CurrentAction<=PLAYER_RUN_TWO_HAND_SWORD_TWO )
+		||( o->CurrentAction>=PLAYER_DARKLORD_STAND && o->CurrentAction<=PLAYER_RUN_RIDE_HORSE )
+		|| (o->CurrentAction >= PLAYER_FENRIR_RUN && o->CurrentAction <= PLAYER_FENRIR_WALK_ONE_LEFT)
+#ifdef PBG_ADD_NEWCHAR_MONK_ANI
+		|| (o->CurrentAction >= PLAYER_RAGE_FENRIR_WALK && o->CurrentAction <= PLAYER_RAGE_FENRIR_STAND_ONE_LEFT)
+#endif //PBG_ADD_NEWCHAR_MONK_ANI
+		);
+}
+
 void MoveHero()
 {
 	CHARACTER *c = Hero;
@@ -8147,7 +8185,21 @@ void MoveHero()
 					{
 						Success = true;
 					}
-					
+
+#ifdef __ANDROID__
+					// The movement stick owns the hero's path while it is held, so
+					// nothing below may hand out a competing one. It would path to
+					// wherever the touch cursor was last left - the last tap on the
+					// world, or a hotkey press - and the two would overwrite each
+					// other's path every frame. The stick no longer fakes
+					// MouseLButton, so in practice only the auto-attack rule just
+					// above can still reach here.
+					if( IsAndroidVirtualJoystickHoldingMovement() )
+					{
+						Success = false;
+					}
+#endif
+
 					if( Success && !g_isCharacterBuff(o, eDeBuff_Stun) && !g_isCharacterBuff(o, eDeBuff_Sleep) )
 					{
 						g_iFollowCharacter = -1;
@@ -8186,28 +8238,7 @@ void MoveHero()
 						SendMove(c,o);
 				}
 			}
-			else if ( Success && 
-				( ( o->CurrentAction!=PLAYER_SHOCK && ( o->Teleport!=TELEPORT_BEGIN && o->Teleport!=TELEPORT && o->Alpha>=0.7f ) &&
-				( o->CurrentAction<PLAYER_ATTACK_FIST || o->CurrentAction>PLAYER_RIDE_SKILL )
-				&& ( o->CurrentAction<PLAYER_SKILL_SLEEP || o->CurrentAction>PLAYER_SKILL_LIGHTNING_SHOCK )
-				&& o->CurrentAction!=PLAYER_RECOVER_SKILL
-#ifdef PBG_ADD_NEWCHAR_MONK_SKILL
-				&& (o->CurrentAction<PLAYER_SKILL_THRUST || 
-#ifdef PBG_FIX_NEWCHAR_MONK_UNIANI
-				o->CurrentAction>PLAYER_RAGE_UNI_ATTACK_ONE_RIGHT
-#else //PBG_FIX_NEWCHAR_MONK_UNIANI
-				o->CurrentAction>PLAYER_SKILL_HP_UP_OURFORCES
-#endif //PBG_FIX_NEWCHAR_MONK_UNIANI
-				)
-#endif //PBG_ADD_NEWCHAR_MONK_SKILL
-				)
-				||( o->CurrentAction>=PLAYER_STOP_TWO_HAND_SWORD_TWO && o->CurrentAction<=PLAYER_RUN_TWO_HAND_SWORD_TWO )
-				||( o->CurrentAction>=PLAYER_DARKLORD_STAND && o->CurrentAction<=PLAYER_RUN_RIDE_HORSE )
-				|| (o->CurrentAction >= PLAYER_FENRIR_RUN && o->CurrentAction <= PLAYER_FENRIR_WALK_ONE_LEFT)
-#ifdef PBG_ADD_NEWCHAR_MONK_ANI
-				|| (o->CurrentAction >= PLAYER_RAGE_FENRIR_WALK && o->CurrentAction <= PLAYER_RAGE_FENRIR_STAND_ONE_LEFT)
-#endif //PBG_ADD_NEWCHAR_MONK_ANI
-				) )
+			else if ( Success && CanHeroAcceptMoveCommand(o) )
 			{
 				int RightType = CharacterMachine->Equipment[EQUIPMENT_WEAPON_RIGHT].Type;
 				int LeftType = CharacterMachine->Equipment[EQUIPMENT_WEAPON_LEFT].Type;
@@ -8282,7 +8313,7 @@ void MoveHero()
 					}
 					else if ( SelectedOperate != -1
 #ifdef __ANDROID__
-						&& !IsAndroidVirtualJoystickDrivingMouse()
+						&& !IsAndroidVirtualJoystickHoldingMovement()
 #endif
 						&& ( c->SafeZone || ( c->Helper.Type<MODEL_HELPER+2 || c->Helper.Type>MODEL_HELPER+4 || c->Helper.Type != MODEL_HELPER+37 || gCustomPet2.GetInfoPetType(c->Helper.Type - 1171) == 5 || gCustomPet2.GetInfoPetType(c->Helper.Type - 1171) == 6)))
 					{
@@ -8304,7 +8335,7 @@ void MoveHero()
 					}
 					else if(SelectedNpc!=-1
 #ifdef __ANDROID__
-						&& !IsAndroidVirtualJoystickDrivingMouse()
+						&& !IsAndroidVirtualJoystickHoldingMovement()
 #endif
 						&& !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
 						&& !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE)
@@ -8351,7 +8382,7 @@ void MoveHero()
 					}
 					else if(SelectedItem!=-1
 #ifdef __ANDROID__
-						&& !IsAndroidVirtualJoystickDrivingMouse()
+						&& !IsAndroidVirtualJoystickHoldingMovement()
 #endif
 						)
 					{

@@ -57,6 +57,10 @@ void Action(CHARACTER *c, OBJECT *o, bool Now);
 
 bool PressKey(int Key);
 void MoveHero();
+// The action whitelist the click-to-move branch of MoveHero gates on: is the hero
+// in a state where it can be told to walk somewhere? Shared so the Android
+// movement stick asks the same question rather than its own copy of it.
+bool CanHeroAcceptMoveCommand(OBJECT* o);
 void EditObjects();
 
 void ClearInput(BOOL bClearWhisperTarget = TRUE);

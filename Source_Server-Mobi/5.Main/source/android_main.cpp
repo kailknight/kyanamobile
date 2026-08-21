@@ -648,35 +648,49 @@ constexpr float kVirtualPadInputMaxY = 480.0f;
 constexpr float kInventoryWindowWidth = 190.0f;
 constexpr float kInventoryWindowHeight = 429.0f;
 constexpr float kVirtualAutoAcquireMaxDistance = 10.0f;
+// The stick has one home and never moves off it. It used to recentre on
+// whichever finger grabbed it, anywhere in the lower-left quadrant, and only
+// appear while touched - so there was nothing on screen to aim at and no way to
+// tell which way you were pushing relative to it.
 constexpr float kVirtualJoystickDefaultCenterX = 94.0f;
 constexpr float kVirtualJoystickDefaultCenterY = 356.0f;
-constexpr float kVirtualJoystickRadius = 58.0f;
-constexpr float kVirtualJoystickDeadZone = 10.0f;
-constexpr float kVirtualJoystickKnobRadius = 22.0f;
-constexpr float kVirtualJoystickMouseMinRadius = 36.0f;
-constexpr float kVirtualJoystickMouseMaxRadius = 132.0f;
 
-// The joystick walks the character by parking the mouse cursor out in the
-// direction of travel and letting the normal click-to-move pathing chase it, so
-// this origin is the point every drive offset is measured from. It has to be
-// where the hero actually sits on screen, and in this 640x480 mouse space that
-// is the exact centre.
-//
-// It used to be (320, 180), which is 60 units above the hero, and that bias is
-// what made the character set off upward before turning: at low deflection the
-// drive radius is only 36, so pushing down put the cursor at y=216 - still
-// above the hero - and pushing left or right put it up-left or up-right. Only
-// once the stick passed roughly a quarter deflection did the radius exceed the
-// bias and the intended direction win. Pushing up was always correct, which is
-// why up was the one direction that never looked wrong.
-constexpr float kVirtualJoystickDriveOriginX = 320.0f;
-constexpr float kVirtualJoystickDriveOriginY = 240.0f;
-constexpr float kVirtualJoystickDynamicAreaMinY = 210.0f;
-constexpr float kVirtualJoystickDynamicAreaMaxX = 212.0f;
-constexpr float kVirtualJoystickOuterRenderW = 115.0f;
-constexpr float kVirtualJoystickOuterRenderH = 114.0f;
-constexpr float kVirtualJoystickKnobRenderW = 53.0f;
-constexpr float kVirtualJoystickKnobRenderH = 54.0f;
+// Sized and hit-tested in device pixels, not UI units. UI space is a 640x480
+// stretch of whatever the panel is (see TouchToVirtualUi), so on the 2480x1116
+// test phone one UI unit is 3.875px across but only 2.325px down: a ring
+// specified in UI units draws as a wide ellipse, and a 45 degree push measured
+// in UI units is 59 degrees under the thumb. Both the ring the player aims at
+// and the boundaries between the eight directions have to agree with what is on
+// the glass, so the physical size is the constant and the UI extents are derived
+// from it per axis.
+constexpr float kVirtualJoystickRingDiameterPx = 300.0f;
+constexpr float kVirtualJoystickKnobDiameterPx = 138.0f;
+constexpr float kVirtualJoystickDeadZonePx = 40.0f;
+
+// Grab margin outside the ring - roughly a thumb's width, so the stick answers
+// without having to be hit exactly. Everything beyond it now falls through to
+// the world instead of walking the character.
+constexpr float kVirtualJoystickGrabMarginPx = 120.0f;
+constexpr float kVirtualJoystickMaxScreenFraction = 0.30f;
+
+// A press shorter than this is a tap and gets exactly one tile, like a single
+// click on PC. Past it the press is a hold and the path is kept topped up.
+constexpr uint32_t kVirtualJoystickHoldMs = 160;
+
+// Floor between two path commands. A direction change is meant to be immediate,
+// and three frames is not noticeable, but without a floor a thumb sitting on the
+// edge of the dead zone or a refused SendMove would re-path every frame.
+constexpr uint32_t kVirtualJoystickMinIssueMs = 50;
+
+// Tiles per path while holding. Long enough that the character is re-pathed once
+// every couple of tiles rather than every one, short enough that letting go
+// cannot leave the server believing the hero walked much further than it did.
+constexpr int kVirtualJoystickHoldSteps = 2;
+
+// Tile deltas for the eight headings, indexed clockwise from world -Y - the
+// convention CreateAngle uses (ZzzAI.cpp).
+constexpr int kVirtualJoystickOctantDX[8] = {  0, +1, +1, +1,  0, -1, -1, -1 };
+constexpr int kVirtualJoystickOctantDY[8] = { -1, -1,  0, +1, +1, +1,  0, -1 };
 constexpr SDL_FingerID kPcMouseJoystickFingerId = static_cast<SDL_FingerID>(-2);
 constexpr bool kShowVirtualAttackButton = kEnableVirtualCombatOverlay;
 constexpr bool kShowVirtualSkillButtons = kEnableVirtualCombatOverlay;
@@ -1410,13 +1424,27 @@ struct ActiveVirtualTouch
 struct ActiveVirtualJoystick
 {
     SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
-    float centerX = kVirtualJoystickDefaultCenterX;
-    float centerY = kVirtualJoystickDefaultCenterY;
+
+    // Thumb position as an offset from the fixed home, in UI units, clamped to
+    // the ring. Only the knob draw uses it; direction comes from octant.
     float thumbOffsetX = 0.0f;
     float thumbOffsetY = 0.0f;
-    float moveDirX = 0.0f;
-    float moveDirY = 0.0f;
-    float moveStrength = 0.0f;
+
+    // Which of the eight headings is being pushed, or -1 inside the dead zone.
+    int octant = -1;
+
+    uint32_t pressedMs = 0;
+    uint32_t lastIssueMs = 0;
+
+    // What was last asked of the character: the heading, and whether that command
+    // was a hold (topped up) or the single tile of a tap.
+    int  issuedOctant = -1;
+    bool issuedAsHold = false;
+
+    // Set while the character is walking a path this stick commanded, so letting
+    // go only ever truncates the stick's own path and not, say, a tap-to-move
+    // destination the player picked on the ground.
+    bool ownsHeroPath = false;
 };
 
 struct ActiveVirtualPickerTouch
@@ -1518,7 +1546,10 @@ std::array<int, kVirtualSkillSlotCount> g_virtualSkillSlots = []()
 std::array<int, kVirtualSkillSlotCount> g_virtualSkillTypes{};
 ActiveVirtualJoystick g_virtualJoystick{};
 ActiveVirtualPickerTouch g_virtualPickerTouch{};
-bool g_virtualJoystickDrivingMouse = false;
+// True while the stick has the character walking one of its own paths. The
+// click-to-move loop in ZzzInterface.cpp reads it through
+// IsAndroidVirtualJoystickHoldingMovement to stay out of the way.
+bool g_virtualJoystickHoldingMovement = false;
 bool g_joystickPcMouseCaptured = false;
 bool g_virtualSkillSlotsLoaded = false;
 bool g_virtualSkillSlotsDirty = false;
@@ -2895,6 +2926,80 @@ bool HandleVirtualPickerFingerUp(const SDL_TouchFingerEvent& touch)
     return true;
 }
 
+// Everything about the ring in one place: the home in UI units, and the ring,
+// knob, dead zone and grab area in device pixels alongside the UI extents they
+// come out as on this screen. The pixel figures are what the direction maths and
+// the hit test use; the UI extents exist because the draw calls take UI units.
+struct VirtualJoystickGeometry
+{
+    float centerX = kVirtualJoystickDefaultCenterX;
+    float centerY = kVirtualJoystickDefaultCenterY;
+    float pxPerUiX = 1.0f;
+    float pxPerUiY = 1.0f;
+    float ringRadiusPx = 0.0f;
+    float deadZonePx = 0.0f;
+    float grabRadiusPx = 0.0f;
+    float ringDiameterUiX = 0.0f;
+    float ringDiameterUiY = 0.0f;
+    float knobDiameterUiX = 0.0f;
+    float knobDiameterUiY = 0.0f;
+};
+
+VirtualJoystickGeometry GetVirtualJoystickGeometry()
+{
+    VirtualJoystickGeometry geometry;
+
+    geometry.pxPerUiX = std::max(static_cast<float>(WindowWidth) / 640.0f, 0.0001f);
+    geometry.pxPerUiY = std::max(static_cast<float>(WindowHeight) / 480.0f, 0.0001f);
+
+    // Keep the ring a sane fraction of the panel on screens far from the shape
+    // the pixel sizes above were picked on.
+    const float shortEdgePx = std::min(static_cast<float>(WindowWidth), static_cast<float>(WindowHeight));
+    const float maxDiameterPx = std::max(shortEdgePx * kVirtualJoystickMaxScreenFraction, 1.0f);
+    const float scale = std::min(1.0f, maxDiameterPx / kVirtualJoystickRingDiameterPx);
+
+    const float ringDiameterPx = kVirtualJoystickRingDiameterPx * scale;
+    const float knobDiameterPx = kVirtualJoystickKnobDiameterPx * scale;
+
+    geometry.ringRadiusPx = ringDiameterPx * 0.5f;
+    geometry.deadZonePx = kVirtualJoystickDeadZonePx * scale;
+    geometry.grabRadiusPx = geometry.ringRadiusPx + (kVirtualJoystickGrabMarginPx * scale);
+
+    geometry.ringDiameterUiX = ringDiameterPx / geometry.pxPerUiX;
+    geometry.ringDiameterUiY = ringDiameterPx / geometry.pxPerUiY;
+    geometry.knobDiameterUiX = knobDiameterPx / geometry.pxPerUiX;
+    geometry.knobDiameterUiY = knobDiameterPx / geometry.pxPerUiY;
+
+    // Nudge the home in only as far as it takes to keep the whole ring on screen.
+    const float ringRadiusUiX = geometry.ringDiameterUiX * 0.5f;
+    const float ringRadiusUiY = geometry.ringDiameterUiY * 0.5f;
+    const float minX = ringRadiusUiX + 4.0f;
+    const float minY = ringRadiusUiY + 4.0f;
+    geometry.centerX = std::clamp(kVirtualJoystickDefaultCenterX, minX, std::max(minX, 640.0f - minX));
+    geometry.centerY = std::clamp(kVirtualJoystickDefaultCenterY, minY, std::max(minY, kVirtualPadInputMaxY - minY));
+
+    return geometry;
+}
+
+float GetVirtualJoystickRenderCenterX()
+{
+    return std::round(GetVirtualJoystickGeometry().centerX);
+}
+
+float GetVirtualJoystickRenderCenterY()
+{
+    return std::round(GetVirtualJoystickGeometry().centerY);
+}
+
+void ClearVirtualJoystick()
+{
+    g_virtualJoystick = ActiveVirtualJoystick{};
+    g_virtualJoystickHoldingMovement = false;
+}
+
+// A thumb's width around the ring, and nothing else. The whole lower-left
+// quadrant used to grab the stick, which is why a tap on the ground down there
+// walked the character instead of doing what a tap anywhere else does.
 bool IsInsideVirtualJoystickDynamicArea(float uiX, float uiY)
 {
     if (!IsVirtualPadAvailable())
@@ -2907,78 +3012,16 @@ bool IsInsideVirtualJoystickDynamicArea(float uiX, float uiY)
         return false;
     }
 
-    if (uiY < kVirtualJoystickDynamicAreaMinY)
-    {
-        return false;
-    }
-
-    if (uiX < 0.0f || uiX > kVirtualJoystickDynamicAreaMaxX)
-    {
-        return false;
-    }
-
     if (IsTouchOverInventoryWindow(uiX, uiY))
     {
         return false;
     }
 
-    return true;
-}
+    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+    const float pxX = (uiX - geometry.centerX) * geometry.pxPerUiX;
+    const float pxY = (uiY - geometry.centerY) * geometry.pxPerUiY;
 
-float ClampVirtualJoystickCenterX(float uiX)
-{
-    const float minX = kVirtualJoystickRadius + 8.0f;
-    const float maxX = std::max(minX, kVirtualJoystickDynamicAreaMaxX - kVirtualJoystickRadius - 8.0f);
-    return std::clamp(uiX, minX, maxX);
-}
-
-float ClampVirtualJoystickCenterY(float uiY)
-{
-    const float minY = kVirtualJoystickDynamicAreaMinY + kVirtualJoystickRadius + 8.0f;
-    const float maxY = std::max(minY, kVirtualPadInputMaxY - kVirtualJoystickRadius - 8.0f);
-    return std::clamp(uiY, minY, maxY);
-}
-
-float GetVirtualJoystickRenderCenterX()
-{
-    return std::round((g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1))
-        ? g_virtualJoystick.centerX
-        : kVirtualJoystickDefaultCenterX);
-}
-
-float GetVirtualJoystickRenderCenterY()
-{
-    return std::round((g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1))
-        ? g_virtualJoystick.centerY
-        : kVirtualJoystickDefaultCenterY);
-}
-
-void ReleaseVirtualJoystickMouseDrive()
-{
-    if (!g_virtualJoystickDrivingMouse)
-    {
-        return;
-    }
-
-    g_virtualJoystickDrivingMouse = false;
-    MouseLButtonPush = false;
-    MouseLButton = false;
-    MouseLButtonPop = false;
-
-    // Put the cursor back on the character. While driving, the joystick parks
-    // the mouse out at driveRadius in the direction of travel; leaving it
-    // there on release means the next unrelated tap starts from a stale offset
-    // point, and anything that hit-tests the cursor still thinks the player is
-    // pointing away from themselves. The hero is always at screen centre,
-    // which is the same origin the drive code offsets from.
-    MouseX = static_cast<int>(kVirtualJoystickDriveOriginX);
-    MouseY = static_cast<int>(kVirtualJoystickDriveOriginY);
-}
-
-void ClearVirtualJoystick()
-{
-    g_virtualJoystick = ActiveVirtualJoystick{};
-    ReleaseVirtualJoystickMouseDrive();
+    return ((pxX * pxX) + (pxY * pxY)) <= (geometry.grabRadiusPx * geometry.grabRadiusPx);
 }
 
 bool HitTestVirtualJoystick(float uiX, float uiY)
@@ -2986,50 +3029,70 @@ bool HitTestVirtualJoystick(float uiX, float uiY)
     return IsInsideVirtualJoystickDynamicArea(uiX, uiY);
 }
 
+// Which of the eight headings the thumb is pushing, in world tile space.
+//
+// CreateAngle measures clockwise from -Y (ZzzAI.cpp), and the click-to-move
+// conversion in ZzzInterface.cpp is HeroAngle = -CreateAngle(mouse, hero) + 360
+// + 45, which for the main scene's fixed -45 degree camera yaw reduces to
+// worldAngle = 225 - screenAngle. Running the push through the same rotation is
+// what makes the stick read the screen - push up and the character goes up the
+// screen - while the tiles it walks stay in world space.
+int SnapVirtualJoystickOctant(float pxX, float pxY, int previousOctant)
+{
+    const float screenAngle = CreateAngle(0.0f, 0.0f, pxX, pxY);
+    const float worldAngle = std::fmod((225.0f - screenAngle) + 720.0f, 360.0f);
+    const int snapped = static_cast<int>(std::lround(worldAngle / 45.0f)) & 7;
+
+    if (previousOctant < 0 || snapped == previousOctant)
+    {
+        return snapped;
+    }
+
+    // A thumb resting on a boundary would otherwise flip between two headings
+    // every frame, and each flip is a re-path. Hold the heading already being
+    // walked until the push is clearly inside the next one.
+    const float offCentre = std::fabs(
+        std::fmod((worldAngle - (static_cast<float>(previousOctant) * 45.0f)) + 540.0f, 360.0f) - 180.0f);
+    return (offCentre > 27.0f) ? snapped : previousOctant;
+}
+
 void UpdateVirtualJoystickByUi(float uiX, float uiY)
 {
-    const float dx = uiX - g_virtualJoystick.centerX;
-    const float dy = uiY - g_virtualJoystick.centerY;
-    const float dist = std::sqrt((dx * dx) + (dy * dy));
+    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
 
-    float dirX = 0.0f;
-    float dirY = 0.0f;
-    if (dist > 0.0001f)
+    // Measured on the glass rather than in UI units: the 640x480 space is
+    // stretched differently across and down, so a push that looks like 45 degrees
+    // is not 45 degrees in UI units, and the octant it lands in would not be the
+    // one the player aimed at.
+    float pxX = (uiX - geometry.centerX) * geometry.pxPerUiX;
+    float pxY = (uiY - geometry.centerY) * geometry.pxPerUiY;
+    const float distPx = std::sqrt((pxX * pxX) + (pxY * pxY));
+
+    if (distPx > geometry.ringRadiusPx && distPx > 0.0001f)
     {
-        const float invDist = 1.0f / dist;
-        dirX = dx * invDist;
-        dirY = dy * invDist;
+        const float clamp = geometry.ringRadiusPx / distPx;
+        pxX *= clamp;
+        pxY *= clamp;
     }
 
-    const float clampedDist = std::min(dist, kVirtualJoystickRadius);
-    g_virtualJoystick.thumbOffsetX = dirX * clampedDist;
-    g_virtualJoystick.thumbOffsetY = dirY * clampedDist;
+    g_virtualJoystick.thumbOffsetX = pxX / geometry.pxPerUiX;
+    g_virtualJoystick.thumbOffsetY = pxY / geometry.pxPerUiY;
 
-    const float effectiveDist = std::max(clampedDist - kVirtualJoystickDeadZone, 0.0f);
-    const float activeRange = std::max(kVirtualJoystickRadius - kVirtualJoystickDeadZone, 1.0f);
-    const float strength = std::clamp(effectiveDist / activeRange, 0.0f, 1.0f);
+    if (distPx < geometry.deadZonePx)
+    {
+        g_virtualJoystick.octant = -1;
+        return;
+    }
 
-    g_virtualJoystick.moveStrength = strength;
-    if (strength > 0.001f)
-    {
-        CancelAndroidAutoMoveForManualInput("joystick");
-        g_virtualJoystick.moveDirX = dirX;
-        // Touch Y grows downward; movement Y should grow upward.
-        g_virtualJoystick.moveDirY = -dirY;
-    }
-    else
-    {
-        g_virtualJoystick.moveDirX = 0.0f;
-        g_virtualJoystick.moveDirY = 0.0f;
-    }
+    CancelAndroidAutoMoveForManualInput("joystick");
+    g_virtualJoystick.octant = SnapVirtualJoystickOctant(pxX, pxY, g_virtualJoystick.octant);
 }
 
 void StartVirtualJoystick(SDL_FingerID fingerId, float uiX, float uiY)
 {
     g_virtualJoystick = ActiveVirtualJoystick{};
     g_virtualJoystick.fingerId = fingerId;
-    g_virtualJoystick.centerX = ClampVirtualJoystickCenterX(uiX);
-    g_virtualJoystick.centerY = ClampVirtualJoystickCenterY(uiY);
+    g_virtualJoystick.pressedMs = MU_MobileGetTicks();
     UpdateVirtualJoystickByUi(uiX, uiY);
 }
 
@@ -3068,6 +3131,41 @@ bool HandleVirtualJoystickFingerMotion(const SDL_TouchFingerEvent& touch)
     return true;
 }
 
+// Letting go finishes the tile the character is on and stops there, so it never
+// halts between tiles.
+//
+// MovePath ends a path once it reaches node PathNum-1 (ZzzAI.cpp), and while a
+// tile is in progress PathX/PathY[CurrentPath+1] is the tile being entered - so
+// making that node the last one stops the character exactly there, with the same
+// spline finish any other path end gets. Nothing is sent: SendMove transmits the
+// path from PathX[0], which is where this walk started rather than where it is
+// now, so a resend would replay the whole thing. The server has the longer path
+// and will believe the hero went one tile further; the next command corrects it,
+// the same way an interrupted click-to-move walk does on the desktop.
+void StopVirtualJoystickMovementAtCurrentTile()
+{
+    if (!g_virtualJoystick.ownsHeroPath)
+    {
+        return;
+    }
+
+    g_virtualJoystick.ownsHeroPath = false;
+
+    if (Hero == nullptr || !Hero->Movement || Hero->MovementType != MOVEMENT_MOVE)
+    {
+        return;
+    }
+
+    PATH_t& path = Hero->Path;
+    const int stopAt = static_cast<int>(path.CurrentPath) + 2;
+    if (stopAt < static_cast<int>(path.PathNum))
+    {
+        path.PathNum = static_cast<unsigned char>(stopAt);
+    }
+}
+
+void ApplyVirtualJoystickMovement();
+
 bool HandleVirtualJoystickFingerUp(const SDL_TouchFingerEvent& touch)
 {
     if (!IsVirtualJoystickCaptured(touch.fingerId))
@@ -3075,15 +3173,77 @@ bool HandleVirtualJoystickFingerUp(const SDL_TouchFingerEvent& touch)
         return false;
     }
 
+    // A tap shorter than a frame would otherwise be swallowed whole: down and up
+    // both arrive in the same event pump, so the per-frame driver never sees a
+    // finger on the stick and the single tile never gets walked. Issue it here
+    // instead. The truncation below is then a no-op - a one tile path is already
+    // as short as it can be.
+    if (g_virtualJoystick.issuedOctant < 0 && g_virtualJoystick.octant >= 0)
+    {
+        ApplyVirtualJoystickMovement();
+    }
+
+    StopVirtualJoystickMovementAtCurrentTile();
     ClearVirtualJoystick();
     return true;
 }
 
+// Is this tile one the character could step onto?
+//
+// The same test PATH::FindPath applies with its default TW_CHARACTER wall
+// (ZzzPath.h): the action, height and camera bits are not obstacles, anything at
+// or above TW_CHARACTER is. Asking PathFinding2 instead would answer a different
+// question - A* is happy to route around a single blocked tile, so it would
+// report a direction with a wall dead ahead as open.
+bool IsVirtualJoystickTileOpen(int tileX, int tileY)
+{
+    if (tileX < 0 || tileX > 255 || tileY < 0 || tileY > 255)
+    {
+        return false;
+    }
+
+    int attribute = TerrainWall[TERRAIN_INDEX_REPEAT(tileX, tileY)];
+    if ((attribute & TW_ACTION) == TW_ACTION) attribute -= TW_ACTION;
+    if ((attribute & TW_HEIGHT) == TW_HEIGHT) attribute -= TW_HEIGHT;
+    if ((attribute & TW_CAMERA_UP) == TW_CAMERA_UP) attribute -= TW_CAMERA_UP;
+
+    return TW_CHARACTER > attribute;
+}
+
+// Nearest open heading to the one being pushed, so a wall is slid along rather
+// than walked into: straight on first, then one step to either side, then two.
+int SlideVirtualJoystickOctant(int tileX, int tileY, int octant)
+{
+    static const int kSearchOrder[5] = { 0, 1, -1, 2, -2 };
+
+    for (int i = 0; i < 5; ++i)
+    {
+        const int candidate = (octant + kSearchOrder[i] + 8) & 7;
+        if (IsVirtualJoystickTileOpen(tileX + kVirtualJoystickOctantDX[candidate],
+                                      tileY + kVirtualJoystickOctantDY[candidate]))
+        {
+            return candidate;
+        }
+    }
+
+    return -1;
+}
+
+// Walk the character by handing it real paths, which is what every other mover in
+// the client does: PathFinding2 fills c->Path, MovePath walks it a quarter tile at
+// a time, SendMove tells the server.
+//
+// This used to park the mouse cursor out in the push direction and hold the left
+// button down so the desktop click-to-move loop would chase it. That could not do
+// what the stick is meant to do. A tap always walked as far as the parked cursor
+// projected rather than one tile; a direction change had to wait out
+// MouseUpdateTimeMax before the loop would re-path; and the destination was
+// whatever tile the cursor happened to land on, not a chosen heading.
 void ApplyVirtualJoystickMovement()
 {
     if (g_virtualJoystick.fingerId == static_cast<SDL_FingerID>(-1))
     {
-        ReleaseVirtualJoystickMouseDrive();
+        g_virtualJoystickHoldingMovement = false;
         return;
     }
 
@@ -3093,81 +3253,165 @@ void ApplyVirtualJoystickMovement()
         return;
     }
 
-    if (g_virtualJoystick.moveStrength <= 0.001f)
+    if (Hero == nullptr || Hero->Object.Live == 0 || Hero->Dead != 0)
     {
-        ReleaseVirtualJoystickMouseDrive();
         return;
     }
 
-    const float driveRadius = kVirtualJoystickMouseMinRadius
-        + (kVirtualJoystickMouseMaxRadius - kVirtualJoystickMouseMinRadius) * g_virtualJoystick.moveStrength;
-    const int targetMouseX = std::clamp(
-        static_cast<int>(kVirtualJoystickDriveOriginX + g_virtualJoystick.moveDirX * driveRadius),
-        0,
-        640);
-    const int targetMouseY = std::clamp(
-        static_cast<int>(kVirtualJoystickDriveOriginY - g_virtualJoystick.moveDirY * driveRadius),
-        0,
-        480);
+    g_virtualJoystickHoldingMovement = true;
 
-    MouseX = targetMouseX;
-    MouseY = targetMouseY;
-    g_iNoMouseTime = 0;
-
-    // A meaningful direction change should take effect immediately rather
-    // than waiting out the previous path's cooldown (MouseUpdateTimeMax is
-    // set proportional to how long that path was) - otherwise the character
-    // keeps walking the old direction for a beat before the new one lands.
+    // Inside the dead zone nothing is being asked for, and whatever tile the
+    // character is walking into finishes on its own.
+    if (g_virtualJoystick.octant < 0)
     {
-        static float s_lastAppliedDirX = 0.0f;
-        static float s_lastAppliedDirY = 0.0f;
-        const float dot = (g_virtualJoystick.moveDirX * s_lastAppliedDirX)
-            + (g_virtualJoystick.moveDirY * s_lastAppliedDirY);
-        if (dot < 0.85f)
+        return;
+    }
+
+    CHARACTER* c = Hero;
+    OBJECT* o = &c->Object;
+
+    // The same predicate the desktop click-to-move branch gates on, rather than a
+    // second copy that would drift away from it.
+    if (!CanHeroAcceptMoveCommand(o))
+    {
+        return;
+    }
+
+    // SendMove drops the packet outright while a shop or trade window owns the
+    // interface. Pathing anyway would walk the character locally with the server
+    // never having heard about it.
+    if (g_pNewUISystem != nullptr && g_pNewUISystem->IsImpossibleSendMoveInterface())
+    {
+        return;
+    }
+
+    const uint32_t nowMs = MU_MobileGetTicks();
+    const bool holding = (nowMs - g_virtualJoystick.pressedMs) >= kVirtualJoystickHoldMs;
+    const int octant = g_virtualJoystick.octant;
+    const PATH_t& path = c->Path;
+
+    bool reissue = false;
+    if (g_virtualJoystick.issuedOctant < 0)
+    {
+        // First step of this press.
+        reissue = true;
+    }
+    else if (octant != g_virtualJoystick.issuedOctant)
+    {
+        // The thumb crossed into another heading.
+        reissue = true;
+    }
+    else if (holding && !g_virtualJoystick.issuedAsHold)
+    {
+        // The press has turned into a hold. Extend the tap's single tile before it
+        // runs out, so the character carries straight on instead of stopping and
+        // starting again - SetPlayerStop resets c->Run, and Run has to reach 40
+        // before the walk becomes a run (ZzzCharacter.cpp).
+        reissue = true;
+    }
+    else if (holding && static_cast<int>(path.CurrentPath) >= (static_cast<int>(path.PathNum) - 2))
+    {
+        // Entering the last leg of the current path: top it up.
+        reissue = true;
+    }
+    else if (!c->Movement)
+    {
+        // The path ended, or the send was refused.
+        reissue = true;
+    }
+
+    if (!reissue)
+    {
+        return;
+    }
+
+    if (g_virtualJoystick.issuedOctant >= 0
+        && (nowMs - g_virtualJoystick.lastIssueMs) < kVirtualJoystickMinIssueMs)
+    {
+        return;
+    }
+
+    // MovePath assigns c->PositionX/Y = PathX/Y[CurrentPath+1] the moment a tile
+    // begins (ZzzAI.cpp), so mid-walk this is the tile being entered and not the
+    // one under the character's feet. Pathing from it is what makes a direction
+    // change finish the step in progress and turn at its end.
+    //
+    // Doubling straight back is the exception: path from the tile just left, so the
+    // character turns where it stands instead of walking the step out first.
+    const bool doublingBack = c->Movement
+        && g_virtualJoystick.issuedOctant >= 0
+        && (((octant - g_virtualJoystick.issuedOctant) & 7) == 4);
+
+    int startX = c->PositionX;
+    int startY = c->PositionY;
+    if (doublingBack && path.PathNum > 0)
+    {
+        const int current = std::clamp(static_cast<int>(path.CurrentPath), 0, static_cast<int>(path.PathNum) - 1);
+        startX = path.PathX[current];
+        startY = path.PathY[current];
+    }
+
+    const int heading = SlideVirtualJoystickOctant(startX, startY, octant);
+    if (heading < 0)
+    {
+        // Boxed in on every nearby heading.
+        return;
+    }
+
+    const int steps = holding ? kVirtualJoystickHoldSteps : 1;
+    const int stepX = kVirtualJoystickOctantDX[heading];
+    const int stepY = kVirtualJoystickOctantDY[heading];
+
+    CancelAndroidAutoMoveForManualInput("joystick");
+    g_iFollowCharacter = -1;
+    c->MovementType = MOVEMENT_MOVE;
+
+    bool issued = false;
+    for (int reach = steps; reach >= 1 && !issued; --reach)
+    {
+        TargetX = std::clamp(startX + (stepX * reach), 0, 255);
+        TargetY = std::clamp(startY + (stepY * reach), 0, 255);
+
+        if (PathFinding2(startX, startY, TargetX, TargetY, &c->Path))
         {
-            MouseUpdateTime = MouseUpdateTimeMax;
+            // Immediately after the query and never on a path that has been
+            // touched since: SendMove transmits PathX[0..] on the assumption that
+            // index 0 is where the character is standing.
+            SendMove(c, o);
+            issued = true;
         }
-        s_lastAppliedDirX = g_virtualJoystick.moveDirX;
-        s_lastAppliedDirY = g_virtualJoystick.moveDirY;
     }
 
-    MouseLButtonPop = false;
-    if (!MouseLButton)
+    if (!issued)
     {
-        MouseLButtonPush = true;
-        MouseLButton = true;
-    }
-    else
-    {
-        MouseLButtonPush = false;
+        return;
     }
 
-    g_virtualJoystickDrivingMouse = true;
+    g_virtualJoystick.issuedOctant = octant;
+    g_virtualJoystick.issuedAsHold = holding;
+    g_virtualJoystick.lastIssueMs = nowMs;
+    g_virtualJoystick.ownsHeroPath = true;
 
 #if defined(MU_ANDROID_PERF_LOG)
+    if (FILE* f = fopen("mu_joystick_debug.txt", "a"))
     {
-        static int s_dbgJoyCounter = 0;
-        if ((++s_dbgJoyCounter % 5) == 0 && Hero != nullptr)
-        {
-            if (FILE* f = fopen("mu_joystick_debug.txt", "a"))
-            {
-                fprintf(f,
-                    "JOY dirX=%.3f dirY=%.3f mouse=(%d,%d) heroPos=(%d,%d) heroAngle=%.1f targetXY=(%d,%d) movement=%d moveType=%d pathNum=%d\n",
-                    g_virtualJoystick.moveDirX,
-                    g_virtualJoystick.moveDirY,
-                    targetMouseX,
-                    targetMouseY,
-                    Hero->PositionX,
-                    Hero->PositionY,
-                    Hero->Object.Angle[2],
-                    TargetX,
-                    TargetY,
-                    Hero->Movement ? 1 : 0,
-                    Hero->MovementType,
-                    Hero->Path.PathNum);
-                fclose(f);
-            }
-        }
+        fprintf(f,
+            "JOY octant=%d heading=%d hold=%d start=(%d,%d) target=(%d,%d) heroPos=(%d,%d) angle=%.1f movement=%d pathNum=%d currentPath=%d back=%d\n",
+            octant,
+            heading,
+            holding ? 1 : 0,
+            startX,
+            startY,
+            TargetX,
+            TargetY,
+            c->PositionX,
+            c->PositionY,
+            o->Angle[2],
+            c->Movement ? 1 : 0,
+            static_cast<int>(path.PathNum),
+            static_cast<int>(path.CurrentPath),
+            doublingBack ? 1 : 0);
+        fclose(f);
     }
 #endif
 }
@@ -9887,39 +10131,43 @@ void RenderVirtualPad()
     const bool joystickActive = g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1);
     EnsureUITextures();
 
-    // Floating joystick: only draw it while a finger is actually on it, and
-    // draw it wherever that finger landed inside the movement zone. It used to
-    // sit permanently in the corner at 0.90 alpha.
-    if (joystickActive)
+    // The stick is always on screen at its one home, half visible when idle and
+    // full while held, so there is something to aim at before the thumb lands.
+    // It used to be invisible until touched and then recentred on the finger,
+    // which left nothing to push against and no way to see which way you were
+    // pushing. Sizes come from the geometry helper, which works in device pixels
+    // - specified in UI units the ring draws as a wide ellipse.
     {
-        const float joystickCenterX = GetVirtualJoystickRenderCenterX();
-        const float joystickCenterY = GetVirtualJoystickRenderCenterY();
+        const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+        const float joystickCenterX = std::round(geometry.centerX);
+        const float joystickCenterY = std::round(geometry.centerY);
         const float joystickThumbX = std::round(joystickCenterX + g_virtualJoystick.thumbOffsetX);
         const float joystickThumbY = std::round(joystickCenterY + g_virtualJoystick.thumbOffsetY);
+        const float joystickAlpha = joystickActive ? 1.0f : 0.5f;
 
         DrawIconButtonUv(
-            joystickCenterX - kVirtualJoystickOuterRenderW * 0.5f,
-            joystickCenterY - kVirtualJoystickOuterRenderH * 0.5f,
-            kVirtualJoystickOuterRenderW,
-            kVirtualJoystickOuterRenderH,
+            joystickCenterX - geometry.ringDiameterUiX * 0.5f,
+            joystickCenterY - geometry.ringDiameterUiY * 0.5f,
+            geometry.ringDiameterUiX,
+            geometry.ringDiameterUiY,
             g_uiTex_joystick2,
             kJoystickRingU,
             kJoystickRingV,
             kJoystickRingUW,
             kJoystickRingVH,
-            0.75f);
+            joystickAlpha);
 
         DrawIconButtonUv(
-            joystickThumbX - kVirtualJoystickKnobRenderW * 0.5f,
-            joystickThumbY - kVirtualJoystickKnobRenderH * 0.5f,
-            kVirtualJoystickKnobRenderW,
-            kVirtualJoystickKnobRenderH,
+            joystickThumbX - geometry.knobDiameterUiX * 0.5f,
+            joystickThumbY - geometry.knobDiameterUiY * 0.5f,
+            geometry.knobDiameterUiX,
+            geometry.knobDiameterUiY,
             g_uiTex_joystick1,
             kJoystickKnobU,
             kJoystickKnobV,
             kJoystickKnobUW,
             kJoystickKnobVH,
-            1.0f);
+            joystickAlpha);
     }
     EndBitmap();
 
@@ -10421,9 +10669,14 @@ void RenderVirtualPad()
 }
 } // namespace
 
-bool IsAndroidVirtualJoystickDrivingMouse()
+// "The stick currently owns the hero's movement." It used to mean "the stick is
+// faking a held mouse button", which is how it drove movement before it started
+// issuing paths itself; the callers in ZzzInterface.cpp want the same answer
+// either way - keep the click-to-move loop from re-pathing the hero at whatever
+// the touch cursor was last left pointing at.
+bool IsAndroidVirtualJoystickHoldingMovement()
 {
-    return g_virtualJoystickDrivingMouse;
+    return g_virtualJoystickHoldingMovement;
 }
 
 // Called on map change and disconnect. The lock does clear itself once its
