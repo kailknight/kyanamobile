@@ -675,7 +675,11 @@ constexpr float kVirtualJoystickMaxScreenFraction = 0.30f;
 
 // A press shorter than this is a tap and gets exactly one tile, like a single
 // click on PC. Past it the press is a hold and the path is kept topped up.
-constexpr uint32_t kVirtualJoystickHoldMs = 160;
+//
+// 160ms was too eager: an unhurried tap runs 200-300ms, so ordinary taps were
+// being promoted to holds and walking two tiles or more. This has to sit above
+// how long a person holds a button they mean as a tap, not at the low end of it.
+constexpr uint32_t kVirtualJoystickHoldMs = 300;
 
 // Floor between two path commands. A direction change is meant to be immediate,
 // and three frames is not noticeable, but without a floor a thumb sitting on the
@@ -3350,9 +3354,14 @@ void ApplyVirtualJoystickMovement()
         // Entering the last leg of the current path: top it up.
         reissue = true;
     }
-    else if (!c->Movement)
+    else if (holding && !c->Movement)
     {
         // The path ended, or the send was refused.
+        //
+        // Only while holding. Without that, a press that let go before the hold
+        // threshold could still hand out a second tile the moment the first one
+        // finished - a tile takes long enough at walk speed that a slow tap
+        // outlasted it - so a tap walked two tiles, or three.
         reissue = true;
     }
 
@@ -3382,8 +3391,15 @@ void ApplyVirtualJoystickMovement()
     // which is the tile the character had just left: it walked the rest of the way
     // left and came back for no net movement, and only the tap after that went
     // right.
+    // Only while a heading has already been issued in this press, which means only
+    // while turning under a hold. A tap took this branch too for a while, and it
+    // was worse than what it fixed: pathing from behind the character snaps its
+    // facing through 180 degrees mid-tile and walks it back the way it came. A tap
+    // that reverses now finishes the tile it is entering and walks from there, the
+    // same as any other tap.
     const int stepOctant = GetVirtualJoystickStepOctant(path, c->Movement);
     const bool doublingBack = c->Movement
+        && g_virtualJoystick.issuedOctant >= 0
         && stepOctant >= 0
         && (((octant - stepOctant) & 7) == 4);
 
