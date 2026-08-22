@@ -9,7 +9,14 @@
 
 class CUITextInputBox;
 
-class CLoginWin : public CWin  
+// Scales a design-space (329x245) login layout constant for the Android/iOS
+// login window, which is itself enlarged by the same factor (see CLoginWin::Create).
+// Shared with CB_AutoLogin so the save-password checkbox and saved-account list it
+// draws on top of this window scale with it instead of drifting off as the window
+// grows on taller phones - both are defined once in LoginWin.cpp.
+int ScaleLoginMetric(int value);
+
+class CLoginWin : public CWin
 {
 protected:
 	CSprite		m_asprInputBox[2];

@@ -11,7 +11,92 @@
 #include "ZzzInterface.h"
 #include "./ExternalObject/leaf/regkey.h"
 #include "UIMng.h"
+#include "LoginWin.h"
 #if(CB_AUTOLOGINWIN)
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+namespace
+{
+	// Saved-account persistence needs an actual place to land on Android/iOS. The
+	// Reg* calls below go through leaf::CRegKey to Platform/PlatformDefs.h, whose
+	// Android shim is a deliberate no-op: RegSetValueEx writes nothing anywhere,
+	// and RegQueryValueEx always reports success without copying the string
+	// requested. That is fine for the many callers that only ever expected a
+	// registry that quietly does nothing - it is not fine for a feature whose
+	// entire purpose is to write something now and read it back later, so this
+	// gets its own small file instead of pretending the registry works here.
+	const char* const kAutoLoginConfigPath = "mu_autologin.cfg";
+
+	struct AutoLoginConfigEntry
+	{
+		char key[16];
+		char value[11];
+	};
+
+	int LoadAutoLoginConfig(AutoLoginConfigEntry* entries, int maxEntries)
+	{
+		FILE* f = fopen(kAutoLoginConfigPath, "r");
+		if (f == nullptr)
+		{
+			return 0;
+		}
+
+		int count = 0;
+		char line[64];
+		while (count < maxEntries && fgets(line, sizeof(line), f) != nullptr)
+		{
+			line[strcspn(line, "\r\n")] = 0;
+			char* eq = strchr(line, '=');
+			if (eq == nullptr)
+			{
+				continue;
+			}
+			*eq = 0;
+			strncpy(entries[count].key, line, sizeof(entries[count].key) - 1);
+			entries[count].key[sizeof(entries[count].key) - 1] = 0;
+			strncpy(entries[count].value, eq + 1, sizeof(entries[count].value) - 1);
+			entries[count].value[sizeof(entries[count].value) - 1] = 0;
+			++count;
+		}
+		fclose(f);
+		return count;
+	}
+
+	const char* FindAutoLoginConfigValue(const AutoLoginConfigEntry* entries, int count, const char* key)
+	{
+		for (int i = 0; i < count; ++i)
+		{
+			if (strcmp(entries[i].key, key) == 0)
+			{
+				return entries[i].value;
+			}
+		}
+		return nullptr;
+	}
+}
+#endif
+
+namespace
+{
+	// Saved-account list layout, in the same raw design-space units as the rest of
+	// CB_AutoLogin's drawing (ScaleLoginMetric is applied at each use site, exactly
+	// like everything else here). The list draws in the space CLoginWin clears for
+	// it - Account box, Password box, checkbox and OK/Cancel/register all hidden
+	// while showListAccount is true (CLoginWin::RenderControls) - because the
+	// window is only 245 units tall and there was never room to show five stacked
+	// accounts at the old fixed y=111/pitch=15 alongside those controls without
+	// running straight through all of them.
+	constexpr int kAccountListStartY = 128;
+	constexpr int kAccountListRowPitch = 20;
+	constexpr int kAccountListIdX = 114;
+	constexpr int kAccountListRowWidth = 105;
+	constexpr int kAccountListDeleteX = 245;
+	constexpr int kAccountListDeleteSize = 12;
+	constexpr int kAccountListToggleX = 245;
+	constexpr int kAccountListToggleY = 110;
+	constexpr int kAccountListToggleSize = 14;
+}
+
 CB_AutoLogin* gCB_AutoLogin;
 
 CB_AutoLogin::CB_AutoLogin()
@@ -27,25 +112,34 @@ CB_AutoLogin::~CB_AutoLogin()
 }
 void CB_AutoLogin::DrawInfo(int XPos, int YPos)
 {
-	if (g_pBCustomMenuInfo->RenderCheckBoxMini(int((XPos + 124) / g_fScreenRate_x),
-		int((YPos + 158) / g_fScreenRate_y), 0xFFFFFFFF, m_SavePassOnOff == 1 ? TRUE : FALSE, "Save password") && !this->showListAccount)
+	// Every offset and size below is scaled with ScaleLoginMetric because XPos/YPos
+	// is the top-left of the login window, and on Android/iOS that window is itself
+	// enlarged by the same factor (CLoginWin::Create). Left as raw design-space
+	// constants, these drifted further from the OK/Cancel buttons and input boxes -
+	// which do scale - the taller the phone.
+	if (!this->showListAccount)
 	{
-		m_SavePassOnOff ^= 1;
+		// Checkbox only draws while the list isn't using this same area.
+		if (g_pBCustomMenuInfo->RenderCheckBoxMini(int((XPos + ScaleLoginMetric(124)) / g_fScreenRate_x),
+			int((YPos + ScaleLoginMetric(158)) / g_fScreenRate_y), 0xFFFFFFFF, m_SavePassOnOff == 1 ? TRUE : FALSE, "Save password"))
+		{
+			m_SavePassOnOff ^= 1;
+		}
+	}
 
+	if (this->showListAccount && this->totalSavedAcc == 0)
+	{
+		this->showListAccount = 0;
 	}
 
 	if (this->showListAccount)
 	{
-		if (this->totalSavedAcc == 0)
-		{
-			this->showListAccount = 0;
-		}
-		int KC = 15;
-		
+		int KC = ScaleLoginMetric(kAccountListRowPitch);
+
 		for (int i = 0; i < this->totalSavedAcc; i++)
 		{
 			DWORD BGColor = 0x000000FF;
-			if (SEASON3B::CheckMouseIn(int((XPos + 114) / g_fScreenRate_x), int((YPos + 111 + (KC * i)) / g_fScreenRate_y), 105, KC) == 1)
+			if (SEASON3B::CheckMouseIn(int((XPos + ScaleLoginMetric(kAccountListIdX)) / g_fScreenRate_x), int((YPos + ScaleLoginMetric(kAccountListStartY) + (KC * i)) / g_fScreenRate_y), ScaleLoginMetric(kAccountListRowWidth), KC) == 1)
 			{
 				BGColor = 0xA5A100FF;
 				if (GetKeyState(VK_LBUTTON) & 0x8000 && GetTickCount() > this->TickCount +500)
@@ -56,26 +150,77 @@ void CB_AutoLogin::DrawInfo(int XPos, int YPos)
 					this->TickCount = GetTickCount();
 				}
 			}
-			TextDraw(g_hFont, int((XPos + 114) / g_fScreenRate_x), int((YPos + 111 + (KC*i)) / g_fScreenRate_y), 0xFFFFFFFF, BGColor, 115, 0, 1, this->saved_acc[i].ID); //ID
+			TextDraw(g_hFont, int((XPos + ScaleLoginMetric(kAccountListIdX)) / g_fScreenRate_x), int((YPos + ScaleLoginMetric(kAccountListStartY) + (KC*i)) / g_fScreenRate_y), 0xFFFFFFFF, BGColor, 115, 0, 1, this->saved_acc[i].ID); //ID
 			//delete
-			if (g_pBCustomMenuInfo->DrawButtonGUI(CNewUIPartyInfoWindow::IMAGE_PARTY_EXIT, int((XPos + 245) / g_fScreenRate_x), int((YPos + 111 + (KC * i)) / g_fScreenRate_y), 12, 12))
+			if (g_pBCustomMenuInfo->DrawButtonGUI(CNewUIPartyInfoWindow::IMAGE_PARTY_EXIT, int((XPos + ScaleLoginMetric(kAccountListDeleteX)) / g_fScreenRate_x), int((YPos + ScaleLoginMetric(kAccountListStartY) + (KC * i)) / g_fScreenRate_y), ScaleLoginMetric(kAccountListDeleteSize), ScaleLoginMetric(kAccountListDeleteSize)))
 			{
 				this->RemoveAccount(i);
 			}
 		}
 	}
-	else
-	{
-		if (g_pBCustomMenuInfo->DrawButtonGUI(CNewUICastleWindow::IMAGE_CASTLEWINDOW_SCROLL_DOWN_BTN, int((XPos + 245) / g_fScreenRate_x), int((YPos + 110) / g_fScreenRate_y), 14, 14))
-		{
-			this->showListAccount ^= 1;
-			this->TickCount = GetTickCount();
-		}
 
+	// Same toggle in both states - it opens the list, and it is also the only way
+	// to back out of the list without picking an account, now that OK/Cancel are
+	// hidden behind it (CLoginWin::RenderControls).
+	if (g_pBCustomMenuInfo->DrawButtonGUI(CNewUICastleWindow::IMAGE_CASTLEWINDOW_SCROLL_DOWN_BTN, int((XPos + ScaleLoginMetric(kAccountListToggleX)) / g_fScreenRate_x), int((YPos + ScaleLoginMetric(kAccountListToggleY)) / g_fScreenRate_y), ScaleLoginMetric(kAccountListToggleSize), ScaleLoginMetric(kAccountListToggleSize)))
+	{
+		this->showListAccount ^= 1;
+		this->TickCount = GetTickCount();
+	}
+}
+bool CB_AutoLogin::HitsControlArea(int XPos, int YPos, float uiX, float uiY) const
+{
+	// Mirrors DrawInfo's own layout by hand, in the same units each call there
+	// already uses: positions are divided by g_fScreenRate_x/y to land in the same
+	// space as MouseX/MouseY, sizes are not (DrawButtonGUI and RenderCheckBoxMini
+	// take their SizeW/SizeH directly, undivided).
+	auto within = [](float px, float py, float bx, float by, float bw, float bh)
+	{
+		return px >= bx && px <= (bx + bw) && py >= by && py <= (by + bh);
+	};
+
+	// "Save password" checkbox - RenderCheckBoxMini's own hit box is a fixed 15x15
+	// (NewUIBCustomMenu.cpp), not scaled with the window. Only drawn/clickable
+	// while the list isn't using this same area.
+	if (!this->showListAccount && within(uiX, uiY,
+		(XPos + ScaleLoginMetric(124)) / g_fScreenRate_x,
+		(YPos + ScaleLoginMetric(158)) / g_fScreenRate_y,
+		15.0f, 15.0f))
+	{
+		return true;
 	}
 
+	if (this->showListAccount)
+	{
+		const int KC = ScaleLoginMetric(kAccountListRowPitch);
+		for (int i = 0; i < this->totalSavedAcc; ++i)
+		{
+			const float rowY = (YPos + ScaleLoginMetric(kAccountListStartY) + (KC * i)) / g_fScreenRate_y;
+			if (within(uiX, uiY, (XPos + ScaleLoginMetric(kAccountListIdX)) / g_fScreenRate_x, rowY,
+				static_cast<float>(ScaleLoginMetric(kAccountListRowWidth)), static_cast<float>(KC)))
+			{
+				return true;
+			}
+			if (within(uiX, uiY, (XPos + ScaleLoginMetric(kAccountListDeleteX)) / g_fScreenRate_x, rowY,
+				static_cast<float>(ScaleLoginMetric(kAccountListDeleteSize)), static_cast<float>(ScaleLoginMetric(kAccountListDeleteSize))))
+			{
+				return true;
+			}
+		}
+	}
 
+	// Scroll-down arrow, present (and hit-testable) in both states.
+	if (within(uiX, uiY,
+		(XPos + ScaleLoginMetric(kAccountListToggleX)) / g_fScreenRate_x,
+		(YPos + ScaleLoginMetric(kAccountListToggleY)) / g_fScreenRate_y,
+		static_cast<float>(ScaleLoginMetric(kAccountListToggleSize)), static_cast<float>(ScaleLoginMetric(kAccountListToggleSize))))
+	{
+		return true;
+	}
+
+	return false;
 }
+
 void CB_AutoLogin::SetShowListAccount(bool show)
 {
 	this->showListAccount = show;
@@ -101,6 +246,44 @@ void CB_AutoLogin::RemoveAccount(int Index)
 	{
 		return;
 	}
+#if defined(__ANDROID__) || defined(MU_IOS)
+	AutoLoginConfigEntry entries[2 * MAX_ACCOUNT_SAVE + 1];
+	int count = LoadAutoLoginConfig(entries, sizeof(entries) / sizeof(entries[0]));
+
+	char zKey[50];
+	if (Index == 0)
+	{
+		sprintf(zKey, "ID");
+	}
+	else
+	{
+		sprintf(zKey, "ID_%d", Index + 1);
+	}
+
+	FILE* f = fopen(kAutoLoginConfigPath, "w");
+	if (f != nullptr)
+	{
+		char pwKey[50];
+		if (Index == 0)
+		{
+			sprintf(pwKey, "PW");
+		}
+		else
+		{
+			sprintf(pwKey, "PW_%d", Index + 1);
+		}
+
+		for (int i = 0; i < count; ++i)
+		{
+			if (strcmp(entries[i].key, zKey) == 0 || strcmp(entries[i].key, pwKey) == 0)
+			{
+				continue;
+			}
+			fprintf(f, "%s=%s\n", entries[i].key, entries[i].value);
+		}
+		fclose(f);
+	}
+#else
 	leaf::CRegKey regkey;
 	regkey.SetKey(leaf::CRegKey::_HKEY_CURRENT_USER, "SOFTWARE\\Webzen\\Mu\\Config");
 	if (Index == 0)
@@ -116,10 +299,47 @@ void CB_AutoLogin::RemoveAccount(int Index)
 		sprintf(zKey, "PW_%d", Index + 1);
 		regkey.WriteString(zKey, "");
 	}
+#endif
 	this->ReadConfigs();
 }
 void CB_AutoLogin::ReadConfigs()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	this->totalSavedAcc = 0;
+
+	AutoLoginConfigEntry entries[2 * MAX_ACCOUNT_SAVE + 1];
+	int count = LoadAutoLoginConfig(entries, sizeof(entries) / sizeof(entries[0]));
+
+	char zKey[50];
+	for (int i = 0; i < MAX_ACCOUNT_SAVE; i++)
+	{
+		sprintf(zKey, i ? "ID_%d" : "ID", i + 1);
+		const char* id = FindAutoLoginConfigValue(entries, count, zKey);
+		if (id == nullptr || id[0] == 0)
+		{
+			ZeroMemory(this->saved_acc[this->totalSavedAcc].ID, sizeof(this->saved_acc[this->totalSavedAcc].ID));
+			continue;
+		}
+
+		sprintf(zKey, i ? "PW_%d" : "PW", i + 1);
+		const char* pw = FindAutoLoginConfigValue(entries, count, zKey);
+		if (pw == nullptr)
+		{
+			ZeroMemory(this->saved_acc[this->totalSavedAcc].PW, sizeof(this->saved_acc[this->totalSavedAcc].PW));
+			continue;
+		}
+
+		strncpy(this->saved_acc[this->totalSavedAcc].ID, id, sizeof(this->saved_acc[this->totalSavedAcc].ID) - 1);
+		this->saved_acc[this->totalSavedAcc].ID[sizeof(this->saved_acc[this->totalSavedAcc].ID) - 1] = 0;
+		strncpy(this->saved_acc[this->totalSavedAcc].PW, pw, sizeof(this->saved_acc[this->totalSavedAcc].PW) - 1);
+		this->saved_acc[this->totalSavedAcc].PW[sizeof(this->saved_acc[this->totalSavedAcc].PW) - 1] = 0;
+		this->saved_acc[this->totalSavedAcc].index = i;
+		this->totalSavedAcc++;
+	}
+
+	const char* savePass = FindAutoLoginConfigValue(entries, count, "SavePass");
+	m_SavePassOnOff = (savePass == nullptr) || (atoi(savePass) != 0);
+#else
 	HKEY hKey;
 	DWORD dwDisp;
 	DWORD dwSize;
@@ -166,10 +386,42 @@ void CB_AutoLogin::ReadConfigs()
 	}
 
 	m_SavePassOnOff = true;
+#endif
 }
 
 void CB_AutoLogin::SaveData(char* szID, char* szPass)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Rewritten whole: the account just logged in becomes slot 0, everything
+	// already known shifts down behind it (skipping a duplicate of szID), capped
+	// at MAX_ACCOUNT_SAVE. Simpler than patching individual keys in place, and it
+	// means a stale slot can never survive by just not being touched.
+	FILE* f = fopen(kAutoLoginConfigPath, "w");
+	if (f != nullptr)
+	{
+		fprintf(f, "ID=%s\n", szID);
+		fprintf(f, "PW=%s\n", szPass);
+
+		int successCount = 1;
+		for (int i = 0; i < this->totalSavedAcc && successCount < MAX_ACCOUNT_SAVE; i++)
+		{
+			if (strcmp(szID, this->saved_acc[i].ID) == 0) //duplicate account
+			{
+				continue;
+			}
+			fprintf(f, "ID_%d=%s\n", successCount + 1, this->saved_acc[i].ID);
+			fprintf(f, "PW_%d=%s\n", successCount + 1, this->saved_acc[i].PW);
+			successCount++;
+		}
+
+		fprintf(f, "SavePass=%d\n", m_SavePassOnOff ? 1 : 0);
+		fclose(f);
+	}
+
+	// So the account just used shows at the top of the list immediately, in the
+	// same session, instead of only after the login window is recreated.
+	this->ReadConfigs();
+#else
 	leaf::CRegKey regkey;
 	regkey.SetKey(leaf::CRegKey::_HKEY_CURRENT_USER, "SOFTWARE\\Webzen\\Mu\\Config");
 	char zKey[50];
@@ -201,5 +453,6 @@ void CB_AutoLogin::SaveData(char* szID, char* szPass)
 	regkey.WriteString("ID", szID);
 	regkey.WriteString("PW", szPass);
 	regkey.WriteDword("SavePass", m_SavePassOnOff ? 1 : 0);
+#endif
 }
 #endif

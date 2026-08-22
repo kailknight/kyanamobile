@@ -22,6 +22,14 @@ public:
 	void SetSelectedAccount(int Index);
 	void RemoveAccount(int Index);
 
+	// Geometry only, matching DrawInfo's own layout, so CLoginWin::FocusInputAt can
+	// tell whether a tap belongs to the checkbox / arrow / saved-account list before
+	// deciding whether to give the ID or password box keyboard focus instead. Must
+	// not call CheckMouseIn/DrawButtonGUI/RenderCheckBoxMini - those read the live
+	// mouse button state and would double-fire the click DrawInfo is about to handle
+	// this same frame.
+	bool HitsControlArea(int XPos, int YPos, float uiX, float uiY) const;
+
 	bool showListAccount;
 	DWORD TickCount;
 	int  selectedAccount;

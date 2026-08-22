@@ -59,11 +59,13 @@ float GetLoginUiScale()
 	return 1.0f;
 }
 #endif
+}
 
+// Declared in LoginWin.h so CB_AutoLogin.cpp can scale the save-password
+// checkbox and saved-account list it draws on top of this window the same way.
 int ScaleLoginMetric(int value)
 {
 	return static_cast<int>(std::lround(static_cast<double>(value) * GetLoginUiScale()));
-}
 }
 
 CLoginWin::CLoginWin()
@@ -201,6 +203,20 @@ bool CLoginWin::FocusInputAt(float uiX, float uiY)
 		return false;
 	}
 
+#if(CB_AUTOLOGINWIN)
+	// The saved-account checkbox, its scroll arrow, and the account list all draw
+	// on top of the account input box's own sprite - in the original PC layout the
+	// arrow already sits inside that sprite's rectangle, it was just never reachable
+	// as a mis-tap there because PC does not focus inputs by tap area at all (below
+	// is Android/iOS only). Without this, tapping the arrow also matched hitSprite()
+	// below and this function's touch-to-focus shortcut opened the keyboard instead
+	// of - or on top of - opening the list.
+	if (gCB_AutoLogin != nullptr && gCB_AutoLogin->HitsControlArea(CWin::GetXPos(), CWin::GetYPos(), uiX, uiY))
+	{
+		return false;
+	}
+#endif
+
 	auto hitSprite = [uiX, uiY](CSprite& sprite)
 	{
 		float spriteX = static_cast<float>(sprite.GetXPos());
@@ -269,6 +285,16 @@ void CLoginWin::UpdateWhileActive(double dDeltaTick)
 {
 #if(CB_DANGKYINGAME)
 	if (gInterface.Data[eWindow_DangKyInGame].OnShow)
+	{
+		return;
+	}
+#endif
+#if(CB_AUTOLOGINWIN)
+	// OK/Cancel/register sit hidden behind the saved-account list while it is open
+	// (see RenderControls) - stop them from firing too, rather than leaning on
+	// CButton::Show(false) alone, which only stops rendering and the next Update()
+	// pass, not a click already latched from the frame the list opened on.
+	if (gCB_AutoLogin != nullptr && gCB_AutoLogin->showListAccount)
 	{
 		return;
 	}
@@ -342,6 +368,25 @@ void CLoginWin::RenderControls()
 		this->FirstLoad = 0;
 	}
 
+#if(CB_AUTOLOGINWIN)
+	// The saved-account list needs the Account box, Password box, and the
+	// OK/Cancel/register buttons out of the way while it is open - the window is
+	// only 245 units tall, and five stacked accounts ran straight through all of
+	// them (and the "Save password" checkbox) at the old fixed positions. Synced
+	// every frame rather than only at the moment showListAccount flips, so there is
+	// no separate place this can fall out of step with it.
+	const bool bAutoLoginListShown = (gCB_AutoLogin != nullptr) && gCB_AutoLogin->showListAccount;
+	m_asprInputBox[LIW_ACCOUNT].Show(!bAutoLoginListShown);
+	m_asprInputBox[LIW_PASSWORD].Show(!bAutoLoginListShown);
+	m_aBtn[LIW_OK].Show(!bAutoLoginListShown);
+	m_aBtn[LIW_CANCEL].Show(!bAutoLoginListShown);
+#if(CB_DANGKYINGAME)
+	m_DangKy.Show(!bAutoLoginListShown);
+#endif
+#else
+	const bool bAutoLoginListShown = false;
+#endif
+
 	CWin::RenderButtons();
 
 	for (int i = 0; i < 2; ++i)
@@ -359,13 +404,16 @@ void CLoginWin::RenderControls()
 	m_pIDInputBox->Render();
 	m_pPassInputBox->Render();
 #endif
-	g_pRenderText->SetFont(g_hFixFont);
-	g_pRenderText->SetBgColor(0);
-	g_pRenderText->SetTextColor(CLRDW_WHITE);
-	g_pRenderText->RenderText(int((CWin::GetXPos() + ScaleLoginMetric(30)) / g_fScreenRate_x),
-		int((CWin::GetYPos() + ScaleLoginMetric(113)) / g_fScreenRate_y), GlobalText[450]);
-	g_pRenderText->RenderText(int((CWin::GetXPos() + ScaleLoginMetric(30)) / g_fScreenRate_x),
-		int((CWin::GetYPos() + ScaleLoginMetric(139)) / g_fScreenRate_y), GlobalText[451]);	
+	if (!bAutoLoginListShown)
+	{
+		g_pRenderText->SetFont(g_hFixFont);
+		g_pRenderText->SetBgColor(0);
+		g_pRenderText->SetTextColor(CLRDW_WHITE);
+		g_pRenderText->RenderText(int((CWin::GetXPos() + ScaleLoginMetric(30)) / g_fScreenRate_x),
+			int((CWin::GetYPos() + ScaleLoginMetric(113)) / g_fScreenRate_y), GlobalText[450]);
+		g_pRenderText->RenderText(int((CWin::GetXPos() + ScaleLoginMetric(30)) / g_fScreenRate_x),
+			int((CWin::GetYPos() + ScaleLoginMetric(139)) / g_fScreenRate_y), GlobalText[451]);
+	}
 
 	unicode::t_char szServerName[MAX_TEXT_LENGTH];
 
