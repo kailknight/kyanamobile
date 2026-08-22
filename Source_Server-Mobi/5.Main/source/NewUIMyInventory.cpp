@@ -3080,6 +3080,76 @@ int CNewUIMyInventory::GetPointedItemIndex() const
 
 	return m_pNewInventoryCtrl->GetPointedSquareIndex();
 }
+
+ITEM* CNewUIMyInventory::FindEquippedItemAtPt(int x, int y, int* outSlotIndex, bool* outIsMuun) const
+{
+	if (outSlotIndex != nullptr)
+	{
+		*outSlotIndex = -1;
+	}
+	if (outIsMuun != nullptr)
+	{
+		*outIsMuun = false;
+	}
+
+	if (!IsVisible() || CNewUIInventoryCtrl::GetPickedItem() != nullptr)
+	{
+		return nullptr;
+	}
+
+	// Same rects and the same shrink-by-a-few-pixels margin Update() checks
+	// with CheckMouseIn - reproduced here as a plain point test because
+	// CheckMouseIn always reads the live MouseX/MouseY globals rather than
+	// taking a point, and this needs to answer for an arbitrary point.
+	auto pointInRect = [x, y](int rx, int ry, int rw, int rh)
+	{
+		return x >= rx && x < rx + rw && y >= ry && y < ry + rh;
+	};
+
+	for (int i = 0; i < MAX_EQUIPMENT_INDEX; i++)
+	{
+		if (pointInRect(m_EquipmentSlots[i].x + 1, m_EquipmentSlots[i].y,
+			m_EquipmentSlots[i].width - 4, m_EquipmentSlots[i].height - 4))
+		{
+			ITEM* item = &CharacterMachine->Equipment[i];
+			if (item->Type < 0)
+			{
+				return nullptr;
+			}
+			if (outSlotIndex != nullptr)
+			{
+				*outSlotIndex = i;
+			}
+			return item;
+		}
+	}
+
+#if(HAISLOTRING)
+	for (int i = 0; i < 16; i++)
+	{
+		if (pointInRect(m_EquipmentSlotsMuun[i].x + 1, m_EquipmentSlotsMuun[i].y,
+			m_EquipmentSlotsMuun[i].width - 4, m_EquipmentSlotsMuun[i].height - 4))
+		{
+			ITEM* item = &CharacterMachine->EquipmentMuun[i];
+			if (item->Type < 0)
+			{
+				return nullptr;
+			}
+			if (outSlotIndex != nullptr)
+			{
+				*outSlotIndex = i;
+			}
+			if (outIsMuun != nullptr)
+			{
+				*outIsMuun = true;
+			}
+			return item;
+		}
+	}
+#endif
+
+	return nullptr;
+}
 int CNewUIMyInventory::FindHPItemIndex() const
 {
 	for (int i = ITEM_POTION; i < ITEM_POTION + 4; i++)

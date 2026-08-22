@@ -152,6 +152,14 @@ namespace SEASON3B
 		int GetNumItemByType(short sItemType) const;
 		BYTE GetDurabilityPointedItem() const;
 		int GetPointedItemIndex() const;
+		// Point-based equivalent of m_iPointedSlot/m_iPointedSlotMuun (Update()),
+		// for callers that need to test an arbitrary point rather than only the
+		// live mouse position - Android's touch gestures need to resolve a tap
+		// against where the finger actually is, one frame before the ambient
+		// MouseX/MouseY-driven m_iPointedSlot would otherwise catch up. Returns
+		// nullptr unless the slot is filled (Type >= 0), mirroring
+		// CNewUIInventoryCtrl::FindItemAtPt's own convention for the bag grid.
+		ITEM* FindEquippedItemAtPt(int x, int y, int* outSlotIndex, bool* outIsMuun) const;
 		int FindHPItemIndex() const;
 		int FindManaItemIndex() const;
 

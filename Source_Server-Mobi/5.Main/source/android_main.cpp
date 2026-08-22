@@ -110,7 +110,7 @@ static void android_set_data_dir_early()
 
 float GetAdaptiveEffectSpawnScale();
 bool ShouldThrottleAdaptiveEffectSpawn(int kind, int type, vec3_t Position, int SubType, float Scale, OBJECT* Owner);
-bool AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel);
+int AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel);
 #include "w_MapHeaders.h"
 #include "w_PetProcess.h"
 #include "Input.h"
@@ -639,6 +639,33 @@ constexpr uint32_t kVirtualAssignModeTimeoutMs = 9000;
 constexpr uint32_t kVirtualAssignTapDebounceMs = 160;
 constexpr uint32_t kAndroidLongPressRightClickMs = 1000;
 constexpr float kAndroidLongPressRightClickMoveCancelUi = 8.0f;
+
+// Bag item interaction: a quick tap shows the item (the ambient PC-style
+// hover/tooltip state machine in CNewUIInventoryCtrl already does this for
+// free once nothing intercepts the tap - see the removed ambient branch of
+// TryAutoBindAndroidInventoryHotKeyItemAt), a quick second tap on the same
+// slot picks it up (same ambient machinery), and holding uses it - drinks/
+// equips it for ordinary items, or binds it to a Q/W/E/R slot for a
+// consumable, the same thing tapping it used to do before this. Resolved
+// while still held, the same way the world-target long-press above is, not on
+// release - see UpdateAndroidBagHold.
+constexpr uint32_t kAndroidBagHoldMs = 500;
+constexpr float kAndroidBagHoldMoveCancelUi = 8.0f;
+
+// Same three gestures, this time for the character's currently-worn equipment
+// slots (CNewUIMyInventory::EquipmentWindowProcess, NewUIMyInventory.cpp).
+// Unlike the bag, PC's own click-to-pick-up there has no hover-first gate at
+// all - m_iPointedSlot != -1 && IsRelease(VK_LBUTTON) fires on the very first
+// click, no CNewUIInventoryCtrl::EVENT_HOVER equivalent to lean on - so a
+// plain single tap has to be actively held back here (see StartAndroidEquipHold)
+// rather than getting tap=show for free the way the bag's ambient machinery
+// gives it. The equipment tooltip itself (RenderItemToolTip, driven straight
+// off m_iPointedSlot every frame with no cached "last item") needs nothing
+// held back at all - MouseX/MouseY alone is enough to make it show correctly.
+constexpr uint32_t kAndroidEquipHoldMs = 500;
+constexpr float kAndroidEquipHoldMoveCancelUi = 8.0f;
+constexpr uint32_t kAndroidEquipDoubleTapMaxMs = 320;
+
 constexpr uint32_t kAndroidTradeAutoMoveIntervalMs = 520;
 constexpr uint32_t kAndroidTradeAutoMoveTimeoutMs = 15000;
 constexpr const char* kVirtualSkillSlotsPath = "Data/Local/android_touch_skill_slots.cfg";
@@ -1483,6 +1510,55 @@ struct PendingAndroidLongPressRightClick
     int startMouseY = 0;
 };
 
+// A hold on a filled bag slot. Started passively alongside the ambient touch-
+// to-mouse simulation (it does not claim the touch), so a plain tap or a quick
+// double-tap on the same slot still reaches CNewUIInventoryCtrl's own tooltip/
+// pickup handling exactly as it does today; this only ever does something if
+// the press outlasts kAndroidBagHoldMs. uiX/uiY are virtual-UI (640x480)
+// coordinates - the same space FindAndroidInventoryHotKeyItemAt and MouseX/
+// MouseY already use.
+struct PendingAndroidBagHold
+{
+    bool active = false;
+    bool fired = false;
+    bool releaseRightOnNextUpdate = false;
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    uint32_t downMs = 0;
+    float startNX = 0.0f;
+    float startNY = 0.0f;
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+};
+
+// A hold on a filled equipment slot - same shape as PendingAndroidBagHold, plus
+// which slot (and which of the two equipment arrays) it started on, since
+// there is no bag-style ITEM* to re-derive that from later.
+struct PendingAndroidEquipHold
+{
+    bool active = false;
+    bool fired = false;
+    bool releaseRightOnNextUpdate = false;
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    uint32_t downMs = 0;
+    float startNX = 0.0f;
+    float startNY = 0.0f;
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    int slot = -1;
+    bool isMuun = false;
+};
+
+// A single-frame press-then-release pulse on VK_LBUTTON, aimed at a specific
+// equipment slot, to drive CNewUIMyInventory::EquipmentWindowProcess's own
+// pickup branch (m_iPointedSlot != -1 && IsRelease(VK_LBUTTON)) exactly the
+// way a real PC click there would - rather than reimplementing pickup here and
+// risking missing one of its edge cases (the WD_10HEAVEN pet/wing veto, the
+// repair-mode redirect). See FireAndroidEquipSelectPulse/UpdateAndroidEquipSelectPulse.
+struct PendingAndroidEquipSelectPulse
+{
+    bool releaseOnNextUpdate = false;
+};
+
 enum class AndroidPlayerCommandMode
 {
     None,
@@ -1587,6 +1663,18 @@ uint32_t g_virtualLastUtilityTapMs = 0;
 // inventory beats building a parallel potion list - it already has the icons,
 // the stacks and the hit testing.
 int g_androidPendingHotKeyBindSlot = -1;
+
+// The legacy Q/W/E/R hotkey (CNewUIItemHotKey, NewUIMainFrameWindow.cpp) has no
+// real "empty" state: clearing m_iHotKeyItemType to -1 only stops it matching
+// that one exact item, but GetHotKeyItemIndex falls back to a whole category
+// (basic potions, mana potions, ...) whenever the exact type does not match,
+// and happily finds and keeps using whatever else of that category is in the
+// bag. So a hold-to-unbind that only cleared the type never looked empty as
+// long as a same-category potion still existed. This flag is the actual
+// "empty" Android's mirror bar honours - set on unbind, cleared the moment a
+// slot is bound to something again (either flow: the deliberate '+' pick, or
+// AndroidBindVirtualPotionSlotFromInventory). See GetVirtualMirrorHotKeyItem.
+bool g_androidHotKeySlotCleared[kVirtualMirrorHotKeySlotCount] = {};
 
 // A press on a Q/W/E/R slot, resolved when the finger lifts: a quick tap drinks,
 // a hold rebinds. Deciding on release means no per-frame timer is needed, and
@@ -1741,6 +1829,20 @@ int g_androidGroundCastFromY = -1;
 bool g_virtualRightPanelUtilityMode = false;
 bool g_virtualHudChatPinned = false;
 PendingAndroidLongPressRightClick g_androidLongPressRightClick{};
+PendingAndroidBagHold g_androidBagHold{};
+PendingAndroidEquipHold g_androidEquipHold{};
+PendingAndroidEquipSelectPulse g_androidEquipSelectPulse{};
+
+// The last completed short tap on a filled equipment slot that was NOT a hold,
+// so the next finger-down on the same slot within kAndroidEquipDoubleTapMaxMs
+// can be recognised as a double-tap (select) - equipment has no equivalent of
+// the bag's own MouseLButtonDBClick-driven ambient double-tap, because this
+// whole gesture is claimed rather than left to fall through (see
+// StartAndroidEquipHold).
+uint32_t g_androidLastEquipTapUpMs = 0;
+int g_androidLastEquipTapSlot = -1;
+bool g_androidLastEquipTapIsMuun = false;
+
 AndroidTradePickerState g_androidTradePicker{};
 
 // An explicitly chosen combat target that survives between attacks.
@@ -2731,8 +2833,17 @@ bool IsTouchOverInventoryWindow(float uiX, float uiY)
     return uiX >= left && uiX <= right && uiY >= top && uiY <= bottom;
 }
 
-ITEM* FindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
+// outCtrl receives whichever inventory control (main bag or the expanded one)
+// actually owns the item found, or nullptr if none - callers that need to poke
+// the control itself (SetEventState, IsLocked, ...) would otherwise have to
+// redo this exact lookup a second time to get it.
+ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventoryCtrl** outCtrl)
 {
+    if (outCtrl != nullptr)
+    {
+        *outCtrl = nullptr;
+    }
+
     if (g_pNewUISystem == nullptr
         || g_pMyInventory == nullptr
         || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY))
@@ -2752,6 +2863,10 @@ ITEM* FindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
     {
         if (ITEM* item = inventoryCtrl->FindItemAtPt(mouseX, mouseY))
         {
+            if (outCtrl != nullptr)
+            {
+                *outCtrl = inventoryCtrl;
+            }
             return item;
         }
     }
@@ -2759,14 +2874,107 @@ ITEM* FindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
     if (g_pMyInventoryExt != nullptr
         && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_ExpandInventory))
     {
-        return g_pMyInventoryExt->FindItemAtPt(mouseX, mouseY);
+        if (ITEM* item = g_pMyInventoryExt->FindItemAtPt(mouseX, mouseY))
+        {
+            if (outCtrl != nullptr)
+            {
+                // CNewUIInventoryExtension holds one CNewUIInventoryCtrl per
+                // page, and GetInventoryCtrl() (no index) picks the page by
+                // checking the live MouseX/MouseY globals against each one's
+                // rect - it does not take a point parameter, so this touch's
+                // position has to be there for it to see, not whatever the
+                // mouse was doing last frame. Restored right after; nothing
+                // else here is meant to move the simulated mouse.
+                const int savedMouseX = MouseX;
+                const int savedMouseY = MouseY;
+                MouseX = mouseX;
+                MouseY = mouseY;
+                *outCtrl = g_pMyInventoryExt->GetInventoryCtrl();
+                MouseX = savedMouseX;
+                MouseY = savedMouseY;
+            }
+            return item;
+        }
     }
 
     return nullptr;
 }
 
+ITEM* FindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
+{
+    return FindAndroidBagItemAndCtrlAt(uiX, uiY, nullptr);
+}
+
+// A hold on a filled bag slot - see PendingAndroidBagHold and the
+// implementations further down (alongside the world-target long-press this is
+// modelled on). Forward-declared here, still inside this same anonymous
+// namespace, because HandleVirtualFingerDown/Motion/Up below call them well
+// before that point in the file.
+void StartAndroidBagHold(const SDL_TouchFingerEvent& touch, float uiX, float uiY);
+void UpdateAndroidBagHoldMotion(const SDL_TouchFingerEvent& touch);
+bool FinishAndroidBagHoldFingerUp(SDL_FingerID fingerId);
+void UpdateAndroidBagHold();
+
+// Same idea, for the character's currently-worn equipment slots - see
+// PendingAndroidEquipHold/PendingAndroidEquipSelectPulse and the
+// implementations further down.
+void StartAndroidEquipHold(const SDL_TouchFingerEvent& touch, float uiX, float uiY, int slot, bool isMuun);
+// Both return whether they were tracking this finger at all (not whether a
+// hold fired) - true means claim the event, matching the hotkey-slot press
+// pattern this is modelled on: like that one, the equipment hold IS claimed at
+// finger-down (StartAndroidEquipHold, unlike the bag's), so its motion and
+// release must stay claimed too rather than falling through to the joystick.
+bool UpdateAndroidEquipHoldMotion(const SDL_TouchFingerEvent& touch);
+bool FinishAndroidEquipHoldFingerUp(SDL_FingerID fingerId);
+void UpdateAndroidEquipHold();
+void UpdateAndroidEquipSelectPulse();
+void FireAndroidEquipSelectPulse(float uiX, float uiY);
+
+// Wraps CNewUIMyInventory::FindEquippedItemAtPt, converting the same virtual-UI
+// (640x480) coordinates FindAndroidBagItemAndCtrlAt uses into the int point that
+// call needs, and gating on the inventory window being visible - the same
+// visibility flag CNewUIMyInventory::UpdateMouseEvent (and so
+// EquipmentWindowProcess) itself is gated on, so nothing here can fire while
+// the window driving it is not even being updated.
+ITEM* FindAndroidEquippedItemAt(float uiX, float uiY, int* outSlot, bool* outIsMuun)
+{
+    if (outSlot != nullptr)
+    {
+        *outSlot = -1;
+    }
+    if (outIsMuun != nullptr)
+    {
+        *outIsMuun = false;
+    }
+
+    if (g_pNewUISystem == nullptr
+        || g_pMyInventory == nullptr
+        || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY))
+    {
+        return nullptr;
+    }
+
+    const int x = std::clamp(static_cast<int>(uiX), 0, 640);
+    const int y = std::clamp(static_cast<int>(uiY), 0, 480);
+    return g_pMyInventory->FindEquippedItemAtPt(x, y, outSlot, outIsMuun);
+}
+
 bool TryAutoBindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
 {
+    // Only the deliberate flow lands here now: tapping the '+' on an empty
+    // Q/W/E/R slot parks that slot here and opens the bag, and the next
+    // consumable tapped in there binds to it. Passively tapping a potion while
+    // just browsing used to auto-bind it too - that moved to a hold
+    // (UpdateAndroidBagHold) so a plain tap can show the item like everything
+    // else in the bag, the same as the new single-tap/double-tap/hold model
+    // asks for.
+    if (g_androidPendingHotKeyBindSlot < 0
+        || g_androidPendingHotKeyBindSlot >= kVirtualMirrorHotKeySlotCount
+        || g_pMainFrame == nullptr)
+    {
+        return false;
+    }
+
     ITEM* item = FindAndroidInventoryHotKeyItemAt(uiX, uiY);
     if (item == nullptr || !SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(item->Type))
     {
@@ -2775,29 +2983,18 @@ bool TryAutoBindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
 
     const int itemLevel = (item->Level >> 3) & 15;
 
-    // A '+' on one of the Q/W/E/R slots sent us here, so honour that choice
-    // rather than letting the auto-binder pick a slot of its own.
-    if (g_androidPendingHotKeyBindSlot >= 0
-        && g_androidPendingHotKeyBindSlot < kVirtualMirrorHotKeySlotCount
-        && g_pMainFrame != nullptr)
-    {
-        g_pMainFrame->SetItemHotKey(
-            kVirtualMirrorHotKeys[g_androidPendingHotKeyBindSlot], item->Type, itemLevel);
-        LOGI("Android bind consumable type=%d level=%d -> requested slot=%d",
-             item->Type, itemLevel, g_androidPendingHotKeyBindSlot);
-        g_androidPendingHotKeyBindSlot = -1;
+    g_pMainFrame->SetItemHotKey(
+        kVirtualMirrorHotKeys[g_androidPendingHotKeyBindSlot], item->Type, itemLevel);
+    g_androidHotKeySlotCleared[g_androidPendingHotKeyBindSlot] = false;
+    LOGI("Android bind consumable type=%d level=%d -> requested slot=%d",
+         item->Type, itemLevel, g_androidPendingHotKeyBindSlot);
+    g_androidPendingHotKeyBindSlot = -1;
 
-        // The bag was opened purely to answer the '+', so dismiss it once that
-        // is done. Only on this path - browsing the inventory normally and
-        // tapping a consumable still auto-binds without closing anything.
-        if (g_pNewUISystem != nullptr)
-        {
-            g_pNewUISystem->Hide(SEASON3B::INTERFACE_INVENTORY);
-        }
-    }
-    else if (!AndroidBindVirtualPotionSlotFromInventory(item->Type, itemLevel))
+    // The bag was opened purely to answer the '+', so dismiss it once that is
+    // done.
+    if (g_pNewUISystem != nullptr)
     {
-        return false;
+        g_pNewUISystem->Hide(SEASON3B::INTERFACE_INVENTORY);
     }
 
     MouseLButton = false;
@@ -7824,6 +8021,70 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Does not claim the touch - a plain tap or a quick double-tap on this same
+    // slot still needs to reach the ambient touch-to-mouse simulation below and
+    // CNewUIInventoryCtrl's own tooltip/pickup handling, untouched. This only
+    // ever does something if the press outlasts kAndroidBagHoldMs (UpdateAndroidBagHold,
+    // polled from UpdateVirtualPadHolds).
+    {
+        SEASON3B::CNewUIInventoryCtrl* bagCtrl = nullptr;
+        if (ITEM* bagItem = FindAndroidBagItemAndCtrlAt(uiX, uiY, &bagCtrl))
+        {
+            // CNewUIInventoryCtrl::UpdateProcess only resets EVENT_HOVER to
+            // EVENT_NONE when the pointer moves off every filled slot, not when
+            // it moves from one filled slot straight to another - so without
+            // this, tapping a second, different item while the first item's
+            // hover state was still active picked the second one straight up
+            // (EVENT_HOVER + this tap's own release already satisfied the
+            // pickup condition) instead of showing it. A tap that lands back on
+            // the SAME item already being hovered is left alone - that is a
+            // real double-tap-to-select and must still go through.
+            if (bagCtrl != nullptr && bagCtrl->FindItemPointedSquareIndex() != bagItem)
+            {
+                bagCtrl->SetEventState(SEASON3B::CNewUIInventoryCtrl::EVENT_NONE);
+            }
+
+            StartAndroidBagHold(touch, uiX, uiY);
+        }
+    }
+
+    // Equipped items: unlike the bag, PC's own pickup here has no hover-first
+    // gate (see the constant block above), so a plain single tap has to be
+    // actively claimed and held back, not just watched passively - otherwise
+    // its own release would satisfy m_iPointedSlot != -1 && IsRelease(VK_LBUTTON)
+    // and pick the item up immediately, the very thing "single tap shows it"
+    // is supposed to prevent.
+    {
+        int equipSlot = -1;
+        bool equipIsMuun = false;
+        if (FindAndroidEquippedItemAt(uiX, uiY, &equipSlot, &equipIsMuun) != nullptr)
+        {
+            const uint32_t nowMs = MU_MobileGetTicks();
+            const bool isDoubleTap = g_androidLastEquipTapUpMs > 0
+                && g_androidLastEquipTapSlot == equipSlot
+                && g_androidLastEquipTapIsMuun == equipIsMuun
+                && (nowMs - g_androidLastEquipTapUpMs) <= kAndroidEquipDoubleTapMaxMs;
+
+            if (isDoubleTap)
+            {
+                // Consumed so a third tap starts fresh rather than chaining.
+                g_androidLastEquipTapUpMs = 0;
+                FireAndroidEquipSelectPulse(uiX, uiY);
+            }
+            else
+            {
+                // MouseX/MouseY still need to land on the slot even though the
+                // touch is claimed, because CNewUIMyInventory::Update() reads
+                // them - unclaimed or not - to decide m_iPointedSlot, and that
+                // is what the equipment tooltip renders every frame.
+                MouseX = static_cast<int>(uiX);
+                MouseY = static_cast<int>(uiY);
+                StartAndroidEquipHold(touch, uiX, uiY, equipSlot, equipIsMuun);
+            }
+            return true;
+        }
+    }
+
     if (g_androidTradePicker.visible && HandleAndroidTradePickerFingerDown(touch, uiX, uiY))
     {
         return true;
@@ -8073,6 +8334,19 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Does not claim the touch - see StartAndroidBagHold. Sliding off the slot
+    // just abandons the hold, the same as sliding off a hotkey slot below does.
+    UpdateAndroidBagHoldMotion(touch);
+
+    // The equipment hold IS claimed at finger-down (StartAndroidEquipHold), so
+    // its motion must stay claimed too - sliding off the slot abandons the
+    // hold rather than unequipping wherever the finger ends up, or falling
+    // through to the joystick.
+    if (UpdateAndroidEquipHoldMotion(touch))
+    {
+        return true;
+    }
+
     // Sliding off a hotkey slot abandons the press, so a stray drag across the
     // consumable row cannot drink anything.
     if (g_androidHotKeyPress.slot >= 0 && g_androidHotKeyPress.fingerId == touch.fingerId)
@@ -8124,9 +8398,26 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
-    // Resolve a Q/W/E/R press. Quick tap on a filled slot drinks it; holding, or
-    // tapping an empty '+' slot, arms that slot and opens the bag so the next
-    // consumable tapped in there is assigned to it.
+    // Does not claim the touch - see StartAndroidBagHold. If the hold already
+    // fired, MouseLButton was forced false when it did (UpdateAndroidBagHold),
+    // so the ambient tap/double-tap machinery below has nothing left to react
+    // to; this just clears the pending state either way.
+    FinishAndroidBagHoldFingerUp(touch.fingerId);
+
+    // The equipment hold IS claimed (StartAndroidEquipHold) - if it fired, the
+    // right-click pulse already did its job (UpdateAndroidEquipHold); if not,
+    // this was a completed short tap, recorded here so the next tap on the
+    // same slot within kAndroidEquipDoubleTapMaxMs is recognised as the double-
+    // tap that selects it (StartAndroidEquipHold reads these back).
+    if (FinishAndroidEquipHoldFingerUp(touch.fingerId))
+    {
+        return true;
+    }
+
+    // Resolve a Q/W/E/R press. Quick tap on a filled slot drinks it. Tapping an
+    // empty '+' slot arms that slot and opens the bag so the next consumable
+    // tapped in there is assigned to it. Holding a filled slot clears it - to
+    // put something else there, clear it first and then tap the now-empty '+'.
     if (g_androidHotKeyPress.slot >= 0 && g_androidHotKeyPress.fingerId == touch.fingerId)
     {
         const int slot = g_androidHotKeyPress.slot;
@@ -8134,7 +8425,7 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         g_androidHotKeyPress = AndroidHotKeyPressState{};
 
         const bool isEmpty = (GetVirtualMirrorHotKeyItem(slot) == nullptr);
-        if (isEmpty || heldMs >= kHotKeyRebindHoldMs)
+        if (isEmpty)
         {
             g_androidPendingHotKeyBindSlot = slot;
             if (g_pNewUISystem != nullptr
@@ -8143,6 +8434,21 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
                 g_pNewUISystem->Show(SEASON3B::INTERFACE_INVENTORY);
             }
             PlayBuffer(SOUND_CLICK01);
+        }
+        else if (heldMs >= kHotKeyRebindHoldMs)
+        {
+            if (g_pMainFrame != nullptr && slot >= 0 && slot < kVirtualMirrorHotKeySlotCount)
+            {
+                // The type clear alone does not make GetVirtualMirrorHotKeyItem
+                // (and so isEmpty above) actually see this as empty next time -
+                // GetHotKeyItemIndex falls back to category matching and would
+                // just find and keep using some other potion of the same kind
+                // still in the bag. g_androidHotKeySlotCleared is what really
+                // empties it; see its declaration.
+                g_pMainFrame->SetItemHotKey(kVirtualMirrorHotKeys[slot], -1, 0);
+                g_androidHotKeySlotCleared[slot] = true;
+                PlayBuffer(SOUND_CLICK01);
+            }
         }
         else
         {
@@ -8343,6 +8649,309 @@ void UpdateAndroidLongPressRightClick()
 #endif
 }
 
+void ClearAndroidBagHold()
+{
+    g_androidBagHold = PendingAndroidBagHold{};
+}
+
+// Called on finger-down for any touch that starts on a filled bag slot. Does
+// not claim the touch - the caller keeps going into the normal touch-to-mouse
+// simulation, which is what lets a tap or double-tap on the very same slot
+// still reach CNewUIInventoryCtrl's own tooltip/pickup handling untouched.
+void StartAndroidBagHold(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    g_androidBagHold = PendingAndroidBagHold{};
+    g_androidBagHold.active = true;
+    g_androidBagHold.fingerId = touch.fingerId;
+    g_androidBagHold.downMs = MU_MobileGetTicks();
+    g_androidBagHold.startNX = touch.x;
+    g_androidBagHold.startNY = touch.y;
+    g_androidBagHold.uiX = uiX;
+    g_androidBagHold.uiY = uiY;
+}
+
+void UpdateAndroidBagHoldMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (!g_androidBagHold.active
+        || g_androidBagHold.fingerId != touch.fingerId
+        || g_androidBagHold.fired)
+    {
+        return;
+    }
+
+    const float dx = (touch.x - g_androidBagHold.startNX) * 640.0f;
+    const float dy = (touch.y - g_androidBagHold.startNY) * 480.0f;
+    if ((dx * dx + dy * dy) > (kAndroidBagHoldMoveCancelUi * kAndroidBagHoldMoveCancelUi))
+    {
+        ClearAndroidBagHold();
+    }
+}
+
+// Clears the pending hold on finger-up, wherever it came from. Returns whether
+// it had already fired - by then MouseLButton has already been forced false
+// (see UpdateAndroidBagHold), so the ambient tap/double-tap machinery has
+// nothing left to react to and the caller does not need to suppress anything
+// further; the return value exists for parity with the world-target long-press
+// pattern this is modelled on and for callers that want to log it.
+bool FinishAndroidBagHoldFingerUp(SDL_FingerID fingerId)
+{
+    if (!g_androidBagHold.active || g_androidBagHold.fingerId != fingerId)
+    {
+        return false;
+    }
+
+    const bool fired = g_androidBagHold.fired;
+    ClearAndroidBagHold();
+    return fired;
+}
+
+void UpdateAndroidBagHold()
+{
+    if (g_androidBagHold.releaseRightOnNextUpdate)
+    {
+        ReleaseAndroidLongPressRightButton();
+        g_androidBagHold.releaseRightOnNextUpdate = false;
+    }
+
+    if (!g_androidBagHold.active || g_androidBagHold.fired)
+    {
+        return;
+    }
+
+    if ((MU_MobileGetTicks() - g_androidBagHold.downMs) < kAndroidBagHoldMs)
+    {
+        return;
+    }
+
+    // Re-checked fresh rather than trusting whatever was under the finger at
+    // touch-down: GetPickedItem() != nullptr here means something is already on
+    // the cursor (dragging it elsewhere while resting a second finger, or this
+    // same finger having somehow already picked something up), and holding
+    // longer should not also try to use/bind whatever is still sitting in the
+    // slot underneath it.
+    SEASON3B::CNewUIInventoryCtrl* ctrl = nullptr;
+    ITEM* item = FindAndroidBagItemAndCtrlAt(g_androidBagHold.uiX, g_androidBagHold.uiY, &ctrl);
+    if (item == nullptr)
+    {
+        ClearAndroidBagHold();
+        return;
+    }
+
+    g_androidBagHold.fired = true;
+
+    // A hold always wins over whatever the ambient hover/pickup state machine
+    // was doing with this same press (it may already be mid-hover from an
+    // earlier tap on this slot) - this press does not turn into a pickup once
+    // it does. Also cancels the unrelated world-target long-press-to-right-
+    // click, in case some previously selected character left it armed while
+    // the bag happened to be open.
+    //
+    // The state reset matters, not just the button clear: if this item's
+    // tooltip was already showing, m_EventState was already EVENT_HOVER
+    // (NewUIInventoryCtrl.cpp), and clearing MouseLButton from true to false
+    // right below IS a release edge as far as CNewKeyInput::ScanAsyncKeyState
+    // is concerned - EVENT_HOVER + that release satisfies UpdateMouseEvent's
+    // own pickup condition and grabs the item right here, emptying the slot
+    // before the right-click pulse below ever reaches it. Confirmed exactly
+    // this way: holding an item equipped fine until its tooltip was showing,
+    // at which point holding it silently stopped equipping anything - the
+    // slot was already empty (picked up) by the time HandleInventoryActions
+    // went looking for what was in it.
+    if (ctrl != nullptr)
+    {
+        ctrl->SetEventState(SEASON3B::CNewUIInventoryCtrl::EVENT_NONE);
+    }
+    MouseLButtonPush = false;
+    MouseLButtonPop = false;
+    MouseLButtonDBClick = false;
+    MouseLButton = false;
+    ClearAndroidLongPressRightClick(false);
+
+    const int itemLevel = (item->Level >> 3) & 15;
+    if (SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(item->Type))
+    {
+        // Consumables bind to a hotkey slot instead of being used directly -
+        // this is what tapping one used to do; it moved to a hold so a plain
+        // tap can show the item like everything else in the bag.
+        const int boundSlot = AndroidBindVirtualPotionSlotFromInventory(item->Type, itemLevel);
+        if (boundSlot >= 0)
+        {
+            g_androidHotKeySlotCleared[boundSlot] = false;
+            PlayBuffer(SOUND_CLICK01);
+        }
+        return;
+    }
+
+    // Everything else: the same one-frame right-click pulse
+    // StartAndroidLongPressRightClick/UpdateAndroidLongPressRightClick already
+    // use for a world target, aimed at this slot instead - HandleInventoryActions
+    // (NewUIMyInventory.cpp) re-finds the item at MouseX/MouseY itself and
+    // uses/equips it exactly as a PC right-click would.
+    MouseX = static_cast<int>(g_androidBagHold.uiX);
+    MouseY = static_cast<int>(g_androidBagHold.uiY);
+    g_iNoMouseTime = 0;
+
+    MouseRButtonPop = false;
+    MouseRButtonPush = !MouseRButton;
+    MouseRButton = true;
+    g_androidBagHold.releaseRightOnNextUpdate = true;
+}
+
+void ClearAndroidEquipHold()
+{
+    g_androidEquipHold = PendingAndroidEquipHold{};
+}
+
+void StartAndroidEquipHold(const SDL_TouchFingerEvent& touch, float uiX, float uiY, int slot, bool isMuun)
+{
+    g_androidEquipHold = PendingAndroidEquipHold{};
+    g_androidEquipHold.active = true;
+    g_androidEquipHold.fingerId = touch.fingerId;
+    g_androidEquipHold.downMs = MU_MobileGetTicks();
+    g_androidEquipHold.startNX = touch.x;
+    g_androidEquipHold.startNY = touch.y;
+    g_androidEquipHold.uiX = uiX;
+    g_androidEquipHold.uiY = uiY;
+    g_androidEquipHold.slot = slot;
+    g_androidEquipHold.isMuun = isMuun;
+}
+
+bool UpdateAndroidEquipHoldMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (!g_androidEquipHold.active || g_androidEquipHold.fingerId != touch.fingerId)
+    {
+        return false;
+    }
+
+    if (!g_androidEquipHold.fired)
+    {
+        const float dx = (touch.x - g_androidEquipHold.startNX) * 640.0f;
+        const float dy = (touch.y - g_androidEquipHold.startNY) * 480.0f;
+        if ((dx * dx + dy * dy) > (kAndroidEquipHoldMoveCancelUi * kAndroidEquipHoldMoveCancelUi))
+        {
+            ClearAndroidEquipHold();
+        }
+    }
+    return true;
+}
+
+// Returns whether it was tracking this finger at all - see the forward
+// declaration for why the caller claims on true regardless of whether a hold
+// actually fired.
+bool FinishAndroidEquipHoldFingerUp(SDL_FingerID fingerId)
+{
+    if (!g_androidEquipHold.active || g_androidEquipHold.fingerId != fingerId)
+    {
+        return false;
+    }
+
+    if (!g_androidEquipHold.fired)
+    {
+        // A completed short tap - the candidate half of a possible double-tap,
+        // resolved on the NEXT finger-down rather than by waiting here to see
+        // if one arrives (see HandleVirtualFingerDown's isDoubleTap check).
+        g_androidLastEquipTapUpMs = MU_MobileGetTicks();
+        g_androidLastEquipTapSlot = g_androidEquipHold.slot;
+        g_androidLastEquipTapIsMuun = g_androidEquipHold.isMuun;
+    }
+
+    ClearAndroidEquipHold();
+    return true;
+}
+
+void UpdateAndroidEquipHold()
+{
+    if (g_androidEquipHold.releaseRightOnNextUpdate)
+    {
+        ReleaseAndroidLongPressRightButton();
+        g_androidEquipHold.releaseRightOnNextUpdate = false;
+    }
+
+    if (!g_androidEquipHold.active || g_androidEquipHold.fired)
+    {
+        return;
+    }
+
+    if ((MU_MobileGetTicks() - g_androidEquipHold.downMs) < kAndroidEquipHoldMs)
+    {
+        return;
+    }
+
+    // Re-checked fresh, the same as the bag's hold does: confirms the slot is
+    // still filled, and (FindEquippedItemAtPt's own guard) that nothing is
+    // already on the cursor.
+    int slot = -1;
+    bool isMuun = false;
+    if (FindAndroidEquippedItemAt(g_androidEquipHold.uiX, g_androidEquipHold.uiY, &slot, &isMuun) == nullptr
+        || slot != g_androidEquipHold.slot
+        || isMuun != g_androidEquipHold.isMuun)
+    {
+        ClearAndroidEquipHold();
+        return;
+    }
+
+    g_androidEquipHold.fired = true;
+
+    // A hold always wins over a pending double-tap-to-select on this same
+    // slot, and cancels the unrelated world-target long-press-to-right-click
+    // in case a previously selected character left it armed.
+    g_androidLastEquipTapUpMs = 0;
+    MouseLButtonPush = false;
+    MouseLButtonPop = false;
+    MouseLButtonDBClick = false;
+    MouseLButton = false;
+    ClearAndroidLongPressRightClick(false);
+
+    // One-frame right-click pulse aimed at this slot, driving
+    // EquipmentWindowProcess's own IsRelease(VK_RBUTTON) unequip branch
+    // (NewUIMyInventory.cpp) exactly as a real PC right-click there would -
+    // that branch re-reads CharacterMachine->Equipment[iSourceIndex]/
+    // EquipmentMuun itself from m_iPointedSlot, so nothing further needs to be
+    // passed in beyond MouseX/MouseY.
+    MouseX = static_cast<int>(g_androidEquipHold.uiX);
+    MouseY = static_cast<int>(g_androidEquipHold.uiY);
+    g_iNoMouseTime = 0;
+
+    MouseRButtonPop = false;
+    MouseRButtonPush = !MouseRButton;
+    MouseRButton = true;
+    g_androidEquipHold.releaseRightOnNextUpdate = true;
+}
+
+void UpdateAndroidEquipSelectPulse()
+{
+    if (!g_androidEquipSelectPulse.releaseOnNextUpdate)
+    {
+        return;
+    }
+
+    g_androidEquipSelectPulse.releaseOnNextUpdate = false;
+    MouseLButtonPush = false;
+    if (MouseLButton)
+    {
+        MouseLButtonPop = true;
+    }
+    MouseLButton = false;
+}
+
+// One-frame press-then-release pulse on VK_LBUTTON at (uiX, uiY) - see
+// PendingAndroidEquipSelectPulse. The press half happens now; released on the
+// next UpdateAndroidEquipSelectPulse tick, which is what turns it into an
+// IsRelease(VK_LBUTTON) edge for EquipmentWindowProcess to see (a same-frame
+// press+release would never register as either a press or a release, since
+// CNewKeyInput::ScanAsyncKeyState only advances one state per call).
+void FireAndroidEquipSelectPulse(float uiX, float uiY)
+{
+    MouseX = static_cast<int>(uiX);
+    MouseY = static_cast<int>(uiY);
+    g_iNoMouseTime = 0;
+
+    MouseLButtonPop = false;
+    MouseLButtonPush = !MouseLButton;
+    MouseLButton = true;
+    g_androidEquipSelectPulse.releaseOnNextUpdate = true;
+}
+
 bool IsVirtualButtonPressed(int button)
 {
     for (const ActiveVirtualTouch& active : g_activeVirtualTouches)
@@ -8358,6 +8967,9 @@ bool IsVirtualButtonPressed(int button)
 void UpdateVirtualPadHolds()
 {
     UpdateAndroidLongPressRightClick();
+    UpdateAndroidBagHold();
+    UpdateAndroidEquipHold();
+    UpdateAndroidEquipSelectPulse();
     UpdateAndroidTradeAutoMove();
 
     if (!IsVirtualPadAvailable())
@@ -9852,6 +10464,11 @@ ITEM* GetVirtualMirrorHotKeyItem(int slot)
         || slot >= kVirtualMirrorHotKeySlotCount
         || g_pMainFrame == nullptr
         || g_pMyInventory == nullptr)
+    {
+        return nullptr;
+    }
+
+    if (g_androidHotKeySlotCleared[slot])
     {
         return nullptr;
     }
@@ -15463,26 +16080,35 @@ static int FindBestAutoBindHotKeySlot(int itemType, int itemLevel)
 }
 
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Consumable potion slot binding 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
-// Called by NewUIMyInventory.cpp when the player taps a consumable item in
-// the inventory on mobile.  Bind directly to the legacy MU Q/W/E/R bar so
-// the old mainframe UI stays authoritative for both rendering and use.
-bool AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel)
+// Binds directly to the legacy MU Q/W/E/R bar so the old mainframe UI stays
+// authoritative for both rendering and use. Returns the mirror slot (0..3,
+// see kVirtualMirrorHotKeys) it bound, or -1 on failure - the caller needs
+// that to clear g_androidHotKeySlotCleared for the right slot.
+int AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel)
 {
     if (g_pMainFrame == nullptr
         || !SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(itemType))
     {
-        return false;
+        return -1;
     }
 
     const int hotKey = FindBestAutoBindHotKeySlot(itemType, itemLevel);
     if (hotKey < 0)
     {
-        return false;
+        return -1;
     }
 
     g_pMainFrame->SetItemHotKey(hotKey, itemType, itemLevel);
     LOGI("Android auto-bind consumable type=%d level=%d -> hotkey=%d", itemType, itemLevel, hotKey);
-    return true;
+
+    for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
+    {
+        if (kVirtualMirrorHotKeys[slot] == hotKey)
+        {
+            return slot;
+        }
+    }
+    return -1;
 }
 
 float GetAdaptiveEffectSpawnScale()
