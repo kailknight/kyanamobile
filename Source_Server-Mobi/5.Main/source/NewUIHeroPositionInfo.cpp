@@ -745,6 +745,188 @@ void CNewUIHeroPositionInfo::DrawMiniMap() {
   DisableAlphaBlend();
   EnableAlphaTest(0);
 }
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+extern bool AndroidGetMiniMapPanelRect(float* outX, float* outY, float* outW, float* outH);
+// Not declared in any header this file already includes (ZzzOpenglUtil.cpp
+// keeps them file-local in practice), but they are plain global functions.
+extern float ConvertX(float x);
+extern float ConvertY(float y);
+// EndRenderColor() (ZzzOpenglUtil.cpp) enables GL_TEXTURE_2D with a raw
+// glEnable rather than through DisableTexture()'s TextureEnable shadow
+// variable, so that shadow goes stale here. DisableTexture() would then
+// see TextureEnable already false and skip its own glDisable, leaving
+// texturing genuinely on - which is why the cone/border below call
+// glDisable(GL_TEXTURE_2D) directly instead of through that helper.
+
+// Draws a screen-space axis-aligned quad sampling texture ID with its UV
+// window centered at (CurrenX,CurrenY) and half-size SetScale/2, rotated by
+// RotationDeg around that center - the on-screen rectangle stays fixed while
+// the sampled terrain spins under it. Same coordinate conventions as
+// GetDrawCircle (ZzzOpenglUtil.cpp) - ConvertX/ConvertY scaling, the
+// WindowHeight flip, BindTexture - just a plain quad instead of its
+// 20-vertex circular fan, since this panel is rectangular.
+static void DrawRotatingMapQuad(int ID, float X, float Y, float W, float H,
+                                float CurrenX, float CurrenY, float SetScale,
+                                float RotationDeg) {
+  X = ConvertX(X);
+  Y = ConvertY(Y);
+  W = ConvertX(W);
+  H = ConvertY(H);
+
+  const float top = (float)WindowHeight - Y;
+  const float bottom = top - H;
+  const float left = X;
+  const float right = X + W;
+
+  const float halfScale = SetScale / 2.0f;
+  const float rad = RotationDeg * (3.14159265f / 180.0f);
+  const float cosT = std::cos(rad);
+  const float sinT = std::sin(rad);
+
+  BindTexture(ID);
+  glBegin(GL_TRIANGLE_FAN);
+
+  float ox, oy, u, v;
+  ox = -halfScale; oy = -halfScale;
+  u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
+  glTexCoord2f(u, v); glVertex2f(left, bottom);
+
+  ox = halfScale; oy = -halfScale;
+  u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
+  glTexCoord2f(u, v); glVertex2f(right, bottom);
+
+  ox = halfScale; oy = halfScale;
+  u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
+  glTexCoord2f(u, v); glVertex2f(right, top);
+
+  ox = -halfScale; oy = halfScale;
+  u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
+  glTexCoord2f(u, v); glVertex2f(left, top);
+
+  glEnd();
+}
+
+// The Android/iOS replacement for DrawMiniMap(): same per-map texture
+// (IndexIMGMap, loaded by MiniMapLoad()) and the same facing field
+// (Hero->Object.Angle[2]) DrawMiniMap's own arrow icon already rotates by,
+// but a rotating rectangular panel instead of a static circular one with the
+// player's icon rotating on top of it - matches the wireframe's "map turns,
+// player marker stays fixed and always points up" behaviour. Positioned by
+// android_main.cpp (AndroidGetMiniMapPanelRect), display-only, no buttons.
+void CNewUIHeroPositionInfo::DrawAndroidMiniMap() {
+  if (Hero == NULL || IndexIMGMap == -1 || !mShowMiniMap)
+    return;
+
+  float px, py, pw, ph;
+  if (!AndroidGetMiniMapPanelRect(&px, &py, &pw, &ph))
+    return;
+
+  EnableAlphaTest(1);
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+  const float usercurrentx = (float)(Hero->PositionX) / 256.0f;
+  const float usercurrenty = (float)(256 - Hero->PositionY) / 256.0f;
+  // Negated so the player's facing direction is always "up" on screen - the
+  // map rotates the opposite way the player turns. If this reads backwards
+  // on device (map spins the wrong way, or blips end up mirrored), the fix
+  // is flipping this one sign, not re-deriving the formulas below - both the
+  // map quad and the blip placement use the same headingDeg, so they will
+  // stay consistent with each other either way.
+  const float headingDeg = -(Hero->Object.Angle[2]);
+
+  DrawRotatingMapQuad(IndexIMGMap, px, py, pw, ph, usercurrentx, usercurrenty,
+                      (float)ScaleMap, headingDeg);
+
+  // Live blips: place each nearby object at the inverse of the same rotation
+  // applied to the map quad above, so a monster/player that is visually
+  // "ahead" of you on the rotated terrain also ends up drawn ahead of you
+  // here, not at its unrotated compass position.
+  const float rad = headingDeg * (3.14159265f / 180.0f);
+  const float cosT = std::cos(rad);
+  const float sinT = std::sin(rad);
+  const float halfScale = (float)ScaleMap / 2.0f;
+  const float cx = px + pw / 2.0f;
+  const float cy = py + ph / 2.0f;
+
+  for (int i = 0; i < 400; ++i) {
+    CHARACTER *c = &CharactersClient[i];
+    OBJECT *o = &c->Object;
+    if (c == Hero || !o->Live)
+      continue;
+
+    const float dx = (float)(c->PositionX - Hero->PositionX);
+    const float dy = (float)(c->PositionY - Hero->PositionY);
+    const float uOffset = dx / 256.0f;
+    const float vOffset = -dy / 256.0f;
+
+    const float normX = (uOffset * cosT + vOffset * sinT) / halfScale;
+    const float normY = (-uOffset * sinT + vOffset * cosT) / halfScale;
+    if (normX < -1.0f || normX > 1.0f || normY < -1.0f || normY > 1.0f)
+      continue;
+
+    if (o->Kind == KIND_NPC)
+      glColor3f(206 / 255.f, 209 / 255.f, 4 / 255.f);
+    else if (o->Kind == KIND_PLAYER)
+      glColor3f(0 / 255.f, 255 / 255.f, 72 / 255.f);
+    else if (o->Kind == KIND_MONSTER)
+      glColor3f(209 / 255.f, 144 / 255.f, 4 / 255.f);
+    else
+      continue;
+
+    if (c->GuildMarkIndex == Hero->GuildMarkIndex && Hero->GuildMarkIndex >= 0)
+      glColor3f(0 / 255.f, 255 / 255.f, 234 / 255.f);
+
+    const float bx = cx + normX * (pw / 2.0f);
+    const float by = cy - normY * (ph / 2.0f);
+    RenderColor(bx - 1.5f, by - 1.5f, 3.f, 3.f);
+  }
+
+  // Player marker, fixed at the panel's center and always pointing up: the
+  // rotation above is entirely carried by the map and the blips instead.
+  glColor3f(0.16f, 0.94f, 0.35f);
+  RenderColor(cx - 3.0f, cy - 3.0f, 6.0f, 6.0f);
+  EndRenderColor();
+
+  glDisable(GL_TEXTURE_2D);
+  const float coneX = ConvertX(cx);
+  const float coneTop = (float)WindowHeight - ConvertY(cy - 10.0f);
+  const float coneBottom = (float)WindowHeight - ConvertY(cy + 2.0f);
+  const float coneHalfW = ConvertX(cx + 5.0f) - ConvertX(cx);
+  glColor4f(0.16f, 0.94f, 0.35f, 0.9f);
+  glBegin(GL_TRIANGLES);
+  glVertex2f(coneX, coneTop);
+  glVertex2f(coneX - coneHalfW, coneBottom);
+  glVertex2f(coneX + coneHalfW, coneBottom);
+  glEnd();
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+  // Frame, drawn last so it sits on top of the map/blips/marker rather than
+  // being covered by them. Texturing is already off from the cone draw above
+  // (left off deliberately - see the comment by the ConvertX/Y externs -
+  // rather than toggled through DisableTexture(), whose shadow state the
+  // raw glEnable in EndRenderColor() already desynced once this frame).
+  const float borderLeft = ConvertX(px);
+  const float borderRight = ConvertX(px + pw);
+  const float borderTop = (float)WindowHeight - ConvertY(py);
+  const float borderBottom = (float)WindowHeight - ConvertY(py + ph);
+  glLineWidth(2.0f);
+  glColor4f(0.85f, 0.68f, 0.22f, 0.95f);
+  glBegin(GL_LINE_LOOP);
+  glVertex2f(borderLeft, borderTop);
+  glVertex2f(borderRight, borderTop);
+  glVertex2f(borderRight, borderBottom);
+  glVertex2f(borderLeft, borderBottom);
+  glEnd();
+  glLineWidth(1.0f);
+  glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+  glEnable(GL_TEXTURE_2D);
+
+  DisableAlphaBlend();
+  EnableAlphaTest(0);
+}
+#endif // __ANDROID__ || MU_IOS
+
 void AutoMove() {
   if (Hero == NULL)
     return;
@@ -905,6 +1087,7 @@ bool CNewUIHeroPositionInfo::Render() {
   // The three calls above are kept deliberately: MiniMapLoad owns the per-map
   // bitmap the minimap window itself draws, and AutoMove drives auto-run.
   // Neither is UI, and both would stop working if this returned any earlier.
+  DrawAndroidMiniMap();
   return true;
 #endif
 #ifdef __ANDROID__

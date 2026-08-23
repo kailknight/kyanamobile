@@ -84,6 +84,9 @@ namespace SEASON3B
 
 		void MiniMapLoad();
 		void DrawMiniMap();
+#if defined(__ANDROID__) || defined(MU_IOS)
+		void DrawAndroidMiniMap();
+#endif
 		LoadTypeMap DataMap;
 		void DataMapLoad();
 		void DataViewPortMapLoad(float x, float y);

@@ -837,6 +837,11 @@ constexpr int kTopBarActionNone = -1;
 // thing the desktop HOME key does. Negative like the menu sentinel because it
 // is not one of the utility actions the grid dispatches.
 constexpr int kTopBarActionHelperPlay = -3;
+// The map-name/coordinates chip, not one of the row's button slots - opens the
+// same move/map window the grid's MAP action does.
+constexpr int kTopBarActionLocation = -4;
+// The row's own show/hide circle, to the row's left.
+constexpr int kTopBarActionRowToggle = -5;
 
 // The right-anchored row, and then two more stacked in the gap to its left:
 // Helper and, under it, the play toggle. Every loop over the buttons - draw,
@@ -881,7 +886,11 @@ constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_helper_play.png",
 };
 
-constexpr float kTopBarButtonW = 52.0f;
+// 34 rather than the old 52: the row now has to fit entirely to the right of
+// the fixed Helper/Play column (kTopBarSideX below) without overlapping it -
+// see the rowLeft >= kTopBarSideX + kTopBarButtonW + gap check this and
+// kTopBarLocationChipW together satisfy, sized by hand against a 640-wide bar.
+constexpr float kTopBarButtonW = 34.0f;
 constexpr float kTopBarButtonH = 34.0f;
 constexpr float kTopBarButtonGap = 4.0f;
 constexpr float kTopBarMarginRight = 8.0f;
@@ -893,25 +902,31 @@ constexpr float kTopBarY = 8.0f;
 // definition rather than being allowed to drift.
 constexpr float kTopBarSideX = 250.0f;
 
-// Currency and location chips sit under the row, matching the reference.
+// The location chip sits under the row, matching the reference. The gold/Zen
+// chip that used to sit beside it was removed. 108 rather than the old 128 -
+// see kTopBarButtonW's comment; this and the row width are what keep the
+// right-anchored row/toggle/chip chain clear of the fixed Helper/Play column.
 constexpr float kTopBarChipH = 18.0f;
 constexpr float kTopBarChipGap = 4.0f;
-constexpr float kTopBarCoinChipW = 96.0f;
-constexpr float kTopBarLocationChipW = 128.0f;
+constexpr float kTopBarLocationChipW = 108.0f;
 
+// Columns mirrored (612/579/546 instead of 546/579/612) so the grid reads
+// right-to-left, matching the row/toggle/location chip chain above it, which
+// is anchored the same way. Slot-to-action mapping (kVirtualRightPanelUtilityAction*)
+// is untouched - only where each slot's box lands on screen changed.
 constexpr std::array<VirtualUiOffset, kVirtualRightPanelUtilityActionCount> kVirtualRightPanelButtonTopLefts = {
-    VirtualUiOffset{ 546.0f, 298.0f },
-    VirtualUiOffset{ 579.0f, 298.0f },
     VirtualUiOffset{ 612.0f, 298.0f },
-    VirtualUiOffset{ 546.0f, 337.0f },
-    VirtualUiOffset{ 579.0f, 337.0f },
+    VirtualUiOffset{ 579.0f, 298.0f },
+    VirtualUiOffset{ 546.0f, 298.0f },
     VirtualUiOffset{ 612.0f, 337.0f },
-    VirtualUiOffset{ 546.0f, 376.0f },
-    VirtualUiOffset{ 579.0f, 376.0f },
+    VirtualUiOffset{ 579.0f, 337.0f },
+    VirtualUiOffset{ 546.0f, 337.0f },
     VirtualUiOffset{ 612.0f, 376.0f },
-    VirtualUiOffset{ 546.0f, 400.0f },
-    VirtualUiOffset{ 579.0f, 400.0f },
+    VirtualUiOffset{ 579.0f, 376.0f },
+    VirtualUiOffset{ 546.0f, 376.0f },
     VirtualUiOffset{ 612.0f, 400.0f },
+    VirtualUiOffset{ 579.0f, 400.0f },
+    VirtualUiOffset{ 546.0f, 400.0f },
 };
 
 const std::array<VirtualButtonLayout, 1 + kVirtualVisibleSkillButtonCount> kVirtualButtons = []()
@@ -1134,18 +1149,66 @@ AndroidUiRect GetVirtualMirrorHotKeyRect(int slot)
     };
 }
 
-// Right-anchored so the row keeps its edge margin regardless of how many
-// buttons it holds. Slot 0 is the leftmost.
+float GetTopBarBottomY()
+{
+    return kTopBarY + kTopBarButtonH;
+}
+
+// Right-anchored to the screen edge - the coin chip that used to sit here was
+// removed, so this is now the rightmost element in the row. Vertically
+// centered in the row's height rather than sitting on a second line below it -
+// Menu, the toggle and the chip all read as one row now.
+AndroidUiRect GetTopBarLocationChipRect()
+{
+    return {
+        640.0f - kTopBarMarginRight - kTopBarLocationChipW,
+        kTopBarY + (kTopBarButtonH - kTopBarChipH) / 2.0f,
+        kTopBarLocationChipW,
+        kTopBarChipH
+    };
+}
+
+// Placeholder circle between the icon row and the location chip, toggling
+// g_topBarRowIconsVisible. Anchored to the chip (not the row) since the row's
+// own left edge is in turn anchored to this button below - the chip is the
+// one fixed point the whole right-anchored chain hangs off.
+AndroidUiRect GetTopBarRowToggleButtonRect()
+{
+    constexpr float kToggleSize = 24.0f;
+    const AndroidUiRect locRect = GetTopBarLocationChipRect();
+    return {
+        locRect.x - kTopBarChipGap - kToggleSize,
+        kTopBarY + (kTopBarButtonH - kToggleSize) / 2.0f,
+        kToggleSize,
+        kToggleSize
+    };
+}
+
+// Menu (slot 0) sits beside the toggle rather than as the leftmost member of
+// the hideable row - it stays put (and tappable) no matter which way the
+// toggle is set, so it reads as paired with the toggle instead of belonging
+// to the group the toggle hides.
+AndroidUiRect GetTopBarMenuButtonRect()
+{
+    const AndroidUiRect toggleRect = GetTopBarRowToggleButtonRect();
+    return {
+        toggleRect.x - kTopBarButtonGap - kTopBarButtonW,
+        kTopBarY,
+        kTopBarButtonW,
+        kTopBarButtonH
+    };
+}
+
+// Right-anchored to the Menu button (in turn anchored to the toggle, in turn
+// the chip), so the whole group reads as one right-to-left chain: chip,
+// toggle, Menu, then the four hideable icons. Slot 1 (Guild) is the leftmost
+// of the four.
 AndroidUiRect GetTopBarButtonRect(int slot)
 {
     if (slot < 0 || slot >= kTopBarButtonCount)
     {
         return {};
     }
-
-    const float rowW = (kTopBarRowButtonCount * kTopBarButtonW)
-                     + ((kTopBarRowButtonCount - 1) * kTopBarButtonGap);
-    const float rowLeft = 640.0f - kTopBarMarginRight - rowW;
 
     // Helper and its play toggle sit off the row, stacked immediately right of
     // the HP/MP/SD/AG panel rather than against the row's left edge, so they
@@ -1162,36 +1225,39 @@ AndroidUiRect GetTopBarButtonRect(int slot)
         };
     }
 
+    if (slot == 0)
+    {
+        return GetTopBarMenuButtonRect();
+    }
+
+    // The four hideable icons (Guild/Shop/Settings/Bags), slots 1-4.
+    const int rowCount = kTopBarRowButtonCount - 1;
+    const float rowW = (static_cast<float>(rowCount) * kTopBarButtonW)
+                     + (static_cast<float>(rowCount - 1) * kTopBarButtonGap);
+    const AndroidUiRect menuRect = GetTopBarMenuButtonRect();
+    const float rowLeft = menuRect.x - kTopBarButtonGap - rowW;
+
     return {
-        rowLeft + static_cast<float>(slot) * (kTopBarButtonW + kTopBarButtonGap),
+        rowLeft + static_cast<float>(slot - 1) * (kTopBarButtonW + kTopBarButtonGap),
         kTopBarY,
         kTopBarButtonW,
         kTopBarButtonH
     };
 }
 
-float GetTopBarBottomY()
+// The live rotating minimap, docked directly under the location chip. Display
+// only - see DrawAndroidMiniMap (NewUIHeroPositionInfo.cpp), which reaches
+// this rect through AndroidGetMiniMapPanelRect below rather than the older,
+// never-rendered-into GetCompactMiniMapRect (that one is anchored to the
+// permanently-disabled "Map" stack button and has no renderer left to use it).
+AndroidUiRect GetTopBarMiniMapPanelRect()
 {
-    return kTopBarY + kTopBarButtonH;
-}
-
-AndroidUiRect GetTopBarCoinChipRect()
-{
+    const AndroidUiRect locRect = GetTopBarLocationChipRect();
     return {
-        640.0f - kTopBarMarginRight - kTopBarCoinChipW,
-        GetTopBarBottomY() + kTopBarChipGap,
-        kTopBarCoinChipW,
-        kTopBarChipH
-    };
-}
-
-AndroidUiRect GetTopBarLocationChipRect()
-{
-    return {
-        640.0f - kTopBarMarginRight - kTopBarCoinChipW - kTopBarChipGap - kTopBarLocationChipW,
-        GetTopBarBottomY() + kTopBarChipGap,
-        kTopBarLocationChipW,
-        kTopBarChipH
+        locRect.x,
+        locRect.y + locRect.h + kTopBarChipGap,
+        locRect.w,
+        locRect.w
     };
 }
 
@@ -1827,6 +1893,23 @@ int g_androidGroundCastFromX = -1;
 int g_androidGroundCastFromY = -1;
 
 bool g_virtualRightPanelUtilityMode = false;
+
+// Show/hide for the top bar's Guild/Shop/Settings/Bags slots (row indices 1-4
+// - Menu itself, slot 0, stays put since it already doubles as the entry
+// point to the other utility panel). Toggled by a small circle beside Menu,
+// drawn procedurally for now (DrawTopBarRowToggleButton) until real icon art
+// exists for it.
+bool g_topBarRowIconsVisible = true;
+
+// Staggered reveal for the four hideable slots: showing sweeps right-to-left
+// (the slot closest to the toggle appears first), hiding sweeps left-to-right
+// (the leftmost slot disappears first) - set on every toggle tap, read by
+// GetTopBarRowSlotAlpha. Starts inactive so the row is simply visible on
+// launch with no intro animation.
+bool g_topBarRowAnimActive = false;
+DWORD g_topBarRowAnimStartTick = 0;
+constexpr float kTopBarRowAnimStaggerMs = 55.0f;
+constexpr float kTopBarRowAnimFadeMs = 130.0f;
 bool g_virtualHudChatPinned = false;
 PendingAndroidLongPressRightClick g_androidLongPressRightClick{};
 PendingAndroidBagHold g_androidBagHold{};
@@ -3843,9 +3926,12 @@ void TraceHeroTileChanges()
 
 bool IsMiniMapToggleAvailable()
 {
-    return SceneFlag == MAIN_SCENE
-        && g_pNewUISystem != nullptr
-        && !AndroidHasFocusedTextInput();
+    // Permanently disabled: the old circular "MINI" button (which opened the
+    // static, non-rotating full-screen minimap popup) is removed now that the
+    // always-on rotating panel (GetTopBarMiniMapPanelRect) replaces it. Every
+    // render/hit-test site below gates on this one function, same pattern as
+    // HitTestMapButton's hardcoded false just below.
+    return false;
 }
 
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Map button hit test 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
@@ -6709,12 +6795,30 @@ int HitTestVirtualTopBarButton(float uiX, float uiY)
         return kTopBarActionNone;
     }
 
+    if (HitTestAndroidUiRect(uiX, uiY, GetTopBarRowToggleButtonRect()))
+    {
+        return kTopBarActionRowToggle;
+    }
+
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        // Slots 1-4 (Guild/Shop/Settings/Bags) are the row the toggle above
+        // hides; slot 0 (Menu) and the Helper/Play stack (5, 6) stay tappable
+        // regardless, same as they stay drawn in RenderVirtualTopBar.
+        if (!g_topBarRowIconsVisible && slot >= 1 && slot < kTopBarRowButtonCount)
+        {
+            continue;
+        }
+
         if (HitTestAndroidUiRect(uiX, uiY, GetTopBarButtonRect(slot)))
         {
             return kTopBarActions[slot];
         }
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetTopBarLocationChipRect()))
+    {
+        return kTopBarActionLocation;
     }
 
     return kTopBarActionNone;
@@ -8165,6 +8269,19 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
                 // open or the hero is in a safe zone, which is why this does
                 // not try to validate anything itself.
                 ToggleAndroidMuHelperRunning();
+            }
+            else if (topBarAction == kTopBarActionLocation)
+            {
+                // Same window the utility grid's MAP action opens.
+                ToggleMapListByVirtualButton();
+                PlayBuffer(SOUND_CLICK01);
+            }
+            else if (topBarAction == kTopBarActionRowToggle)
+            {
+                g_topBarRowIconsVisible = !g_topBarRowIconsVisible;
+                g_topBarRowAnimActive = true;
+                g_topBarRowAnimStartTick = GetTickCount();
+                PlayBuffer(SOUND_CLICK01);
             }
             else
             {
@@ -10137,6 +10254,135 @@ bool IsTopBarSlotActive(int slot)
     return IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]);
 }
 
+// Current opacity for one of the four hideable slots (1-4 => local index
+// 0-3, left to right). 1 = fully shown, 0 = fully hidden, skip drawing.
+// While g_topBarRowAnimActive, each slot fades in or out over
+// kTopBarRowAnimFadeMs, staggered by kTopBarRowAnimStaggerMs in an order
+// that depends on which way the toggle just went: showing sweeps from the
+// slot nearest the toggle (closest to Menu) outward to the left, hiding
+// sweeps from the leftmost slot back toward the toggle - see the caller's
+// comment by g_topBarRowAnimActive for why.
+float GetTopBarRowSlotAlpha(int localIndex)
+{
+    if (!g_topBarRowAnimActive)
+    {
+        return g_topBarRowIconsVisible ? 1.0f : 0.0f;
+    }
+
+    constexpr int kRowCount = kTopBarRowButtonCount - 1;
+    const int order = g_topBarRowIconsVisible ? (kRowCount - 1 - localIndex) : localIndex;
+    const float startDelay = static_cast<float>(order) * kTopBarRowAnimStaggerMs;
+    const float elapsed = static_cast<float>(GetTickCount() - g_topBarRowAnimStartTick);
+    const float localT = std::clamp((elapsed - startDelay) / kTopBarRowAnimFadeMs, 0.0f, 1.0f);
+    return g_topBarRowIconsVisible ? localT : (1.0f - localT);
+}
+
+// Opacity for any top bar slot - 1 for Menu and the Helper/Play stack, which
+// never hide, and GetTopBarRowSlotAlpha's animated value for the four
+// hideable slots (1-4).
+float GetTopBarSlotAlpha(int slot)
+{
+    if (slot < 1 || slot >= kTopBarRowButtonCount)
+    {
+        return 1.0f;
+    }
+    return GetTopBarRowSlotAlpha(slot - 1);
+}
+
+// Scales a 0xAARRGGBB color's alpha byte by a 0-1 factor, for fading
+// TextDraw labels in step with the boxes/icons under them.
+DWORD ScaleColorAlpha(DWORD color, float alpha)
+{
+    const DWORD baseA = (color >> 24) & 0xFF;
+    const DWORD a = static_cast<DWORD>(static_cast<float>(baseA) * std::clamp(alpha, 0.0f, 1.0f));
+    return (a << 24) | (color & 0x00FFFFFFu);
+}
+
+// Placeholder circle to the row's left, toggling g_topBarRowIconsVisible - a
+// procedural GL shape (ring + fill + a chevron-ish glyph) rather than a PNG,
+// same technique DrawVirtualChatUtilityButton already uses for its own
+// circular button. Swap for real icon art later; nothing else needs to
+// change when that happens, this function is the only place the look lives.
+void DrawTopBarRowToggleButton()
+{
+    const AndroidUiRect rect = GetTopBarRowToggleButtonRect();
+    const float uiCx = rect.x + rect.w * 0.5f;
+    const float uiCy = rect.y + rect.h * 0.5f;
+    const float uiRadius = rect.w * 0.5f;
+    const float cx = UiToScreenX(uiCx);
+    const float cy = static_cast<float>(WindowHeight) - UiToScreenY(uiCy);
+    const float rx = UiToScreenX(uiRadius);
+    const float ry = UiToScreenY(uiRadius);
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glColor4f(0.06f, 0.06f, 0.08f, 0.78f);
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(cx, cy);
+    for (int i = 0; i <= 24; ++i)
+    {
+        const float angle = (static_cast<float>(i) / 24.0f) * 6.28318530718f;
+        glVertex2f(cx + (std::cos(angle) * rx), cy + (std::sin(angle) * ry));
+    }
+    glEnd();
+
+    glLineWidth(2.0f);
+    glColor4f(0.85f, 0.85f, 0.90f, 0.90f);
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i < 24; ++i)
+    {
+        const float angle = (static_cast<float>(i) / 24.0f) * 6.28318530718f;
+        glVertex2f(cx + (std::cos(angle) * rx), cy + (std::sin(angle) * ry));
+    }
+    glEnd();
+    glLineWidth(1.0f);
+
+    // Small glyph telling the two states apart: a down chevron (row shown,
+    // tap collapses it) or a right chevron (row hidden, tap expands it).
+    glColor4f(0.92f, 0.92f, 0.85f, 0.95f);
+    glBegin(GL_TRIANGLES);
+    if (g_topBarRowIconsVisible)
+    {
+        glVertex2f(cx - rx * 0.35f, cy + ry * 0.20f);
+        glVertex2f(cx + rx * 0.35f, cy + ry * 0.20f);
+        glVertex2f(cx, cy - ry * 0.30f);
+    }
+    else
+    {
+        glVertex2f(cx - rx * 0.20f, cy - ry * 0.35f);
+        glVertex2f(cx - rx * 0.20f, cy + ry * 0.35f);
+        glVertex2f(cx + rx * 0.30f, cy);
+    }
+    glEnd();
+}
+
+// Placeholder dropdown chevron on the location chip, hinting it is now
+// tappable (opens the same move/map window the utility grid's MAP action
+// does - see kTopBarActionLocation). Procedural triangle for the same reason
+// as DrawTopBarRowToggleButton above; swap for real art later.
+void DrawTopBarLocationChevron()
+{
+    const AndroidUiRect rect = GetTopBarLocationChipRect();
+    const float uiCx = rect.x + rect.w - 10.0f;
+    const float uiCy = rect.y + rect.h * 0.5f;
+    const float cx = UiToScreenX(uiCx);
+    const float cy = static_cast<float>(WindowHeight) - UiToScreenY(uiCy);
+    const float halfW = UiToScreenX(4.0f) - UiToScreenX(0.0f);
+    const float halfH = UiToScreenY(3.0f) - UiToScreenY(0.0f);
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.85f, 0.88f, 0.95f, 0.85f);
+    glBegin(GL_TRIANGLES);
+    glVertex2f(cx - halfW, cy + halfH);
+    glVertex2f(cx + halfW, cy + halfH);
+    glVertex2f(cx, cy - halfH);
+    glEnd();
+}
+
 // The always-visible labelled row plus the coin and location chips beneath it.
 // Icons are optional: DrawIconButton skips a texture that failed to load, and
 // the box and label are drawn either way, so the row works before any art
@@ -10146,6 +10392,16 @@ void RenderVirtualTopBar()
     if (!IsVirtualUtilityButtonsAvailable())
     {
         return;
+    }
+
+    if (g_topBarRowAnimActive)
+    {
+        constexpr float kTotalAnimMs =
+            static_cast<float>(kTopBarRowButtonCount - 2) * kTopBarRowAnimStaggerMs + kTopBarRowAnimFadeMs;
+        if (static_cast<float>(GetTickCount() - g_topBarRowAnimStartTick) >= kTotalAnimMs)
+        {
+            g_topBarRowAnimActive = false;
+        }
     }
 
     BeginBitmap();
@@ -10162,38 +10418,25 @@ void RenderVirtualTopBar()
     // is the whole state cue left once the labels are gone.
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        const float slotAlpha = GetTopBarSlotAlpha(slot);
+        if (slotAlpha <= 0.0f)
+        {
+            continue;
+        }
+
         const AndroidUiRect rect = GetTopBarButtonRect(slot);
         const bool active = IsTopBarSlotActive(slot);
         DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
-                              0.0f, 0.0f, 0.0f, active ? 0.78f : 0.45f);
-        if (active)
-        {
-            DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
-                                   0.85f, 0.85f, 0.90f, 0.85f, 1.0f);
-        }
+                              0.0f, 0.0f, 0.0f, (active ? 0.78f : 0.45f) * slotAlpha);
+        DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                               0.85f, 0.85f, 0.90f, (active ? 0.85f : 0.35f) * slotAlpha, 1.0f);
     }
 
-    const AndroidUiRect coinRect = GetTopBarCoinChipRect();
     const AndroidUiRect locRect = GetTopBarLocationChipRect();
-    DrawVirtualRectFilled(coinRect.x, coinRect.y, coinRect.w, coinRect.h, 0.05f, 0.05f, 0.08f, 0.62f);
-    DrawVirtualRectOutline(coinRect.x, coinRect.y, coinRect.w, coinRect.h, 0.55f, 0.45f, 0.18f, 0.90f, 1.0f);
     DrawVirtualRectFilled(locRect.x, locRect.y, locRect.w, locRect.h, 0.05f, 0.05f, 0.08f, 0.62f);
     DrawVirtualRectOutline(locRect.x, locRect.y, locRect.w, locRect.h, 0.22f, 0.36f, 0.62f, 0.90f, 1.0f);
 
     HFONT chipFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
-
-    if (CharacterMachine != nullptr)
-    {
-        unicode::t_char goldText[256] = { 0, };
-        ConvertGold(static_cast<double>(CharacterMachine->Gold), goldText);
-        TextDraw(chipFont,
-                 static_cast<int>(coinRect.x + 4.0f),
-                 static_cast<int>(coinRect.y + 4.0f),
-                 0xFFFFFFFF,
-                 0x0,
-                 static_cast<int>(coinRect.w - 8.0f),
-                 0, 3, "%s", goldText);
-    }
 
     const char* mapName = gMapManager.GetMapName(gMapManager.WorldActive);
     if (mapName != nullptr && mapName[0] != '\0' && Hero != nullptr)
@@ -10214,9 +10457,15 @@ void RenderVirtualTopBar()
     // them under the world projection where nothing was visible.
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        const float slotAlpha = GetTopBarSlotAlpha(slot);
+        if (slotAlpha <= 0.0f)
+        {
+            continue;
+        }
+
         const AndroidUiRect rect = GetTopBarButtonRect(slot);
         DrawIconButton(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f,
-                       GetTopBarIconTexture(slot), 1.0f);
+                       GetTopBarIconTexture(slot), slotAlpha);
     }
 
     // Labels drawn by the engine rather than baked into the art, onto the empty
@@ -10233,16 +10482,30 @@ void RenderVirtualTopBar()
     //
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        const float slotAlpha = GetTopBarSlotAlpha(slot);
+        if (slotAlpha <= 0.0f)
+        {
+            continue;
+        }
+
         const AndroidUiRect rect = GetTopBarButtonRect(slot);
         TextDraw(g_hFontMini != nullptr ? g_hFontMini : g_hFont,
                  static_cast<int>(rect.x),
                  static_cast<int>(rect.y + rect.h - 11.0f),
-                 IsTopBarSlotActive(slot) ? 0xFFFFF0C0 : 0xFFF0E4CC,
+                 ScaleColorAlpha(IsTopBarSlotActive(slot) ? 0xFFFFF0C0 : 0xFFF0E4CC, slotAlpha),
                  0x0,
                  static_cast<int>(rect.w),
                  0, 3,
                  "%s", kTopBarLabels[slot]);
     }
+
+    // Both placeholders until real icon art exists for them - see
+    // DrawTopBarRowToggleButton/DrawTopBarLocationChevron just below. Must
+    // stay inside the BeginBitmap/EndBitmap pair, same reason DrawIconButton
+    // above does: their raw glVertex2f calls only land correctly under the 2D
+    // ortho projection BeginBitmap sets up.
+    DrawTopBarRowToggleButton();
+    DrawTopBarLocationChevron();
 
     EndBitmap();
 }
@@ -11610,6 +11873,21 @@ float AndroidGetCompactMiniMapLeftX()
 bool AndroidGetMoveMapWindowPosition(int panelWidth, int panelHeight, int* outX, int* outY)
 {
     return GetAndroidMoveMapWindowPositionInternal(panelWidth, panelHeight, outX, outY);
+}
+
+bool AndroidGetMiniMapPanelRect(float* outX, float* outY, float* outW, float* outH)
+{
+    if (outX == nullptr || outY == nullptr || outW == nullptr || outH == nullptr)
+    {
+        return false;
+    }
+
+    const AndroidUiRect rect = GetTopBarMiniMapPanelRect();
+    *outX = rect.x;
+    *outY = rect.y;
+    *outW = rect.w;
+    *outH = rect.h;
+    return true;
 }
 
 static void UpdateMouseFromPixel(int pixelX, int pixelY, int screenW, int screenH)
