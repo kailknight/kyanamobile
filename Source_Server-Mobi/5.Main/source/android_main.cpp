@@ -881,20 +881,18 @@ constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
 
 // Optional per-button art. Missing files are fine: DrawIconButton skips an
 // unloaded texture, and the box and label underneath are drawn regardless, so
-// the grid stays usable until real icons exist - true today for all four of
-// the new second row's entries.
+// the grid stays usable until real icons exist.
 constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_guild.png",
     "ui/topbar_shop.png",
     "ui/topbar_settings.png",
     "ui/topbar_bags.png",
     "ui/topbar_friend.png",
-    "ui/topbar_cmd.png",
+    "ui/topbar_command.png",
     "ui/topbar_jewel.png",
-    "ui/topbar_masterskill.png",
+    "ui/topbar_ML.png",
     "ui/topbar_helper.png",
-    // Not drawn yet - the "Play" label carries it until the art exists.
-    "ui/topbar_helper_play.png",
+    "ui/topbar_play.png",
 };
 
 // 34 rather than the old 52: the row now has to fit entirely to the right of
@@ -1473,14 +1471,6 @@ constexpr float kPetBarX = 6.0f;
 constexpr float kPetBarY = 98.0f + kStatRowShift;
 constexpr float kPetBarW = 50.0f;
 constexpr float kPetBarH = 10.0f;
-
-// Pet sits under the status panel, matching the reference layout. Anchored to
-// the panel's bottom edge, not to the old avatar square - the portrait reaches
-// all the way down now, so the previous offset would have put the pet on top of
-// the portrait's chest.
-constexpr float kPortraitPetSize    = 26.0f;
-constexpr float kPortraitPetX       = kPortraitPanelX + 2.0f;
-constexpr float kPortraitPetY       = kStatRowBottom + 4.0f;
 
 // Share of the portrait's vertical cover-crop taken off the bottom of the art.
 // 1.0 anchors the sampled window to the top of the image, 0.5 centres it.
@@ -11097,18 +11087,6 @@ void RenderVirtualPortraitHud()
             portrait,
             u0, v0, uW, vH,
             1.0f);
-    }
-
-    if (Hero != nullptr && Hero->m_pPet != nullptr)
-    {
-        DrawIconButton(
-            kPortraitPetX,
-            kPortraitPetY,
-            kPortraitPetSize,
-            kPortraitPetSize,
-            g_uiTex_character,
-            0.85f,
-            0.06f, 0.06f, 0.09f);
     }
 
     EndBitmap();
