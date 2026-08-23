@@ -839,15 +839,26 @@ constexpr int kTopBarActionRowToggle = -5;
 // NewUICharacterInfoWindow.cpp's own Master Level button uses, which the
 // generic TriggerVirtualRightPanelUtilityAction switch has no slot for.
 constexpr int kTopBarActionMasterSkill = -6;
+// Ends the session and returns to character select - the same
+// SendRequestLogOut(1) the desktop system menu's "Change Character" button
+// sends (NewUICustomMessageBox.cpp's ChooseCharacterBtnDown). Bespoke like
+// the skill tree above: it needs the same "not while the mix-inventory craft
+// window is open" guard, which the generic switch has no slot for.
+constexpr int kTopBarActionSwitchChar = -7;
+// Ends the session and returns to server select - SendRequestLogOut(2),
+// mirroring ChooseServerBtnDown the same way.
+constexpr int kTopBarActionSwitchServer = -8;
 
-// Two rows of four, read as one 4x2 grid: Guild/Shop/Settings/Bags on top,
-// Friend/CMD/Jewel/Skill Tree underneath. Both rows share the same show/hide
-// toggle and the same column positions, and every loop over the buttons -
-// draw, label, hit test, lit state - runs to kTopBarButtonCount, so the
-// trailing Helper/play-toggle pair is picked up everywhere too, placed off
-// the grid by GetTopBarButtonRect.
+// Three rows of four, read as one 4x3 grid: Guild/Shop/Settings/Bags, then
+// Friend/CMD/Jewel/Skill Tree, then Switch Character/Switch Server and two
+// still-empty slots. All three rows share the same show/hide toggle and the
+// same column positions, and every loop over the buttons - draw, label, hit
+// test, lit state - runs to kTopBarButtonCount, so the trailing Helper/
+// play-toggle pair is picked up everywhere too, placed off the grid by
+// GetTopBarButtonRect. Empty slots use kTopBarActionNone, which every one of
+// those loops skips - see the "action != kTopBarActionNone" checks.
 constexpr int kTopBarGridColumns = 4;
-constexpr int kTopBarGridRows = 2;
+constexpr int kTopBarGridRows = 3;
 constexpr int kTopBarHideableSlotCount = kTopBarGridColumns * kTopBarGridRows;
 constexpr int kTopBarButtonCount = kTopBarHideableSlotCount + 2;
 constexpr int kTopBarSlotHelper = kTopBarHideableSlotCount;
@@ -862,6 +873,10 @@ constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
     kVirtualRightPanelUtilityActionCommand,
     kVirtualRightPanelUtilityActionJewelBank,
     kTopBarActionMasterSkill,
+    kTopBarActionSwitchChar,
+    kTopBarActionSwitchServer,
+    kTopBarActionNone,
+    kTopBarActionNone,
     kVirtualRightPanelUtilityActionHelper,
     kTopBarActionHelperPlay,
 };
@@ -875,13 +890,18 @@ constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
     _T("CMD"),
     _T("Jewel"),
     _T("ML"),
+    _T("Char"),
+    _T("Server"),
+    _T(""),
+    _T(""),
     _T("Helper"),
     _T("Play"),
 };
 
 // Optional per-button art. Missing files are fine: DrawIconButton skips an
 // unloaded texture, and the box and label underneath are drawn regardless, so
-// the grid stays usable until real icons exist.
+// the grid stays usable until real icons exist. The two empty slots' paths
+// are never loaded (EnsureUITextures skips kTopBarActionNone slots too).
 constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_guild.png",
     "ui/topbar_shop.png",
@@ -891,6 +911,10 @@ constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_command.png",
     "ui/topbar_jewel.png",
     "ui/topbar_ML.png",
+    "ui/topbar_switch_char.png",
+    "ui/topbar_switch_server.png",
+    "",
+    "",
     "ui/topbar_helper.png",
     "ui/topbar_play.png",
 };
@@ -6794,9 +6818,10 @@ int HitTestVirtualTopBarButton(float uiX, float uiY)
 
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
-        // Slots 0-7 (the 4x2 grid) are what the toggle above hides; the
-        // Helper/Play stack (8, 9) stays tappable regardless, same as it
-        // stays drawn in RenderVirtualTopBar.
+        // Slots 0-11 (the 4x3 grid) are what the toggle above hides; the
+        // Helper/Play stack (12, 13) stays tappable regardless, same as it
+        // stays drawn in RenderVirtualTopBar. Empty grid slots (kTopBarActionNone)
+        // fall through the same way a miss would - see the return below.
         if (!g_topBarRowIconsVisible && slot < kTopBarHideableSlotCount)
         {
             continue;
@@ -8265,6 +8290,27 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
                     PlayBuffer(SOUND_CLICK01);
                 }
             }
+            else if (topBarAction == kTopBarActionSwitchChar || topBarAction == kTopBarActionSwitchServer)
+            {
+                // Mirrors NewUICustomMessageBox.cpp's ChooseCharacterBtnDown/
+                // ChooseServerBtnDown: same mix-inventory guard (switching
+                // mid-craft would strand the items in that window), same
+                // save-before-leaving calls, same ResetActiveUIObj before the
+                // logout packet so no UI object from this session is still
+                // "active" in the next scene.
+                if (g_pNewUISystem != nullptr && !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY))
+                {
+                    SaveOptions();
+                    SaveMacro("Data\\Macro.txt");
+                    g_pNewUIMng->ResetActiveUIObj();
+                    SendRequestLogOut(topBarAction == kTopBarActionSwitchChar ? 1 : 2);
+                    PlayBuffer(SOUND_CLICK01);
+                }
+                else if (g_pChatListBox != nullptr)
+                {
+                    g_pChatListBox->AddText("", GlobalText[592], SEASON3B::TYPE_ERROR_MESSAGE);
+                }
+            }
             else if (topBarAction == kTopBarActionHelperPlay)
             {
                 // Same call the desktop HOME key makes: the argument is the
@@ -9353,6 +9399,10 @@ static void EnsureUITextures()
 
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        if (kTopBarActions[slot] == kTopBarActionNone)
+        {
+            continue;
+        }
         g_uiTex_topBar[slot] = LoadUITextureAsset(kTopBarIconAssets[slot]);
     }
 
@@ -10424,6 +10474,11 @@ void RenderVirtualTopBar()
     // is the whole state cue left once the labels are gone.
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        if (kTopBarActions[slot] == kTopBarActionNone)
+        {
+            continue;
+        }
+
         const float slotAlpha = GetTopBarSlotAlpha(slot);
         if (slotAlpha <= 0.0f)
         {
@@ -10463,6 +10518,11 @@ void RenderVirtualTopBar()
     // them under the world projection where nothing was visible.
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        if (kTopBarActions[slot] == kTopBarActionNone)
+        {
+            continue;
+        }
+
         const float slotAlpha = GetTopBarSlotAlpha(slot);
         if (slotAlpha <= 0.0f)
         {
@@ -10488,6 +10548,11 @@ void RenderVirtualTopBar()
     //
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
+        if (kTopBarActions[slot] == kTopBarActionNone)
+        {
+            continue;
+        }
+
         const float slotAlpha = GetTopBarSlotAlpha(slot);
         if (slotAlpha <= 0.0f)
         {
