@@ -2795,8 +2795,18 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 	{
 		for (int i = AT_PET_COMMAND_DEFAULT; i < AT_PET_COMMAND_END; ++i)
 		{
+#if defined(__ANDROID__) || defined(MU_IOS)
 			GetLegacySkillPickerCellRect(iSkillCount, x, y, width, height);
 			iSkillCount++;
+#else
+			// RenderPetSkill() draws these in their own fixed row instead of
+			// through GetLegacySkillPickerCellRect's main-grid layout, so the
+			// hit-test rect must match that row - otherwise clicks land on
+			// whatever cell the continuing skill grid happens to occupy there.
+			width = 32.f; height = 38.f;
+			y = 352.f + DisplayHeightExt;
+			x = 353.f - FixX + DisplayWinExt + static_cast<float>(i - AT_PET_COMMAND_DEFAULT) * width;
+#endif
 
 			if (SEASON3B::CheckMouseIn(x, y, width, height) == true)
 			{
