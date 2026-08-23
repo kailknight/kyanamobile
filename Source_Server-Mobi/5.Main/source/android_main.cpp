@@ -824,63 +824,74 @@ constexpr std::array<const TCHAR*, kVirtualRightPanelUtilityActionCount> kVirtua
 };
 constexpr const TCHAR* kVirtualRightPanelModeButtonLabel = _T("CHG");
 
-// The always-visible labelled row along the top right. These are the five the
-// reference layout puts there; the remaining seven actions above stay reachable
-// through the CHG button, which still opens the full grid. The enum is the
-// switch key for both TriggerVirtualRightPanelUtilityAction and the lit-state
-// predicate, so it is deliberately left intact rather than trimmed to five.
-// Not a utility action: this one opens the grid holding the other seven, and
-// used to be the CHG button parked in the bottom right corner.
-constexpr int kTopBarActionMenu = -2;
 constexpr int kTopBarActionNone = -1;
 // Starts and stops the helper directly, without opening its window - the same
-// thing the desktop HOME key does. Negative like the menu sentinel because it
-// is not one of the utility actions the grid dispatches.
+// thing the desktop HOME key does. Negative because it is not one of the
+// utility actions the old grid dispatched.
 constexpr int kTopBarActionHelperPlay = -3;
-// The map-name/coordinates chip, not one of the row's button slots - opens the
-// same move/map window the grid's MAP action does.
+// The map-name/coordinates chip, not one of the grid's slots - opens the
+// same move/map window kVirtualRightPanelUtilityActionMap does.
 constexpr int kTopBarActionLocation = -4;
-// The row's own show/hide circle, to the row's left.
+// The grid's own show/hide circle, to its right.
 constexpr int kTopBarActionRowToggle = -5;
+// Opens the Master skill tree/Master Level window. Negative like the other
+// bespoke actions above: it needs the same class/level guard
+// NewUICharacterInfoWindow.cpp's own Master Level button uses, which the
+// generic TriggerVirtualRightPanelUtilityAction switch has no slot for.
+constexpr int kTopBarActionMasterSkill = -6;
 
-// The right-anchored row, and then two more stacked in the gap to its left:
-// Helper and, under it, the play toggle. Every loop over the buttons - draw,
-// label, hit test, lit state - runs to kTopBarButtonCount, so the pair is
-// picked up everywhere by GetTopBarButtonRect placing slots 5 and 6 off-row.
-constexpr int kTopBarRowButtonCount = 5;
-constexpr int kTopBarButtonCount = 7;
-constexpr int kTopBarSlotHelper = 5;
-constexpr int kTopBarSlotHelperPlay = 6;
+// Two rows of four, read as one 4x2 grid: Guild/Shop/Settings/Bags on top,
+// Friend/CMD/Jewel/Skill Tree underneath. Both rows share the same show/hide
+// toggle and the same column positions, and every loop over the buttons -
+// draw, label, hit test, lit state - runs to kTopBarButtonCount, so the
+// trailing Helper/play-toggle pair is picked up everywhere too, placed off
+// the grid by GetTopBarButtonRect.
+constexpr int kTopBarGridColumns = 4;
+constexpr int kTopBarGridRows = 2;
+constexpr int kTopBarHideableSlotCount = kTopBarGridColumns * kTopBarGridRows;
+constexpr int kTopBarButtonCount = kTopBarHideableSlotCount + 2;
+constexpr int kTopBarSlotHelper = kTopBarHideableSlotCount;
+constexpr int kTopBarSlotHelperPlay = kTopBarHideableSlotCount + 1;
 
 constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
-    kTopBarActionMenu,
     kVirtualRightPanelUtilityActionGuild,
     kVirtualRightPanelUtilityActionXShop,
     kVirtualRightPanelUtilityActionSetting,
     kVirtualRightPanelUtilityActionBag,
+    kVirtualRightPanelUtilityActionFriend,
+    kVirtualRightPanelUtilityActionCommand,
+    kVirtualRightPanelUtilityActionJewelBank,
+    kTopBarActionMasterSkill,
     kVirtualRightPanelUtilityActionHelper,
     kTopBarActionHelperPlay,
 };
 
 constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
-    _T("Menu"),
     _T("Guild"),
     _T("Shop"),
     _T("Settings"),
     _T("Bags"),
+    _T("Friend"),
+    _T("CMD"),
+    _T("Jewel"),
+    _T("ML"),
     _T("Helper"),
     _T("Play"),
 };
 
 // Optional per-button art. Missing files are fine: DrawIconButton skips an
 // unloaded texture, and the box and label underneath are drawn regardless, so
-// the row stays usable until real icons exist.
+// the grid stays usable until real icons exist - true today for all four of
+// the new second row's entries.
 constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
-    "ui/topbar_menu.png",
     "ui/topbar_guild.png",
     "ui/topbar_shop.png",
     "ui/topbar_settings.png",
     "ui/topbar_bags.png",
+    "ui/topbar_friend.png",
+    "ui/topbar_cmd.png",
+    "ui/topbar_jewel.png",
+    "ui/topbar_masterskill.png",
     "ui/topbar_helper.png",
     // Not drawn yet - the "Play" label carries it until the art exists.
     "ui/topbar_helper_play.png",
@@ -1156,8 +1167,8 @@ float GetTopBarBottomY()
 
 // Right-anchored to the screen edge - the coin chip that used to sit here was
 // removed, so this is now the rightmost element in the row. Vertically
-// centered in the row's height rather than sitting on a second line below it -
-// Menu, the toggle and the chip all read as one row now.
+// centered in the top grid row's height rather than sitting on a second line
+// below it - the grid and the chip all read as one row now.
 AndroidUiRect GetTopBarLocationChipRect()
 {
     return {
@@ -1168,10 +1179,10 @@ AndroidUiRect GetTopBarLocationChipRect()
     };
 }
 
-// Placeholder circle between the icon row and the location chip, toggling
-// g_topBarRowIconsVisible. Anchored to the chip (not the row) since the row's
-// own left edge is in turn anchored to this button below - the chip is the
-// one fixed point the whole right-anchored chain hangs off.
+// Placeholder circle between the icon grid and the location chip, toggling
+// g_topBarRowIconsVisible. Anchored to the chip (not the grid) since the
+// grid's own right edge is in turn anchored to this button below - the chip
+// is the one fixed point the whole right-anchored chain hangs off.
 AndroidUiRect GetTopBarRowToggleButtonRect()
 {
     constexpr float kToggleSize = 24.0f;
@@ -1184,25 +1195,13 @@ AndroidUiRect GetTopBarRowToggleButtonRect()
     };
 }
 
-// Menu (slot 0) sits beside the toggle rather than as the leftmost member of
-// the hideable row - it stays put (and tappable) no matter which way the
-// toggle is set, so it reads as paired with the toggle instead of belonging
-// to the group the toggle hides.
-AndroidUiRect GetTopBarMenuButtonRect()
-{
-    const AndroidUiRect toggleRect = GetTopBarRowToggleButtonRect();
-    return {
-        toggleRect.x - kTopBarButtonGap - kTopBarButtonW,
-        kTopBarY,
-        kTopBarButtonW,
-        kTopBarButtonH
-    };
-}
-
-// Right-anchored to the Menu button (in turn anchored to the toggle, in turn
-// the chip), so the whole group reads as one right-to-left chain: chip,
-// toggle, Menu, then the four hideable icons. Slot 1 (Guild) is the leftmost
-// of the four.
+// Right-anchored to the toggle (in turn the chip), so the whole group reads
+// as one right-to-left chain: chip, toggle, then the 4x2 grid. Slots 0-3 are
+// the top row (Guild/Shop/Settings/Bags), slots 4-7 the bottom row
+// (Friend/CMD/Jewel/ML) - both rows share these same column positions, which
+// is what reads as one grid rather than two unrelated rows. Slots 8-9
+// (Helper, play toggle) sit off the grid entirely, stacked beside the
+// HP/MP/SD/AG panel.
 AndroidUiRect GetTopBarButtonRect(int slot)
 {
     if (slot < 0 || slot >= kTopBarButtonCount)
@@ -1210,13 +1209,13 @@ AndroidUiRect GetTopBarButtonRect(int slot)
         return {};
     }
 
-    // Helper and its play toggle sit off the row, stacked immediately right of
-    // the HP/MP/SD/AG panel rather than against the row's left edge, so they
-    // read as belonging to the status block. Anchored to the panel so they
-    // follow it if its width ever changes.
-    if (slot >= kTopBarRowButtonCount)
+    // Helper and its play toggle sit off the grid, stacked immediately right
+    // of the HP/MP/SD/AG panel rather than against the grid's left edge, so
+    // they read as belonging to the status block. Anchored to the panel so
+    // they follow it if its width ever changes.
+    if (slot >= kTopBarHideableSlotCount)
     {
-        const int stackIndex = slot - kTopBarRowButtonCount;
+        const int stackIndex = slot - kTopBarHideableSlotCount;
         return {
             kTopBarSideX,
             kTopBarY + static_cast<float>(stackIndex) * (kTopBarButtonH + kTopBarButtonGap),
@@ -1225,21 +1224,17 @@ AndroidUiRect GetTopBarButtonRect(int slot)
         };
     }
 
-    if (slot == 0)
-    {
-        return GetTopBarMenuButtonRect();
-    }
+    const int row = slot / kTopBarGridColumns;
+    const int column = slot % kTopBarGridColumns;
 
-    // The four hideable icons (Guild/Shop/Settings/Bags), slots 1-4.
-    const int rowCount = kTopBarRowButtonCount - 1;
-    const float rowW = (static_cast<float>(rowCount) * kTopBarButtonW)
-                     + (static_cast<float>(rowCount - 1) * kTopBarButtonGap);
-    const AndroidUiRect menuRect = GetTopBarMenuButtonRect();
-    const float rowLeft = menuRect.x - kTopBarButtonGap - rowW;
+    const float gridW = (static_cast<float>(kTopBarGridColumns) * kTopBarButtonW)
+                      + (static_cast<float>(kTopBarGridColumns - 1) * kTopBarButtonGap);
+    const AndroidUiRect toggleRect = GetTopBarRowToggleButtonRect();
+    const float gridLeft = toggleRect.x - kTopBarButtonGap - gridW;
 
     return {
-        rowLeft + static_cast<float>(slot - 1) * (kTopBarButtonW + kTopBarButtonGap),
-        kTopBarY,
+        gridLeft + static_cast<float>(column) * (kTopBarButtonW + kTopBarButtonGap),
+        kTopBarY + static_cast<float>(row) * (kTopBarButtonH + kTopBarButtonGap),
         kTopBarButtonW,
         kTopBarButtonH
     };
@@ -6795,8 +6790,8 @@ void TriggerVirtualRightPanelUtilityAction(int button)
 // does not belong to the CHG toggle.
 int HitTestVirtualTopBarButton(float uiX, float uiY)
 {
-    // Not -1 for "nothing here": the menu entry uses a negative sentinel of its
-    // own, so the miss value has to be distinct from any real action.
+    // Not -1 for "nothing here": the bespoke actions use negative sentinels of
+    // their own, so the miss value has to be distinct from any real action.
     if (!IsVirtualUtilityButtonsAvailable() || !IsVirtualPadAvailable())
     {
         return kTopBarActionNone;
@@ -6809,10 +6804,10 @@ int HitTestVirtualTopBarButton(float uiX, float uiY)
 
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
-        // Slots 1-4 (Guild/Shop/Settings/Bags) are the row the toggle above
-        // hides; slot 0 (Menu) and the Helper/Play stack (5, 6) stay tappable
-        // regardless, same as they stay drawn in RenderVirtualTopBar.
-        if (!g_topBarRowIconsVisible && slot >= 1 && slot < kTopBarRowButtonCount)
+        // Slots 0-7 (the 4x2 grid) are what the toggle above hides; the
+        // Helper/Play stack (8, 9) stays tappable regardless, same as it
+        // stays drawn in RenderVirtualTopBar.
+        if (!g_topBarRowIconsVisible && slot < kTopBarHideableSlotCount)
         {
             continue;
         }
@@ -8264,9 +8259,21 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         {
             g_virtualLastUtilityTapMs = nowMs;
 
-            if (topBarAction == kTopBarActionMenu)
+            if (topBarAction == kTopBarActionMasterSkill)
             {
-                ToggleVirtualRightPanelMode();
+                // Same class/level guard NewUICharacterInfoWindow.cpp's own
+                // Master Level button uses - the window is not meaningful (and
+                // the server will reject it) for a character that hasn't
+                // reached Master Level yet.
+                if (gCharacterManager.IsMasterLevel(CharacterAttribute->Class)
+#ifdef PBG_ADD_NEWCHAR_MONK
+                    || gCharacterManager.GetCharacterClass(CharacterAttribute->Class) == CLASS_TEMPLENIGHT
+#endif
+                    )
+                {
+                    g_pNewUISystem->Toggle(SEASON3B::INTERFACE_MASTER_LEVEL);
+                    PlayBuffer(SOUND_CLICK01);
+                }
             }
             else if (topBarAction == kTopBarActionHelperPlay)
             {
@@ -10237,8 +10244,9 @@ void RenderAndroidTradePicker()
     EndBitmap();
 }
 
-// Lit state for a top bar slot. The menu entry tracks whether the grid it opens
-// is showing; the rest track their own window.
+// Lit state for a top bar slot. Most track their own window; the two bespoke
+// actions (Master skill tree, the play toggle) have no slot in the generic
+// utility-action switch, so they are special-cased here instead.
 bool IsTopBarSlotActive(int slot)
 {
     if (slot < 0 || slot >= kTopBarButtonCount)
@@ -10246,9 +10254,9 @@ bool IsTopBarSlotActive(int slot)
         return false;
     }
 
-    if (kTopBarActions[slot] == kTopBarActionMenu)
+    if (kTopBarActions[slot] == kTopBarActionMasterSkill)
     {
-        return g_virtualRightPanelUtilityMode;
+        return g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL);
     }
 
     // Lit while the helper is actually running, not while its window is open -
@@ -10261,39 +10269,40 @@ bool IsTopBarSlotActive(int slot)
     return IsVirtualRightPanelUtilityActionActive(kTopBarActions[slot]);
 }
 
-// Current opacity for one of the four hideable slots (1-4 => local index
-// 0-3, left to right). 1 = fully shown, 0 = fully hidden, skip drawing.
-// While g_topBarRowAnimActive, each slot fades in or out over
-// kTopBarRowAnimFadeMs, staggered by kTopBarRowAnimStaggerMs in an order
-// that depends on which way the toggle just went: showing sweeps from the
-// slot nearest the toggle (closest to Menu) outward to the left, hiding
-// sweeps from the leftmost slot back toward the toggle - see the caller's
-// comment by g_topBarRowAnimActive for why.
-float GetTopBarRowSlotAlpha(int localIndex)
+// Current opacity for one of the 4x2 grid's 8 slots. 1 = fully shown, 0 =
+// fully hidden, skip drawing. While g_topBarRowAnimActive, each slot fades in
+// or out over kTopBarRowAnimFadeMs, staggered by kTopBarRowAnimStaggerMs by
+// column only - both rows in a column animate together, so the sweep reads
+// as one 2-tall wave rather than two independent rows. Order depends on
+// which way the toggle just went: showing sweeps from the column nearest the
+// toggle outward to the left, hiding sweeps from the leftmost column back
+// toward the toggle - see the caller's comment by g_topBarRowAnimActive for
+// why.
+float GetTopBarRowSlotAlpha(int slot)
 {
     if (!g_topBarRowAnimActive)
     {
         return g_topBarRowIconsVisible ? 1.0f : 0.0f;
     }
 
-    constexpr int kRowCount = kTopBarRowButtonCount - 1;
-    const int order = g_topBarRowIconsVisible ? (kRowCount - 1 - localIndex) : localIndex;
+    const int column = slot % kTopBarGridColumns;
+    const int order = g_topBarRowIconsVisible ? (kTopBarGridColumns - 1 - column) : column;
     const float startDelay = static_cast<float>(order) * kTopBarRowAnimStaggerMs;
     const float elapsed = static_cast<float>(GetTickCount() - g_topBarRowAnimStartTick);
     const float localT = std::clamp((elapsed - startDelay) / kTopBarRowAnimFadeMs, 0.0f, 1.0f);
     return g_topBarRowIconsVisible ? localT : (1.0f - localT);
 }
 
-// Opacity for any top bar slot - 1 for Menu and the Helper/Play stack, which
-// never hide, and GetTopBarRowSlotAlpha's animated value for the four
-// hideable slots (1-4).
+// Opacity for any top bar slot - 1 for the Helper/Play stack, which never
+// hides, and GetTopBarRowSlotAlpha's animated value for the grid's 8
+// hideable slots.
 float GetTopBarSlotAlpha(int slot)
 {
-    if (slot < 1 || slot >= kTopBarRowButtonCount)
+    if (slot < 0 || slot >= kTopBarHideableSlotCount)
     {
         return 1.0f;
     }
-    return GetTopBarRowSlotAlpha(slot - 1);
+    return GetTopBarRowSlotAlpha(slot);
 }
 
 // Scales a 0xAARRGGBB color's alpha byte by a 0-1 factor, for fading
@@ -10404,7 +10413,7 @@ void RenderVirtualTopBar()
     if (g_topBarRowAnimActive)
     {
         constexpr float kTotalAnimMs =
-            static_cast<float>(kTopBarRowButtonCount - 2) * kTopBarRowAnimStaggerMs + kTopBarRowAnimFadeMs;
+            static_cast<float>(kTopBarGridColumns - 1) * kTopBarRowAnimStaggerMs + kTopBarRowAnimFadeMs;
         if (static_cast<float>(GetTickCount() - g_topBarRowAnimStartTick) >= kTotalAnimMs)
         {
             g_topBarRowAnimActive = false;
