@@ -14,7 +14,9 @@
 
 #include <fstream>
 #include <crtdbg.h>
+#ifndef __ANDROID__
 #include <strsafe.h>
+#endif
 
 TCHAR* Path::GetCurrentFullPath(TCHAR* szPath)
 {
@@ -31,7 +33,7 @@ TCHAR* Path::GetCurrentDirectory(TCHAR* szPath)
 
 	GetModuleFileName(0,szPath,MAX_PATH);
 
-	char* chr = _tcsrchr(szPath,'\\');
+	char* chr = strrchr(szPath,'\\');
 
 	if(!chr) return 0;
 
@@ -92,7 +94,7 @@ TCHAR* Path::ClearDirString(TCHAR* szPath)
 
 	if(szPath[0]=='"')
 	{
-		StringCchCopy(szPath,MAX_PATH,szPath+1);
+		StringCchCopyA(szPath,MAX_PATH,szPath+1);
 	}
 
 	return szPath;
@@ -102,15 +104,15 @@ TCHAR* Path::GetDirectory(TCHAR* szPath)
 {
 	if(!szPath||!(*szPath)) return szPath;
 
-	char* chr = _tcsrchr(szPath,'\\');
+	char* chr = strrchr(szPath,'\\');
 
 	if(!chr)
-		chr = _tcsrchr(szPath,'/');
+		chr = strrchr(szPath,'/');
 
 	if(chr)
 		(*chr) = 0;
 	else
-		StringCchCopy(szPath,MAX_PATH,".");
+		StringCchCopyA(szPath,MAX_PATH,".");
 
 	return szPath;
 }
@@ -119,13 +121,13 @@ TCHAR* Path::GetFileName(TCHAR* szPath)
 {
 	if(!szPath||!(*szPath)) return szPath;
 
-	char* chr = _tcsrchr(szPath,'\\');
+	char* chr = strrchr(szPath,'\\');
 
 	if(!chr)
-		chr = _tcsrchr(szPath,'/');
+		chr = strrchr(szPath,'/');
 
 	if(chr)
-		StringCchCopy(szPath,MAX_PATH,szPath+1);
+		StringCchCopyA(szPath,MAX_PATH,szPath+1);
 
 	return szPath;
 }
@@ -177,16 +179,16 @@ BOOL			Path::ReadFileLastLine(TCHAR* szFile,TCHAR* szLastLine)
 			ifs.getline(buff,sizeof(buff));
 
 			len = 0;
-			StringCchLength(buff,sizeof(buff),&len);
+			StringCchLengthA(buff,sizeof(buff),&len);
 
 			if(len>1)
-				StringCchCopy(szLastLine,sizeof(buff),buff);
+				StringCchCopyA(szLastLine,sizeof(buff),buff);
 		}
 
 		ifs.close();
 
 		len = 0;
-		StringCchLength(szLastLine,1024,&len);
+		StringCchLengthA(szLastLine,1024,&len);
 
 		if(len>1)
 		{
@@ -223,17 +225,17 @@ BOOL			Path::CreateDirectorys(TCHAR* szFilePath,BOOL bIsFile)
 	char PathName[MAX_PATH] = {0};
 	char buff2[MAX_PATH] = {0};
 
-	StringCchCopy(PathName,sizeof(PathName),szFilePath);
+	StringCchCopyA(PathName,sizeof(PathName),szFilePath);
 
 	if(bIsFile)
 		Path::GetDirectory(PathName);
 
-	if(CreateDirectory(PathName,0)==0)
+	if(CreateDirectoryA(PathName,0)==0)
 	{
-		StringCchCopy(buff2,sizeof(buff2),PathName);
+		StringCchCopyA(buff2,sizeof(buff2),PathName);
 
-		char* chr1 = _tcsrchr(buff2,'\\');
-		char* chr2 = _tcschr(buff2,'\\');
+		char* chr1 = strrchr(buff2,'\\');
+		char* chr2 = strchr(buff2,'\\');
 
 		if(!chr1||!chr2||chr1==chr2)
 			return 0;
@@ -243,7 +245,7 @@ BOOL			Path::CreateDirectorys(TCHAR* szFilePath,BOOL bIsFile)
 		if(!Path::CreateDirectorys(buff2,0))
 			return 0;
 
-		return CreateDirectory(PathName,0);
+		return CreateDirectoryA(PathName,0);
 	}
 
 	return 0;

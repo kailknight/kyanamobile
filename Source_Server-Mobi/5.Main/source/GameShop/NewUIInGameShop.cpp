@@ -762,7 +762,8 @@ void CNewUIInGameShop::InitZoneBtn()
 	m_ZoneButton.CreateRadioGroup(g_InGameShopSystem->GetSizeZones(), IMAGE_IGS_ZONE_BTN);
 	m_ZoneButton.ChangeRadioButtonInfo(true, m_Pos.x+IMAGE_IGS_ZONE_BTN_POS_X, m_Pos.y+IMAGE_IGS_ZONE_BTN_POS_Y,IMAGE_IGS_ZONE_BTN_WIDTH, IMAGE_IGS_ZONE_BTN_HEIGHT);
 	m_ZoneButton.SetFont(g_hFontBold);
-	m_ZoneButton.ChangeRadioText(g_InGameShopSystem->GetZoneName());
+	type_listName ZoneNameList = g_InGameShopSystem->GetZoneName();
+	m_ZoneButton.ChangeRadioText(ZoneNameList);
 	m_ZoneButton.ChangeFrame(0);
 }
 
@@ -778,7 +779,8 @@ void CNewUIInGameShop::InitCategoryBtn()
 	m_CategoryButton.ChangeRadioButtonInfo(false, m_Pos.x+IMAGE_IGS_CATEGORY_BTN_POS_X, m_Pos.y+IMAGE_IGS_CATEGORY_BTN_POS_Y,IMAGE_IGS_CATEGORY_BTN_WIDTH, IMAGE_IGS_CATEGORY_BTN_HEIGHT, IMAGE_IGS_CATEGORY_BTN_DISTANCE);
 	m_CategoryButton.ChangeButtonState( SEASON3B::BUTTON_STATE_DOWN, 2 );
 	m_CategoryButton.SetFont(g_hFontBold);
-	m_CategoryButton.ChangeRadioText(g_InGameShopSystem->GetCategoryName());
+	type_listName CategoryNameList = g_InGameShopSystem->GetCategoryName();
+	m_CategoryButton.ChangeRadioText(CategoryNameList);
 	m_CategoryButton.ChangeFrame(0);
 }
 

@@ -70,8 +70,8 @@ void			CListManager::SetListManagerInfo(DownloaderType type,
 	this->m_ListManagerInfo.m_Version = Version;
 	this->m_ListManagerInfo.m_dwDownloadMaxTime = dwDownloadMaxTime;
 
-	if(GetFileAttributes(LocalPath)==INVALID_FILE_ATTRIBUTES)
-		CreateDirectory(LocalPath,0);
+	if(GetFileAttributesA(LocalPath)==INVALID_FILE_ATTRIBUTES)
+		CreateDirectoryA(LocalPath,0);
 
 	if(this->m_ListManagerInfo.m_strLocalPath.substr(this->m_ListManagerInfo.m_strLocalPath.size(),1)!="\\")
 	{
@@ -127,7 +127,7 @@ bool			CListManager::IsScriptFileExist() // OK
 	{
 		std::string file_path = path+*(it);
 
-		if(GetFileAttributes(file_path.c_str())==INVALID_FILE_ATTRIBUTES)
+		if(GetFileAttributesA(file_path.c_str())==INVALID_FILE_ATTRIBUTES)
 		{
 			return 0;
 		}
@@ -140,7 +140,7 @@ std::string		CListManager::GetScriptPath() // OK
 {
 	TCHAR buff[MAX_PATH] = {0};
 
-	StringCchPrintf(buff,sizeof(buff),"%03d.%04d.%03d",
+	StringCchPrintfA(buff,sizeof(buff),"%03d.%04d.%03d",
 					m_ListManagerInfo.m_Version.Zone,
 					m_ListManagerInfo.m_Version.year,
 					m_ListManagerInfo.m_Version.yearId);
@@ -160,12 +160,13 @@ void			CListManager::DeleteScriptFiles() // OK
 	{
 		std::string file_path = path+(*it);
 
-		DeleteFile(file_path.c_str());
+		DeleteFileA(file_path.c_str());
 	}
 }
 
 WZResult		CListManager::FileDownLoad() // OK
 {
+#ifndef __ANDROID__
 	if(this->m_ListManagerInfo.m_dwDownloadMaxTime>0)
 	{
 		unsigned int ThreadID = 0;
@@ -199,7 +200,12 @@ WZResult		CListManager::FileDownLoad() // OK
 		}
 	}
 	else
+#endif // __ANDROID__
 	{
+		// No live downloader on Android (CFTPFileDownLoader's DownLoadFiles()
+		// is stubbed there), so this always returns immediately - no need for
+		// the threaded timeout machinery above, which exists to bound a real,
+		// possibly-slow FTP/HTTP transfer.
 		this->m_Result = this->FileDownLoadImpl();
 	}
 
@@ -208,6 +214,7 @@ WZResult		CListManager::FileDownLoad() // OK
 
 WZResult		CListManager::FileDownLoadImpl() // OK
 {
+#ifndef __ANDROID__
 	if(m_pFTPDownLoader!=NULL)
 	{
 		m_pFTPDownLoader->Break();
@@ -217,6 +224,7 @@ WZResult		CListManager::FileDownLoadImpl() // OK
 			m_pFTPDownLoader->GetFileDownloader()->Break();
 		}
 	}
+#endif // __ANDROID__
 
 	SAFE_DELETE(m_pFTPDownLoader); // FIX THIS
 

@@ -19,9 +19,14 @@ CFTPFileDownLoader::CFTPFileDownLoader() // OK
 
 CFTPFileDownLoader::~CFTPFileDownLoader() // OK
 {
+#ifndef __ANDROID__
 	SAFE_DELETE(this->m_pFileDownloader);
+#endif // __ANDROID__ - m_pFileDownloader is never assigned on Android (see
+	   // the #else DownLoadFiles() below), so there is nothing to delete,
+	   // and FileDownloader's destructor is never linked in.
 }
 
+#ifndef __ANDROID__
 WZResult CFTPFileDownLoader::DownLoadFiles(DownloaderType type,
 										   std::string strServerIP,
 										   unsigned short PortNum,
@@ -89,12 +94,34 @@ void	CFTPFileDownLoader::Break() // OK
 	if(this->m_pFileDownloader!=NULL)
 		m_pFileDownloader->Break();
 }
+#else // __ANDROID__
+// The real implementation above is WinINet-based FTP/HTTP, which does not
+// exist on Android. It is unreachable in practice - CListManager::LoadScriptList
+// skips downloading whenever the local script files already exist, and the
+// shop ships those files as Android assets - but the symbols must still
+// link, since CListManager unconditionally new/deletes a CFTPFileDownLoader.
+// m_pFileDownloader is never assigned here, so FileDownloader (the actual
+// WinINet class, excluded from the Android build) never needs to be linked.
+WZResult CFTPFileDownLoader::DownLoadFiles(DownloaderType, std::string, unsigned short,
+										   std::string, std::string, std::string, std::string,
+										   bool, CListVersionInfo, std::vector<std::string>)
+{
+	WZResult result;
+	result.SetResult(ERROR_LOAD_SCRIPT, 0, "Cash shop live update is not available on this platform");
+	return result;
+}
+
+void	CFTPFileDownLoader::Break()
+{
+	this->m_Break = 1;
+}
+#endif // __ANDROID__
 
 BOOL CFTPFileDownLoader::CreateFolder(std::string strFilePath) // OK
 {
-	if(GetFileAttributes(strFilePath.c_str())==INVALID_FILE_ATTRIBUTES)
+	if(GetFileAttributesA(strFilePath.c_str())==INVALID_FILE_ATTRIBUTES)
 	{
-		return CreateDirectory(strFilePath.c_str(),0);
+		return CreateDirectoryA(strFilePath.c_str(),0);
 	}
 
 	return 1;

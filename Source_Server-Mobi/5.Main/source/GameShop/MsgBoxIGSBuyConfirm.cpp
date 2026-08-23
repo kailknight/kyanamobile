@@ -7,7 +7,9 @@
 #include "MsgBoxIGSBuyConfirm.h"
 #include "DSPlaySound.h"
 #include "wsclientinline.h"
+#ifndef __ANDROID__
 #include <strsafe.h>
+#endif
 
 CMsgBoxIGSBuyConfirm::CMsgBoxIGSBuyConfirm()
 {

@@ -14,6 +14,27 @@
 
 #include <fstream>
 
+// GetScriptPath() (ListManager.cpp) builds these paths with Windows-style
+// backslashes. That's fine for GetFileAttributesA/fopen, which normalize
+// backslashes to forward slashes internally on Android (Platform/PlatformDefs.h),
+// but std::ifstream::open() here goes straight to the OS with no such
+// translation, so a backslash-built path silently fails to open on Android's
+// POSIX filesystem (backslash isn't a separator there) - "package file open
+// fail" even though GetFileAttributesA just confirmed the file exists.
+// Forward slashes work identically on Windows, so this is safe unconditionally.
+static std::string NormalizeShopFilePath(const char* szFilePath)
+{
+	std::string path = szFilePath ? szFilePath : "";
+	for (std::string::iterator it = path.begin(); it != path.end(); ++it)
+	{
+		if (*it == '\\')
+		{
+			*it = '/';
+		}
+	}
+	return path;
+}
+
 CShopList::CShopList() // OK
 {
 	this->m_CategoryListPtr = new CShopCategoryList;
@@ -31,6 +52,9 @@ CShopList::~CShopList() // OK
 WZResult CShopList::LoadCategroy(const char* szFilePath) // OK
 {
 	WZResult result;
+
+	const std::string normalizedPath = NormalizeShopFilePath(szFilePath);
+	szFilePath = normalizedPath.c_str();
 
 	FILE_ENCODE enc = this->IsFileEncodingUtf8(szFilePath);
 
@@ -84,6 +108,9 @@ WZResult CShopList::LoadPackage (const char* szFilePath) // OK
 {
 	WZResult result;
 
+	const std::string normalizedPath = NormalizeShopFilePath(szFilePath);
+	szFilePath = normalizedPath.c_str();
+
 	FILE_ENCODE enc = this->IsFileEncodingUtf8(szFilePath);
 
 	std::ifstream ifs;
@@ -134,6 +161,9 @@ WZResult CShopList::LoadProduct (const char* szFilePath) // OK
 	static WZResult result;
 
 	result.BuildSuccessResult();
+
+	const std::string normalizedPath = NormalizeShopFilePath(szFilePath);
+	szFilePath = normalizedPath.c_str();
 
 	FILE_ENCODE enc = this->IsFileEncodingUtf8(szFilePath);
 

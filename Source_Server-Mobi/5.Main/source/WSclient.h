@@ -3293,9 +3293,9 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 	
-	long				lBuyItemPackageSeq;
-	long				lBuyItemDisplaySeq;
-	long				lBuyItemPriceSeq;
+	int				lBuyItemPackageSeq;
+	int				lBuyItemDisplaySeq;
+	int				lBuyItemPriceSeq;
 	WORD				wItemCode;
 }PMSG_CASHSHOP_BUYITEM_REQ, *LPPMSG_CASHSHOP_BUYITEM_REQ;
 
@@ -3307,7 +3307,7 @@ typedef struct
 	PBMSG_HEADER2		h;
 
 	BYTE				byResultCode;
-	long				lItemLeftCount;
+	int				lItemLeftCount;
 }PMSG_CASHSHOP_BUYITEM_ANS, *LPPMSG_CASHSHOP_BUYITEM_ANS;
 
 //----------------------------------------------------------------------------
@@ -3317,10 +3317,10 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 
-	long				lGiftItemPackageSeq;
-	long				lDiftItemDisplaySeq;
-	long				lGiftItemPriceSeq;
-	long				lSaleZone;
+	int				lGiftItemPackageSeq;
+	int				lDiftItemDisplaySeq;
+	int				lGiftItemPriceSeq;
+	int				lSaleZone;
 	char				chReceiveUserID[MAX_ID_SIZE+1];
 	char				chMessage[MAX_GIFT_MESSAGE_SIZE];
 }PMSG_CASHSHOP_GIFTSEND_REQ, *LPPMSG_CASHSHOP_GIFTSEND_REQ;
@@ -3333,7 +3333,7 @@ typedef struct
 	PBMSG_HEADER2		h;
 
 	BYTE				byResultCode;
-	long				lItemLeftCount;
+	int				lItemLeftCount;
 	double				dLimitedCash;
 }PMSG_CASHSHOP_GIFTSEND_ANS, *LPPMSG_CASHSHOP_GIFTSEND_ANS;
 
@@ -3366,11 +3366,11 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 
-	long				lStorageIndex;
-	long				lItemSeq;
-	long				lStorageGroupCode;
-	long				lProductSeq;
-	long				lPriceSeq;
+	int				lStorageIndex;
+	int				lItemSeq;
+	int				lStorageGroupCode;
+	int				lProductSeq;
+	int				lPriceSeq;
 	double				dCashPoint;
 	char				chItemType;
 }PMSG_CASHSHOP_STORAGELIST, *LPPMSG_CASHSHOP_STORAGELIST;
@@ -3382,11 +3382,11 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 	
-	long				lStorageIndex;
-	long				lItemSeq;
-	long				lStorageGroupCode;
-	long				lProductSeq;
-	long				lPriceSeq;
+	int				lStorageIndex;
+	int				lItemSeq;
+	int				lStorageGroupCode;
+	int				lProductSeq;
+	int				lPriceSeq;
 	double				dCashPoint;
 	char				chItemType;
 
@@ -3448,7 +3448,7 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 
-	long				lPackageSeq;
+	int				lPackageSeq;
 }PMSG_CASHSHOP_ITEMBUY_LEFT_COUNT_REQ, *LPPMSG_CASHSHOP_ITEMBUY_LEFT_COUNT_REQ;
 
 //----------------------------------------------------------------------------
@@ -3458,8 +3458,8 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 
-	long				lPackageSeq;
-	long				lLeftCount;
+	int				lPackageSeq;
+	int				lLeftCount;
 }PMSG_CASHSHOP_ITEMBUY_LEFT_COUNT_ANS, *LPPMSG_CASHSHOP_ITEMBUY_LEFT_COUNT_ANS;
 
 //----------------------------------------------------------------------------
@@ -3469,8 +3469,8 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 
-	long				lStorageSeq;
-	long				lStorageItemSeq;
+	int				lStorageSeq;
+	int				lStorageItemSeq;
 	char				chStorageItemType;
 }PMSG_CASHSHOP_STORAGE_ITEM_THROW_REQ, *LPPMSG_CASHSHOP_STORAGE_ITEM_THROW_REQ;
 
@@ -3491,8 +3491,8 @@ typedef struct
 {
 	PBMSG_HEADER2		h;
 
-	long				lStorageSeq;
-	long				lStorageItemSeq;
+	int				lStorageSeq;
+	int				lStorageItemSeq;
 
 	WORD				wItemCode;
 	char				chStorageItemType;
@@ -3527,7 +3527,7 @@ typedef struct
 {
 	PBMSG_HEADER2			h;
 	
-	long				lEventCategorySeq;
+	int				lEventCategorySeq;
 }PMSG_CASHSHOP_EVENTITEM_REQ, *LPPMSG_CASHSHOP_EVENTITEM_REQ;
 
 
@@ -3546,7 +3546,7 @@ typedef struct
 {
 	PBMSG_HEADER2			h;
 	
-	long				lPackageSeq[INGAMESHOP_DISPLAY_ITEMLIST_SIZE];
+	int				lPackageSeq[INGAMESHOP_DISPLAY_ITEMLIST_SIZE];
 }PMSG_CASHSHOP_EVENTITEM_LIST, *LPPMSG_CASHSHOP_EVENTITEM_LIST;
 
 typedef struct

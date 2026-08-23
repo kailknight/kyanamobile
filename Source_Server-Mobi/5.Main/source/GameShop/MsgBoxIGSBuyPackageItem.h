@@ -105,6 +105,7 @@ private:
 
 	int		m_iPackageSeq;
 	int		m_iDisplaySeq;
+	int		m_iPriceSeq;
 	WORD	m_wItemCode;
 	int		m_iCashType;
 

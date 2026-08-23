@@ -98,7 +98,7 @@ bool CInGameShopSystem::ScriptDownload()
 {
 	m_bFirstScriptDownloaded = true;
 
-	::GetCurrentDirectory(255, m_szScriptLocalPath);
+	::GetCurrentDirectoryA(255, m_szScriptLocalPath);
 
 	char szScriptRemotePathforDMZ[MAX_TEXT_LENGTH];
 	sprintf(m_szScriptLocalPath, "%s%s", m_szScriptLocalPath, "\\data\\InGameShopScript");
@@ -168,7 +168,7 @@ bool CInGameShopSystem::BannerDownload()
 {
 	m_bFirstBannerDownloaded = true;
 
-	::GetCurrentDirectory(255, m_szBannerLocalPath);
+	::GetCurrentDirectoryA(255, m_szBannerLocalPath);
 
 	char szBannerRemotePathforDMZ[MAX_TEXT_LENGTH];
 	sprintf(m_szBannerLocalPath, "%s%s", m_szBannerLocalPath, "\\data\\InGameShopBanner");

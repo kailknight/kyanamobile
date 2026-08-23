@@ -2455,9 +2455,9 @@ __forceinline bool SendRequestMixExit()
     CStreamPacketEngine spe; \
     spe.Init( 0xC1, 0xD2); \
 	spe << (BYTE)0x03; \
-	spe << (long)lBuyItemPackageSeq; \
-	spe << (long)lBuyItemDisplaySeq; \
-	spe << (long)lBuyItemPriceSeq; \
+	spe << (int)lBuyItemPackageSeq; \
+	spe << (int)lBuyItemDisplaySeq; \
+	spe << (int)lBuyItemPriceSeq; \
 	spe << (WORD)wItemCode; \
 	spe << (int)iCashType; \
     spe.Send(); \
@@ -2475,10 +2475,10 @@ __forceinline bool SendRequestMixExit()
     CStreamPacketEngine spe; \
     spe.Init( 0xC1, 0xD2); \
 	spe << (BYTE)0x04; \
-	spe << (long)lGiftItemPackageSeq; \
-	spe << (long)lGiftItemPriceSeq; \
-	spe << (long)lGiftItemDisplaySeq; \
-	spe << (long)lSaleZone; \
+	spe << (int)lGiftItemPackageSeq; \
+	spe << (int)lGiftItemPriceSeq; \
+	spe << (int)lGiftItemDisplaySeq; \
+	spe << (int)lSaleZone; \
 	spe << (WORD)wItemCode; \
 	spe << (int)iCashType; \
 	spe.AddData( strReceiveUserID, MAX_ID_SIZE+1); \
@@ -2526,7 +2526,7 @@ __forceinline bool SendRequestMixExit()
     CStreamPacketEngine spe; \
     spe.Init( 0xC1, 0xD2); \
 	spe << (BYTE)0x09; \
-	spe << (long)lPackageSeq; \
+	spe << (int)lPackageSeq; \
     spe.Send(); \
 }
 
@@ -2535,8 +2535,8 @@ __forceinline bool SendRequestMixExit()
     CStreamPacketEngine spe; \
     spe.Init( 0xC1, 0xD2); \
 	spe << (BYTE)0x0A; \
-	spe << (long)lStorageSeq; \
-	spe << (long)lStorageItemSeq; \
+	spe << (int)lStorageSeq; \
+	spe << (int)lStorageItemSeq; \
 	spe.AddData( pstrStorageItemType, sizeof(char)); \
     spe.Send(); \
 }
@@ -2546,8 +2546,8 @@ __forceinline bool SendRequestMixExit()
     CStreamPacketEngine spe; \
     spe.Init( 0xC1, 0xD2); \
 	spe << (BYTE)0x0B; \
-	spe << (long)lStorageSeq; \
-	spe << (long)lStorageItemSeq; \
+	spe << (int)lStorageSeq; \
+	spe << (int)lStorageItemSeq; \
 	spe << (WORD)wItemCode; \
 	spe.AddData( pstrStorageItemType, sizeof(char)); \
     spe.Send(); \
@@ -2558,7 +2558,7 @@ __forceinline bool SendRequestMixExit()
     CStreamPacketEngine spe; \
     spe.Init( 0xC1, 0xD2); \
 	spe << (BYTE)0x13; \
-	spe << (long)lEventCategorySeq; \
+	spe << (int)lEventCategorySeq; \
     spe.Send(); \
 }
 

@@ -1270,8 +1270,13 @@ inline void  SetTimer(HWND, UINT_PTR id, UINT ms, void*)  {}
 inline void  KillTimer(HWND, UINT_PTR id)              {}
 // DeleteObject defined later with proper AndroidGDI implementation
 inline HGDIOBJ GetStockObject(int)                  { return nullptr; }
-inline void  ShellExecute(HWND,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,int) {}
-inline void  ShellExecute(HWND,LPCSTR,LPCSTR,LPCSTR,LPCSTR,int) {}
+// No shell/browser Intent bridge on Android, so this stays a no-op - but it
+// must return a "success" value (>32, per Win32 ShellExecute convention),
+// not void: iexplorer.h's OpenExplorer() casts the return to UINT and
+// compares it, so a void-returning shim fails to compile wherever that's
+// reachable (e.g. the cash shop's banner click-through).
+inline INT_PTR ShellExecute(HWND,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,int) { return 33; }
+inline INT_PTR ShellExecute(HWND,LPCSTR,LPCSTR,LPCSTR,LPCSTR,int) { return 33; }
 inline HFONT CreateFontA(int h,int,int,int,int weight,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,LPCSTR) { return AndroidCreateFont(h, weight); }
 inline DWORD GetLastError()                         { return 0; }
 inline void  SystemParametersInfo(UINT,UINT,void*,UINT) {}
@@ -2361,6 +2366,27 @@ inline DWORD GetCurrentDirectoryW(DWORD nBufLen, LPWSTR lpBuffer) {
     return static_cast<DWORD>(len);
 }
 #define GetCurrentDirectory GetCurrentDirectoryW
+// ANSI form: this codebase has no UNICODE build (TCHAR = char), so ANSI
+// callers need a char*-returning version rather than the macro above,
+// which only binds to the wchar_t* overload.
+inline DWORD GetCurrentDirectoryA(DWORD nBufLen, char* lpBuffer) {
+    char cwd[MAX_PATH] = {};
+    if (!getcwd(cwd, sizeof(cwd))) {
+        if (lpBuffer && nBufLen > 0) lpBuffer[0] = '\0';
+        return 0;
+    }
+    for (char* p = cwd; *p; ++p) {
+        if (*p == '/') *p = '\\';
+    }
+    const size_t len = strlen(cwd);
+    if (!lpBuffer || nBufLen == 0) return static_cast<DWORD>(len);
+    if (len + 1 > nBufLen) {
+        lpBuffer[0] = '\0';
+        return static_cast<DWORD>(len + 1);
+    }
+    memcpy(lpBuffer, cwd, len + 1);
+    return static_cast<DWORD>(len);
+}
 
 // ── _wtoi64 → wide string to int64 ───────────────────────────────────────
 inline long long _wtoi64(const wchar_t* s) { return (long long)wcstoll(s, nullptr, 10); }
@@ -2495,6 +2521,23 @@ inline DWORD GetFileAttributesW(LPCWSTR path) {
     return attr ? attr : FILE_ATTRIBUTE_NORMAL;
 }
 #define GetFileAttributes GetFileAttributesW
+// This ANSI-only codebase builds paths with backslashes (TCHAR = char, no
+// UNICODE build), so - unlike GetFileAttributesW's caller, which always
+// gets a real wide path from Windows APIs - callers here need backslashes
+// normalized before stat(), or every lookup on a backslash-built path
+// (e.g. the GameShop script cache) silently reports "missing".
+inline DWORD GetFileAttributesA(LPCSTR path) {
+    if (!path) return INVALID_FILE_ATTRIBUTES;
+    char cpath[MAX_PATH];
+    size_t i = 0;
+    for (; path[i] != '\0' && i < MAX_PATH - 1; ++i) cpath[i] = (path[i] == '\\') ? '/' : path[i];
+    cpath[i] = '\0';
+    struct stat st;
+    if (stat(cpath, &st) != 0) return INVALID_FILE_ATTRIBUTES;
+    DWORD attr = 0;
+    if (S_ISDIR(st.st_mode)) attr |= FILE_ATTRIBUTE_DIRECTORY;
+    return attr ? attr : FILE_ATTRIBUTE_NORMAL;
+}
 // ── SetFileAttributes → no-op on Android ────────────────────────────────
 inline BOOL SetFileAttributesW(LPCWSTR, DWORD) { return FALSE; }
 #define SetFileAttributes SetFileAttributesW
@@ -2745,6 +2788,16 @@ inline long StringCchPrintfW(wchar_t* dst, size_t cchDst, const wchar_t* fmt, ..
     return (n >= 0) ? 0L : 0x80070057L;
 }
 #define StringCchPrintf StringCchPrintfW
+// ANSI form: no UNICODE build in this codebase (TCHAR = char), so ANSI
+// callers need this rather than the macro above, which only binds wchar_t*.
+inline long StringCchPrintfA(char* dst, size_t cchDst, const char* fmt, ...) {
+    va_list va;
+    va_start(va, fmt);
+    int n = vsnprintf(dst, cchDst, fmt, va);
+    va_end(va);
+    if (dst && cchDst > 0) dst[cchDst - 1] = '\0';
+    return (n >= 0) ? 0L : 0x80070057L;
+}
 
 inline long StringCchVPrintfW(wchar_t* dst, size_t cchDst, const wchar_t* fmt, va_list ap) {
     int n = vswprintf(dst, cchDst, fmt, ap);
@@ -2752,10 +2805,16 @@ inline long StringCchVPrintfW(wchar_t* dst, size_t cchDst, const wchar_t* fmt, v
     return (n >= 0) ? 0L : 0x80070057L;
 }
 #define StringCchVPrintf StringCchVPrintfW
+inline long StringCchVPrintfA(char* dst, size_t cchDst, const char* fmt, va_list ap) {
+    int n = vsnprintf(dst, cchDst, fmt, ap);
+    if (dst && cchDst > 0) dst[cchDst - 1] = '\0';
+    return (n >= 0) ? 0L : 0x80070057L;
+}
 
 // ── URLDownloadToFile → stub (no WinInet on Android) ─────────────────────
 #define CBGAMEGUARD(...) ((void)0)
 inline HRESULT URLDownloadToFile(void*, LPCWSTR, LPCWSTR, DWORD, void*) { return E_FAIL; }
+inline HRESULT URLDownloadToFileA(void*, LPCSTR, LPCSTR, DWORD, void*) { return E_FAIL; }
 
 // ── CORECLR / DotNet bridge stubs (Android: no .NET runtime) ─────────────
 #define CORECLR_DELEGATE_CALLTYPE

@@ -18,6 +18,7 @@ CMsgBoxIGSBuyPackageItem::CMsgBoxIGSBuyPackageItem()
 {
 	m_iPackageSeq	= 0;
 	m_iDisplaySeq	= 0;
+	m_iPriceSeq		= 0;
 	m_wItemCode		= -1;
 	m_iCashType		= 0;
 	m_szPackageName[0]	= '\0';
@@ -84,13 +85,19 @@ void CMsgBoxIGSBuyPackageItem::Initialize(CShopPackage* pPackage)
 	g_InGameShopSystem->GetProductInfoFromProductSeq(iProductSeq, CInGameShopSystem::IGS_PRODUCT_ATT_TYPE_USE_LIMIT_PERIOD, iValue, szText);
 
 	if( iValue > 0 )
-	{	
+	{
 		sprintf(m_szPeriod, "%d %s", iValue, szText);
 	}
-	else 
+	else
 	{
 		sprintf(m_szPeriod, "-");
 	}
+
+	// PriceSeq was never set here (always sent as the literal 0 in
+	// BuyBtnDown below), so every single-price ("Buy" without a size/price
+	// picker) purchase asked the server to buy price-sequence 0, which the
+	// server correctly refuses as an invalid/sold-out offer.
+	g_InGameShopSystem->GetProductInfoFromProductSeq(iProductSeq, CInGameShopSystem::IGS_PRODUCT_ATT_TYPE_PRICE_SEQUENCE, m_iPriceSeq, szText);
 
 	m_wItemCode = atoi(pPackage->InGamePackageID);
 
@@ -187,7 +194,7 @@ void CMsgBoxIGSBuyPackageItem::RenderTexts()
 	g_pRenderText->SetTextColor(255, 0, 0, 255);
 	if( m_wItemCode == 65535 )
 	{
-		sprintf(szText, "¾ÆÀÌÅÛÄÚµå°¡ ¾ø½À´Ï´Ù.");
+		sprintf(szText, "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Úµå°¡ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½.");
 	}
 	else
 	{
@@ -262,7 +269,7 @@ CALLBACK_RESULT CMsgBoxIGSBuyPackageItem::BuyBtnDown(class CNewUIMessageBoxBase*
 	CMsgBoxIGSBuyConfirm* pMsgBox = NULL;
 	CreateMessageBox(MSGBOX_LAYOUT_CLASS(CMsgBoxIGSBuyConfirmLayout), &pMsgBox);
 
-	pMsgBox->Initialize(pOwnMsgBox->m_wItemCode, pOwnMsgBox->m_iPackageSeq, pOwnMsgBox->m_iDisplaySeq, 0, pOwnMsgBox->m_iCashType,pOwnMsgBox->m_szPackageName, pOwnMsgBox->m_szPrice, pOwnMsgBox->m_szPeriod);
+	pMsgBox->Initialize(pOwnMsgBox->m_wItemCode, pOwnMsgBox->m_iPackageSeq, pOwnMsgBox->m_iDisplaySeq, pOwnMsgBox->m_iPriceSeq, pOwnMsgBox->m_iCashType,pOwnMsgBox->m_szPackageName, pOwnMsgBox->m_szPrice, pOwnMsgBox->m_szPeriod);
 
 	PlayBuffer(SOUND_CLICK01);
 	g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);

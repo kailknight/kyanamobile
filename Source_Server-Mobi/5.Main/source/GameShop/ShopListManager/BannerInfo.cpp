@@ -14,9 +14,10 @@
 #include "StringToken.h"
 #include "StringMethod.h"
 
+#ifndef __ANDROID__
 #include <UrlMon.h>
-
 #pragma comment(lib,"Urlmon.lib")
+#endif
 
 CBannerInfo::CBannerInfo() // OK
 {
@@ -42,9 +43,9 @@ bool	CBannerInfo::SetBanner(std::string strdata,std::string strDirPath,bool bDon
 
 	this->BannerSeq = atoi(Token.nextToken().c_str());
 
-	StringCchCopy(this->BannerName,sizeof(this->BannerName),Token.nextToken().c_str());
+	StringCchCopyA(this->BannerName,sizeof(this->BannerName),Token.nextToken().c_str());
 
-	StringCchCopy(this->BannerImageURL,sizeof(this->BannerImageURL),Token.nextToken().c_str());
+	StringCchCopyA(this->BannerImageURL,sizeof(this->BannerImageURL),Token.nextToken().c_str());
 
 	this->BannerOrder = atoi(Token.nextToken().c_str());
 	this->BannerDirection = atoi(Token.nextToken().c_str());
@@ -52,7 +53,7 @@ bool	CBannerInfo::SetBanner(std::string strdata,std::string strDirPath,bool bDon
 	CStringMethod::ConvertStringToDateTime(this->BannerStartDate,Token.nextToken());
 	CStringMethod::ConvertStringToDateTime(this->BannerEndDate,Token.nextToken());
 
-	StringCchCopy(this->BannerLinkURL,sizeof(this->BannerLinkURL),Token.nextToken().c_str());
+	StringCchCopyA(this->BannerLinkURL,sizeof(this->BannerLinkURL),Token.nextToken().c_str());
 
 	std::string url = this->BannerImageURL;
 	std::size_t pos = url.rfind("/",std::string::npos);
@@ -61,11 +62,11 @@ bool	CBannerInfo::SetBanner(std::string strdata,std::string strDirPath,bool bDon
 	{
 		std::string sub = url.substr(pos+1,url.length()-pos-1);
 
-		StringCchPrintf(this->BannerImagePath,sizeof(this->BannerImagePath),"%s%s",strDirPath.c_str(),sub.c_str());
+		StringCchPrintfA(this->BannerImagePath,sizeof(this->BannerImagePath),"%s%s",strDirPath.c_str(),sub.c_str());
 
-		if(bDonwLoad||GetFileAttributes(this->BannerImagePath)==INVALID_FILE_ATTRIBUTES)
+		if(bDonwLoad||GetFileAttributesA(this->BannerImagePath)==INVALID_FILE_ATTRIBUTES)
 		{
-			URLDownloadToFile(0,this->BannerImageURL,this->BannerImagePath,0,0);
+			URLDownloadToFileA(0,this->BannerImageURL,this->BannerImagePath,0,0);
 		}
 	}
 

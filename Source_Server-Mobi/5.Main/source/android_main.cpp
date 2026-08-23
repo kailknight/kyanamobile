@@ -6607,21 +6607,29 @@ void TriggerVirtualRightPanelUtilityAction(int button)
         break;
 
     case kVirtualRightPanelUtilityActionXShop:
-        // Dead on Android, and not for a reason this file can fix. The in-game
-        // shop is disabled for this platform at two levels:
-        //
-        //   Defined_Global.h wraps KJH_PBG_ADD_INGAMESHOP_SYSTEM - which is
-        //   what defines KJH_ADD_INGAMESHOP_UI_SYSTEM and its siblings - in
-        //   #ifndef __ANDROID__, so every guarded body below compiles to
-        //   nothing here.
-        //
-        //   CMakeLists.txt line 128 excludes GameShop/*.cpp from the Android
-        //   build outright, so the implementation is not even linked in.
-        //
-        // Wiring the button harder cannot help while either of those holds;
-        // making it work means porting the IGS subsystem, not editing this
-        // case. Left as a no-op rather than pretending to dispatch.
+        // Mirrors the PC "X" toolbar button (NewUIMainFrameWindow.cpp's
+        // PBG_ADD_INGAMESHOP_UI_MAINFRAME handler): the shop's own movement/
+        // safe-zone gate, then load the category/package/product script
+        // (from the locally-shipped IBS*.txt files - see MuAudio-adjacent
+        // asset extraction in MuMainNativeActivity.java) before requesting
+        // the server open the shop. Banner download is skipped: it's a
+        // separate, PC-only-triggered subsystem not needed for shop content.
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
+        if (g_pInGameShop->IsInGameShopOpen() == false)
+        {
+            break;
+        }
+
+#ifdef KJH_MOD_SHOP_SCRIPT_DOWNLOAD
+        if (g_InGameShopSystem->IsScriptDownload() == true)
+        {
+            if (g_InGameShopSystem->ScriptDownload() == false)
+            {
+                break;
+            }
+        }
+#endif
+
         if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == false)
         {
             if (g_InGameShopSystem->GetIsRequestShopOpenning() == false)

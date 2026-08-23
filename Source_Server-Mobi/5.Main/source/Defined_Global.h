@@ -201,15 +201,12 @@ extern float g_fScreenRate_y;
 	#define PBG_ADD_GENSRANKING
 #endif	// ASG_ADD_GENS_SYSTEM
 
-#ifndef __ANDROID__
+// Android used to opt out here and re-declare a subset of the macros below
+// on its own; the cash-shop content (categories/packages/products) loads
+// from local script files and skips the WinINet-only live downloader
+// whenever those files already exist (CListManager::LoadScriptList), so
+// Android can share the same cascade PC uses instead of a hand-kept subset.
 #define KJH_PBG_ADD_INGAMESHOP_SYSTEM
-#else
-#define PBG_ADD_NAMETOPMSGBOX
-#define KJH_ADD_PERIOD_ITEM_SYSTEM
-#define PBG_ADD_INGAMESHOPMSGBOX
-#define PBG_ADD_ITEMRESIZE
-#define PBG_ADD_CHARACTERCARD
-#endif
 #ifdef KJH_PBG_ADD_INGAMESHOP_SYSTEM
 	#define PBG_ADD_INGAMESHOP_UI_MAINFRAME
 	#define PBG_ADD_INGAMESHOP_UI_ITEMSHOP

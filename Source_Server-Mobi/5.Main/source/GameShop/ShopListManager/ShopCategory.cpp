@@ -35,7 +35,7 @@ bool CShopCategory::SetCategory(std::string strdata) // OK
 		return 0;
 
 	this->ProductDisplaySeq = atoi(token.nextToken().c_str());
-	StringCchCopy(this->CategroyName,sizeof(this->CategroyName),token.nextToken().c_str());
+	StringCchCopyA(this->CategroyName,sizeof(this->CategroyName),token.nextToken().c_str());
 	this->EventFlag = atoi(token.nextToken().c_str());
 	this->OpenFlag = atoi(token.nextToken().c_str());
 	this->ParentProductDisplaySeq = atoi(token.nextToken().c_str());
