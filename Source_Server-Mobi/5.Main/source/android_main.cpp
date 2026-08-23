@@ -1074,6 +1074,19 @@ constexpr float kTargetPickerHeaderH = 26.0f;
 constexpr float kTargetPickerRowH = 28.0f;
 constexpr float kTargetPickerFooterH = 26.0f;
 
+// Skill-bind picker: same scrollable-list shape as the target picker above,
+// but each row needs room for an icon plus two lines of text (name, then
+// stats), so it runs a bit wider and taller per row. Kept as compact as that
+// still allows - the first pass at 400x318 covered most of the screen.
+constexpr int kSkillPickerListVisibleRows = 5;
+constexpr float kSkillPickerListW = 260.0f;
+constexpr float kSkillPickerListX = (640.0f - kSkillPickerListW) / 2.0f;
+constexpr float kSkillPickerListY = 90.0f;
+constexpr float kSkillPickerListHeaderH = 20.0f;
+constexpr float kSkillPickerListRowH = 28.0f;
+constexpr float kSkillPickerListFooterH = 18.0f;
+constexpr float kSkillPickerListIconSize = 22.0f;
+
 // The scan walks every client character with a non-trivial predicate, so it is
 // throttled rather than run per frame. Finger down and finger up force a
 // refresh regardless, so a selection always matches what was on screen.
@@ -1585,12 +1598,6 @@ struct ActiveVirtualJoystick
     bool ownsHeroPath = false;
 };
 
-struct ActiveVirtualPickerTouch
-{
-    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
-    int skillIndex = -1;
-};
-
 struct PendingAndroidLongPressRightClick
 {
     bool active = false;
@@ -1723,6 +1730,26 @@ struct AndroidTargetPickerState
 
 AndroidTargetPickerState g_androidTargetPicker{};
 
+// Same shape as AndroidTargetPickerState (scroll offset + drag tracking), but
+// entries are skill-list indices (into CharacterAttribute->Skill[], or a
+// pet-command id) rather than character indices. Replaces the old fixed 6x2
+// icon grid (ActiveVirtualPickerTouch) with a scrollable list so each row has
+// room for stats text.
+constexpr int kSkillPickerListMaxEntries = 64;
+struct AndroidSkillPickerListState
+{
+    int entryCount = 0;
+    std::array<int, kSkillPickerListMaxEntries> entries{};
+    int scrollOffset = 0;
+    bool dragging = false;
+    bool dragMoved = false;
+    SDL_FingerID dragFingerId = static_cast<SDL_FingerID>(-1);
+    float dragStartY = 0.0f;
+    float dragLastY = 0.0f;
+    int pressedEntry = -1;
+};
+AndroidSkillPickerListState g_androidSkillPickerList{};
+
 std::array<ActiveVirtualTouch, 4> g_activeVirtualTouches{};
 std::array<int, kVirtualSkillSlotCount> g_virtualSkillSlots = []()
 {
@@ -1732,7 +1759,6 @@ std::array<int, kVirtualSkillSlotCount> g_virtualSkillSlots = []()
 }();
 std::array<int, kVirtualSkillSlotCount> g_virtualSkillTypes{};
 ActiveVirtualJoystick g_virtualJoystick{};
-ActiveVirtualPickerTouch g_virtualPickerTouch{};
 // True while the stick has the character walking one of its own paths. The
 // click-to-move loop in ZzzInterface.cpp reads it through
 // IsAndroidVirtualJoystickHoldingMovement to stay out of the way.
@@ -2337,6 +2363,12 @@ int GetHeroCharacterIndex();
 void SyncVirtualSlotsToMainFrame();
 void SaveVirtualSkillSlots();
 void ClearVirtualPickerTouch();
+void RefreshAndroidSkillPickerListEntries();
+void ClampAndroidSkillPickerListScroll();
+int GetSkillPickerListRowCount();
+AndroidUiRect GetSkillPickerListRect();
+AndroidUiRect GetSkillPickerListRowRect(int row);
+AndroidUiRect GetSkillPickerListFooterRect();
 
 void SanitizeVirtualSkillSlots()
 {
@@ -3141,14 +3173,68 @@ bool IsVirtualJoystickCaptured(SDL_FingerID fingerId)
 
 bool IsVirtualPickerTouchCaptured(SDL_FingerID fingerId)
 {
-    return g_virtualPickerTouch.fingerId != static_cast<SDL_FingerID>(-1)
-        && g_virtualPickerTouch.fingerId == fingerId;
+    return g_androidSkillPickerList.dragFingerId != static_cast<SDL_FingerID>(-1)
+        && g_androidSkillPickerList.dragFingerId == fingerId;
 }
 
 void ClearVirtualPickerTouch()
 {
-    g_virtualPickerTouch.fingerId = static_cast<SDL_FingerID>(-1);
-    g_virtualPickerTouch.skillIndex = -1;
+    g_androidSkillPickerList.dragging = false;
+    g_androidSkillPickerList.dragMoved = false;
+    g_androidSkillPickerList.dragFingerId = static_cast<SDL_FingerID>(-1);
+    g_androidSkillPickerList.pressedEntry = -1;
+}
+
+// Commits a skill picked from the list to Hero->CurrentSkill / the wheel-slot
+// assign flow. Unchanged from before this became a scrollable list - only how
+// chosenSkill gets picked (row tap instead of the old grid cell) changed.
+void CommitAndroidSkillPickerChoice(int chosenSkill)
+{
+    if (g_pSkillList == nullptr || chosenSkill < 0)
+    {
+        return;
+    }
+
+    int previousSkillType = 0;
+    if (Hero != nullptr && CharacterAttribute != nullptr)
+    {
+        if (Hero->CurrentSkill >= AT_PET_COMMAND_DEFAULT && Hero->CurrentSkill < AT_PET_COMMAND_END)
+        {
+            previousSkillType = Hero->CurrentSkill;
+        }
+        else if (Hero->CurrentSkill >= 0 && Hero->CurrentSkill < MAX_MAGIC)
+        {
+            previousSkillType = CharacterAttribute->Skill[Hero->CurrentSkill];
+        }
+    }
+
+    if (previousSkillType > 0)
+    {
+        g_pSkillList->SetHeroPriorSkill(static_cast<BYTE>(previousSkillType));
+    }
+
+    if (Hero != nullptr)
+    {
+        Hero->CurrentSkill = static_cast<BYTE>(chosenSkill);
+    }
+
+    g_pSkillList->SetAndroidTouchAssignSkillIndex(chosenSkill);
+    g_pSkillList->SetSkillPickerOpen(false);
+
+    if (IsVirtualOverlayHotKeySkillIndex(chosenSkill))
+    {
+        g_virtualAssignPickerSkillIndex = chosenSkill;
+        g_virtualAssignConsumedForPickerSkill = false;
+        g_virtualAssignConsumedForPickerSession = false;
+        ActivateVirtualAssignMode(chosenSkill, "picker-touch");
+    }
+    else
+    {
+        g_virtualAssignPickerSkillIndex = -1;
+        DeactivateVirtualAssignMode("picker-touch-nonassignable");
+    }
+
+    UpdateVirtualAssignMode();
 }
 
 bool HandleVirtualPickerFingerDown(const SDL_TouchFingerEvent& touch)
@@ -3167,35 +3253,88 @@ bool HandleVirtualPickerFingerDown(const SDL_TouchFingerEvent& touch)
     float uiY = 0.0f;
     TouchToVirtualUi(touch, uiX, uiY);
 
-    // Page arrows first: they sit beside the grid, so a tap there is not a
-    // skill and must not fall through to the world underneath.
-    const int pageButton = g_pSkillList->HitTestAndroidSkillPickerPageButton(uiX, uiY);
-    if (pageButton >= 0)
+    RefreshAndroidSkillPickerListEntries();
+    const AndroidUiRect pickerRect = GetSkillPickerListRect();
+
+    if (!HitTestAndroidUiRect(uiX, uiY, pickerRect))
     {
-        g_pSkillList->StepAndroidSkillPickerPage(pageButton == 0 ? -1 : 1);
+        // Same as tapping the footer's Close - dismiss without picking.
+        g_pSkillList->SetSkillPickerOpen(false);
+        g_virtualAssignPickerSkillIndex = -1;
+        DeactivateVirtualAssignMode("picker-dismiss");
+        return true;
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetSkillPickerListFooterRect()))
+    {
+        g_pSkillList->SetSkillPickerOpen(false);
+        g_virtualAssignPickerSkillIndex = -1;
+        DeactivateVirtualAssignMode("picker-dismiss");
         PlayBuffer(SOUND_CLICK01);
         return true;
     }
 
-    const int skillIndex = g_pSkillList->HitTestAndroidTouchSkillPicker(uiX, uiY);
-    if (skillIndex < 0)
+    ClearVirtualPickerTouch();
+
+    for (int row = 0; row < GetSkillPickerListRowCount(); ++row)
     {
-        return false;
+        if (HitTestAndroidUiRect(uiX, uiY, GetSkillPickerListRowRect(row)))
+        {
+            const int entryIndex = g_androidSkillPickerList.scrollOffset + row;
+            if (entryIndex < g_androidSkillPickerList.entryCount)
+            {
+                g_androidSkillPickerList.dragging = true;
+                g_androidSkillPickerList.dragFingerId = touch.fingerId;
+                g_androidSkillPickerList.dragStartY = uiY;
+                g_androidSkillPickerList.dragLastY = uiY;
+                g_androidSkillPickerList.pressedEntry = g_androidSkillPickerList.entries[entryIndex];
+            }
+            return true;
+        }
     }
 
-    g_virtualPickerTouch.fingerId = touch.fingerId;
-    g_virtualPickerTouch.skillIndex = skillIndex;
     return true;
 }
 
 bool HandleVirtualPickerFingerMotion(const SDL_TouchFingerEvent& touch)
 {
-    if (!kShowVirtualSkillButtons)
+    if (!kShowVirtualSkillButtons
+        || !g_androidSkillPickerList.dragging
+        || !IsVirtualPickerTouchCaptured(touch.fingerId))
     {
         return false;
     }
 
-    return IsVirtualPickerTouchCaptured(touch.fingerId);
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+
+    // Past this much travel the gesture is a scroll, and finger-up must not
+    // also select the row it started on - same rule the target picker uses.
+    const float totalDy = uiY - g_androidSkillPickerList.dragStartY;
+    if ((totalDy * totalDy) > 36.0f)
+    {
+        g_androidSkillPickerList.dragMoved = true;
+    }
+
+    const float dy = uiY - g_androidSkillPickerList.dragLastY;
+    const int steps = static_cast<int>(std::fabs(dy) / kSkillPickerListRowH);
+    if (steps > 0)
+    {
+        if (dy < 0.0f)
+        {
+            g_androidSkillPickerList.scrollOffset += steps;
+            g_androidSkillPickerList.dragLastY -= static_cast<float>(steps) * kSkillPickerListRowH;
+        }
+        else
+        {
+            g_androidSkillPickerList.scrollOffset -= steps;
+            g_androidSkillPickerList.dragLastY += static_cast<float>(steps) * kSkillPickerListRowH;
+        }
+        ClampAndroidSkillPickerListScroll();
+    }
+
+    return true;
 }
 
 bool HandleVirtualPickerFingerUp(const SDL_TouchFingerEvent& touch)
@@ -3205,7 +3344,7 @@ bool HandleVirtualPickerFingerUp(const SDL_TouchFingerEvent& touch)
         return false;
     }
 
-    if (!IsVirtualPickerTouchCaptured(touch.fingerId))
+    if (!g_androidSkillPickerList.dragging || !IsVirtualPickerTouchCaptured(touch.fingerId))
     {
         return false;
     }
@@ -3214,58 +3353,34 @@ bool HandleVirtualPickerFingerUp(const SDL_TouchFingerEvent& touch)
     float uiY = 0.0f;
     TouchToVirtualUi(touch, uiX, uiY);
 
-    const int releasedSkill = (g_pSkillList != nullptr)
-        ? g_pSkillList->HitTestAndroidTouchSkillPicker(uiX, uiY)
-        : -1;
-    const int chosenSkill = (releasedSkill == g_virtualPickerTouch.skillIndex)
-        ? releasedSkill
-        : g_virtualPickerTouch.skillIndex;
+    const int pressedEntry = g_androidSkillPickerList.pressedEntry;
+    const bool shouldSelect = !g_androidSkillPickerList.dragMoved && pressedEntry >= 0;
+    ClearVirtualPickerTouch();
 
-    if (g_pSkillList != nullptr && chosenSkill >= 0)
+    if (!shouldSelect || g_pSkillList == nullptr || !g_pSkillList->IsSkillPickerOpen())
     {
-        int previousSkillType = 0;
-        if (Hero != nullptr && CharacterAttribute != nullptr)
-        {
-            if (Hero->CurrentSkill >= AT_PET_COMMAND_DEFAULT && Hero->CurrentSkill < AT_PET_COMMAND_END)
-            {
-                previousSkillType = Hero->CurrentSkill;
-            }
-            else if (Hero->CurrentSkill >= 0 && Hero->CurrentSkill < MAX_MAGIC)
-            {
-                previousSkillType = CharacterAttribute->Skill[Hero->CurrentSkill];
-            }
-        }
-
-        if (previousSkillType > 0)
-        {
-            g_pSkillList->SetHeroPriorSkill(static_cast<BYTE>(previousSkillType));
-        }
-
-        if (Hero != nullptr)
-        {
-            Hero->CurrentSkill = static_cast<BYTE>(chosenSkill);
-        }
-
-        g_pSkillList->SetAndroidTouchAssignSkillIndex(chosenSkill);
-        g_pSkillList->SetSkillPickerOpen(false);
-
-        if (IsVirtualOverlayHotKeySkillIndex(chosenSkill))
-        {
-            g_virtualAssignPickerSkillIndex = chosenSkill;
-            g_virtualAssignConsumedForPickerSkill = false;
-            g_virtualAssignConsumedForPickerSession = false;
-            ActivateVirtualAssignMode(chosenSkill, "picker-touch");
-        }
-        else
-        {
-            g_virtualAssignPickerSkillIndex = -1;
-            DeactivateVirtualAssignMode("picker-touch-nonassignable");
-        }
-
-        UpdateVirtualAssignMode();
+        return true;
     }
 
-    ClearVirtualPickerTouch();
+    // Only if the finger is still on the row it went down on - same rule the
+    // target picker's own row-tap uses.
+    for (int row = 0; row < GetSkillPickerListRowCount(); ++row)
+    {
+        const int entryIndex = g_androidSkillPickerList.scrollOffset + row;
+        if (entryIndex >= g_androidSkillPickerList.entryCount
+            || g_androidSkillPickerList.entries[entryIndex] != pressedEntry)
+        {
+            continue;
+        }
+
+        if (HitTestAndroidUiRect(uiX, uiY, GetSkillPickerListRowRect(row)))
+        {
+            CommitAndroidSkillPickerChoice(pressedEntry);
+            PlayBuffer(SOUND_CLICK01);
+        }
+        return true;
+    }
+
     return true;
 }
 
@@ -4807,6 +4922,102 @@ AndroidUiRect GetAndroidTargetPickerFooterRect()
         rect.w - 12.0f,
         kTargetPickerFooterH - 6.0f
     };
+}
+
+// Same entries CharacterAttribute->Skill[] would have shown in the old 6x2
+// grid: a non-zero learned skill, excluding pet-command placeholder ids and
+// the stun/removal-buff pseudo-types, and excluding master-tree-only skills
+// (those bind through the Master skill tree, not the wheel). Pet commands are
+// appended separately, matching the old grid's own behaviour.
+void RefreshAndroidSkillPickerListEntries()
+{
+    g_androidSkillPickerList.entryCount = 0;
+    if (CharacterAttribute == nullptr)
+    {
+        return;
+    }
+
+    for (int i = 0; i < MAX_MAGIC && g_androidSkillPickerList.entryCount < kSkillPickerListMaxEntries; ++i)
+    {
+        const int skillType = CharacterAttribute->Skill[i];
+        if (skillType <= 0 || skillType >= MAX_SKILLS)
+        {
+            continue;
+        }
+        if (skillType >= AT_SKILL_STUN && skillType <= AT_SKILL_REMOVAL_BUFF)
+        {
+            continue;
+        }
+
+        const BYTE useType = SkillAttribute[skillType].SkillUseType;
+        if (useType == SKILL_USE_TYPE_MASTER || useType == SKILL_USE_TYPE_MASTERLEVEL)
+        {
+            continue;
+        }
+
+        g_androidSkillPickerList.entries[g_androidSkillPickerList.entryCount++] = i;
+    }
+
+    if (Hero != nullptr && Hero->m_pPet != nullptr)
+    {
+        for (int cmd = AT_PET_COMMAND_DEFAULT;
+             cmd < AT_PET_COMMAND_END && g_androidSkillPickerList.entryCount < kSkillPickerListMaxEntries;
+             ++cmd)
+        {
+            g_androidSkillPickerList.entries[g_androidSkillPickerList.entryCount++] = cmd;
+        }
+    }
+
+    ClampAndroidSkillPickerListScroll();
+}
+
+int GetSkillPickerListRowCount()
+{
+    if (g_androidSkillPickerList.entryCount <= 0)
+    {
+        return 1;
+    }
+
+    return std::min(g_androidSkillPickerList.entryCount, kSkillPickerListVisibleRows);
+}
+
+AndroidUiRect GetSkillPickerListRect()
+{
+    return {
+        kSkillPickerListX,
+        kSkillPickerListY,
+        kSkillPickerListW,
+        kSkillPickerListHeaderH
+            + (static_cast<float>(GetSkillPickerListRowCount()) * kSkillPickerListRowH)
+            + kSkillPickerListFooterH
+    };
+}
+
+AndroidUiRect GetSkillPickerListRowRect(int row)
+{
+    return {
+        kSkillPickerListX + 6.0f,
+        kSkillPickerListY + kSkillPickerListHeaderH + (static_cast<float>(row) * kSkillPickerListRowH),
+        kSkillPickerListW - 12.0f,
+        kSkillPickerListRowH - 2.0f
+    };
+}
+
+AndroidUiRect GetSkillPickerListFooterRect()
+{
+    const AndroidUiRect rect = GetSkillPickerListRect();
+    return {
+        rect.x + 6.0f,
+        rect.y + rect.h - kSkillPickerListFooterH + 2.0f,
+        rect.w - 12.0f,
+        kSkillPickerListFooterH - 6.0f
+    };
+}
+
+void ClampAndroidSkillPickerListScroll()
+{
+    const int maxOffset = std::max(0, g_androidSkillPickerList.entryCount - kSkillPickerListVisibleRows);
+    g_androidSkillPickerList.scrollOffset = std::clamp(g_androidSkillPickerList.scrollOffset, 0, maxOffset);
 }
 
 AndroidUiRect GetComboToggleRect()
@@ -10187,6 +10398,174 @@ void RenderSkillPagePlaceholder()
     EndBitmap();
 }
 
+// Short type label for a row's stat line. Pure attack (chases a target) has
+// no dedicated eTypeSkill value of its own - it is just "none of the others"
+// - so that is the fallback rather than a fourth IsCorrectSkillType_* call.
+const char* GetAndroidSkillTypeLabel(int skillType)
+{
+    if (IsCorrectSkillType_Buff(skillType))
+    {
+        return "Buff";
+    }
+    if (IsCorrectSkillType_DeBuff(skillType))
+    {
+        return "Debuff";
+    }
+    if (IsCorrectSkillType_FrendlySkill(skillType))
+    {
+        return "Support";
+    }
+    return "Attack";
+}
+
+// Skill-bind picker: a scrollable list (row tap to pick, drag to scroll) that
+// replaced the old fixed 6x2 icon grid so each row has room to show what the
+// skill actually does before binding it, not just its icon.
+void RenderAndroidSkillPickerList()
+{
+    if (g_pSkillList == nullptr || !g_pSkillList->IsSkillPickerOpen() || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    RefreshAndroidSkillPickerListEntries();
+    const AndroidUiRect pickerRect = GetSkillPickerListRect();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, 0.30f);
+    DrawVirtualRectFilled(pickerRect.x - 3.0f, pickerRect.y - 3.0f, pickerRect.w + 6.0f, pickerRect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+    DrawVirtualRectFilled(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.05f, 0.08f, 0.14f, 0.82f);
+    DrawVirtualRectFilled(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.10f, 0.14f, 0.24f, 0.66f);
+    DrawVirtualRectFilled(pickerRect.x + 3.0f, pickerRect.y + 3.0f, pickerRect.w - 6.0f, kSkillPickerListHeaderH - 6.0f, 0.24f, 0.34f, 0.62f, 0.40f);
+    DrawVirtualRectOutline(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.34f, 0.52f, 0.90f, 0.94f, 2.0f);
+    DrawVirtualRectOutline(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.08f, 0.12f, 0.22f, 0.94f, 1.0f);
+
+    HFONT titleFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+    HFONT nameFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+    HFONT statFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    TextDraw(titleFont,
+             static_cast<int>(pickerRect.x + 7.0f),
+             static_cast<int>(pickerRect.y + 6.0f),
+             0xFFFFFFFF, 0x0,
+             static_cast<int>(pickerRect.w - 14.0f), 0, 3,
+             "%s", "Select Skill");
+
+    const int rowCount = GetSkillPickerListRowCount();
+    if (g_androidSkillPickerList.entryCount <= 0)
+    {
+        TextDraw(statFont,
+                 static_cast<int>(pickerRect.x + 7.0f),
+                 static_cast<int>(pickerRect.y + kSkillPickerListHeaderH + 8.0f),
+                 0xFFC0C0FF, 0x0,
+                 static_cast<int>(pickerRect.w - 14.0f), 0, 3,
+                 "%s", "No skills learned");
+    }
+    else
+    {
+        for (int row = 0; row < rowCount; ++row)
+        {
+            const int entryIndex = g_androidSkillPickerList.scrollOffset + row;
+            if (entryIndex >= g_androidSkillPickerList.entryCount)
+            {
+                break;
+            }
+
+            const int skillIndex = g_androidSkillPickerList.entries[entryIndex];
+            const AndroidUiRect rowRect = GetSkillPickerListRowRect(row);
+            const bool isCurrent = (Hero != nullptr && Hero->CurrentSkill == skillIndex);
+
+            DrawVirtualRectFilled(rowRect.x, rowRect.y, rowRect.w, rowRect.h,
+                                  isCurrent ? 0.22f : 0.0f,
+                                  isCurrent ? 0.32f : 0.0f,
+                                  isCurrent ? 0.52f : 0.0f,
+                                  isCurrent ? 0.55f : 0.20f);
+
+            ConfigureVirtualSkillIconNoBlendState();
+            g_pSkillList->RenderSkillIcon(
+                skillIndex,
+                rowRect.x + 4.0f, rowRect.y + (rowRect.h - kSkillPickerListIconSize) * 0.5f,
+                kSkillPickerListIconSize, kSkillPickerListIconSize,
+                0, false);
+
+            const float textX = rowRect.x + kSkillPickerListIconSize + 10.0f;
+            const float textW = rowRect.w - kSkillPickerListIconSize - 14.0f;
+            const bool isPetCommand = skillIndex >= AT_PET_COMMAND_DEFAULT && skillIndex < AT_PET_COMMAND_END;
+            const int skillType = (!isPetCommand && CharacterAttribute != nullptr)
+                ? CharacterAttribute->Skill[skillIndex]
+                : 0;
+
+            if (isPetCommand || skillType <= 0 || skillType >= MAX_SKILLS)
+            {
+                TextDraw(nameFont,
+                         static_cast<int>(textX), static_cast<int>(rowRect.y + 3.0f),
+                         0xFFFFFFFF, 0x0, static_cast<int>(textW), 0, 1,
+                         "%s", "Pet Command");
+            }
+            else
+            {
+                char name[64] = {};
+                int mana = 0;
+                int distance = 0;
+                int abilityGauge = 0;
+                gSkillManager.GetSkillInformation(skillType, 1, name, &mana, &distance, &abilityGauge);
+
+                TextDraw(nameFont,
+                         static_cast<int>(textX), static_cast<int>(rowRect.y + 3.0f),
+                         0xFFFFFFFF, 0x0, static_cast<int>(textW), 0, 1,
+                         "%s", name);
+
+                const char* typeLabel = GetAndroidSkillTypeLabel(skillType);
+                const bool dealsDamage = (strcmp(typeLabel, "Attack") == 0);
+
+                if (dealsDamage)
+                {
+                    int dmgMin = 0;
+                    int dmgMax = 0;
+                    gCharacterManager.GetMagicSkillDamage(skillType, &dmgMin, &dmgMax);
+                    if (dmgMin == 0 && dmgMax == 0)
+                    {
+                        gCharacterManager.GetSkillDamage(skillType, &dmgMin, &dmgMax);
+                    }
+
+                    TextDraw(statFont,
+                             static_cast<int>(textX), static_cast<int>(rowRect.y + rowRect.h - 13.0f),
+                             0xFFB8C8FF, 0x0, static_cast<int>(textW), 0, 1,
+                             "DMG %d-%d  Rng %d  MP %d  AG %d  %s",
+                             dmgMin, dmgMax, distance, mana, abilityGauge, typeLabel);
+                }
+                else
+                {
+                    // Buffs/debuffs/support skills don't hit anything, so a
+                    // damage figure here would be meaningless (or, worse,
+                    // whatever garbage the damage lookup returns for a skill
+                    // it was never meant to be called on).
+                    TextDraw(statFont,
+                             static_cast<int>(textX), static_cast<int>(rowRect.y + rowRect.h - 13.0f),
+                             0xFFB8C8FF, 0x0, static_cast<int>(textW), 0, 1,
+                             "Rng %d  MP %d  AG %d  %s",
+                             distance, mana, abilityGauge, typeLabel);
+                }
+            }
+        }
+    }
+
+    const AndroidUiRect footerRect = GetSkillPickerListFooterRect();
+    TextDraw(statFont,
+             static_cast<int>(footerRect.x + 4.0f),
+             static_cast<int>(footerRect.y + 4.0f),
+             0xFFE0A0FF, 0x0,
+             static_cast<int>(footerRect.w - 8.0f), 0, 3,
+             "%s", "Close");
+
+    EndBitmap();
+}
+
 void RenderAndroidTargetPicker()
 {
     if (!g_androidTargetPicker.visible || !IsVirtualPadAvailable())
@@ -11638,6 +12017,7 @@ void RenderVirtualPad()
 
     // Last, so the panel and its dimming layer sit over every other control.
     RenderAndroidTargetPicker();
+    RenderAndroidSkillPickerList();
 
 #if 0
     // Disabled: custom Android HUD. We keep this code commented for now so it

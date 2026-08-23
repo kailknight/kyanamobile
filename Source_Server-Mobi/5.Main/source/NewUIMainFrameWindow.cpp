@@ -3477,35 +3477,14 @@ bool SEASON3B::CNewUISkillList::Render()
 		if (m_bSkillList == true)
 		{
 #if defined(__ANDROID__) || defined(MU_IOS)
-			// Touch build: one 6x2 paged grid, positioned and ordered by the
-			// shared helpers so the cells, the taps and the page count agree.
-			// Pet commands are part of the same list here rather than being
-			// drawn in their own row by RenderPetSkill.
-			int entries[kAndroidPickerMaxEntries] = { 0 };
-			const int entryCount = BuildAndroidSkillPickerEntries(entries, kAndroidPickerMaxEntries);
-
-			for (int order = 0; order < entryCount; ++order)
-			{
-				GetLegacySkillPickerCellRect(order, x, y, width, height);
-				if (x <= kAndroidPickerHiddenXY)
-				{
-					continue;	// not on the current page
-				}
-
-				const int entry = entries[order];
-				if (entry == Hero->CurrentSkill)
-				{
-					SEASON3B::RenderImage(IMAGE_SKILLBOX_USE, x, y, width, height);
-				}
-				else
-				{
-					SEASON3B::RenderImage(IMAGE_SKILLBOX, x, y, width, height);
-				}
-
-				RenderSkillIcon(entry, x + 6, y + 6, 20, 28);
-			}
-
-			RenderAndroidSkillPickerPageControls();
+			// The touch build's picker is a scrollable list now
+			// (RenderAndroidSkillPickerList in android_main.cpp) instead of
+			// this fixed 6x2 paged grid, so each row has room to show what a
+			// skill actually does before binding it. BuildAndroidSkillPickerEntries/
+			// GetLegacySkillPickerCellRect/RenderAndroidSkillPickerPageControls
+			// are left in place rather than deleted - HitTestAndroidSkillPickerPageButton
+			// and friends are dead alongside them, all superseded together - but
+			// none of them are called here any more.
 #else
 			x = 385 - FixX + DisplayWinExt; y = 390 + DisplayHeightExt; width = 32; height = 38;
 			float fOrigX = 385.f - FixX + DisplayWinExt;
