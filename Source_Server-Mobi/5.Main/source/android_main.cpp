@@ -6618,7 +6618,13 @@ bool IsAndroidGameWindowOpen()
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_OPTION)
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_COMMAND)
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO);
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO)
+        // Covers both the Master skill tree and the Master Level info window -
+        // they register under the same INTERFACE_ enum. The skill tree in
+        // particular is nearly full-canvas (640x428 of the 640x480 UI space),
+        // so leaving it out of this list let the joystick, potion slots, top
+        // bar and utility grid all render and eat touches on top of it.
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL);
 }
 
 bool IsVirtualRightPanelUtilityWindowVisible()
@@ -6634,7 +6640,8 @@ bool IsVirtualRightPanelUtilityWindowVisible()
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_OPTION)
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_COMMAND)
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND)
-            || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO));
+            || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO)
+            || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL));
 }
 
 bool ShouldYieldVirtualRightPanelUtilityOverlay()
