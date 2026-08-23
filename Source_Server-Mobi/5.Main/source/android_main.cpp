@@ -610,16 +610,25 @@ constexpr bool kUseLegacyMainHud = true;
 constexpr bool kEnableVirtualCombatOverlay = true;
 constexpr int kVirtualAttackButton = 0;
 constexpr int kVirtualSkillButtonBase = 1;
-constexpr int kVirtualVisibleSkillButtonCount = 6;
+// Four buttons arranged symmetrically around the ATK circle, all of them real
+// hotkey slots now - the old sixth "open the picker" button is gone. Binding
+// now happens on the slots themselves (tap empty / long-press any - see
+// g_androidSkillSlotPress) rather than through a dedicated selector button.
+constexpr int kVirtualVisibleSkillButtonCount = 4;
 constexpr int kVirtualSkillSlotCount = kVirtualVisibleSkillButtonCount;
 
-// Of the six buttons in the arc, the first five hold skills (hotkeys 1-5) and
-// the sixth opens the skill picker so those five can be rebound. The big circle
-// in the middle of the arc is the attack button.
-//
+// Every visible slot is a real hotkey slot now, so this equals
+// kVirtualSkillSlotCount - the two used to differ by one (the old picker
+// button ate a visual slot without owning a hotkey). Left as a separate name
+// since the fire/assign paths (GetVirtualOverlayHotKeySlot and friends) are
+// written against it specifically.
+constexpr int kVirtualOverlaySkillSlotCount = kVirtualSkillSlotCount;
+// -1 rather than a real slot index: there is no selector button to single out
+// any more, so every "visualSlot == kVirtualSkillSelectorVisualSlot" check
+// elsewhere is now permanently false without needing to touch each call site.
+constexpr int kVirtualSkillSelectorVisualSlot = -1;
+
 // Skill buttons select rather than fire: tap a skill to arm it, then tap attack.
-constexpr int kVirtualOverlaySkillSlotCount = 5;
-constexpr int kVirtualSkillSelectorVisualSlot = 5;
 constexpr int kVirtualUtilityButtonCount = 4;
 constexpr int kVirtualUtilityButtonChat = 3;
 constexpr int kVirtualRightPanelUtilityActionCount = 12;
@@ -766,14 +775,16 @@ struct VirtualUiOffset
     float x;
     float y;
 };
+// Symmetric ring around the ATK circle - 58 UI units out, at 60/120/180/240
+// degrees (top-right, top-left, left, bottom-left), leaving the bottom-right
+// quadrant clear for AIM/the page switch/combo outside the ring. Matches the
+// reference layout: four buttons around a central ATK, nothing crowding the
+// open side where the outside controls live.
 constexpr std::array<VirtualUiOffset, kVirtualVisibleSkillButtonCount> kVirtualSkillCenters = {
-    // Lift the whole right-side skill cluster above the main action bar.
-    VirtualUiOffset{ 565.0f, 284.0f },
-    VirtualUiOffset{ 610.0f, 284.0f },
-    VirtualUiOffset{ 547.0f, 323.0f },
-    VirtualUiOffset{ 547.0f, 368.0f },
-    VirtualUiOffset{ 565.0f, 414.0f },
-    VirtualUiOffset{ 610.0f, 414.0f },
+    VirtualUiOffset{ 625.0f, 300.0f },  // top-right
+    VirtualUiOffset{ 567.0f, 300.0f },  // top-left
+    VirtualUiOffset{ 538.0f, 350.0f },  // left
+    VirtualUiOffset{ 567.0f, 400.0f },  // bottom-left
 };
 constexpr float kVirtualSkillFrameW = 22.0f;
 constexpr float kVirtualSkillFrameH = 28.0f;
@@ -1068,9 +1079,16 @@ constexpr float kTargetPickerFooterH = 26.0f;
 // refresh regardless, so a selection always matches what was on screen.
 constexpr uint32_t kTargetPickerRefreshMs = 200;
 
-constexpr float kTargetSelectButtonCx = 624.0f;
-constexpr float kTargetSelectButtonCy = 452.0f;
-constexpr float kTargetSelectButtonRadius = 18.0f;
+// AIM button (target lock) - outside the skill ring, upper right of ATK.
+constexpr float kTargetSelectButtonCx = 630.0f;
+constexpr float kTargetSelectButtonCy = 400.0f;
+constexpr float kTargetSelectButtonRadius = 17.0f;
+
+// Placeholder for the page switch (1/2) - visual only this round, stacked
+// under AIM outside the ring. Phase 3 wires up the actual second page.
+constexpr float kSkillPagePlaceholderCx = 630.0f;
+constexpr float kSkillPagePlaceholderCy = 434.0f;
+constexpr float kSkillPagePlaceholderRadius = 13.0f;
 
 // Tabbed chat panel along the bottom centre. The channels already exist - the
 // chat log keeps a separate message vector per type and ChangeMessage switches
@@ -1096,9 +1114,10 @@ constexpr std::array<const char*, kChatTabCount> kChatTabLabels = {
 };
 
 // Auto-combo toggle. Only drawn and only hit-tested for the Knight line, so it
-// costs nothing on classes that have no combo.
-constexpr float kComboToggleX = 596.0f;
-constexpr float kComboToggleY = 240.0f;
+// costs nothing on classes that have no combo. Below the ring rather than
+// above it, matching the reference layout.
+constexpr float kComboToggleX = 576.0f;
+constexpr float kComboToggleY = 452.0f;
 constexpr float kComboToggleW = 40.0f;
 constexpr float kComboToggleH = 22.0f;
 
@@ -1767,6 +1786,24 @@ struct AndroidHotKeyPressState
     float downY = 0.0f;
 };
 AndroidHotKeyPressState g_androidHotKeyPress{};
+
+// A press on a wheel skill slot, resolved on finger-up the same way the Q/W/E/R
+// hotkey press above is: a quick tap arms/disarms the slot, a hold opens the
+// skill picker to rebind it. Replaces the old dedicated sixth "picker" button
+// now that the ring only has the four real skill slots - see
+// kVirtualSkillSelectorVisualSlot's comment.
+constexpr uint32_t kSkillSlotRebindHoldMs = 1000;
+constexpr float kSkillSlotPressMoveCancelUi = 14.0f;
+
+struct AndroidSkillSlotPressState
+{
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    int slot = -1;
+    uint32_t downMs = 0;
+    float downX = 0.0f;
+    float downY = 0.0f;
+};
+AndroidSkillSlotPressState g_androidSkillSlotPress{};
 
 // Two-finger pinch zoom. fingerA is simply the first finger currently down -
 // it may well belong to the joystick or a button - and the gesture only starts
@@ -8439,19 +8476,14 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     {
         const int skillSlot = skillButton - kVirtualSkillButtonBase;
 
-        // The last button in the arc is the picker, not a skill.
-        if (skillSlot == kVirtualSkillSelectorVisualSlot)
-        {
-            ToggleVirtualSkillPickerByTouch();
-            PlayBuffer(SOUND_CLICK01);
-            return true;
-        }
-
         const int hotKeySlot = GetVirtualOverlayHotKeySlot(skillSlot);
         const uint32_t nowMs = MU_MobileGetTicks();
         const int pendingSkill = GetPendingVirtualAssignSkillIndex(nowMs);
         if (hotKeySlot >= 0 && IsVirtualOverlayHotKeySkillIndex(pendingSkill) && g_pSkillList != nullptr)
         {
+            // Placing a skill already picked from an open picker - stays an
+            // immediate tap, not hold-gated, so choosing a skill and placing
+            // it feels like one continuous action.
             g_pSkillList->SetHotKey(hotKeySlot, pendingSkill);
             if (Hero != nullptr)
             {
@@ -8466,34 +8498,19 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
             g_virtualAssignPickerSkillIndex = -1;
             g_virtualAssignConsumedForPickerSkill = true;
             g_virtualAssignConsumedForPickerSession = true;
-        }
-        else
-        {
-            // Arms the slot instead of casting it. The skill only goes off when
-            // the attack button in the middle of the arc is pressed, so aiming
-            // and firing are two separate deliberate taps.
-            //
-            // No touch slot is claimed here: nothing is being held down, so the
-            // hold-to-repeat loop has no business tracking this finger.
-            if (g_virtualSelectedSkillSlot == skillSlot)
-            {
-                g_virtualSelectedSkillSlot = -1;   // tap again to go back to weapon
-            }
-            else
-            {
-                g_virtualSelectedSkillSlot = skillSlot;
-
-                // Mirror it onto CurrentSkill so the rest of the UI shows the
-                // same armed skill the overlay is highlighting.
-                const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
-                if (Hero != nullptr && IsValidSkillIndex(hotKeySkillIndex))
-                {
-                    Hero->CurrentSkill = static_cast<BYTE>(hotKeySkillIndex);
-                }
-            }
-
             PlayBuffer(SOUND_CLICK01);
+            return true;
         }
+
+        // Otherwise, decide tap (arm/disarm) vs. long-press (open the picker
+        // to rebind this slot) on release - see HandleVirtualFingerUp and
+        // g_androidSkillSlotPress's comment. No touch slot is claimed here:
+        // nothing is being held down for the hold-to-repeat loop to track.
+        g_androidSkillSlotPress.fingerId = touch.fingerId;
+        g_androidSkillSlotPress.slot = skillSlot;
+        g_androidSkillSlotPress.downMs = nowMs;
+        g_androidSkillSlotPress.downX = uiX;
+        g_androidSkillSlotPress.downY = uiY;
         return true;
     }
 
@@ -8534,6 +8551,22 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         if (((dx * dx) + (dy * dy)) > (kHotKeyPressMoveCancelUi * kHotKeyPressMoveCancelUi))
         {
             g_androidHotKeyPress = AndroidHotKeyPressState{};
+        }
+        return true;
+    }
+
+    // Same idea for a skill slot press - sliding off it abandons the tap/hold
+    // rather than arming whatever slot the finger happens to end up over.
+    if (g_androidSkillSlotPress.slot >= 0 && g_androidSkillSlotPress.fingerId == touch.fingerId)
+    {
+        float moveX = 0.0f;
+        float moveY = 0.0f;
+        TouchToVirtualUi(touch, moveX, moveY);
+        const float dx = moveX - g_androidSkillSlotPress.downX;
+        const float dy = moveY - g_androidSkillSlotPress.downY;
+        if (((dx * dx) + (dy * dy)) > (kSkillSlotPressMoveCancelUi * kSkillSlotPressMoveCancelUi))
+        {
+            g_androidSkillSlotPress = AndroidSkillSlotPressState{};
         }
         return true;
     }
@@ -8628,6 +8661,49 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         else
         {
             UseVirtualMirrorHotKeySlot(slot);
+        }
+        return true;
+    }
+
+    // Resolve a wheel skill slot press: a quick tap arms/disarms it, a hold
+    // opens the picker to rebind it. This is the replacement for the old
+    // dedicated picker button - see g_androidSkillSlotPress's comment.
+    if (g_androidSkillSlotPress.slot >= 0 && g_androidSkillSlotPress.fingerId == touch.fingerId)
+    {
+        const int skillSlot = g_androidSkillSlotPress.slot;
+        const uint32_t heldMs = MU_MobileGetTicks() - g_androidSkillSlotPress.downMs;
+        g_androidSkillSlotPress = AndroidSkillSlotPressState{};
+
+        const bool isEmpty = GetVirtualOverlayHotKeySkillIndex(skillSlot) < 0;
+        if (heldMs >= kSkillSlotRebindHoldMs || isEmpty)
+        {
+            // A hold on any slot, or a plain tap on an empty one (nothing to
+            // arm there yet), both open the picker to bind it.
+            ToggleVirtualSkillPickerByTouch();
+            PlayBuffer(SOUND_CLICK01);
+        }
+        else
+        {
+            // Arms the slot instead of casting it. The skill only goes off when
+            // the attack button in the middle of the arc is pressed, so aiming
+            // and firing are two separate deliberate taps.
+            if (g_virtualSelectedSkillSlot == skillSlot)
+            {
+                g_virtualSelectedSkillSlot = -1;   // tap again to go back to weapon
+            }
+            else
+            {
+                g_virtualSelectedSkillSlot = skillSlot;
+
+                // Mirror it onto CurrentSkill so the rest of the UI shows the
+                // same armed skill the overlay is highlighting.
+                const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
+                if (Hero != nullptr && IsValidSkillIndex(hotKeySkillIndex))
+                {
+                    Hero->CurrentSkill = static_cast<BYTE>(hotKeySkillIndex);
+                }
+            }
+            PlayBuffer(SOUND_CLICK01);
         }
         return true;
     }
@@ -10051,7 +10127,7 @@ void RenderTargetSelectButton()
              locked ? 0xFFB0B0FF : 0xFFFFFFFF,
              0x0,
              static_cast<int>(rect.w),
-             0, 3, "%s", locked ? "LOCK" : "TGT");
+             0, 3, "%s", locked ? "LOCK" : "AIM");
 
     if (locked)
     {
@@ -10063,6 +10139,50 @@ void RenderTargetSelectButton()
                  static_cast<int>(rect.w + 40.0f),
                  0, 3, "%s", g_androidTargetLock.id);
     }
+
+    EndBitmap();
+}
+
+// Visual placeholder for the page switch (1/2) outside the ring, under AIM -
+// not wired to anything yet. A real second page of skills is Phase 3; this
+// just reserves and shows the spot so the ring reads complete this round.
+void RenderSkillPagePlaceholder()
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualCircle(
+        kSkillPagePlaceholderCx,
+        kSkillPagePlaceholderCy,
+        kSkillPagePlaceholderRadius,
+        0.06f, 0.06f, 0.09f,
+        0.70f,
+        true);
+
+    const AndroidUiRect rect = {
+        kSkillPagePlaceholderCx - kSkillPagePlaceholderRadius,
+        kSkillPagePlaceholderCy - kSkillPagePlaceholderRadius,
+        kSkillPagePlaceholderRadius * 2.0f,
+        kSkillPagePlaceholderRadius * 2.0f
+    };
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.55f, 0.55f, 0.60f, 0.80f, 1.5f);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font,
+             static_cast<int>(rect.x),
+             static_cast<int>(rect.y + rect.h * 0.5f - 5.0f),
+             0xFFC0C0C0,
+             0x0,
+             static_cast<int>(rect.w),
+             0, 3, "1/2");
 
     EndBitmap();
 }
@@ -11478,6 +11598,21 @@ void RenderVirtualPad()
                          static_cast<int>(button.radius * 2.0f),
                          0, 3,
                          "%s", isSelector ? "SKL" : std::to_string(visualSlot + 1).c_str());
+
+                // Empty slot: no icon was drawn above, so a bare number would
+                // read as already-bound. A centered '+' stands in for it -
+                // tap to open the picker, same as a filled slot's long-press.
+                if (!isSelector && GetVirtualOverlayHotKeySkillIndex(visualSlot) < 0)
+                {
+                    TextDraw(slotFont,
+                             static_cast<int>(button.cx - button.radius),
+                             static_cast<int>(button.cy - 7.0f),
+                             0xFFA0A0A0,
+                             0x0,
+                             static_cast<int>(button.radius * 2.0f),
+                             0, 3,
+                             "+");
+                }
             }
         }
 
@@ -11497,6 +11632,7 @@ void RenderVirtualPad()
     RenderVirtualMirrorHotKeySlots();
     RenderComboToggle();
     RenderTargetSelectButton();
+    RenderSkillPagePlaceholder();
     RenderAndroidGroundAim();
     RenderAndroidTradePicker();
 
