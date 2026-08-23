@@ -6303,11 +6303,25 @@ void AttackWizard(CHARACTER *c, int Skill, float Distance)
 	OBJECT *o = &c->Object;
     int ClassIndex = gCharacterManager.GetBaseClass ( c->Class );
 
+	// Mana/Energy requirements come out of SkillAttribute[], indexed by the raw
+	// Skill id - which becomes a master-tree id (e.g. Swell of Magic Power's
+	// Improved/Enhanced tier) once the player has mastered it, not the base
+	// skill's own id (RegisterSkillInCharacterAttribute, NewUIMasterSkillTree.cpp,
+	// swaps the hotkey slot to hold the master id directly). A master row that
+	// happens to carry its own non-zero requirement then silently blocked the
+	// cast here - no message, no sound, nothing - regardless of the character's
+	// real stats. MasterSkillToBaseSkillIndex is an identity mapping for any id
+	// it doesn't recognise, so this is safe to apply unconditionally; Skill
+	// itself is left untouched below for the switch dispatch and the request
+	// actually sent to the server, both of which need the real (possibly
+	// master-tree) id.
+	int iSkillRequirementLookup = gSkillManager.MasterSkillToBaseSkillIndex(Skill);
+
 	int iMana, iSkillMana;
 	if( Skill == AT_SKILL_BLAST_HELL_BEGIN || Skill == AT_SKILL_BLAST_HELL )
 	{
 		gSkillManager.GetSkillInformation( AT_SKILL_BLAST_HELL, 1, NULL, &iMana, NULL, &iSkillMana);
-		
+
         if ( Skill==AT_SKILL_BLAST_HELL )
         {
 			iSkillMana = 0;
@@ -6315,11 +6329,11 @@ void AttackWizard(CHARACTER *c, int Skill, float Distance)
 	}
 	else
 	{
-		gSkillManager.GetSkillInformation( Skill, 1, NULL, &iMana, NULL, &iSkillMana);
+		gSkillManager.GetSkillInformation( iSkillRequirementLookup, 1, NULL, &iMana, NULL, &iSkillMana);
 	}
-	
+
 	int iEnergy;
-	gSkillManager.GetSkillInformation_Energy(Skill, &iEnergy);
+	gSkillManager.GetSkillInformation_Energy(iSkillRequirementLookup, &iEnergy);
 	if(iEnergy > (CharacterAttribute->Energy + CharacterAttribute->AddEnergy))
 	{
 		return;
@@ -7521,8 +7535,14 @@ bool CanExecuteSkill(CHARACTER* c, int Skill, float Distance)
 
 bool CheckMana(CHARACTER* c, int Skill)
 {
+	// Same reasoning as AttackWizard's own Mana/Energy lookup just above: Skill
+	// is whatever the hotkey slot holds, which becomes a master-tree id once
+	// mastered, and SkillAttribute[] is indexed by that raw id. This runs from
+	// CanExecuteSkill, ahead of AttackWizard's own check, so an unmapped lookup
+	// here blocks the cast even earlier - called from both PC (this file) and
+	// Android (android_main.cpp), so fixing it here covers both.
 	int iMana, iSkillMana;
-	gSkillManager.GetSkillInformation(Skill, 1, NULL, &iMana, NULL, &iSkillMana);
+	gSkillManager.GetSkillInformation(gSkillManager.MasterSkillToBaseSkillIndex(Skill), 1, NULL, &iMana, NULL, &iSkillMana);
 	if (CharacterAttribute->Mana < iMana)
 	{
 		int Index = g_pMyInventory->FindManaItemIndex();

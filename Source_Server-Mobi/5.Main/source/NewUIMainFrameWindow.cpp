@@ -3648,6 +3648,17 @@ void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, fl
 
 	bool bCantSkill = false;
 
+	// IsDisableSkill's Energy/Charisma requirement (below) is looked up straight
+	// out of SkillAttribute[bySkillType] - the master-tree tier's OWN data row,
+	// not the base skill's, once the hotkey slot holds the raw master id
+	// (RegisterSkillInCharacterAttribute, NewUIMasterSkillTree.cpp, swaps it in
+	// the moment a master point is invested). DemendConditionCheckSkill just
+	// below already goes through MasterSkillToBaseSkillIndex for exactly this
+	// reason; IsDisableSkill never did, so a mastered skill whose master-tier
+	// row happens to carry its own non-zero Energy requirement greys out
+	// permanently, independent of the character's actual stats.
+	int byBaseSkillType = gSkillManager.MasterSkillToBaseSkillIndex(bySkillType);
+
 	BYTE bySkillUseType = SkillAttribute[bySkillType].SkillUseType;
 	int Skill_Icon = SkillAttribute[bySkillType].Magic_Icon;
 
@@ -3702,7 +3713,7 @@ void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, fl
 
 	int iEnergy = CharacterAttribute->Energy + CharacterAttribute->AddEnergy;
 
-	if (g_csItemOption.IsDisableSkill(bySkillType, iEnergy))
+	if (g_csItemOption.IsDisableSkill(byBaseSkillType, iEnergy))
 	{
 		bCantSkill = true;
 	}
@@ -3749,7 +3760,7 @@ void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, fl
 		(bySkillType == MASTER_SKILL_ADD_INFINITY_ARROW_IMPROVED) ||
 		(bySkillType == AT_SKILL_SWELL_OF_MAGICPOWER) || (bySkillType == MASTER_SKILL_ADD_MAGIC_CIRCLE_ENHANCED) || bySkillType == MASTER_SKILL_ADD_MAGIC_CIRCLE_IMPROVED)
 	{
-		if (g_csItemOption.IsDisableSkill(bySkillType, iEnergy))
+		if (g_csItemOption.IsDisableSkill(byBaseSkillType, iEnergy))
 		{
 			bCantSkill = true;
 		}
@@ -3847,7 +3858,7 @@ void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, fl
 
 	int iCharisma = CharacterAttribute->Charisma + CharacterAttribute->AddCharisma;
 
-	if (g_csItemOption.IsDisableSkill(bySkillType, iEnergy, iCharisma))
+	if (g_csItemOption.IsDisableSkill(byBaseSkillType, iEnergy, iCharisma))
 	{
 		bCantSkill = true;
 	}

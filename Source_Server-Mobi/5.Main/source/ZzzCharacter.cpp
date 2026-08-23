@@ -5978,6 +5978,28 @@ void MoveCharacter(CHARACTER *c,OBJECT *o)
 					}
 				}
 				break;
+			case AT_SKILL_THUNDER:
+			case MASTER_SKILL_ADD_LIGHTNING_IMPROVED1:
+			case MASTER_SKILL_ADD_LIGHTNING_IMPROVED2:
+				// Damage, sound and cast animation for this skill were already
+				// wired up (WSclient.cpp, ZzzInterface.cpp) - this switch is
+				// what spawns the impact visual once it lands on a target, and
+				// Lightning had no case here at all, so it hit silently with no
+				// bolt ever drawn. Mirrors the monster-cast lightning effect
+				// (this file, the MonsterIndex==77 case), except for the
+				// CreateJoint SubType: that case uses SubType 2, which
+				// (ZzzEffectJoint.cpp, case BITMAP_JOINT_THUNDER, case 2) reads
+				// o->Target->BoneTransform[33] through Models[MODEL_PLAYER] -
+				// hardcoded to a player skeleton, because a monster's own
+				// attack always targets the player. Here it is the other way
+				// around - a player casting at a monster - so that bone lookup
+				// read a monster's bone array as if it were a player's and the
+				// bolt landed at whatever garbage position came out, i.e.
+				// nowhere visible. SubType 4 has no such assumption - it uses
+				// the TargetPosition actually passed in below.
+				CreateEffect(MODEL_PIERCING+1, o->Position, o->Angle, o->Light, 1, to);
+				CreateJoint(BITMAP_JOINT_THUNDER, o->Position, to->Position, o->Angle, 4, to, 50.f);
+				break;
 			case AT_SKILL_POISON:
 			case MASTER_SKILL_ADD_POISON_IMPROVED:
 				if(o->Type == MODEL_PLAYER)

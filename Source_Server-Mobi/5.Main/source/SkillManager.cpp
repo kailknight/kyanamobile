@@ -163,7 +163,19 @@ bool CSkillManager::CheckSkillDelay ( int SkillIndex )
 	{
 		return true;
 	}
-		
+
+	// Same reasoning as the Infinity Arrow case above: this is a toggle buff (the
+	// "already buffed" check elsewhere is the real gate, not a cooldown timer),
+	// and Delay/Charisma just below are looked up from SkillAttribute[Skill]
+	// using the raw hotkey id - the master-tree id once mastered, not the base
+	// skill's - so it needs the same bypass or a mastered cast could pick up a
+	// stray Delay/Charisma requirement from that id's own data row.
+	if (Skill == AT_SKILL_SWELL_OF_MAGICPOWER
+		|| Skill == MASTER_SKILL_ADD_MAGIC_CIRCLE_IMPROVED
+		|| Skill == MASTER_SKILL_ADD_MAGIC_CIRCLE_ENHANCED)
+	{
+		return true;
+	}
 
 #endif //PBG_ADD_NEWCHAR_MONK_SKILL
     if ( Delay>0 )
@@ -448,6 +460,12 @@ int CSkillManager::MasterSkillToBaseSkillIndex(int iMasterSkillIndex)
 	case MASTER_SKILL_ADD_DRAIN_LIFE_ENHANCED:
 		{
 			iBaseSkillIndex = AT_SKILL_ALICE_DRAINLIFE;
+		}
+		break;
+	case MASTER_SKILL_ADD_MAGIC_CIRCLE_IMPROVED:
+	case MASTER_SKILL_ADD_MAGIC_CIRCLE_ENHANCED:
+		{
+			iBaseSkillIndex = AT_SKILL_SWELL_OF_MAGICPOWER;
 		}
 		break;
 	default:
