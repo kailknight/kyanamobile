@@ -125,7 +125,13 @@ list(FILTER GAME_SOURCES EXCLUDE REGEX ".*[Ww]inmain\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*MuEditor.*\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*imgui.*\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*MuParallel\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*GameShop.*\\.cpp$")
+# Only the WinINet-based FTP/HTTP downloader implementation is excluded:
+# the shop's category/package/product data loads from local script files
+# and skips the live downloader whenever those files already exist
+# (CListManager::LoadScriptList), so the rest of GameShop/ is portable.
+# FTPFileDownLoader.cpp is kept - it self-guards its WinINet-touching body
+# with #ifdef __ANDROID__ and never needs FileDownloader linked on Android.
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*GameShop/FileDownloader.*\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*ProtectSysKey.*\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Scenes.*\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*[/\\\\]Camera[/\\\\].*\\.cpp$")

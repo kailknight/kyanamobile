@@ -368,6 +368,11 @@ public class MuMainNativeActivity extends NativeActivity {
             extDir = getFilesDir();
         }
         copyAssetFolder(getAssets(), "ui", new File(extDir, "ui"));
+        // Cash shop category/package/product script: CListManager::LoadScriptList
+        // (GameShop/ShopListManager/ListManager.cpp) skips its WinINet-only live
+        // downloader entirely when these files already exist locally, so shipping
+        // them here is what makes the shop show real content on Android.
+        copyAssetFolder(getAssets(), "data", new File(extDir, "data"));
     }
 
     private void configureFullscreenWindow() {
