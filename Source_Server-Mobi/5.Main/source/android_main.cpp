@@ -13647,6 +13647,18 @@ static void QueueSappEventAsSDL(const sapp_event* event)
     case SAPP_EVENTTYPE_UNFOCUSED:
     case SAPP_EVENTTYPE_ICONIFIED:
         {
+            // Stop here, synchronously, rather than through the queued SDL
+            // event below: sokol_app's Android backend stops calling
+            // desc.frame_cb the moment the activity is paused/unfocused
+            // (has_resumed/has_focus gate _sapp_android_should_update), so
+            // nothing ever drains that queue - and therefore nothing ever
+            // stopped the sound - until the app was foregrounded again.
+            // SoundPool/MediaPlayer keep playing under Android's process
+            // lifecycle regardless, so combat SFX and map BGM were audible
+            // for the entire time the app sat in the background/switcher.
+            AllStopSound();
+            AndroidAudioStopMusic();
+
             SDL_Event sdlEvent {};
             sdlEvent.type = SDL_APP_DIDENTERBACKGROUND;
             QueueSyntheticSDLEvent(sdlEvent);
