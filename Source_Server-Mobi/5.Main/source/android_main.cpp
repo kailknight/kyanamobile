@@ -3629,6 +3629,19 @@ void StartVirtualJoystick(SDL_FingerID fingerId, float uiX, float uiY)
     g_virtualJoystick = ActiveVirtualJoystick{};
     g_virtualJoystick.fingerId = fingerId;
     g_virtualJoystick.pressedMs = MU_MobileGetTicks();
+
+    // "Tap the ground" (spec) to break off an attack-skill's auto-chase - the
+    // stick is the closest equivalent to that on a joystick-driven build, so
+    // taking manual control of movement while a skill is armed drops the
+    // target EnsureOffensiveSkillTarget would otherwise keep chasing. Left
+    // alone when no skill is armed: a plain ATK target is deliberately sticky
+    // across manual movement (see EnsureNormalAttackTarget's own comment) and
+    // should not be cancelled by every stick nudge.
+    if (g_virtualSelectedSkillSlot >= 0)
+    {
+        SelectedCharacter = -1;
+    }
+
     UpdateVirtualJoystickByUi(uiX, uiY);
 }
 
@@ -5375,7 +5388,23 @@ void EnsureOffensiveSkillTarget()
 
     if (IsTargetAttackable(SelectedCharacter))
     {
-        return;
+        if (IsWithinVirtualAutoAcquireRange(SelectedCharacter))
+        {
+            return;
+        }
+
+        // Wandered past auto-acquire range - give it up rather than chase
+        // indefinitely, matching the spec: an attack skill chases a target
+        // until it dies, you tap the ground, or it gets past this range.
+        // Cleared explicitly, not left for the fallback chain below to sort
+        // out - EnsureCombatTarget's own IsTargetAttackable check has no
+        // distance term of its own, so it would just re-adopt this same
+        // still-alive-but-too-far target if this did not clear it first.
+        // Deliberately not applied above to a locked target (see the early
+        // return for lockedTarget) - an explicit AIM lock is a deliberate
+        // choice, the same reasoning EnsureNormalAttackTarget already uses to
+        // stay unlimited for a manually-picked ATK target.
+        SelectedCharacter = -1;
     }
 
     if (IsVirtualPkTargetingEnabled())
