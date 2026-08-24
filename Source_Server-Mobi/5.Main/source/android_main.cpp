@@ -1860,6 +1860,24 @@ int g_virtualSelectedSkillSlot = -1;
 // Which of the two pages the wheel's four slots are currently showing.
 int g_virtualSkillPage = 0;
 
+// A buff pressed mid-swing: ExecuteSkill's own action-state gate
+// (ZzzInterface.cpp, right before the class dispatch) silently drops any
+// skill request while Hero->Object.CurrentAction is outside the idle "stop"
+// range, buffs included, so a buff tap during a swing did nothing before this.
+// Queuing it here and firing on the first idle frame after is what makes a
+// buff press "never eaten" - see IsAndroidHeroBusyForSkillCast and
+// UpdateAndroidPendingBuffCast.
+struct AndroidPendingBuffCast
+{
+    bool pending = false;
+    int hotKeySkillIndex = -1;
+    uint32_t queuedMs = 0;
+};
+AndroidPendingBuffCast g_androidPendingBuffCast{};
+// Safety net only - normal swings are well under this, so this should never
+// actually fire the discard branch in practice.
+constexpr uint32_t kAndroidPendingBuffCastTimeoutMs = 4000;
+
 // Auto-combo. Each press of the attack button advances one step through arc
 // slots 1, 2 and 3, so the Knight combo can be played with a single button.
 // Step 0 is meant to hold the weapon skill.
@@ -6355,6 +6373,80 @@ bool IsGroundTargetedSkillIndex(int skillIndex)
     return IsGroundTargetedSkillType(CharacterAttribute->Skill[skillIndex]);
 }
 
+// Mirrors the action-state gate ExecuteSkill itself applies right before its
+// class dispatch (ZzzInterface.cpp) - same CurrentAction ranges, same
+// exemption list of special "stand" states (Fenrir/Uniria mount idles, the
+// Nova charge pose, etc). Kept as an exact copy rather than calling into
+// ExecuteSkill speculatively, since that would spend mana/cooldown checks on
+// a request this function already knows will be dropped.
+bool IsAndroidHeroBusyForSkillCast()
+{
+    if (Hero == nullptr)
+    {
+        return false;
+    }
+
+    const int action = Hero->Object.CurrentAction;
+    if (action >= PLAYER_STOP_MALE && action <= PLAYER_STOP_RIDE_WEAPON)
+    {
+        return false;
+    }
+
+    if (action == PLAYER_STOP_TWO_HAND_SWORD_TWO
+        || action == PLAYER_SKILL_HELL_BEGIN
+        || action == PLAYER_DARKLORD_STAND
+        || action == PLAYER_STOP_RIDE_HORSE
+        || action == PLAYER_FENRIR_STAND
+        || action == PLAYER_FENRIR_STAND_TWO_SWORD
+        || action == PLAYER_FENRIR_STAND_ONE_RIGHT
+        || action == PLAYER_FENRIR_STAND_ONE_LEFT
+        || (action >= PLAYER_RAGE_FENRIR_STAND && action <= PLAYER_RAGE_FENRIR_STAND_ONE_LEFT)
+        || action == PLAYER_RAGE_UNI_STOP_ONE_RIGHT
+        || action == PLAYER_STOP_RAGEFIGHTER)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+// Defined just below - forward-declared so the queue-fire function above can
+// re-enter it once the swing that blocked the original tap ends.
+bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex);
+
+// Fires a buff queued by AndroidTriggerHotKeySkillTapInternal the instant the
+// swing that blocked it ends, so the press is never silently eaten. Runs from
+// UpdateVirtualPadHolds, once a frame.
+void UpdateAndroidPendingBuffCast()
+{
+    if (!g_androidPendingBuffCast.pending)
+    {
+        return;
+    }
+
+    if (Hero == nullptr || Hero->Dead > 0 || !IsVirtualPadAvailable())
+    {
+        g_androidPendingBuffCast = AndroidPendingBuffCast{};
+        return;
+    }
+
+    const uint32_t nowMs = MU_MobileGetTicks();
+    if ((nowMs - g_androidPendingBuffCast.queuedMs) >= kAndroidPendingBuffCastTimeoutMs)
+    {
+        g_androidPendingBuffCast = AndroidPendingBuffCast{};
+        return;
+    }
+
+    if (IsAndroidHeroBusyForSkillCast())
+    {
+        return;
+    }
+
+    const int hotKeySkillIndex = g_androidPendingBuffCast.hotKeySkillIndex;
+    g_androidPendingBuffCast = AndroidPendingBuffCast{};
+    AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex);
+}
+
 bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
 {
     if (!IsVirtualPadAvailable()
@@ -6399,6 +6491,22 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
     const bool isNovaSkill = (rawSkillType == AT_SKILL_BLAST_HELL);
 
     const bool groundSkill = IsGroundTargetedSkillType(rawSkillType);
+
+    // A buff pressed mid-swing would just be silently dropped by ExecuteSkill's
+    // own action-state gate (see IsAndroidHeroBusyForSkillCast's comment) -
+    // queue it instead of attempting it, so it fires the instant the swing
+    // ends rather than being eaten. Not applied to offensive/ground/Nova
+    // presses: those are deliberately retried by tapping again, not queued.
+    if (supportSkill && IsAndroidHeroBusyForSkillCast())
+    {
+        g_androidPendingBuffCast.pending = true;
+        g_androidPendingBuffCast.hotKeySkillIndex = hotKeySkillIndex;
+        g_androidPendingBuffCast.queuedMs = MU_MobileGetTicks();
+        Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
+        LOGI("VirtualPad: buff queued skillIndex=%d skillType=%d action=%d",
+             hotKeySkillIndex, rawSkillType, Hero->Object.CurrentAction);
+        return true;
+    }
 
     if (supportSkill)
     {
@@ -8710,6 +8818,11 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     {
         g_virtualSkillPage = (g_virtualSkillPage + 1) % kVirtualSkillPageCount;
         g_virtualSelectedSkillSlot = -1;
+        // The queued index is a CharacterAttribute->Skill[] slot from
+        // whichever page was showing when it queued - a page switch before it
+        // fires would otherwise fire whatever the new page put in that same
+        // slot number instead.
+        g_androidPendingBuffCast = AndroidPendingBuffCast{};
         PlayBuffer(SOUND_CLICK01);
         return true;
     }
@@ -9514,6 +9627,7 @@ void UpdateVirtualPadHolds()
     UpdateAndroidEquipHold();
     UpdateAndroidEquipSelectPulse();
     UpdateAndroidTradeAutoMove();
+    UpdateAndroidPendingBuffCast();
 
     if (!IsVirtualPadAvailable())
     {
