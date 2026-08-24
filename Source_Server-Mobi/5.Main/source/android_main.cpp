@@ -665,7 +665,14 @@ constexpr uint32_t kVirtualAttackRepeatMs = 140;
 // Holding attack with the combo on steps through the three skills instead of
 // swinging repeatedly, and each step needs long enough to actually go off. The
 // 140ms weapon cadence would blow through all three before the first landed.
-constexpr uint32_t kVirtualComboRepeatMs = 420;
+// Configurable per phase 9, one value per combo slot - g_virtualComboRepeatMs
+// (declared beside the other combo state) is what actually gets read; this is
+// only every slot's starting value and the shared floor/ceiling/step the
+// settings panel clamps and nudges each one by.
+constexpr uint32_t kVirtualComboRepeatMsDefault = 420;
+constexpr uint32_t kVirtualComboRepeatMsMin = 200;
+constexpr uint32_t kVirtualComboRepeatMsMax = 800;
+constexpr uint32_t kVirtualComboRepeatStepMs = 20;
 constexpr uint32_t kVirtualUtilityButtonCooldownMs = 200;
 constexpr uint32_t kVirtualSkillAssignLongPressMs = 480;
 constexpr uint32_t kVirtualAssignModeTimeoutMs = 9000;
@@ -1911,9 +1918,50 @@ constexpr uint32_t kAndroidPendingBuffCastTimeoutMs = 4000;
 constexpr int kVirtualComboSlotCount = 3;
 constexpr uint32_t kVirtualComboResetMs = 2500;
 
+// Combo settings panel, opened by a long-press on the toggle. One row per
+// combo slot rather than one shared value - see g_virtualComboRepeatMs.
+// Centred above the wheel rather than anchored to the toggle, so it never
+// overlaps the skill buttons or the toggle it was opened from.
+constexpr float kComboSettingsW = 190.0f;
+constexpr float kComboSettingsX = (640.0f - kComboSettingsW) / 2.0f;
+constexpr float kComboSettingsY = 210.0f;
+constexpr float kComboSettingsHeaderH = 20.0f;
+constexpr float kComboSettingsRowH = 40.0f;
+constexpr float kComboSettingsBodyH = kComboSettingsRowH * static_cast<float>(kVirtualComboSlotCount);
+constexpr float kComboSettingsFooterH = 18.0f;
+constexpr float kComboSettingsButtonSize = 28.0f;
+
 bool g_virtualComboEnabled = false;
 int g_virtualComboStep = 0;
 uint32_t g_virtualComboLastMs = 0;
+
+// Runtime ms-per-step, one value per wheel slot in the chain (step 0 = slot 1
+// / the opener, and so on) rather than a single pace for all three - a slow
+// buff-ish opener and a fast finisher want different timing. Adjustable from
+// the combo settings panel (long-press the combo toggle) and persisted in the
+// same file as the wheel bindings - see SaveVirtualSkillSlots/
+// LoadVirtualSkillSlots. kVirtualComboResetMs above stays fixed: that is the
+// "chain went cold" idle timeout, a different thing from the pacing between
+// steps this controls.
+std::array<uint32_t, kVirtualComboSlotCount> g_virtualComboRepeatMs = {
+    kVirtualComboRepeatMsDefault, kVirtualComboRepeatMsDefault, kVirtualComboRepeatMsDefault
+};
+bool g_virtualComboSettingsOpen = false;
+
+// A press on the combo toggle, resolved on finger-up the same way the Q/W/E/R
+// hotkey and wheel-slot presses are: a quick tap flips combo on/off, a hold
+// opens the settings panel instead.
+constexpr uint32_t kComboSettingsLongPressMs = 500;
+constexpr float kComboTogglePressMoveCancelUi = 14.0f;
+
+struct AndroidComboTogglePressState
+{
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    uint32_t downMs = 0;
+    float downX = 0.0f;
+    float downY = 0.0f;
+};
+AndroidComboTogglePressState g_androidComboTogglePress{};
 
 // What the last combo press actually did. Shown next to the toggle because
 // logcat does not come through on these devices, so an on-screen readout is the
@@ -2741,6 +2789,29 @@ void LoadVirtualSkillSlots()
                             g_virtualComboEnabled = (comboEnabled != 0);
                         }
                     }
+
+                    // Version 7 appends one ms-per-step value for every combo
+                    // slot. Older files stop at the flag above and leave these
+                    // at their default; each read is independently optional so
+                    // a file with fewer values than kVirtualComboSlotCount
+                    // (there was briefly a single-value build of this) just
+                    // leaves the remaining slots at default too.
+                    if (readOk && version >= 7)
+                    {
+                        for (int step = 0; step < kVirtualComboSlotCount; ++step)
+                        {
+                            int comboRepeatMs = 0;
+                            if (!(in >> comboRepeatMs))
+                            {
+                                break;
+                            }
+
+                            g_virtualComboRepeatMs[step] = std::clamp(
+                                static_cast<uint32_t>(std::max(0, comboRepeatMs)),
+                                kVirtualComboRepeatMsMin,
+                                kVirtualComboRepeatMsMax);
+                        }
+                    }
                 }
             }
         }
@@ -2808,12 +2879,16 @@ void SaveVirtualSkillSlots()
     }
 
     RefreshVirtualSkillTypesFromSlots();
-    out << "6 " << kVirtualSkillSlotCount;
+    out << "7 " << kVirtualSkillSlotCount;
     for (int slot = 0; slot < kVirtualSkillSlotCount; ++slot)
     {
         out << ' ' << g_virtualSkillSlots[slot];
     }
     out << ' ' << (g_virtualComboEnabled ? 1 : 0);
+    for (int step = 0; step < kVirtualComboSlotCount; ++step)
+    {
+        out << ' ' << g_virtualComboRepeatMs[step];
+    }
     out << '\n';
     g_virtualSkillSlotsDirty = false;
     const std::string slotText = BuildVirtualSkillArrayString(g_virtualSkillSlots);
@@ -5115,6 +5190,57 @@ AndroidUiRect GetComboToggleRect()
     return { kComboToggleX, kComboToggleY, kComboToggleW, kComboToggleH };
 }
 
+AndroidUiRect GetComboSettingsRect()
+{
+    return {
+        kComboSettingsX,
+        kComboSettingsY,
+        kComboSettingsW,
+        kComboSettingsHeaderH + kComboSettingsBodyH + kComboSettingsFooterH
+    };
+}
+
+// Top of one combo-slot row within the panel body, in UI space. Shared by the
+// minus/plus rect helpers below and by the renderer, so the two stay in sync.
+float GetComboSettingsRowY(int step)
+{
+    const AndroidUiRect rect = GetComboSettingsRect();
+    return rect.y + kComboSettingsHeaderH + (static_cast<float>(step) * kComboSettingsRowH);
+}
+
+AndroidUiRect GetComboSettingsMinusRect(int step)
+{
+    const AndroidUiRect rect = GetComboSettingsRect();
+    return {
+        rect.x + 8.0f,
+        GetComboSettingsRowY(step) + (kComboSettingsRowH - kComboSettingsButtonSize) * 0.5f,
+        kComboSettingsButtonSize,
+        kComboSettingsButtonSize
+    };
+}
+
+AndroidUiRect GetComboSettingsPlusRect(int step)
+{
+    const AndroidUiRect rect = GetComboSettingsRect();
+    return {
+        rect.x + rect.w - 8.0f - kComboSettingsButtonSize,
+        GetComboSettingsRowY(step) + (kComboSettingsRowH - kComboSettingsButtonSize) * 0.5f,
+        kComboSettingsButtonSize,
+        kComboSettingsButtonSize
+    };
+}
+
+AndroidUiRect GetComboSettingsCloseRect()
+{
+    const AndroidUiRect rect = GetComboSettingsRect();
+    return {
+        rect.x + 6.0f,
+        rect.y + kComboSettingsHeaderH + kComboSettingsBodyH,
+        rect.w - 12.0f,
+        kComboSettingsFooterH
+    };
+}
+
 // Defined further down, next to the tab rendering.
 bool HandleAndroidChatTabTap(float uiX, float uiY);
 bool HandleAndroidChatLogTap(float uiX, float uiY);
@@ -6663,6 +6789,57 @@ bool HitTestComboToggle(float uiX, float uiY)
     }
 
     return HitTestAndroidUiRect(uiX, uiY, GetComboToggleRect());
+}
+
+// Modal, so it gets first look at a tap while open - called near the top of
+// HandleVirtualFingerDown, same priority as the target/trade pickers. The
+// buttons act immediately on down rather than deciding on release, since
+// unlike the wheel slots there is nothing here a drag could turn into
+// something else.
+bool HandleAndroidComboSettingsFingerDown(float uiX, float uiY)
+{
+    if (!g_virtualComboSettingsOpen)
+    {
+        return false;
+    }
+
+    if (!HitTestAndroidUiRect(uiX, uiY, GetComboSettingsRect()))
+    {
+        g_virtualComboSettingsOpen = false;
+        return true;
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetComboSettingsCloseRect()))
+    {
+        g_virtualComboSettingsOpen = false;
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
+    for (int step = 0; step < kVirtualComboSlotCount; ++step)
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, GetComboSettingsMinusRect(step)))
+        {
+            g_virtualComboRepeatMs[step] = std::max(kVirtualComboRepeatMsMin, g_virtualComboRepeatMs[step] - kVirtualComboRepeatStepMs);
+            g_virtualSkillSlotsDirty = true;
+            SaveVirtualSkillSlots();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (HitTestAndroidUiRect(uiX, uiY, GetComboSettingsPlusRect(step)))
+        {
+            g_virtualComboRepeatMs[step] = std::min(kVirtualComboRepeatMsMax, g_virtualComboRepeatMs[step] + kVirtualComboRepeatStepMs);
+            g_virtualSkillSlotsDirty = true;
+            SaveVirtualSkillSlots();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+    }
+
+    // Inside the panel but not on a control - swallow it rather than let it
+    // fall through to whatever is behind the panel.
+    return true;
 }
 
 // Paired with RenderSkillPageButton further down, same reason as
@@ -8722,6 +8899,11 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    if (HandleAndroidComboSettingsFingerDown(uiX, uiY))
+    {
+        return true;
+    }
+
     if (g_androidTradePicker.autoMoving)
     {
         if (HitTestMiniMapToggleButton(uiX, uiY) || HitTestMapButton(uiX, uiY))
@@ -8897,12 +9079,13 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
 
     if (HitTestComboToggle(uiX, uiY))
     {
-        g_virtualComboEnabled = !g_virtualComboEnabled;
-        g_virtualComboStep = 0;
-        g_virtualSkillSlotsDirty = true;
-        SaveVirtualSkillSlots();
-        PlayBuffer(SOUND_CLICK01);
-        LOGI("VirtualPad: auto-combo %s", g_virtualComboEnabled ? "on" : "off");
+        // Only recorded here - see HandleVirtualFingerUp, which decides
+        // between toggling and opening the settings panel based on how long
+        // the finger stayed down.
+        g_androidComboTogglePress.fingerId = touch.fingerId;
+        g_androidComboTogglePress.downMs = MU_MobileGetTicks();
+        g_androidComboTogglePress.downX = uiX;
+        g_androidComboTogglePress.downY = uiY;
         return true;
     }
 
@@ -9049,6 +9232,23 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Same idea for the combo toggle press - sliding off it abandons the
+    // tap/hold rather than toggling or opening settings from wherever the
+    // finger ends up.
+    if (g_androidComboTogglePress.fingerId == touch.fingerId)
+    {
+        float moveX = 0.0f;
+        float moveY = 0.0f;
+        TouchToVirtualUi(touch, moveX, moveY);
+        const float dx = moveX - g_androidComboTogglePress.downX;
+        const float dy = moveY - g_androidComboTogglePress.downY;
+        if (((dx * dx) + (dy * dy)) > (kComboTogglePressMoveCancelUi * kComboTogglePressMoveCancelUi))
+        {
+            g_androidComboTogglePress = AndroidComboTogglePressState{};
+        }
+        return true;
+    }
+
     if (HandleAndroidTradePickerFingerMotion(touch))
     {
         return true;
@@ -9179,6 +9379,31 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
                 }
             }
             PlayBuffer(SOUND_CLICK01);
+        }
+        return true;
+    }
+
+    // Resolve the combo toggle press: a quick tap flips combo on/off, a hold
+    // opens the settings panel instead - same tap-vs-hold shape as the wheel
+    // slot press just above.
+    if (g_androidComboTogglePress.fingerId == touch.fingerId)
+    {
+        const uint32_t heldMs = MU_MobileGetTicks() - g_androidComboTogglePress.downMs;
+        g_androidComboTogglePress = AndroidComboTogglePressState{};
+
+        if (heldMs >= kComboSettingsLongPressMs)
+        {
+            g_virtualComboSettingsOpen = true;
+            PlayBuffer(SOUND_CLICK01);
+        }
+        else
+        {
+            g_virtualComboEnabled = !g_virtualComboEnabled;
+            g_virtualComboStep = 0;
+            g_virtualSkillSlotsDirty = true;
+            SaveVirtualSkillSlots();
+            PlayBuffer(SOUND_CLICK01);
+            LOGI("VirtualPad: auto-combo %s", g_virtualComboEnabled ? "on" : "off");
         }
         return true;
     }
@@ -9708,7 +9933,7 @@ void UpdateVirtualPadHolds()
         }
 
         const uint32_t repeatMs = IsAndroidComboActive()
-            ? kVirtualComboRepeatMs
+            ? g_virtualComboRepeatMs[g_virtualComboStep]
             : kVirtualAttackRepeatMs;
 
         if ((nowMs - active.lastRepeatMs) >= repeatMs)
@@ -10655,6 +10880,85 @@ void RenderComboToggle()
                  0, 3,
                  "%d/%d", g_virtualComboStep + 1, kVirtualComboSlotCount);
     }
+
+    EndBitmap();
+}
+
+// Long-press-the-toggle settings surface for the combo step pacing - see
+// HandleAndroidComboSettingsFingerDown for the input side. Styled like
+// RenderAndroidSkillPickerList's popup (dim backdrop, drop-shadowed box,
+// header strip) since that is the closest existing small-panel precedent.
+void RenderComboSettingsPanel()
+{
+    if (!g_virtualComboSettingsOpen || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const AndroidUiRect rect = GetComboSettingsRect();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, 0.30f);
+    DrawVirtualRectFilled(rect.x - 3.0f, rect.y - 3.0f, rect.w + 6.0f, rect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.05f, 0.08f, 0.14f, 0.82f);
+    DrawVirtualRectFilled(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.10f, 0.14f, 0.24f, 0.66f);
+    DrawVirtualRectFilled(rect.x + 3.0f, rect.y + 3.0f, rect.w - 6.0f, kComboSettingsHeaderH - 6.0f, 0.24f, 0.34f, 0.62f, 0.40f);
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.34f, 0.52f, 0.90f, 0.94f, 2.0f);
+    DrawVirtualRectOutline(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.08f, 0.12f, 0.22f, 0.94f, 1.0f);
+
+    HFONT titleFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+    HFONT bodyFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    TextDraw(titleFont,
+             static_cast<int>(rect.x + 7.0f), static_cast<int>(rect.y + 5.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(rect.w - 14.0f), 0, 3,
+             "%s", "Combo Speed");
+
+    // One row per combo slot - config for 1, 2, 3, not one shared value. The
+    // highlighted row is whichever step fires next, so it is obvious which
+    // number a live combo is currently paced by.
+    for (int step = 0; step < kVirtualComboSlotCount; ++step)
+    {
+        const AndroidUiRect minusRect = GetComboSettingsMinusRect(step);
+        const AndroidUiRect plusRect = GetComboSettingsPlusRect(step);
+        const bool atMin = g_virtualComboRepeatMs[step] <= kVirtualComboRepeatMsMin;
+        const bool atMax = g_virtualComboRepeatMs[step] >= kVirtualComboRepeatMsMax;
+        const bool isNextStep = g_virtualComboEnabled && g_virtualComboStep == step;
+
+        DrawVirtualRightPanelButtonBox(minusRect, false);
+        DrawVirtualRightPanelButtonBox(plusRect, false);
+
+        TextDraw(bodyFont,
+                 static_cast<int>(minusRect.x), static_cast<int>(minusRect.y + 7.0f),
+                 atMin ? 0xFF808080 : 0xFFFFFFFF, 0x0, static_cast<int>(minusRect.w), 0, 3,
+                 "%s", "-");
+        TextDraw(bodyFont,
+                 static_cast<int>(plusRect.x), static_cast<int>(plusRect.y + 7.0f),
+                 atMax ? 0xFF808080 : 0xFFFFFFFF, 0x0, static_cast<int>(plusRect.w), 0, 3,
+                 "%s", "+");
+
+        const float labelY = GetComboSettingsRowY(step) + (kComboSettingsRowH * 0.5f) - 15.0f;
+        TextDraw(bodyFont,
+                 static_cast<int>(rect.x), static_cast<int>(labelY),
+                 isNextStep ? 0xFF80FFB0 : 0xFFC0C8E0, 0x0, static_cast<int>(rect.w), 0, 3,
+                 isNextStep ? "Step %d (next)" : "Step %d", step + 1);
+
+        TextDraw(bodyFont,
+                 static_cast<int>(rect.x), static_cast<int>(labelY + 13.0f),
+                 0xFFD0E0FF, 0x0, static_cast<int>(rect.w), 0, 3,
+                 "%u ms", g_virtualComboRepeatMs[step]);
+    }
+
+    const AndroidUiRect closeRect = GetComboSettingsCloseRect();
+    TextDraw(bodyFont,
+             static_cast<int>(closeRect.x), static_cast<int>(closeRect.y + 4.0f),
+             0xFFE0A0FF, 0x0, static_cast<int>(closeRect.w), 0, 3,
+             "%s", "Close");
 
     EndBitmap();
 }
@@ -12392,6 +12696,7 @@ void RenderVirtualPad()
     // Last, so the panel and its dimming layer sit over every other control.
     RenderAndroidTargetPicker();
     RenderAndroidSkillPickerList();
+    RenderComboSettingsPanel();
 
 #if 0
     // Disabled: custom Android HUD. We keep this code commented for now so it
