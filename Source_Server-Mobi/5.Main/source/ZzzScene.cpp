@@ -2698,6 +2698,19 @@ bool RenderMainScene()
 	unsigned long long dbgPhaseStart = MainScenePerfNow();
 #endif
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+	{
+		// Last point in the frame where CameraMatrix/PerspectiveX-Y/
+		// ScreenCenterX-Y still describe the game camera: everything below is UI,
+		// and any panel that previews a 3D item overwrites all four with an
+		// item-view camera without restoring them. The touch overlay draws after
+		// Scene() returns and needs to project world points, so it works from
+		// this snapshot instead. See g_androidWorldCameraMatrix in android_main.cpp.
+		extern void AndroidCaptureWorldCamera();
+		AndroidCaptureWorldCamera();
+	}
+#endif
+
     SelectObjects();
 #ifdef __ANDROID__
 	g_ProfUiSelectTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();

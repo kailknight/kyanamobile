@@ -185,6 +185,30 @@ extern BYTE g_byPacketSerialSend;
 extern bool First;
 extern int FirstTime;
 
+// Not in ZzzOpenglUtil.h despite living beside PerspectiveX/Y there. Needed by
+// the world-camera snapshot below, which reproduces Projection()'s math.
+extern int ScreenCenterX;
+extern int ScreenCenterY;
+
+// Snapshot of the real world camera, taken once per frame by
+// AndroidCaptureWorldCamera() at the end of the 3D pass.
+//
+// Projection() reads CameraMatrix/PerspectiveX-Y/ScreenCenterX-Y as globals,
+// and any UI panel that previews a 3D item (RenderItem3D, via gluPerspective2 +
+// glLoadIdentity + GetOpenGLMatrix(CameraMatrix) - NewUISystem.cpp, ZzzScene.cpp
+// and RenderVirtualMirrorHotKeySlots all do it) overwrites all four with an
+// item-view camera and never puts them back; only the next frame's 3D pass
+// restores them. Anything projecting world points after that point in the frame
+// - which includes the whole touch overlay, drawn once Scene() has returned -
+// gets an identity view matrix and a 1-degree FOV, throwing every point
+// thousands of pixels off screen. Hence the snapshot.
+float g_androidWorldCameraMatrix[3][4] = {};
+float g_androidWorldPerspectiveX = 0.0f;
+float g_androidWorldPerspectiveY = 0.0f;
+int   g_androidWorldScreenCenterX = 0;
+int   g_androidWorldScreenCenterY = 0;
+bool  g_androidWorldCameraValid = false;
+
 static void UpdateAndroidScreenMetrics(int screenW, int screenH)
 {
     WindowWidth = static_cast<unsigned int>(screenW);
@@ -1907,19 +1931,22 @@ int g_androidComboLastResult = kAndroidComboResultNone;
 // Aiming a ground-targeted skill. On the desktop client these are cast by
 // pointing at the terrain and right-clicking - the skill reads the global
 // TargetX/TargetY that the mouse pick filled in. There is no pointer on a
-// phone, so the attack button doubles as an aim stick: press and drag to move
-// a reticle over the ground, release to cast there.
+// phone, so the attack button arms an explicit aim mode instead: tap it to
+// show a range ring around the hero, tap anywhere to try casting there, tap
+// the attack button again to disarm without casting.
 struct AndroidGroundAim
 {
-    bool aiming = false;
-    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
-    float uiX = 0.0f;
-    float uiY = 0.0f;
+    // True while the range ring is showing. Set/cleared only by an explicit
+    // tap on the attack button (arm/disarm) or a successful in-range cast -
+    // an out-of-range tap elsewhere is a no-op and leaves this set, so the
+    // player can try again without re-arming.
+    bool armed = false;
     int skillIndex = -1;
 
-    // Set on release. The cast itself has to wait for the scene phase, where
-    // the camera matrices the terrain pick needs are set up.
+    // The most recent tap waiting to be resolved. Set on any tap while armed.
     bool pendingCast = false;
+    float uiX = 0.0f;
+    float uiY = 0.0f;
 
     // Frames still to wait before picking. MoveHero never builds the pick ray
     // itself - it reads the MouseTarget the render phase produced from
@@ -1940,6 +1967,7 @@ enum AndroidGroundCastResult
     kGroundCastNoTile,      // aim point hit no terrain
     kGroundCastOffMap,      // picked tile outside the map
     kGroundCastBadSkill,    // armed skill index no longer valid
+    kGroundCastOutOfRange,  // picked tile outside the range ring - no-op, stays armed
 };
 
 int g_androidGroundCastResult = kGroundCastNone;
@@ -3668,6 +3696,20 @@ bool HandleVirtualJoystickFingerDown(const SDL_TouchFingerEvent& touch)
     float uiX = 0.0f;
     float uiY = 0.0f;
     TouchToVirtualUi(touch, uiX, uiY);
+
+    // A ground-targeted skill is armed (range ring showing) - this tap
+    // decides where to jump instead of moving the character. Handed to the
+    // scene phase rather than resolved here - see UpdateAndroidGroundAimCast,
+    // which either casts (inside the ring) or leaves the arm standing
+    // (outside it, a no-op) so the player can try again without re-arming.
+    if (g_androidGroundAim.armed)
+    {
+        g_androidGroundAim.uiX = uiX;
+        g_androidGroundAim.uiY = uiY;
+        g_androidGroundAim.pendingCast = true;
+        g_androidGroundAim.settleFrames = 2;
+        return true;
+    }
 
     if (!HitTestVirtualJoystick(uiX, uiY))
     {
@@ -6647,7 +6689,7 @@ bool HitTestSkillPageButton(float uiX, float uiY)
 
 void CancelAndroidGroundAim(const char* reason)
 {
-    if (!g_androidGroundAim.aiming && !g_androidGroundAim.pendingCast)
+    if (!g_androidGroundAim.armed && !g_androidGroundAim.pendingCast)
     {
         return;
     }
@@ -6697,7 +6739,12 @@ void UpdateAndroidGroundAimCast()
         return;
     }
 
-    g_androidGroundAim = AndroidGroundAim{};
+    // Only the transient per-tap state clears here - armed/skillIndex stay so
+    // an out-of-range no-op below leaves the ring standing for another try.
+    g_androidGroundAim.pendingCast = false;
+    g_androidGroundAim.uiX = 0.0f;
+    g_androidGroundAim.uiY = 0.0f;
+    g_androidGroundAim.settleFrames = 0;
 
     // MouseX/MouseY are deliberately left at the aim point. No button is held,
     // so a parked pointer does nothing, and restoring the old value here would
@@ -6723,6 +6770,28 @@ void UpdateAndroidGroundAimCast()
             TargetX = tileX;
             TargetY = tileY;
 
+            // Evaluate the same gates CanExecuteSkill and ExecuteSkill apply, so
+            // a refusal names the reason instead of just failing. Read-only:
+            // these are all predicates, none of them change state.
+            const int skillType = (CharacterAttribute != nullptr)
+                ? CharacterAttribute->Skill[skillIndex]
+                : -1;
+
+            // The range ring drawn while armed (RenderAndroidTeleportRangeRing)
+            // is purely cosmetic unless this also refuses a tap outside it -
+            // neither CanExecuteSkill nor AttackWizard's teleport branch check
+            // distance client-side at all, so without this gate the ring would
+            // be a decoration and every tap would just try to cast, wall
+            // permitting. CheckTile does the same tile-center-to-hero distance
+            // test CanExecuteSkill runs for the summon skills, against the same
+            // GetSkillDistance value the ring's radius comes from.
+            if (skillType > 0 && !CheckTile(Hero, &Hero->Object, gSkillManager.GetSkillDistance(skillType, Hero)))
+            {
+                g_androidGroundCastResult = kGroundCastOutOfRange;
+                LOGI("VirtualPad: ground cast no-op, tile (%d,%d) outside range", tileX, tileY);
+                return;
+            }
+
             // The teleport branch in AttackWizard drops the cast without a word
             // unless the destination tile has no wall attributes left after
             // ACTION and HEIGHT are masked off - so a safe zone, or any no-move
@@ -6732,13 +6801,6 @@ void UpdateAndroidGroundAimCast()
             if ((wall & TW_ACTION) == TW_ACTION) wall -= TW_ACTION;
             if ((wall & TW_HEIGHT) == TW_HEIGHT) wall -= TW_HEIGHT;
             g_androidGroundCastWall = wall;
-
-            // Evaluate the same gates CanExecuteSkill and ExecuteSkill apply, so
-            // a refusal names the reason instead of just failing. Read-only:
-            // these are all predicates, none of them change state.
-            const int skillType = (CharacterAttribute != nullptr)
-                ? CharacterAttribute->Skill[skillIndex]
-                : -1;
 
             g_androidGroundCastReason = kGroundReasonOk;
 
@@ -6860,6 +6922,11 @@ void UpdateAndroidGroundAimCast()
 
             LOGI("VirtualPad: ground cast skillIndex=%d type=%d tile=(%d,%d) wall=%d reason=%d sent=%d",
                  skillIndex, skillType, TargetX, TargetY, wall, g_androidGroundCastReason, sent ? 1 : 0);
+
+            // An in-range attempt was made - disarm regardless of whether the
+            // other gates above let it through, matching tap-inside-jumps.
+            g_androidGroundAim.armed = false;
+            g_androidGroundAim.skillIndex = -1;
         }
         else
         {
@@ -8816,6 +8883,7 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
 
     if (HitTestSkillPageButton(uiX, uiY))
     {
+        CancelAndroidGroundAim("skill page switch");
         g_virtualSkillPage = (g_virtualSkillPage + 1) % kVirtualSkillPageCount;
         g_virtualSelectedSkillSlot = -1;
         // The queued index is a CharacterAttribute->Skill[] slot from
@@ -8848,18 +8916,23 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         const uint32_t nowMs = MU_MobileGetTicks();
 
         // A ground-targeted skill needs a map position, which a button press
-        // alone cannot express. Turn the press into a drag-to-aim instead of
-        // firing: no touch slot is claimed, so the hold-repeat loop leaves it
-        // alone and the finger drives the reticle until it lifts.
+        // alone cannot express. Tap arms a range ring instead of firing - a
+        // later tap anywhere resolves into a cast attempt (see the armed
+        // check at the top of HandleVirtualJoystickFingerDown); tapping this
+        // button again while armed disarms without casting.
         const int armedSkillIndex = GetVirtualOverlayHotKeySkillIndex(g_virtualSelectedSkillSlot);
         if (IsGroundTargetedSkillIndex(armedSkillIndex))
         {
-            g_androidGroundAim.aiming = true;
-            g_androidGroundAim.pendingCast = false;
-            g_androidGroundAim.fingerId = touch.fingerId;
-            g_androidGroundAim.uiX = uiX;
-            g_androidGroundAim.uiY = uiY;
-            g_androidGroundAim.skillIndex = armedSkillIndex;
+            if (g_androidGroundAim.armed && g_androidGroundAim.skillIndex == armedSkillIndex)
+            {
+                CancelAndroidGroundAim("re-tap disarm");
+            }
+            else
+            {
+                g_androidGroundAim = AndroidGroundAim{};
+                g_androidGroundAim.armed = true;
+                g_androidGroundAim.skillIndex = armedSkillIndex;
+            }
             return true;
         }
 
@@ -8986,14 +9059,6 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
-    // Ground aim owns its finger until it lifts, so the reticle follows the
-    // drag instead of the joystick picking the movement up.
-    if (g_androidGroundAim.aiming && g_androidGroundAim.fingerId == touch.fingerId)
-    {
-        TouchToVirtualUi(touch, g_androidGroundAim.uiX, g_androidGroundAim.uiY);
-        return true;
-    }
-
     if (FindActiveVirtualTouchSlot(touch.fingerId) >= 0)
     {
         return true;
@@ -9092,6 +9157,11 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
             // Arms the slot instead of casting it. The skill only goes off when
             // the attack button in the middle of the arc is pressed, so aiming
             // and firing are two separate deliberate taps.
+            //
+            // A ring armed for the previous slot's skill would otherwise keep
+            // showing (and keep intercepting taps) for a skill no longer
+            // selected.
+            CancelAndroidGroundAim("skill slot changed");
             if (g_virtualSelectedSkillSlot == skillSlot)
             {
                 g_virtualSelectedSkillSlot = -1;   // tap again to go back to weapon
@@ -9120,24 +9190,6 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 
     if (HandleAndroidTargetPickerFingerUp(touch))
     {
-        return true;
-    }
-
-    if (g_androidGroundAim.aiming && g_androidGroundAim.fingerId == touch.fingerId)
-    {
-        float upX = g_androidGroundAim.uiX;
-        float upY = g_androidGroundAim.uiY;
-        TouchToVirtualUi(touch, upX, upY);
-
-        g_androidGroundAim.uiX = upX;
-        g_androidGroundAim.uiY = upY;
-        g_androidGroundAim.aiming = false;
-
-        // Handed to the scene phase rather than cast here - see
-        // UpdateAndroidGroundAimCast. Two frames of settle so the render phase
-        // has definitely turned the parked MouseX/MouseY into a pick ray.
-        g_androidGroundAim.pendingCast = true;
-        g_androidGroundAim.settleFrames = 2;
         return true;
     }
 
@@ -10191,11 +10243,127 @@ void DrawVirtualRightPanelButtonBox(const AndroidUiRect& rect, bool active)
     DrawVirtualRectOutline(rect.x + 1.0f, rect.y + 1.0f, rect.w - 2.0f, rect.h - 2.0f, 0.03f, 0.05f, 0.12f, 0.96f, 1.0f);
 }
 
-// Reticle for a ground-targeted skill while the finger is dragging. Drawn at
-// the aim point itself, which is where the terrain pick will be taken from.
+// Projection() but reading the snapshot AndroidCaptureWorldCamera() took while
+// the world camera was still live, instead of the globals - which by overlay
+// draw time belong to whichever UI panel last previewed a 3D item. Same math as
+// ZzzOpenglUtil.cpp's Projection(), including the WIDE_SCREEN scale back into
+// the 640x480 UI space the overlay works in.
+//
+// Returns false for a point at or behind the camera plane, where the perspective
+// divide has no meaningful answer - Projection() itself just divides anyway and
+// produces the wild coordinates that made this worth isolating.
+bool ProjectWorldPointWithSnapshot(const vec3_t position, float& outUiX, float& outUiY)
+{
+    if (!g_androidWorldCameraValid)
+    {
+        return false;
+    }
+
+    vec3_t viewPosition;
+    VectorTransform(position, g_androidWorldCameraMatrix, viewPosition);
+
+    // Camera looks down -Z, so anything visible has a negative Z here.
+    if (viewPosition[2] > -1.0f)
+    {
+        return false;
+    }
+
+    const float sx = -(viewPosition[0] / g_androidWorldPerspectiveX / viewPosition[2])
+        + static_cast<float>(g_androidWorldScreenCenterX);
+    const float sy = (viewPosition[1] / g_androidWorldPerspectiveY / viewPosition[2])
+        + static_cast<float>(g_androidWorldScreenCenterY);
+
+    outUiX = sx * static_cast<float>(DisplayWin) / static_cast<float>(WindowWidth);
+    outUiY = sy * static_cast<float>(DisplayHeight) / static_cast<float>(WindowHeight);
+    return true;
+}
+
+// Range ring shown around the hero while a ground-targeted skill is armed.
+// Projects a circle of world points at GetSkillDistance's radius - the same
+// value UpdateAndroidGroundAimCast's CheckTile gate enforces, so the ring shows
+// exactly the area a tap will accept.
+void RenderAndroidTeleportRangeRing()
+{
+    if (!g_androidGroundAim.armed || Hero == nullptr || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const int skillType = (CharacterAttribute != nullptr && IsValidSkillIndex(g_androidGroundAim.skillIndex))
+        ? CharacterAttribute->Skill[g_androidGroundAim.skillIndex]
+        : -1;
+    if (skillType <= 0)
+    {
+        return;
+    }
+
+    const float radiusWorld = gSkillManager.GetSkillDistance(skillType, Hero) * TERRAIN_SCALE;
+    if (radiusWorld <= 0.0f)
+    {
+        return;
+    }
+
+    const float heroX = Hero->Object.Position[0];
+    const float heroY = Hero->Object.Position[1];
+
+    constexpr int kRingSegments = 40;
+    float screenX[kRingSegments];
+    float screenY[kRingSegments];
+
+    for (int i = 0; i < kRingSegments; ++i)
+    {
+        const float angle = (static_cast<float>(i) / static_cast<float>(kRingSegments)) * 6.28318530718f;
+        const float wx = heroX + (std::cos(angle) * radiusWorld);
+        const float wy = heroY + (std::sin(angle) * radiusWorld);
+        const float wz = RequestTerrainHeight(wx, wy);
+
+        vec3_t point;
+        Vector(wx, wy, wz, point);
+
+        float uiSx = 0.0f;
+        float uiSy = 0.0f;
+        if (!ProjectWorldPointWithSnapshot(point, uiSx, uiSy))
+        {
+            // Part of the ring is behind the camera - drawing the remaining
+            // points would chord straight across the screen, so drop the frame's
+            // ring entirely rather than show a wrong shape.
+            return;
+        }
+
+        screenX[i] = UiToScreenX(uiSx);
+        screenY[i] = static_cast<float>(WindowHeight) - UiToScreenY(uiSy);
+    }
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glColor4f(0.35f, 0.85f, 1.0f, 0.12f);
+    glBegin(GL_TRIANGLE_FAN);
+    for (int i = 0; i < kRingSegments; ++i)
+    {
+        glVertex2f(screenX[i], screenY[i]);
+    }
+    glEnd();
+
+    glColor4f(0.45f, 0.90f, 1.0f, 0.85f);
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i < kRingSegments; ++i)
+    {
+        glVertex2f(screenX[i], screenY[i]);
+    }
+    glEnd();
+
+    EndBitmap();
+}
+
+// Reticle for a ground-targeted skill tap while it settles into a pick - see
+// UpdateAndroidGroundAimCast. Drawn at the tapped point itself.
 void RenderAndroidGroundAim()
 {
-    if (!g_androidGroundAim.aiming || !IsVirtualPadAvailable())
+    if (!g_androidGroundAim.pendingCast || !IsVirtualPadAvailable())
     {
         return;
     }
@@ -10224,7 +10392,7 @@ void RenderAndroidGroundAim()
              static_cast<int>(cx - 40.0f),
              static_cast<int>(cy + 24.0f),
              0xFFFFFFFF, 0x0, 80, 0, 3,
-             "%s", "release to cast");
+             "%s", "casting...");
 
     EndBitmap();
 }
@@ -11914,9 +12082,10 @@ void RenderVirtualPortraitHud()
         // whether the request went out.
         case kGroundCastOk:       castText = "sent";     break;
         case kGroundCastRefused:  castText = "sent";     break;
-        case kGroundCastNoTile:   castText = "notile";   break;
-        case kGroundCastOffMap:   castText = "offmap";   break;
-        case kGroundCastBadSkill: castText = "badskill"; break;
+        case kGroundCastNoTile:      castText = "notile";  break;
+        case kGroundCastOffMap:      castText = "offmap";  break;
+        case kGroundCastBadSkill:    castText = "badskill"; break;
+        case kGroundCastOutOfRange:  castText = "range";   break;
         default:                  castText = "-";        break;
         }
 
@@ -12216,6 +12385,7 @@ void RenderVirtualPad()
     RenderComboToggle();
     RenderTargetSelectButton();
     RenderSkillPageButton();
+    RenderAndroidTeleportRangeRing();
     RenderAndroidGroundAim();
     RenderAndroidTradePicker();
 
@@ -12594,6 +12764,20 @@ void AndroidClearTargetLock()
 void AndroidUpdateGroundAimCast()
 {
     UpdateAndroidGroundAimCast();
+}
+
+// Called from the main scene's render path the moment the 3D world is done and
+// before any UI is drawn - the last point in the frame where the four camera
+// globals still describe the game camera. See g_androidWorldCameraMatrix for
+// why the overlay cannot just read them where it draws.
+void AndroidCaptureWorldCamera()
+{
+    memcpy(g_androidWorldCameraMatrix, CameraMatrix, sizeof(g_androidWorldCameraMatrix));
+    g_androidWorldPerspectiveX = PerspectiveX;
+    g_androidWorldPerspectiveY = PerspectiveY;
+    g_androidWorldScreenCenterX = ScreenCenterX;
+    g_androidWorldScreenCenterY = ScreenCenterY;
+    g_androidWorldCameraValid = true;
 }
 
 bool AndroidShowCommandTradePicker()
