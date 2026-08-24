@@ -1097,11 +1097,12 @@ constexpr float kTargetSelectButtonCx = 630.0f;
 constexpr float kTargetSelectButtonCy = 400.0f;
 constexpr float kTargetSelectButtonRadius = 17.0f;
 
-// Placeholder for the page switch (1/2) - visual only this round, stacked
-// under AIM outside the ring. Phase 3 wires up the actual second page.
-constexpr float kSkillPagePlaceholderCx = 630.0f;
-constexpr float kSkillPagePlaceholderCy = 434.0f;
-constexpr float kSkillPagePlaceholderRadius = 13.0f;
+// Page switch for the skill wheel - two pages of four slots each, eight
+// bindable skills total. Stacked under AIM outside the ring.
+constexpr int kVirtualSkillPageCount = 2;
+constexpr float kSkillPageButtonCx = 630.0f;
+constexpr float kSkillPageButtonCy = 434.0f;
+constexpr float kSkillPageButtonRadius = 13.0f;
 
 // Tabbed chat panel along the bottom centre. The channels already exist - the
 // chat log keeps a separate message vector per type and ChangeMessage switches
@@ -1848,8 +1849,15 @@ struct AndroidPinchZoomState
 };
 AndroidPinchZoomState g_androidPinch{};
 // Which arc slot is armed, or -1 for a plain weapon attack. Tapping a skill
-// button sets this; the attack button reads it.
+// button sets this; the attack button reads it. Page-relative - slot 0 on
+// page 1 is a different hotkey slot than slot 0 on page 0 (see
+// GetVirtualOverlayHotKeySlot), which is exactly why switching pages clears
+// this: it would otherwise go on pointing at "visual slot 0" and silently
+// arm whatever the new page put there.
 int g_virtualSelectedSkillSlot = -1;
+
+// Which of the two pages the wheel's four slots are currently showing.
+int g_virtualSkillPage = 0;
 
 // Auto-combo. Each press of the attack button advances one step through arc
 // slots 1, 2 and 3, so the Knight combo can be played with a single button.
@@ -6466,6 +6474,28 @@ bool HitTestComboToggle(float uiX, float uiY)
     return HitTestAndroidUiRect(uiX, uiY, GetComboToggleRect());
 }
 
+// Paired with RenderSkillPageButton further down, same reason as
+// HitTestComboToggle above.
+AndroidUiRect GetSkillPageButtonRect()
+{
+    return {
+        kSkillPageButtonCx - kSkillPageButtonRadius,
+        kSkillPageButtonCy - kSkillPageButtonRadius,
+        kSkillPageButtonRadius * 2.0f,
+        kSkillPageButtonRadius * 2.0f
+    };
+}
+
+bool HitTestSkillPageButton(float uiX, float uiY)
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    return HitTestAndroidUiRect(uiX, uiY, GetSkillPageButtonRect());
+}
+
 void CancelAndroidGroundAim(const char* reason)
 {
     if (!g_androidGroundAim.aiming && !g_androidGroundAim.pendingCast)
@@ -6787,15 +6817,17 @@ bool TriggerVirtualAttackButtonPress()
 
 int GetVirtualOverlayHotKeySlot(int visualSlot)
 {
-    // The last button in the arc is the skill selector, not a skill: it owns no
-    // hotkey. Returning -1 here is what keeps it out of the fire and assign
-    // paths, all of which route through this one function.
     if (visualSlot < 0 || visualSlot >= kVirtualOverlaySkillSlotCount)
     {
         return -1;
     }
 
-    return visualSlot + 1;
+    // Page-relative: page 0 uses hotkey slots 1-4, page 1 uses 5-8 - both well
+    // inside CNewUISkillList's own SKILLHOTKEY_COUNT (10), so no change was
+    // needed there. This one mapping is what makes every other page-aware -
+    // render, fire, assign - since they all resolve a bound skill through
+    // GetVirtualOverlayHotKeySkillIndex, which calls this.
+    return g_virtualSkillPage * kVirtualVisibleSkillButtonCount + visualSlot + 1;
 }
 
 int GetVirtualOverlayHotKeySkillIndex(int visualSlot)
@@ -8633,6 +8665,14 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return HandleTargetSelectButtonTap();
     }
 
+    if (HitTestSkillPageButton(uiX, uiY))
+    {
+        g_virtualSkillPage = (g_virtualSkillPage + 1) % kVirtualSkillPageCount;
+        g_virtualSelectedSkillSlot = -1;
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
     if (HitTestComboToggle(uiX, uiY))
     {
         g_virtualComboEnabled = !g_virtualComboEnabled;
@@ -10354,10 +10394,12 @@ void RenderTargetSelectButton()
     EndBitmap();
 }
 
-// Visual placeholder for the page switch (1/2) outside the ring, under AIM -
-// not wired to anything yet. A real second page of skills is Phase 3; this
-// just reserves and shows the spot so the ring reads complete this round.
-void RenderSkillPagePlaceholder()
+// Page switch for the skill wheel - "1/2" or "2/2", outside the ring under
+// AIM. Tapping it is handled where the other top-control taps are (see
+// HitTestSkillPageButton's call site); it just flips g_virtualSkillPage and
+// clears g_virtualSelectedSkillSlot there, matching the reference spec: you
+// are never left holding a button that just left the screen.
+void RenderSkillPageButton()
 {
     if (!IsVirtualPadAvailable())
     {
@@ -10371,19 +10413,14 @@ void RenderSkillPagePlaceholder()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     DrawVirtualCircle(
-        kSkillPagePlaceholderCx,
-        kSkillPagePlaceholderCy,
-        kSkillPagePlaceholderRadius,
+        kSkillPageButtonCx,
+        kSkillPageButtonCy,
+        kSkillPageButtonRadius,
         0.06f, 0.06f, 0.09f,
         0.70f,
         true);
 
-    const AndroidUiRect rect = {
-        kSkillPagePlaceholderCx - kSkillPagePlaceholderRadius,
-        kSkillPagePlaceholderCy - kSkillPagePlaceholderRadius,
-        kSkillPagePlaceholderRadius * 2.0f,
-        kSkillPagePlaceholderRadius * 2.0f
-    };
+    const AndroidUiRect rect = GetSkillPageButtonRect();
     DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.55f, 0.55f, 0.60f, 0.80f, 1.5f);
 
     HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
@@ -10393,7 +10430,7 @@ void RenderSkillPagePlaceholder()
              0xFFC0C0C0,
              0x0,
              static_cast<int>(rect.w),
-             0, 3, "1/2");
+             0, 3, "%d/%d", g_virtualSkillPage + 1, kVirtualSkillPageCount);
 
     EndBitmap();
 }
@@ -11969,6 +12006,10 @@ void RenderVirtualPad()
                 // rectangular frame's fixed width/height, so it stays anchored to
                 // the bottom of the (larger) circular frame instead of floating
                 // above it.
+                // The actual hotkey slot (1-4 on page 1, 5-8 on page 2), not
+                // just the visual position - otherwise every button reads
+                // "1/2/3/4" on both pages with nothing to tell you which
+                // page's bindings you are looking at.
                 TextDraw(slotFont,
                          static_cast<int>(button.cx - button.radius),
                          static_cast<int>(button.cy + button.radius - 9.0f),
@@ -11976,7 +12017,7 @@ void RenderVirtualPad()
                          0x0,
                          static_cast<int>(button.radius * 2.0f),
                          0, 3,
-                         "%s", isSelector ? "SKL" : std::to_string(visualSlot + 1).c_str());
+                         "%s", isSelector ? "SKL" : std::to_string(GetVirtualOverlayHotKeySlot(visualSlot)).c_str());
 
                 // Empty slot: no icon was drawn above, so a bare number would
                 // read as already-bound. A centered '+' stands in for it -
@@ -12011,7 +12052,7 @@ void RenderVirtualPad()
     RenderVirtualMirrorHotKeySlots();
     RenderComboToggle();
     RenderTargetSelectButton();
-    RenderSkillPagePlaceholder();
+    RenderSkillPageButton();
     RenderAndroidGroundAim();
     RenderAndroidTradePicker();
 
