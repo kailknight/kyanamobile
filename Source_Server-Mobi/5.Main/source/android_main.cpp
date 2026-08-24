@@ -1057,15 +1057,16 @@ constexpr float kCompactMiniMapPanelGapToIcons = 10.0f;
 constexpr float kVirtualChatQuickButtonCx = 305.0f;
 constexpr float kVirtualChatQuickButtonCy = 413.0f;
 constexpr float kVirtualChatQuickButtonRadius = 18.0f;
-// Select-target: a button that opens a scrollable list of nearby enemies, and
+// AIM: a button that opens a scrollable list of the ten nearest players, and
 // locks onto whichever one is tapped. Tapping the button again releases the
-// lock rather than reopening the list.
+// lock rather than reopening the list. Players only - monsters are
+// auto-acquired directly by ATK/skills and don't need a picker.
 //
 // Range is 10 tiles to match kVirtualAutoAcquireMaxDistance rather than the
 // item menu's 5 - something worth deliberately targeting is usually further off
 // than dropped loot.
 constexpr float kTargetPickerRangeTiles = 10.0f;
-constexpr int kTargetPickerMaxEntries = 16;
+constexpr int kTargetPickerMaxEntries = 10;
 constexpr int kTargetPickerVisibleRows = 6;
 constexpr float kTargetPickerX = 300.0f;
 constexpr float kTargetPickerY = 90.0f;
@@ -4862,6 +4863,14 @@ bool IsAndroidTargetLockActive()
     return ResolveAndroidLockedTargetIndex() >= 0;
 }
 
+// AIM is for PvP - locking or fighting another player never makes sense in a
+// safe zone (attacks are refused there anyway), so the button itself just
+// doesn't exist there rather than being present but useless.
+bool IsAndroidAimAvailable()
+{
+    return IsVirtualPadAvailable() && Hero != nullptr && !Hero->SafeZone;
+}
+
 void SetAndroidTargetLock(int characterIndex)
 {
     if (!IsValidAutoCombatTarget(characterIndex) || IsAndroidMuHelperRunning())
@@ -5077,9 +5086,12 @@ bool IsAndroidTargetPickerCandidate(int characterIndex)
 
     const CHARACTER* c = &CharactersClient[characterIndex];
 
-    // Other players only count when PK targeting is on, so the list does not
-    // offer targets an attack would refuse to hit.
-    if (c->Object.Kind == KIND_PLAYER && !IsVirtualPkTargetingEnabled())
+    // AIM is for PvP specifically - monsters don't belong in this list, and
+    // unlike before this no longer depends on the separate auto-PK toggle:
+    // locking a player here is inert on its own (see SetAndroidTargetLock's
+    // caller), the actual attack permission check still happens when ATK or
+    // a skill is pressed, so there's nothing unsafe about listing them.
+    if (c->Object.Kind != KIND_PLAYER)
     {
         return false;
     }
@@ -8660,7 +8672,7 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
 
     // Ahead of the attack button: GetVirtualButtonHitRadius pads that circle by
     // 8, so testing it first would let it claim taps meant for this one.
-    if (HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
+    if (IsAndroidAimAvailable() && HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
     {
         return HandleTargetSelectButtonTap();
     }
@@ -10341,8 +10353,16 @@ void RenderComboToggle()
 // opening the list.
 void RenderTargetSelectButton()
 {
-    if (!IsVirtualPadAvailable())
+    if (!IsAndroidAimAvailable())
     {
+        // Entering a safe zone with a lock already held: drop it along with
+        // the button, rather than leaving a "LOCK" state active with no way
+        // to reach the button that would clear it.
+        if (IsAndroidTargetLockActive())
+        {
+            ClearAndroidTargetLock("entered-safe-zone");
+        }
+        HideAndroidTargetPicker();
         return;
     }
 
