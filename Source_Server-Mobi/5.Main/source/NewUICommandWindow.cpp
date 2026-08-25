@@ -21,6 +21,11 @@ extern bool AndroidShowCommandPartyPicker();
 extern bool AndroidShowCommandGuildPicker();
 extern bool AndroidShowCommandDuelPicker();
 extern bool AndroidShowCommandFriendPicker();
+extern bool AndroidShowCommandPurchasePicker();
+extern bool AndroidShowCommandGuildUnionPicker();
+extern bool AndroidShowCommandRivalPicker();
+extern bool AndroidShowCommandRivalOffPicker();
+extern bool AndroidShowCommandFollowPicker();
 #endif
 
 using namespace SEASON3B;
@@ -185,6 +190,61 @@ bool SEASON3B::CNewUICommandWindow::BtnProcess()
 			}
 
 			if (i == COMMAND_BATTLE && ::AndroidShowCommandDuelPicker())
+			{
+				if (m_iCurSelectCommand != COMMAND_NONE)
+					SetBtnState(m_iCurSelectCommand, false);
+
+				m_iCurSelectCommand = COMMAND_NONE;
+				SetMouseCursor(CURSOR_NORMAL);
+				PlayBuffer(SOUND_CLICK01);
+				return true;
+			}
+
+			if (i == COMMAND_PURCHASE && ::AndroidShowCommandPurchasePicker())
+			{
+				if (m_iCurSelectCommand != COMMAND_NONE)
+					SetBtnState(m_iCurSelectCommand, false);
+
+				m_iCurSelectCommand = COMMAND_NONE;
+				SetMouseCursor(CURSOR_NORMAL);
+				PlayBuffer(SOUND_CLICK01);
+				return true;
+			}
+
+			if (i == COMMAND_GUILDUNION && ::AndroidShowCommandGuildUnionPicker())
+			{
+				if (m_iCurSelectCommand != COMMAND_NONE)
+					SetBtnState(m_iCurSelectCommand, false);
+
+				m_iCurSelectCommand = COMMAND_NONE;
+				SetMouseCursor(CURSOR_NORMAL);
+				PlayBuffer(SOUND_CLICK01);
+				return true;
+			}
+
+			if (i == COMMAND_RIVAL && ::AndroidShowCommandRivalPicker())
+			{
+				if (m_iCurSelectCommand != COMMAND_NONE)
+					SetBtnState(m_iCurSelectCommand, false);
+
+				m_iCurSelectCommand = COMMAND_NONE;
+				SetMouseCursor(CURSOR_NORMAL);
+				PlayBuffer(SOUND_CLICK01);
+				return true;
+			}
+
+			if (i == COMMAND_RIVALOFF && ::AndroidShowCommandRivalOffPicker())
+			{
+				if (m_iCurSelectCommand != COMMAND_NONE)
+					SetBtnState(m_iCurSelectCommand, false);
+
+				m_iCurSelectCommand = COMMAND_NONE;
+				SetMouseCursor(CURSOR_NORMAL);
+				PlayBuffer(SOUND_CLICK01);
+				return true;
+			}
+
+			if (i == COMMAND_FOLLOW && ::AndroidShowCommandFollowPicker())
 			{
 				if (m_iCurSelectCommand != COMMAND_NONE)
 					SetBtnState(m_iCurSelectCommand, false);

@@ -190,6 +190,10 @@ namespace SEASON3B
 
 		void ShowChatLog();
 		void HideChatLog();
+		// Companion to IsShowFrame below. Added for the Android overlay, which
+		// hides the log while a window owns the screen and has to put the
+		// player's own on/off choice back afterwards rather than forcing it on.
+		bool IsShowChatLog() const { return m_bShowChatLog; }
 
 		int GetCurrentRenderEndLine() const;
 		void Scrolling(int nRenderEndLine);

@@ -1805,7 +1805,16 @@ enum class AndroidPlayerCommandMode
     Party,
     Guild,
     Duel,
-    Friend
+    Friend,
+    // Below: the CMD window's other five buttons, added after the picker
+    // architecture already existed for the six above - CNewUICommandWindow's
+    // own CommandXxx methods are the source of truth for each one's rules,
+    // referenced by name in the comments beside their handling below.
+    Purchase,   // "Buy" - opens the target's personal shop.
+    GuildUnion, // "Alliance" - propose a guild alliance.
+    Rival,      // "HostilityGuild" - declare a guild rivalry.
+    RivalOff,   // "Suspend" - cancel a guild rivalry.
+    Follow,     // Auto-follow the target.
 };
 
 struct AndroidTradePickerEntry
@@ -7727,13 +7736,90 @@ bool IsVirtualRightPanelUtilityActionActive(int button)
     }
 }
 
-// True while any real MU window owns the screen. The whole touch overlay hides
-// behind this so its controls never sit on top of the bag, the character sheet
-// or an NPC window, and so taps go to that window instead.
+// Every MU window that owns the screen while it is open. The whole touch
+// overlay hides behind this so its controls never sit on top of the bag, the
+// character sheet or an NPC window, and so taps go to that window instead.
+//
+// Kept as one list rather than a chain of ||s because it kept growing by bug
+// report - NPCSHOP was missing (the pad stole taps meant for the shop and for
+// the high-value-item sell confirm on top of it), then NPCGUILDMASTER (the
+// guild-mark editor rendered under the whole attack wheel). Anything with a
+// panel big enough to reach under a control belongs here; when in doubt, add
+// it, since the cost of a false entry is only that the overlay hides for a
+// window that did not strictly need it.
 //
 // Deliberately lists only MU interfaces: the Android trade and target pickers
 // are themselves modal panels, and including them here would make each one hide
 // itself the moment it opened.
+constexpr SEASON3B::INTERFACE_LIST kAndroidScreenOwningWindows[] = {
+    SEASON3B::INTERFACE_INVENTORY,
+    SEASON3B::INTERFACE_ExpandInventory,
+    SEASON3B::INTERFACE_CHARACTER,
+    SEASON3B::INTERFACE_INGAMESHOP,
+    SEASON3B::INTERFACE_NPCSHOP,
+    SEASON3B::INTERFACE_MuHelper,
+    SEASON3B::INTERFACE_MOVEMAP,
+    SEASON3B::INTERFACE_OPTION,
+    SEASON3B::INTERFACE_COMMAND,
+    SEASON3B::INTERFACE_FRIEND,
+    SEASON3B::INTERFACE_GUILDINFO,
+    // Covers both the Master skill tree and the Master Level info window -
+    // they register under the same INTERFACE_ enum. The skill tree in
+    // particular is nearly full-canvas (640x428 of the 640x480 UI space),
+    // so leaving it out of this list let the joystick, potion slots, top
+    // bar and utility grid all render and eat touches on top of it.
+    SEASON3B::INTERFACE_MASTER_LEVEL,
+
+    // Storage/crafting panels, all inventory-sized or larger.
+    SEASON3B::INTERFACE_STORAGE,
+    SEASON3B::INTERFACE_ExpandWarehouse,
+    SEASON3B::INTERFACE_MIXINVENTORY,
+    SEASON3B::INTERFACE_TRADE,
+    SEASON3B::INTERFACE_MYSHOP_INVENTORY,
+    SEASON3B::INTERFACE_PURCHASESHOP_INVENTORY,
+
+    // NPC dialogue windows. INTERFACE_NPCGUILDMASTER is the Devias guild
+    // master's guild-create/guild-mark editor - the report that prompted
+    // auditing this whole list, since the attack wheel, PK/CMB toggles and
+    // skill buttons all drew straight over its colour palette and canvas.
+    SEASON3B::INTERFACE_NPCGUILDMASTER,
+    SEASON3B::INTERFACE_NPC_DIALOGUE,
+    SEASON3B::INTERFACE_NPCQUEST,
+    SEASON3B::INTERFACE_MYQUEST,
+    SEASON3B::INTERFACE_NPCBREEDER,
+    SEASON3B::INTERFACE_GATEKEEPER,
+    SEASON3B::INTERFACE_GUARDSMAN,
+    SEASON3B::INTERFACE_SENATUS,
+    SEASON3B::INTERFACE_REFINERY,
+    SEASON3B::INTERFACE_REFINERYINFO,
+    SEASON3B::INTERFACE_DEVILSQUARE,
+    SEASON3B::INTERFACE_BLOODCASTLE,
+    SEASON3B::INTERFACE_KANTURU2ND_ENTERNPC,
+    SEASON3B::INTERFACE_CURSEDTEMPLE_NPC,
+    SEASON3B::INTERFACE_DOPPELGANGER_NPC,
+    SEASON3B::INTERFACE_EMPIREGUARDIAN_NPC,
+    SEASON3B::INTERFACE_UNITEDMARKETPLACE_NPC_JULIA,
+    SEASON3B::INTERFACE_GOLD_BOWMAN,
+    SEASON3B::INTERFACE_GOLD_BOWMAN_LENA,
+    SEASON3B::INTERFACE_GENSRANKING,
+};
+
+// The subset of the list above that the movement joystick is allowed to stay
+// live underneath. Everything else takes movement away with it.
+//
+// These three are the ones the player opens mid-fight and expects to keep
+// walking through - swapping gear, checking stats, toggling the helper - and
+// none of them render anywhere near the joystick's bottom-left corner. An NPC
+// conversation is the opposite case: the player is standing at a fixed spot
+// talking to someone, and being able to wander off mid-dialogue is neither
+// wanted nor coherent, so those hide it along with the rest of the overlay.
+constexpr SEASON3B::INTERFACE_LIST kAndroidMovementFriendlyWindows[] = {
+    SEASON3B::INTERFACE_INVENTORY,
+    SEASON3B::INTERFACE_ExpandInventory,
+    SEASON3B::INTERFACE_CHARACTER,
+    SEASON3B::INTERFACE_MuHelper,
+};
+
 bool IsAndroidGameWindowOpen()
 {
     if (g_pNewUISystem == nullptr)
@@ -7741,28 +7827,45 @@ bool IsAndroidGameWindowOpen()
         return false;
     }
 
-    return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP)
-        // The NPC shop (buy/sell/repair) was missing from this list entirely -
-        // while it was open (with no other listed window also open), the pad
-        // controls stayed live underneath it and could steal a tap meant for
-        // the shop or a message box popped on top of it (e.g. the high-value-
-        // item sell confirm's OK/Cancel), since this is the only gate that
-        // hands touches to windows instead of the virtual pad.
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MuHelper)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MOVEMAP)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_OPTION)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_COMMAND)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND)
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO)
-        // Covers both the Master skill tree and the Master Level info window -
-        // they register under the same INTERFACE_ enum. The skill tree in
-        // particular is nearly full-canvas (640x428 of the 640x480 UI space),
-        // so leaving it out of this list let the joystick, potion slots, top
-        // bar and utility grid all render and eat touches on top of it.
-        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL);
+    for (const SEASON3B::INTERFACE_LIST window : kAndroidScreenOwningWindows)
+    {
+        if (g_pNewUISystem->IsVisible(window))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// True when the joystick should stay drawn and tappable despite a window being
+// open - i.e. every screen-owning window currently up is one of the three the
+// player is meant to keep moving through. A single non-friendly window (an NPC
+// dialogue, the map, options, ...) is enough to take movement away, even if a
+// friendly one happens to be open at the same time: the stricter of the two
+// wins, since the reason that window hides the overlay applies regardless of
+// what else is on screen.
+bool IsAndroidMovementAllowedWithOpenWindows()
+{
+    if (g_pNewUISystem == nullptr)
+    {
+        return true;
+    }
+
+    for (const SEASON3B::INTERFACE_LIST window : kAndroidScreenOwningWindows)
+    {
+        if (!g_pNewUISystem->IsVisible(window))
+        {
+            continue;
+        }
+
+        if (std::find(std::begin(kAndroidMovementFriendlyWindows),
+                      std::end(kAndroidMovementFriendlyWindows),
+                      window) == std::end(kAndroidMovementFriendlyWindows))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool IsVirtualRightPanelUtilityWindowVisible()
@@ -8176,6 +8279,16 @@ const char* GetAndroidPlayerCommandPickerTitle()
         return "PARTY LIST";
     case AndroidPlayerCommandMode::Trade:
         return "TRADE LIST";
+    case AndroidPlayerCommandMode::Purchase:
+        return "BUY LIST";
+    case AndroidPlayerCommandMode::GuildUnion:
+        return "ALLIANCE LIST";
+    case AndroidPlayerCommandMode::Rival:
+        return "RIVAL LIST";
+    case AndroidPlayerCommandMode::RivalOff:
+        return "SUSPEND LIST";
+    case AndroidPlayerCommandMode::Follow:
+        return "FOLLOW LIST";
     default:
         return "PLAYER LIST";
     }
@@ -8204,6 +8317,24 @@ bool CanAndroidSendGuildCommand()
         if (g_pChatListBox != nullptr)
         {
             g_pChatListBox->AddText("", GlobalText[255], SEASON3B::TYPE_SYSTEM_MESSAGE);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+// Shared by GuildUnion/Rival/RivalOff - all three require the hero to be a
+// guild master before CommandGuildUnion/CommandGuildRival/
+// CommandCancelGuildRival will do anything, and all three reject with the
+// exact same message (GlobalText[1320]) when that is not the case.
+bool CanAndroidSendGuildMasterCommand()
+{
+    if (Hero != nullptr && Hero->GuildStatus != G_MASTER)
+    {
+        if (g_pChatListBox != nullptr)
+        {
+            g_pChatListBox->AddText("", GlobalText[1320], SEASON3B::TYPE_SYSTEM_MESSAGE);
         }
         return false;
     }
@@ -8359,6 +8490,14 @@ bool IsAndroidPlayerCommandCandidate(int characterIndex, AndroidPlayerCommandMod
     case AndroidPlayerCommandMode::Duel:
         return !g_DuelMgr.IsDuelEnabled()
             || g_DuelMgr.IsDuelPlayer(c, DUEL_ENEMY) == TRUE;
+    // GuildUnion/Rival/RivalOff all target another guild's master - see
+    // CommandGuildUnion/CommandGuildRival/CommandCancelGuildRival, which
+    // reject anything else server-side with the same GlobalText[507] message
+    // CommandGuild's own guild-master check uses.
+    case AndroidPlayerCommandMode::GuildUnion:
+    case AndroidPlayerCommandMode::Rival:
+    case AndroidPlayerCommandMode::RivalOff:
+        return c->GuildStatus == G_MASTER;
     default:
         return true;
     }
@@ -8642,6 +8781,56 @@ bool TrySendAndroidTradeToIndex(int characterIndex)
             sent = true;
         }
     }
+    else if (g_androidTradePicker.mode == AndroidPlayerCommandMode::Purchase)
+    {
+        sent = g_pCommandWindow->CommandPurchase(target);
+    }
+    else if (g_androidTradePicker.mode == AndroidPlayerCommandMode::GuildUnion)
+    {
+        if (!CanAndroidSendGuildMasterCommand()
+            || !IsAndroidPlayerCommandCandidate(characterIndex, AndroidPlayerCommandMode::GuildUnion, false))
+        {
+            if (g_pChatListBox != nullptr)
+            {
+                g_pChatListBox->AddText("", GlobalText[507], SEASON3B::TYPE_SYSTEM_MESSAGE);
+            }
+            return true;
+        }
+
+        sent = g_pCommandWindow->CommandGuildUnion(target);
+    }
+    else if (g_androidTradePicker.mode == AndroidPlayerCommandMode::Rival)
+    {
+        if (!CanAndroidSendGuildMasterCommand()
+            || !IsAndroidPlayerCommandCandidate(characterIndex, AndroidPlayerCommandMode::Rival, false))
+        {
+            if (g_pChatListBox != nullptr)
+            {
+                g_pChatListBox->AddText("", GlobalText[507], SEASON3B::TYPE_SYSTEM_MESSAGE);
+            }
+            return true;
+        }
+
+        sent = g_pCommandWindow->CommandGuildRival(target);
+    }
+    else if (g_androidTradePicker.mode == AndroidPlayerCommandMode::RivalOff)
+    {
+        if (!CanAndroidSendGuildMasterCommand()
+            || !IsAndroidPlayerCommandCandidate(characterIndex, AndroidPlayerCommandMode::RivalOff, false))
+        {
+            if (g_pChatListBox != nullptr)
+            {
+                g_pChatListBox->AddText("", GlobalText[507], SEASON3B::TYPE_SYSTEM_MESSAGE);
+            }
+            return true;
+        }
+
+        sent = g_pCommandWindow->CommandCancelGuildRival(target);
+    }
+    else if (g_androidTradePicker.mode == AndroidPlayerCommandMode::Follow)
+    {
+        sent = g_pCommandWindow->CommandFollow(characterIndex);
+    }
     else
     {
         sent = g_pCommandWindow->CommandTrade(target);
@@ -8877,6 +9066,14 @@ bool ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode mode)
         return true;
     }
 
+    if ((mode == AndroidPlayerCommandMode::GuildUnion
+            || mode == AndroidPlayerCommandMode::Rival
+            || mode == AndroidPlayerCommandMode::RivalOff)
+        && !CanAndroidSendGuildMasterCommand())
+    {
+        return true;
+    }
+
     CancelAndroidTradeAutoMove("show");
     g_androidTradePicker.visible = true;
     g_androidTradePicker.mode = mode;
@@ -8912,6 +9109,31 @@ bool ShowAndroidDuelPickerFromCommand()
 bool ShowAndroidFriendPickerFromCommand()
 {
     return ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode::Friend);
+}
+
+bool ShowAndroidPurchasePickerFromCommand()
+{
+    return ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode::Purchase);
+}
+
+bool ShowAndroidGuildUnionPickerFromCommand()
+{
+    return ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode::GuildUnion);
+}
+
+bool ShowAndroidRivalPickerFromCommand()
+{
+    return ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode::Rival);
+}
+
+bool ShowAndroidRivalOffPickerFromCommand()
+{
+    return ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode::RivalOff);
+}
+
+bool ShowAndroidFollowPickerFromCommand()
+{
+    return ShowAndroidPlayerCommandPickerFromCommand(AndroidPlayerCommandMode::Follow);
 }
 
 bool HandleAndroidTargetPickerFingerDown(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
@@ -9490,6 +9712,30 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     if (!IsVirtualPadAvailable())
     {
         return false;
+    }
+
+    // Movement is partly exempt from the game-window gate just below - the
+    // joystick stays live while the Bag, Character sheet or Helper is open
+    // (see kAndroidMovementFriendlyWindows), since those are the windows a
+    // player opens mid-fight and expects to keep walking through, and none of
+    // them render anywhere near its bottom-left corner. Every other window -
+    // NPC dialogues especially - still takes it away with the rest of the
+    // overlay. See RenderVirtualPad's matching exemption for the draw side.
+    //
+    // Deliberately NOT exempt from IsVirtualPadAvailable() itself just above -
+    // a focused text input (chat, or an NPC dialogue's own input such as
+    // CNewUIGuildMakeWindow's guild-name entry) should take the joystick away
+    // too: the player is meant to stand still while typing.
+    //
+    // A tap outside the joystick's own rect falls through here
+    // (HandleVirtualJoystickFingerDown hit-tests it first) rather than being
+    // claimed, so this cannot steal a tap meant for a window underneath -
+    // except while a ground-targeted skill is armed, which claims unconditionally
+    // regardless of where the tap lands; that is pre-existing behaviour this
+    // does not change, just reaches from a new place.
+    if (IsAndroidMovementAllowedWithOpenWindows() && HandleVirtualJoystickFingerDown(touch))
+    {
+        return true;
     }
 
     // Paired with the same check in RenderVirtualPad. The controls are not on
@@ -11427,6 +11673,46 @@ SEASON3B::CNewUIChatLogWindow* GetAndroidChatLog()
     return (g_pNewUISystem != nullptr) ? g_pNewUISystem->GetUI_NewChatLogWindow() : nullptr;
 }
 
+// Takes the chat log's message text off screen while a window owns the screen,
+// so it does not sit on top of an NPC panel - the tab strip above it is
+// suppressed by RenderAndroidChatTabs's own matching gate.
+//
+// Done by toggling m_bShowChatLog rather than hiding the interface, because
+// INTERFACE_CHATLOGWINDOW is on CNewUISystem::IsImpossibleHideInterface's list
+// and simply will not Hide(). That flag is also the player's own chat-log
+// on/off setting (the input box's CHATLOG button), so the previous value is
+// saved on the way in and put back on the way out instead of unconditionally
+// re-showing - otherwise closing an NPC window would silently turn the log
+// back on for someone who had deliberately turned it off.
+void UpdateAndroidChatLogSuppression()
+{
+    SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
+    if (pLog == nullptr)
+    {
+        return;
+    }
+
+    static bool s_suppressed = false;
+    static bool s_restoreShowChatLog = false;
+
+    const bool shouldSuppress = IsAndroidGameWindowOpen();
+
+    if (shouldSuppress && !s_suppressed)
+    {
+        s_restoreShowChatLog = pLog->IsShowChatLog();
+        pLog->HideChatLog();
+        s_suppressed = true;
+    }
+    else if (!shouldSuppress && s_suppressed)
+    {
+        if (s_restoreShowChatLog)
+        {
+            pLog->ShowChatLog();
+        }
+        s_suppressed = false;
+    }
+}
+
 bool IsChatTabActive(int tab)
 {
     SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
@@ -11454,7 +11740,15 @@ bool IsChatTabActive(int tab)
 
 void RenderAndroidChatTabs()
 {
-    if (!IsAndroidChatUiAvailable() || GetAndroidChatLog() == nullptr)
+    // The IsAndroidGameWindowOpen() half matches the tap handler's own gate
+    // exactly (see HandleVirtualFingerDown) - the strip was drawing over NPC
+    // panels and the inventory while being untappable there, which is both
+    // ugly and misleading. The chat log's own message text is suppressed
+    // alongside it by UpdateAndroidChatLogSuppression; this call only owns the
+    // tab buttons and the backing panel behind them.
+    if (!IsAndroidChatUiAvailable()
+        || IsAndroidGameWindowOpen()
+        || GetAndroidChatLog() == nullptr)
     {
         return;
     }
@@ -12316,7 +12610,7 @@ void RenderAndroidTradePicker()
         static_cast<int>(footerRect.w),
         0,
         3,
-        g_androidTradePicker.autoMoving ? "HUY MOVE" : "HUY");
+        g_androidTradePicker.autoMoving ? "CANCEL MOVE" : "CANCEL");
     EndBitmap();
 }
 
@@ -13330,29 +13624,30 @@ void RenderVirtualPad()
         s_inventoryWasVisible = inventoryVisible;
     }
 
-    // A bag, character sheet or any other MU window owns the screen: draw none
-    // of the touch controls over it. The two modal pickers still render, since
-    // they are windows in their own right rather than overlay controls.
-    if (IsAndroidGameWindowOpen())
-    {
-        RenderAndroidTradePicker();
-        RenderAndroidTargetPicker();
-        return;
-    }
-
-    BeginBitmap();
-    EnableAlphaBlend();
-    DisableTexture();
-    const bool joystickActive = g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1);
-    EnsureUITextures();
-
     // The stick is always on screen at its one home, half visible when idle and
     // full while held, so there is something to aim at before the thumb lands.
     // It used to be invisible until touched and then recentred on the finger,
     // which left nothing to push against and no way to see which way you were
     // pushing. Sizes come from the geometry helper, which works in device pixels
     // - specified in UI units the ring draws as a wide ellipse.
+    //
+    // Deliberately drawn ahead of the IsAndroidGameWindowOpen() check below,
+    // under its own narrower condition - see HandleVirtualFingerDown's
+    // matching exemption: the Bag, Character sheet and Helper leave the
+    // joystick up (nothing they draw goes near its bottom-left corner, and
+    // they are the windows a player opens mid-fight), while every other
+    // window - NPC dialogues especially - hides it along with the rest of the
+    // overlay. Still behind IsVirtualPadAvailable() above, deliberately - a
+    // focused text input (chat, or an NPC dialogue's own input) is meant to
+    // take the joystick away too, the player standing still while typing.
+    if (IsAndroidMovementAllowedWithOpenWindows())
     {
+        BeginBitmap();
+        EnableAlphaBlend();
+        DisableTexture();
+        EnsureUITextures();
+
+        const bool joystickActive = g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1);
         const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
         const float joystickCenterX = std::round(geometry.centerX);
         const float joystickCenterY = std::round(geometry.centerY);
@@ -13383,8 +13678,19 @@ void RenderVirtualPad()
             kJoystickKnobUW,
             kJoystickKnobVH,
             joystickAlpha);
+        EndBitmap();
     }
-    EndBitmap();
+
+    // A bag, character sheet or any other MU window owns the screen: draw none
+    // of the REST of the touch controls over it (the joystick above is exempt
+    // - see its own comment). The two modal pickers still render, since they
+    // are windows in their own right rather than overlay controls.
+    if (IsAndroidGameWindowOpen())
+    {
+        RenderAndroidTradePicker();
+        RenderAndroidTargetPicker();
+        return;
+    }
 
     RenderVirtualPortraitHud();
     RenderVirtualTopBar();
@@ -14032,6 +14338,31 @@ bool AndroidShowCommandDuelPicker()
 bool AndroidShowCommandFriendPicker()
 {
     return ShowAndroidFriendPickerFromCommand();
+}
+
+bool AndroidShowCommandPurchasePicker()
+{
+    return ShowAndroidPurchasePickerFromCommand();
+}
+
+bool AndroidShowCommandGuildUnionPicker()
+{
+    return ShowAndroidGuildUnionPickerFromCommand();
+}
+
+bool AndroidShowCommandRivalPicker()
+{
+    return ShowAndroidRivalPickerFromCommand();
+}
+
+bool AndroidShowCommandRivalOffPicker()
+{
+    return ShowAndroidRivalOffPickerFromCommand();
+}
+
+bool AndroidShowCommandFollowPicker()
+{
+    return ShowAndroidFollowPickerFromCommand();
 }
 
 bool AndroidTriggerNormalAttackButton()
@@ -16679,12 +17010,23 @@ static void RunAndroidGameFrame()
     // - on desktop it closes with the input, but here dismissing the keyboard
     // only dropped focus and left the bar sitting over the hotkey row. Closing
     // it on the same transition keeps the two together.
-    if (!hasFocusedTextInput
-        && g_pNewUISystem != nullptr
-        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX))
+    //
+    // The IsAndroidGameWindowOpen() arm closes it for a second reason: an NPC
+    // panel (or the bag, character sheet, ...) taking the screen should take
+    // the chat bar with it. That case cannot rely on the focus check beside
+    // it, because an NPC window carrying its own text field - the Devias guild
+    // master's guild-name entry, say - keeps hasFocusedTextInput true and
+    // would otherwise leave the chat bar open on top of it.
+    if (g_pNewUISystem != nullptr
+        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX)
+        && (!hasFocusedTextInput || IsAndroidGameWindowOpen()))
     {
         g_pNewUISystem->Hide(SEASON3B::INTERFACE_CHATINPUTBOX);
     }
+
+    // Companion to the tab strip's own gate in RenderAndroidChatTabs - takes
+    // the log's message text off screen while a window owns it.
+    UpdateAndroidChatLogSuppression();
 
     // Keeps the box clear of the keyboard - see SyncVirtualHudChatBox's own
     // comment for why this has to run every frame rather than only when the
