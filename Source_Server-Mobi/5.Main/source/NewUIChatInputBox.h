@@ -128,8 +128,6 @@ namespace SEASON3B
 		void UnloadImages();
 
 		void SetButtonInfo();
-		void SetInputMsgType(int iInputMsgType);
-		int GetInputMsgType() const;
 
 		bool RenderFrame();
 		void RenderButtons();
@@ -143,6 +141,16 @@ namespace SEASON3B
 		void Release();
 
 		void SetWndPos(int x, int y);
+
+		// Which outgoing channel a typed message prefixes itself with on send
+		// ('~' party / '@' guild / '$' gens - see INPUT_MESSAGE_TYPE and the
+		// VK_RETURN handler in UpdateKeyEvent). Public so the Android chat tab
+		// strip can switch it alongside the log's own display filter - on PC
+		// this is set by clicking the small per-channel buttons drawn on the
+		// input box itself (see UpdateMouseEvent), which have no touch
+		// equivalent.
+		void SetInputMsgType(int iInputMsgType);
+		int GetInputMsgType() const;
 
 		void SetFont(HFONT hFont);
 

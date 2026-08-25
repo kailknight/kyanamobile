@@ -1594,14 +1594,22 @@ constexpr float kVirtualCurrentSkillBoxX = kHudBarRight + 4.0f;
 constexpr float kVirtualCurrentSkillBoxY = 431.0f;
 constexpr float kVirtualCurrentSkillBoxW = 32.0f;
 constexpr float kVirtualCurrentSkillBoxH = 38.0f;
-constexpr float kVirtualHudChatBoxX = 226.0f;
-
-// Y was 400 so the box cleared the top of the legacy frame. That frame is gone,
-// so it can drop into the reclaimed strip and stop covering the play area; 418
-// keeps its 52px height just inside the 480 bottom edge.
-constexpr float kVirtualHudChatBoxY = 418.0f;
-constexpr float kVirtualHudChatBoxW = 170.0f;
-constexpr float kVirtualHudChatBoxH = 52.0f;
+// Where the chat input box (CNewUIChatInputBox, 281x47) is moved to while it
+// is open - see SyncVirtualHudChatBox. Its PC position
+// (NewUISystem.cpp's Create call: x=0, y=480-51-47=382) sits in the bottom
+// fifth of the 640x480 UI space; a landscape on-screen keyboard easily covers
+// a third or more of the screen height, so at that position both the box and
+// whatever the player is typing disappear completely behind it. Same X column
+// as the chat tabs/log (215) for visual consistency, flush against the top
+// margin the stat panel uses so it does not get clipped. It does briefly cover
+// the stat panel and buff row while open - an accepted trade-off since the box
+// is only ever visible while actively being typed into (see the
+// hide-when-unfocused block in RunAndroidGameFrame), not a permanent HUD
+// fixture.
+constexpr float kVirtualHudChatBoxX = 215.0f;
+constexpr float kVirtualHudChatBoxY = 6.0f;
+constexpr float kVirtualHudChatBoxW = 281.0f;
+constexpr float kVirtualHudChatBoxH = 47.0f;
 
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Zoom +/- buttons: top-center beside the level badge 鑺掗垾婵冨亾鑺掗垾婵冨亾
 constexpr float kZoomMin  = 800.0f;
@@ -2337,6 +2345,32 @@ bool IsVirtualPadAvailable()
         && !AndroidHasFocusedTextInput();
 }
 
+// Same base requirements as IsVirtualPadAvailable, minus the focused-text-input
+// veto - the chat tab strip and chat log tap-to-focus/whisper are chat UI, not
+// movement/combat pad controls, and the one time they most need to work is
+// while the chat box itself already has focus (it grabs focus the instant it
+// opens - see ToggleVirtualChatInputBox). Using IsVirtualPadAvailable for them
+// made every tab and the log itself untappable for as long as chat was open at
+// all, which is effectively always: switching to Party/Guild/Alliance never
+// worked, and neither did tapping a name in the log to whisper it.
+bool IsAndroidChatUiAvailable()
+{
+    return SceneFlag == MAIN_SCENE
+        && Hero != nullptr
+        && CharacterAttribute != nullptr
+        && g_pMainFrame != nullptr;
+}
+
+// Called once per frame from RunAndroidGameFrame so the box sits at
+// kVirtualHudChatBoxX/Y - clear of the on-screen keyboard - for as long as
+// SceneFlag is MAIN_SCENE, whether or not it is currently open. Cheap either
+// way (just updates position fields and its two child controls'), and it must
+// already be in place by the time the box is shown, or the first frame it
+// opens on would still draw at its old PC position before this next runs.
+// g_virtualHudChatPinned is always false (nothing sets it) - the block below
+// it is unreachable in practice and left alone rather than removed, since it
+// is a real, harmless, independent feature (auto-show a persistent HUD chat
+// bar) that a future session may want to wire up behind a settings toggle.
 void SyncVirtualHudChatBox()
 {
     if (g_pNewUISystem == nullptr || g_pChatInputBox == nullptr)
@@ -9431,6 +9465,28 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         HideAndroidTradePicker();
     }
 
+    // Checked ahead of IsVirtualPadAvailable() on purpose, but still behind
+    // IsAndroidGameWindowOpen() - the chat tab strip and log need to keep
+    // working for as long as the chat box has focus (it grabs focus the
+    // moment it opens, so IsVirtualPadAvailable() is false for essentially
+    // its entire time on screen; gating chat taps on it made every tab
+    // untappable - see IsAndroidChatUiAvailable's comment), but still have to
+    // yield to Inventory/NPCSHOP/Character/etc. windows that can visually
+    // overlap the same bottom-centre screen region, the same as the pad
+    // controls below do.
+    if (!IsAndroidGameWindowOpen() && IsAndroidChatUiAvailable())
+    {
+        if (HandleAndroidChatTabTap(uiX, uiY))
+        {
+            return true;
+        }
+
+        if (HandleAndroidChatLogTap(uiX, uiY))
+        {
+            return true;
+        }
+    }
+
     if (!IsVirtualPadAvailable())
     {
         return false;
@@ -9443,20 +9499,6 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     if (IsAndroidGameWindowOpen())
     {
         return false;
-    }
-
-    // Before the pad controls: the tab strip sits above the chat log, clear of
-    // them, and a tap there should switch channel rather than fall through.
-    if (HandleAndroidChatTabTap(uiX, uiY))
-    {
-        return true;
-    }
-
-    // Directly after the tabs: same region of the screen, and a tap in the log
-    // should start typing rather than fall through to the world behind it.
-    if (HandleAndroidChatLogTap(uiX, uiY))
-    {
-        return true;
     }
 
     // Before the top control stack: the labelled bar sits above it in the
@@ -11412,7 +11454,7 @@ bool IsChatTabActive(int tab)
 
 void RenderAndroidChatTabs()
 {
-    if (!IsVirtualPadAvailable() || GetAndroidChatLog() == nullptr)
+    if (!IsAndroidChatUiAvailable() || GetAndroidChatLog() == nullptr)
     {
         return;
     }
@@ -11462,10 +11504,37 @@ void RenderAndroidChatTabs()
     EndBitmap();
 }
 
+// Which outgoing channel a tab should also switch the chat box to send as, or
+// -1 (INPUT_NOTHING) to leave the send channel alone. System (5) and the
+// overflow tab (6) are pure history filters - there is no "send a system
+// message" or "send to whisper/GM/error" to switch into, so tapping them only
+// changes what is displayed, same as before. tab 4 (Alliance) maps to
+// INPUT_GENS_MESSAGE ('$' prefix) as the closest of the four channels the
+// input box actually supports sending as - there is no dedicated union/
+// alliance send type in CNewUIChatInputBox::INPUT_MESSAGE_TYPE, only
+// Normal/Party/Guild/Gens.
+int GetChatTabInputMsgType(int tab)
+{
+    switch (tab)
+    {
+    case 0:  // All
+    case 1:  // Chat
+        return SEASON3B::CNewUIChatInputBox::INPUT_CHAT_MESSAGE;
+    case 2:  // Party
+        return SEASON3B::CNewUIChatInputBox::INPUT_PARTY_MESSAGE;
+    case 3:  // Guild
+        return SEASON3B::CNewUIChatInputBox::INPUT_GUILD_MESSAGE;
+    case 4:  // Alliance
+        return SEASON3B::CNewUIChatInputBox::INPUT_GENS_MESSAGE;
+    default:
+        return SEASON3B::CNewUIChatInputBox::INPUT_NOTHING;
+    }
+}
+
 bool HandleAndroidChatTabTap(float uiX, float uiY)
 {
     SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
-    if (pLog == nullptr || !IsVirtualPadAvailable())
+    if (pLog == nullptr || !IsAndroidChatUiAvailable())
     {
         return false;
     }
@@ -11496,6 +11565,18 @@ bool HandleAndroidChatTabTap(float uiX, float uiY)
             pLog->ChangeMessage(GetChatTabMessageType(tab));
         }
 
+        // ChangeMessage above only switches which history is displayed - it
+        // has no effect on which channel a typed message actually sends to
+        // (CNewUIChatInputBox::m_iInputMsgType, read on Enter to prepend the
+        // '~'/'@'/'$' channel prefix). Without this, every tab looked like it
+        // was doing something but a typed message kept going out as Normal
+        // regardless of which tab was selected.
+        const int inputMsgType = GetChatTabInputMsgType(tab);
+        if (inputMsgType != SEASON3B::CNewUIChatInputBox::INPUT_NOTHING && g_pChatInputBox != nullptr)
+        {
+            g_pChatInputBox->SetInputMsgType(inputMsgType);
+        }
+
         PlayBuffer(SOUND_CLICK01);
         return true;
     }
@@ -11520,7 +11601,7 @@ bool HandleAndroidChatTabTap(float uiX, float uiY)
 bool HandleAndroidChatLogTap(float uiX, float uiY)
 {
     SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
-    if (pLog == nullptr || g_pNewUISystem == nullptr || !IsVirtualPadAvailable())
+    if (pLog == nullptr || g_pNewUISystem == nullptr || !IsAndroidChatUiAvailable())
     {
         return false;
     }
@@ -13307,7 +13388,10 @@ void RenderVirtualPad()
 
     RenderVirtualPortraitHud();
     RenderVirtualTopBar();
-    RenderAndroidChatTabs();
+    // NOT called here - RenderVirtualPad as a whole already returned above
+    // whenever a text input is focused, which is essentially the entire time
+    // chat is open. Called separately, outside that gate, from
+    // RunAndroidGameFrame right after this function - see the comment there.
 
     RenderVirtualTopRightControls();
 
@@ -16602,6 +16686,11 @@ static void RunAndroidGameFrame()
         g_pNewUISystem->Hide(SEASON3B::INTERFACE_CHATINPUTBOX);
     }
 
+    // Keeps the box clear of the keyboard - see SyncVirtualHudChatBox's own
+    // comment for why this has to run every frame rather than only when the
+    // box opens.
+    SyncVirtualHudChatBox();
+
     AndroidDrainPackets();
     UpdateVirtualPadHolds();
 
@@ -16639,6 +16728,12 @@ static void RunAndroidGameFrame()
         Scene(nullptr);
         const Uint64 virtualPadStart = static_cast<Uint64>(MU_MobilePerfNow());
         RenderVirtualPad();
+        // Deliberately outside RenderVirtualPad - that function returns
+        // entirely while any text input is focused (IsVirtualPadAvailable()),
+        // which is essentially the whole time chat is open, so the tab strip
+        // never got a chance to draw right when it matters most. Guards
+        // itself with IsAndroidChatUiAvailable (no focus requirement).
+        RenderAndroidChatTabs();
         const Uint64 presentStart = static_cast<Uint64>(MU_MobilePerfNow());
         if (g_RenderBackend)
         {
