@@ -100,6 +100,8 @@ namespace SEASON3B
 		void SetSellingItem(bool bFlag);
 		bool IsSellingItem();
 
+		CNewUIInventoryCtrl* GetInventoryCtrl() const { return m_pNewInventoryCtrl; }
+
 	private:
 		void Init();
 		void SetButtonInfo();

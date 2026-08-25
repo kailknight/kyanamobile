@@ -134,7 +134,7 @@ void SEASON3B::CNewUIMessageBoxBase::RenderMsgBackColor(bool _bRender)
 		EnableAlphaTest();
 		//glColor4f(0.2f, 0.2f, 0.2f, m_fOpacityAlpha);
 		glColor4f(m_vColor[0], m_vColor[1], m_vColor[2], m_fOpacityAlpha);
-		// ¸ÞÀÎÇÁ·¹ÀÓ¿¡¼­ ³ôÀÌ°ªÀ» 51À» Àâ°íÀÖÀ½
+		// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó¿ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ì°ï¿½ï¿½ï¿½ 51ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 		RenderColor(_fPosX, _fPosY, _fWidth, _fHeight);
 		glEnable(GL_TEXTURE_2D);
 		
@@ -416,9 +416,21 @@ void SEASON3B::CNewUIMessageBoxMng::PopAllMessageBoxes()
 	m_vecMsgBoxes.clear();
 }
 
-bool SEASON3B::CNewUIMessageBoxMng::IsEmpty() 
-{ 
-	return m_vecMsgBoxes.empty(); 
+bool SEASON3B::CNewUIMessageBoxMng::IsEmpty()
+{
+	return m_vecMsgBoxes.empty();
+}
+
+SEASON3B::CNewUIMessageBoxBase* SEASON3B::CNewUIMessageBoxMng::GetTopMessageBox()
+{
+	if(m_vecMsgBoxes.empty())
+		return NULL;
+
+	// Same sort UpdateMouseEvent does before taking begin(), so both agree on
+	// which box is frontmost.
+	std::sort(m_vecMsgBoxes.begin(), m_vecMsgBoxes.end(), ComparePriority);
+
+	return m_vecMsgBoxes.front();
 }
 
 void SEASON3B::CNewUIMessageBoxMng::SendEvent(CNewUIMessageBoxBase* pOwner, DWORD dwEvent)

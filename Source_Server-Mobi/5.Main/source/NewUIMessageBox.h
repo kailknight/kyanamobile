@@ -326,6 +326,12 @@ namespace SEASON3B
 
 		bool IsEmpty();
 
+		// Highest-priority (frontmost) message box, or NULL when none is open -
+		// the same one UpdateMouseEvent drives. Added for the Android touch
+		// layer, which has to hit-test its rect itself: it routes taps by raw
+		// screen position rather than by the z-ordered window walk PC uses.
+		CNewUIMessageBoxBase* GetTopMessageBox();
+
 		void SendEvent(CNewUIMessageBoxBase* pOwner, DWORD dwEvent);
 		void SendEvent(CNewUIMessageBoxBase* pOwner, DWORD dwEvent, const leaf::xstreambuf& xParam);
 		

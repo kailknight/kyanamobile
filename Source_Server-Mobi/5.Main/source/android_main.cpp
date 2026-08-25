@@ -100,6 +100,8 @@ static void android_set_data_dir_early()
 #include "NewUIMainFrameWindow.h"
 #include "NewUIMyInventory.h"
 #include "NewUIInventoryCtrl.h"
+#include "NewUINPCShop.h"
+#include "NewUIMessageBox.h"
 #include "NewUISystem.h"
 #include "NewUIFriendWindow.h"
 #include "Translation/i18n.h"
@@ -706,6 +708,13 @@ constexpr uint32_t kAndroidEquipHoldMs = 500;
 constexpr float kAndroidEquipHoldMoveCancelUi = 8.0f;
 constexpr uint32_t kAndroidEquipDoubleTapMaxMs = 320;
 
+// NPC shop listing: a single tap only shows the item (tooltip), same shape as
+// the two above but simpler - no hold gesture, just tap-to-show vs.
+// double-tap-to-buy. PC's own click-to-buy (CNewUINPCShop::UpdateMouseEvent)
+// has the same no-hover-gate shape as equipment's pickup, so it needs the
+// same active single-tap hold-back.
+constexpr uint32_t kAndroidShopDoubleTapMaxMs = 320;
+
 constexpr uint32_t kAndroidTradeAutoMoveIntervalMs = 520;
 constexpr uint32_t kAndroidTradeAutoMoveTimeoutMs = 15000;
 constexpr const char* kVirtualSkillSlotsPath = "Data/Local/android_touch_skill_slots.cfg";
@@ -1163,12 +1172,22 @@ constexpr std::array<const char*, kChatTabCount> kChatTabLabels = {
 };
 
 // Auto-combo toggle. Only drawn and only hit-tested for the Knight line, so it
-// costs nothing on classes that have no combo. Below the ring rather than
-// above it, matching the reference layout.
-constexpr float kComboToggleX = 552.0f;
-constexpr float kComboToggleY = 452.0f;
+// costs nothing on classes that have no combo. Sits beside skill slot 4
+// (kVirtualSkillCenters[3], the bottom-left button in the ring), just outside
+// its left edge and vertically centred on it.
+constexpr float kComboToggleX = 481.0f;
+constexpr float kComboToggleY = 389.0f;
 constexpr float kComboToggleW = 40.0f;
 constexpr float kComboToggleH = 22.0f;
+
+// PK (auto-attack-PK) toggle - same small box style as combo, always shown
+// (no class gate). Sits beside skill slot 2 (kVirtualSkillCenters[1], the
+// top-left button in the ring), to its left and vertically centred on it -
+// same column as the combo toggle below it, one ring position up.
+constexpr float kPkToggleX = 481.0f;
+constexpr float kPkToggleY = 289.0f;
+constexpr float kPkToggleW = 40.0f;
+constexpr float kPkToggleH = 22.0f;
 
 constexpr int kAndroidTradePickerMaxEntries = MAX_CHARACTERS_CLIENT;
 constexpr int kAndroidTradePickerVisibleRows = 6;
@@ -1693,7 +1712,82 @@ struct PendingAndroidEquipHold
 // repair-mode redirect). See FireAndroidEquipSelectPulse/UpdateAndroidEquipSelectPulse.
 struct PendingAndroidEquipSelectPulse
 {
-    bool releaseOnNextUpdate = false;
+    // Fire() only requests the pulse (armed=true). The press itself is applied
+    // on the following UpdateAndroidEquipSelectPulse() call (pressed=true), and
+    // released on the call after that - two full ticks of UpdateVirtualPadHolds
+    // apart. Arming and pressing on the same tick (as an earlier version of
+    // this did by setting the press bits directly in Fire) collapsed press and
+    // release into the same frame whenever Fire ran before that frame's
+    // UpdateVirtualPadHolds - which it always does, since finger-down handling
+    // happens during event processing, earlier in the frame than the update
+    // tick. ScanAsyncKeyState (which IsRelease(VK_LBUTTON) depends on) polls
+    // MouseLButton once per frame; if it never sees it true, the state machine
+    // never reaches PRESS and can therefore never see a RELEASE edge either.
+    bool armed = false;
+    bool pressed = false;
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+};
+
+// A completed short tap on a shop listing item, candidate half of a possible
+// double-tap - same shape as g_androidLastEquipTapUpMs/Slot, resolved on the
+// NEXT finger-down rather than by waiting to see if one arrives. Identified by
+// the item's own Key rather than a grid slot index, since InsertItem re-lays
+// out the whole listing arbitrarily and a slot index has no guaranteed
+// meaning across shop refreshes.
+struct AndroidShopTapState
+{
+    bool active = false;
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    DWORD itemKey = 0;
+};
+
+// Single-frame press-then-release pulse on VK_LBUTTON aimed at a shop listing
+// item, to drive CNewUINPCShop::UpdateMouseEvent's own buy branch exactly the
+// way a real PC click there would. Same two-tick armed/pressed/release shape
+// as PendingAndroidEquipSelectPulse, and for the same reason - see its comment.
+struct PendingAndroidShopBuyPulse
+{
+    bool armed = false;
+    bool pressed = false;
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+};
+
+// A synthetic mouse click delivered to a modal message box, spread over three
+// consecutive frames.
+//
+// CNewUIMessageBoxMng::UpdateMouseEvent (NewUIMessageBox.cpp) is a state
+// machine that needs the pointer to be resting inside the box with the button
+// UP for one frame (EVENT_NONE -> EVENT_WND_MOUSE_HOVER) *before* it will
+// accept a press (-> EVENT_WND_MOUSE_LBUTTON_DOWN), and only then does the
+// following release send MSGBOX_EVENT_MOUSE_LBUTTON_UP, which is what actually
+// fires OK/Cancel. On a mouse that hover frame is free - the pointer is
+// already sitting on the button before the click. A touch has no hover at all:
+// position and press arrive in the same event, so the manager's very first
+// look at a tap is EVENT_NONE with the button already down, which matches no
+// branch, leaving it stuck in EVENT_NONE. A single tap could therefore never
+// press OK or Cancel - at best a tap latched HOVER on its release, so a
+// *second* tap landing on the same spot before anything moved MouseX/MouseY
+// would fire. That is why it looked intermittent rather than dead.
+//
+// Playing the three stages out on our own frame clock (rather than following
+// the finger) also decouples this from how briefly the user taps - a flick
+// where FINGERDOWN and FINGERUP land in the same event drain still delivers a
+// full, correctly-spaced click.
+struct PendingAndroidMessageBoxClick
+{
+    enum Stage
+    {
+        kIdle = 0,
+        kHover,     // pointer parked in the box, button up
+        kPress,     // button down
+        kRelease,   // button up again -> LBUTTON_UP -> OK/Cancel fires
+    };
+
+    Stage stage = kIdle;
+    float uiX = 0.0f;
+    float uiY = 0.0f;
 };
 
 enum class AndroidPlayerCommandMode
@@ -2122,6 +2216,17 @@ PendingAndroidEquipSelectPulse g_androidEquipSelectPulse{};
 uint32_t g_androidLastEquipTapUpMs = 0;
 int g_androidLastEquipTapSlot = -1;
 bool g_androidLastEquipTapIsMuun = false;
+
+AndroidShopTapState g_androidShopTap{};
+uint32_t g_androidLastShopTapUpMs = 0;
+DWORD g_androidLastShopTapItemKey = 0;
+PendingAndroidShopBuyPulse g_androidShopBuyPulse{};
+
+PendingAndroidMessageBoxClick g_androidMessageBoxClick{};
+// The finger currently driving (or having driven) a message-box tap. Kept so
+// its motion and release stay claimed rather than falling through to the
+// joystick behind the modal box.
+SDL_FingerID g_androidMessageBoxFinger = static_cast<SDL_FingerID>(-1);
 
 AndroidTradePickerState g_androidTradePicker{};
 
@@ -3146,6 +3251,54 @@ bool IsTouchOverInventoryWindow(float uiX, float uiY)
     return uiX >= left && uiX <= right && uiY >= top && uiY <= bottom;
 }
 
+// True while a modal message box (g_MessageBox - level-up confirms, the
+// high-value-item sell check, trade/quit prompts, ...) is on screen. On PC,
+// window input is routed by z-order (CNewUIMessageBoxMng::GetLayerDepth is
+// 10.7f, above every ordinary window), so a message box always gets first
+// look at a click even when it visually overlaps a window under it. The
+// android-specific item/equipment/shop hit-tests below have no such z-order -
+// they test raw screen position against a window's rect directly - so without
+// this guard, a message box floating over the inventory or shop panel (the
+// high-value-item confirm does exactly this, see CHighValueItemCheckMsgBoxLayout)
+// would have its OK/Cancel taps swallowed by whatever equipped/bag/shop item
+// happens to sit at the same screen position underneath it, exactly as if it
+// were not there at all.
+bool IsAndroidMessageBoxOpen()
+{
+    return g_MessageBox != nullptr && !g_MessageBox->IsEmpty();
+}
+
+// Screen rect of the frontmost message box, in the same 640x480 UI space
+// everything else here works in (CheckMouseIn compares against MouseX/MouseY,
+// which UpdateMouseFromTouch already maps into that space). False when none is
+// open.
+bool GetAndroidMessageBoxRect(AndroidUiRect* outRect)
+{
+    if (g_MessageBox == nullptr)
+    {
+        return false;
+    }
+
+    SEASON3B::CNewUIMessageBoxBase* box = g_MessageBox->GetTopMessageBox();
+    if (box == nullptr)
+    {
+        return false;
+    }
+
+    const POINT& pos = box->GetPos();
+    const SIZE& size = box->GetSize();
+    if (outRect != nullptr)
+    {
+        *outRect = {
+            static_cast<float>(pos.x),
+            static_cast<float>(pos.y),
+            static_cast<float>(size.cx),
+            static_cast<float>(size.cy)
+        };
+    }
+    return true;
+}
+
 // outCtrl receives whichever inventory control (main bag or the expanded one)
 // actually owns the item found, or nullptr if none - callers that need to poke
 // the control itself (SetEventState, IsLocked, ...) would otherwise have to
@@ -3159,7 +3312,8 @@ ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventor
 
     if (g_pNewUISystem == nullptr
         || g_pMyInventory == nullptr
-        || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY))
+        || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
+        || IsAndroidMessageBoxOpen())
     {
         return nullptr;
     }
@@ -3243,6 +3397,22 @@ void UpdateAndroidEquipHold();
 void UpdateAndroidEquipSelectPulse();
 void FireAndroidEquipSelectPulse(float uiX, float uiY);
 
+// Same idea, for the NPC shop listing - see AndroidShopTapState/
+// PendingAndroidShopBuyPulse and the implementations further down. No hold
+// gesture here, so there is no motion/cancel counterpart to the two above -
+// just the finger-up resolve and the buy pulse itself.
+bool FinishAndroidShopTapFingerUp(SDL_FingerID fingerId);
+void UpdateAndroidShopBuyPulse();
+void FireAndroidShopBuyPulse(float uiX, float uiY);
+
+// Modal message box tap routing - see PendingAndroidMessageBoxClick. Declared
+// here because HandleVirtualFingerDown/Motion/Up call them well above the
+// implementations.
+bool HandleAndroidMessageBoxFingerDown(const SDL_TouchFingerEvent& touch, float uiX, float uiY);
+bool HandleAndroidMessageBoxFingerMotion(const SDL_TouchFingerEvent& touch);
+bool HandleAndroidMessageBoxFingerUp(const SDL_TouchFingerEvent& touch);
+void UpdateAndroidMessageBoxClick();
+
 // Wraps CNewUIMyInventory::FindEquippedItemAtPt, converting the same virtual-UI
 // (640x480) coordinates FindAndroidBagItemAndCtrlAt uses into the int point that
 // call needs, and gating on the inventory window being visible - the same
@@ -3262,7 +3432,8 @@ ITEM* FindAndroidEquippedItemAt(float uiX, float uiY, int* outSlot, bool* outIsM
 
     if (g_pNewUISystem == nullptr
         || g_pMyInventory == nullptr
-        || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY))
+        || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
+        || IsAndroidMessageBoxOpen())
     {
         return nullptr;
     }
@@ -3270,6 +3441,33 @@ ITEM* FindAndroidEquippedItemAt(float uiX, float uiY, int* outSlot, bool* outIsM
     const int x = std::clamp(static_cast<int>(uiX), 0, 640);
     const int y = std::clamp(static_cast<int>(uiY), 0, 480);
     return g_pMyInventory->FindEquippedItemAtPt(x, y, outSlot, outIsMuun);
+}
+
+// Item for sale under (uiX, uiY) in the open NPC shop's own listing, or
+// nullptr. Deliberately steps aside (returns nullptr) while a picked item is
+// on the cursor - that is the player selling one of their own items into this
+// same grid (CNewUINPCShop::InventoryProcess), a completely different flow
+// that must keep reaching the ambient tap-to-click path untouched.
+ITEM* FindAndroidShopItemAt(float uiX, float uiY)
+{
+    if (g_pNewUISystem == nullptr
+        || g_pNPCShop == nullptr
+        || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
+        || SEASON3B::CNewUIInventoryCtrl::GetPickedItem() != nullptr
+        || IsAndroidMessageBoxOpen())
+    {
+        return nullptr;
+    }
+
+    SEASON3B::CNewUIInventoryCtrl* shopCtrl = g_pNPCShop->GetInventoryCtrl();
+    if (shopCtrl == nullptr)
+    {
+        return nullptr;
+    }
+
+    const int x = std::clamp(static_cast<int>(uiX), 0, 640);
+    const int y = std::clamp(static_cast<int>(uiY), 0, 480);
+    return shopCtrl->FindItemAtPt(x, y);
 }
 
 bool TryAutoBindAndroidInventoryHotKeyItemAt(float uiX, float uiY)
@@ -5225,6 +5423,11 @@ AndroidUiRect GetComboToggleRect()
     return { kComboToggleX, kComboToggleY, kComboToggleW, kComboToggleH };
 }
 
+AndroidUiRect GetPkToggleRect()
+{
+    return { kPkToggleX, kPkToggleY, kPkToggleW, kPkToggleH };
+}
+
 AndroidUiRect GetComboSettingsRect()
 {
     return {
@@ -6990,6 +7193,19 @@ bool HitTestComboToggle(float uiX, float uiY)
     return HitTestAndroidUiRect(uiX, uiY, GetComboToggleRect());
 }
 
+// Paired with RenderPkToggle further down. No class gate (PK auto-attack
+// applies to every class) and no tap-vs-hold distinction (see the finger-down
+// handler) - unlike combo, there is no settings panel behind a long-press.
+bool HitTestVirtualPkToggle(float uiX, float uiY)
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    return HitTestAndroidUiRect(uiX, uiY, GetPkToggleRect());
+}
+
 // Modal, so it gets first look at a tap while open - called near the top of
 // HandleVirtualFingerDown, same priority as the target/trade pickers. The
 // buttons act immediately on down rather than deciding on release, since
@@ -7494,6 +7710,13 @@ bool IsAndroidGameWindowOpen()
     return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER)
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP)
+        // The NPC shop (buy/sell/repair) was missing from this list entirely -
+        // while it was open (with no other listed window also open), the pad
+        // controls stayed live underneath it and could steal a tap meant for
+        // the shop or a message box popped on top of it (e.g. the high-value-
+        // item sell confirm's OK/Cancel), since this is the only gate that
+        // hands touches to windows instead of the virtual pad.
+        || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MuHelper)
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MOVEMAP)
         || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_OPTION)
@@ -9020,6 +9243,15 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Directly after the pinch tracker (which only registers the finger here,
+    // it does not claim a lone touch): a modal message box outranks every
+    // other surface, the same way it does on PC. See
+    // HandleAndroidMessageBoxFingerDown.
+    if (HandleAndroidMessageBoxFingerDown(touch, uiX, uiY))
+    {
+        return true;
+    }
+
     {
         CCharMakeWin& charMakeWin = CUIMng::Instance().m_CharMakeWin;
         if (charMakeWin.IsShow())
@@ -9128,6 +9360,40 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
                 MouseX = static_cast<int>(uiX);
                 MouseY = static_cast<int>(uiY);
                 StartAndroidEquipHold(touch, uiX, uiY, equipSlot, equipIsMuun);
+            }
+            return true;
+        }
+    }
+
+    // NPC shop listing: same shape as equipped items just above (no
+    // hover-first gate on PC's own click-to-buy, so a plain single tap has to
+    // be actively claimed and held back) but simpler - no hold gesture, a
+    // single tap only shows the item, a double-tap buys it.
+    {
+        if (ITEM* shopItem = FindAndroidShopItemAt(uiX, uiY))
+        {
+            const uint32_t nowMs = MU_MobileGetTicks();
+            const bool isDoubleTap = g_androidLastShopTapUpMs > 0
+                && g_androidLastShopTapItemKey == shopItem->Key
+                && (nowMs - g_androidLastShopTapUpMs) <= kAndroidShopDoubleTapMaxMs;
+
+            if (isDoubleTap)
+            {
+                // Consumed so a third tap starts fresh rather than chaining.
+                g_androidLastShopTapUpMs = 0;
+                FireAndroidShopBuyPulse(uiX, uiY);
+            }
+            else
+            {
+                // MouseX/MouseY still need to land on the item even though the
+                // touch is claimed, because CNewUIInventoryCtrl's own hover
+                // state (which the shop tooltip renders off) reads them
+                // unclaimed or not.
+                MouseX = static_cast<int>(uiX);
+                MouseY = static_cast<int>(uiY);
+                g_androidShopTap.active = true;
+                g_androidShopTap.fingerId = touch.fingerId;
+                g_androidShopTap.itemKey = shopItem->Key;
             }
             return true;
         }
@@ -9340,6 +9606,16 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    if (HitTestVirtualPkToggle(uiX, uiY))
+    {
+        if (g_pBCustomMenuInfo != nullptr)
+        {
+            g_pBCustomMenuInfo->AutoCtrlPK ^= 1;
+            PlayBuffer(SOUND_CLICK01);
+        }
+        return true;
+    }
+
     if (!kShowVirtualAttackButton && !kShowVirtualSkillButtons)
     {
         return HandleVirtualJoystickFingerDown(touch);
@@ -9438,6 +9714,12 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Modal box outranks everything below, matching the finger-down order.
+    if (HandleAndroidMessageBoxFingerMotion(touch))
+    {
+        return true;
+    }
+
     // Does not claim the touch - see StartAndroidBagHold. Sliding off the slot
     // just abandons the hold, the same as sliding off a hotkey slot below does.
     UpdateAndroidBagHoldMotion(touch);
@@ -9532,6 +9814,13 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Modal box outranks everything below, matching the finger-down order. The
+    // staged click keeps running after this - see the implementation.
+    if (HandleAndroidMessageBoxFingerUp(touch))
+    {
+        return true;
+    }
+
     // Does not claim the touch - see StartAndroidBagHold. If the hold already
     // fired, MouseLButton was forced false when it did (UpdateAndroidBagHold),
     // so the ambient tap/double-tap machinery below has nothing left to react
@@ -9544,6 +9833,15 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     // same slot within kAndroidEquipDoubleTapMaxMs is recognised as the double-
     // tap that selects it (StartAndroidEquipHold reads these back).
     if (FinishAndroidEquipHoldFingerUp(touch.fingerId))
+    {
+        return true;
+    }
+
+    // The shop tap IS claimed (finger-down above), same reasoning as
+    // equipment's - this was a completed short tap, recorded here so the next
+    // tap on the same item within kAndroidShopDoubleTapMaxMs is recognised as
+    // the double-tap that buys it.
+    if (FinishAndroidShopTapFingerUp(touch.fingerId))
     {
         return true;
     }
@@ -10114,36 +10412,218 @@ void UpdateAndroidEquipHold()
 
 void UpdateAndroidEquipSelectPulse()
 {
-    if (!g_androidEquipSelectPulse.releaseOnNextUpdate)
+    // Release always takes priority: if last tick applied the press, this
+    // tick's job is to end it, not to look at a newer arm request.
+    if (g_androidEquipSelectPulse.pressed)
+    {
+        g_androidEquipSelectPulse.pressed = false;
+        MouseLButtonPush = false;
+        if (MouseLButton)
+        {
+            MouseLButtonPop = true;
+        }
+        MouseLButton = false;
+        return;
+    }
+
+    if (!g_androidEquipSelectPulse.armed)
     {
         return;
     }
 
-    g_androidEquipSelectPulse.releaseOnNextUpdate = false;
-    MouseLButtonPush = false;
-    if (MouseLButton)
-    {
-        MouseLButtonPop = true;
-    }
-    MouseLButton = false;
-}
+    g_androidEquipSelectPulse.armed = false;
+    g_androidEquipSelectPulse.pressed = true;
 
-// One-frame press-then-release pulse on VK_LBUTTON at (uiX, uiY) - see
-// PendingAndroidEquipSelectPulse. The press half happens now; released on the
-// next UpdateAndroidEquipSelectPulse tick, which is what turns it into an
-// IsRelease(VK_LBUTTON) edge for EquipmentWindowProcess to see (a same-frame
-// press+release would never register as either a press or a release, since
-// CNewKeyInput::ScanAsyncKeyState only advances one state per call).
-void FireAndroidEquipSelectPulse(float uiX, float uiY)
-{
-    MouseX = static_cast<int>(uiX);
-    MouseY = static_cast<int>(uiY);
+    MouseX = static_cast<int>(g_androidEquipSelectPulse.uiX);
+    MouseY = static_cast<int>(g_androidEquipSelectPulse.uiY);
     g_iNoMouseTime = 0;
 
     MouseLButtonPop = false;
     MouseLButtonPush = !MouseLButton;
     MouseLButton = true;
-    g_androidEquipSelectPulse.releaseOnNextUpdate = true;
+}
+
+// Requests a single-frame press-then-release pulse on VK_LBUTTON at
+// (uiX, uiY) - see PendingAndroidEquipSelectPulse for why the press is
+// deliberately deferred to the next UpdateAndroidEquipSelectPulse tick rather
+// than applied here: Fire always runs during event processing, earlier in the
+// frame than that tick, so applying the press immediately here would let the
+// very same tick release it again before ScanAsyncKeyState ever polled
+// MouseLButton true in between.
+void FireAndroidEquipSelectPulse(float uiX, float uiY)
+{
+    g_androidEquipSelectPulse.armed = true;
+    g_androidEquipSelectPulse.uiX = uiX;
+    g_androidEquipSelectPulse.uiY = uiY;
+}
+
+// Returns whether it was tracking this finger at all - see the forward
+// declaration for why the caller claims on true regardless (mirrors
+// FinishAndroidEquipHoldFingerUp).
+bool FinishAndroidShopTapFingerUp(SDL_FingerID fingerId)
+{
+    if (!g_androidShopTap.active || g_androidShopTap.fingerId != fingerId)
+    {
+        return false;
+    }
+
+    // A completed short tap - the candidate half of a possible double-tap,
+    // resolved on the NEXT finger-down rather than by waiting here to see if
+    // one arrives (see HandleVirtualFingerDown's isDoubleTap check).
+    g_androidLastShopTapUpMs = MU_MobileGetTicks();
+    g_androidLastShopTapItemKey = g_androidShopTap.itemKey;
+
+    g_androidShopTap = AndroidShopTapState{};
+    return true;
+}
+
+void UpdateAndroidShopBuyPulse()
+{
+    // Release always takes priority: if last tick applied the press, this
+    // tick's job is to end it, not to look at a newer arm request.
+    if (g_androidShopBuyPulse.pressed)
+    {
+        g_androidShopBuyPulse.pressed = false;
+        MouseLButtonPush = false;
+        if (MouseLButton)
+        {
+            MouseLButtonPop = true;
+        }
+        MouseLButton = false;
+        return;
+    }
+
+    if (!g_androidShopBuyPulse.armed)
+    {
+        return;
+    }
+
+    g_androidShopBuyPulse.armed = false;
+    g_androidShopBuyPulse.pressed = true;
+
+    MouseX = static_cast<int>(g_androidShopBuyPulse.uiX);
+    MouseY = static_cast<int>(g_androidShopBuyPulse.uiY);
+    g_iNoMouseTime = 0;
+
+    MouseLButtonPop = false;
+    MouseLButtonPush = !MouseLButton;
+    MouseLButton = true;
+}
+
+// Requests a single-frame press-then-release pulse on VK_LBUTTON at
+// (uiX, uiY) - see PendingAndroidShopBuyPulse/FireAndroidEquipSelectPulse's
+// comment for why the press is deliberately deferred rather than applied here.
+void FireAndroidShopBuyPulse(float uiX, float uiY)
+{
+    g_androidShopBuyPulse.armed = true;
+    g_androidShopBuyPulse.uiX = uiX;
+    g_androidShopBuyPulse.uiY = uiY;
+}
+
+// While a modal message box is up it owns every touch, exactly as it owns
+// every click on PC (UpdateMouseEvent returns false for anything it does not
+// consume, and CanMove()==false blocks the rest, so no window underneath ever
+// sees it). Claiming here - the very first thing HandleVirtualFingerDown does -
+// keeps the joystick, the wheel and the item hit-tests from reacting to a tap
+// aimed at OK or Cancel.
+bool HandleAndroidMessageBoxFingerDown(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    if (!IsAndroidMessageBoxOpen())
+    {
+        return false;
+    }
+
+    // A click already in flight plays out untouched - restarting it mid-way
+    // would drop the hover frame the manager is waiting on, and a second press
+    // arriving before the first released could fire the button twice.
+    if (g_androidMessageBoxClick.stage == PendingAndroidMessageBoxClick::kIdle)
+    {
+        g_androidMessageBoxClick.stage = PendingAndroidMessageBoxClick::kHover;
+        g_androidMessageBoxClick.uiX = uiX;
+        g_androidMessageBoxClick.uiY = uiY;
+        g_androidMessageBoxFinger = touch.fingerId;
+    }
+
+    return true;
+}
+
+bool HandleAndroidMessageBoxFingerMotion(const SDL_TouchFingerEvent& touch)
+{
+    // Deliberately ignores where the finger travels: the click is delivered at
+    // the position it started from. Letting it follow the finger would let a
+    // small drag slide the synthetic pointer off the button between the press
+    // and release frames, and IsMouseIn() is re-read at release.
+    return IsAndroidMessageBoxOpen() || g_androidMessageBoxFinger == touch.fingerId;
+}
+
+bool HandleAndroidMessageBoxFingerUp(const SDL_TouchFingerEvent& touch)
+{
+    const bool claimed = IsAndroidMessageBoxOpen() || g_androidMessageBoxFinger == touch.fingerId;
+
+    if (g_androidMessageBoxFinger == touch.fingerId)
+    {
+        // Only forgets the finger - the staged click keeps running on its own
+        // frame clock, so a very quick tap still completes.
+        g_androidMessageBoxFinger = static_cast<SDL_FingerID>(-1);
+    }
+
+    return claimed;
+}
+
+void UpdateAndroidMessageBoxClick()
+{
+    if (g_androidMessageBoxClick.stage == PendingAndroidMessageBoxClick::kIdle)
+    {
+        return;
+    }
+
+    // The box can be destroyed mid-sequence (its own OK handler, an ESC, a
+    // server packet). Releasing the button is still required in that case, or
+    // MouseLButton would be left stuck down for whatever is underneath.
+    if (!IsAndroidMessageBoxOpen()
+        && g_androidMessageBoxClick.stage != PendingAndroidMessageBoxClick::kRelease)
+    {
+        g_androidMessageBoxClick.stage = PendingAndroidMessageBoxClick::kRelease;
+    }
+
+    MouseX = static_cast<int>(g_androidMessageBoxClick.uiX);
+    MouseY = static_cast<int>(g_androidMessageBoxClick.uiY);
+    g_iNoMouseTime = 0;
+
+    switch (g_androidMessageBoxClick.stage)
+    {
+    case PendingAndroidMessageBoxClick::kHover:
+        // Button explicitly up, pointer parked in the box: this is the frame
+        // the manager turns EVENT_NONE into EVENT_WND_MOUSE_HOVER on, and the
+        // one a touch never produces by itself.
+        MouseLButtonPush = false;
+        MouseLButtonPop = false;
+        MouseLButton = false;
+        g_androidMessageBoxClick.stage = PendingAndroidMessageBoxClick::kPress;
+        break;
+
+    case PendingAndroidMessageBoxClick::kPress:
+        MouseLButtonPop = false;
+        MouseLButtonPush = true;
+        MouseLButton = true;
+        g_androidMessageBoxClick.stage = PendingAndroidMessageBoxClick::kRelease;
+        break;
+
+    case PendingAndroidMessageBoxClick::kRelease:
+        MouseLButtonPush = false;
+        if (MouseLButton)
+        {
+            MouseLButtonPop = true;
+            g_iMousePopPosition_x = MouseX;
+            g_iMousePopPosition_y = MouseY;
+        }
+        MouseLButton = false;
+        g_androidMessageBoxClick.stage = PendingAndroidMessageBoxClick::kIdle;
+        break;
+
+    default:
+        break;
+    }
 }
 
 bool IsVirtualButtonPressed(int button)
@@ -10164,6 +10644,8 @@ void UpdateVirtualPadHolds()
     UpdateAndroidBagHold();
     UpdateAndroidEquipHold();
     UpdateAndroidEquipSelectPulse();
+    UpdateAndroidShopBuyPulse();
+    UpdateAndroidMessageBoxClick();
     UpdateAndroidTradeAutoMove();
     UpdateAndroidPendingBuffCast();
 
@@ -11141,6 +11623,38 @@ void RenderComboToggle()
                  0, 3,
                  "%d/%d", g_virtualComboStep + 1, kVirtualComboSlotCount);
     }
+
+    EndBitmap();
+}
+
+// PK (auto-attack-PK) toggle, every class. Paired with HitTestVirtualPkToggle.
+void RenderPkToggle()
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const bool pkActive = g_pBCustomMenuInfo != nullptr && g_pBCustomMenuInfo->AutoCtrlPK;
+    const AndroidUiRect rect = GetPkToggleRect();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRightPanelButtonBox(rect, pkActive);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font,
+             static_cast<int>(rect.x),
+             static_cast<int>(rect.y + 6.0f),
+             pkActive ? 0xFF80FFB0 : 0xFFFFFFFF,
+             0x0,
+             static_cast<int>(rect.w),
+             0, 3,
+             "%s", pkActive ? "PK ON" : "PK");
 
     EndBitmap();
 }
@@ -12964,6 +13478,7 @@ void RenderVirtualPad()
 
     RenderVirtualMirrorHotKeySlots();
     RenderComboToggle();
+    RenderPkToggle();
     RenderTargetSelectButton();
     RenderSkillPageButton();
     RenderAndroidTeleportRangeRing();
