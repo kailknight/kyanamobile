@@ -797,7 +797,7 @@ struct VirtualButtonLayout
     float radius;
 };
 
-constexpr float kVirtualAttackButtonCx = 596.0f;
+constexpr float kVirtualAttackButtonCx = 572.0f;
 constexpr float kVirtualAttackButtonCy = 350.0f;
 constexpr float kVirtualAttackButtonRadius = 29.0f;
 constexpr float kVirtualSkillButtonRadius = 19.0f;
@@ -812,10 +812,10 @@ struct VirtualUiOffset
 // reference layout: four buttons around a central ATK, nothing crowding the
 // open side where the outside controls live.
 constexpr std::array<VirtualUiOffset, kVirtualVisibleSkillButtonCount> kVirtualSkillCenters = {
-    VirtualUiOffset{ 625.0f, 300.0f },  // top-right
-    VirtualUiOffset{ 567.0f, 300.0f },  // top-left
-    VirtualUiOffset{ 538.0f, 350.0f },  // left
-    VirtualUiOffset{ 567.0f, 400.0f },  // bottom-left
+    VirtualUiOffset{ 601.0f, 300.0f },  // top-right
+    VirtualUiOffset{ 543.0f, 300.0f },  // top-left
+    VirtualUiOffset{ 514.0f, 350.0f },  // left
+    VirtualUiOffset{ 543.0f, 400.0f },  // bottom-left
 };
 constexpr float kVirtualSkillFrameW = 22.0f;
 constexpr float kVirtualSkillFrameH = 28.0f;
@@ -1099,8 +1099,11 @@ constexpr float kVirtualChatQuickButtonRadius = 18.0f;
 constexpr float kTargetPickerRangeTiles = 10.0f;
 constexpr int kTargetPickerMaxEntries = 10;
 constexpr int kTargetPickerVisibleRows = 6;
-constexpr float kTargetPickerX = 300.0f;
-constexpr float kTargetPickerY = 90.0f;
+// Starting spot only - draggable by its header, see AndroidTargetPickerState's
+// boxDrag fields and GetAndroidTargetPickerHeaderRect. g_androidTargetPickerX/Y
+// (declared beside AndroidTargetPickerState) is what actually gets read.
+constexpr float kTargetPickerDefaultX = 300.0f;
+constexpr float kTargetPickerDefaultY = 90.0f;
 constexpr float kTargetPickerW = 180.0f;
 constexpr float kTargetPickerHeaderH = 26.0f;
 constexpr float kTargetPickerRowH = 28.0f;
@@ -1125,14 +1128,14 @@ constexpr float kSkillPickerListIconSize = 22.0f;
 constexpr uint32_t kTargetPickerRefreshMs = 200;
 
 // AIM button (target lock) - outside the skill ring, upper right of ATK.
-constexpr float kTargetSelectButtonCx = 630.0f;
+constexpr float kTargetSelectButtonCx = 606.0f;
 constexpr float kTargetSelectButtonCy = 400.0f;
 constexpr float kTargetSelectButtonRadius = 17.0f;
 
 // Page switch for the skill wheel - two pages of four slots each, eight
 // bindable skills total. Stacked under AIM outside the ring.
 constexpr int kVirtualSkillPageCount = 2;
-constexpr float kSkillPageButtonCx = 630.0f;
+constexpr float kSkillPageButtonCx = 606.0f;
 constexpr float kSkillPageButtonCy = 434.0f;
 constexpr float kSkillPageButtonRadius = 13.0f;
 
@@ -1162,7 +1165,7 @@ constexpr std::array<const char*, kChatTabCount> kChatTabLabels = {
 // Auto-combo toggle. Only drawn and only hit-tested for the Knight line, so it
 // costs nothing on classes that have no combo. Below the ring rather than
 // above it, matching the reference layout.
-constexpr float kComboToggleX = 576.0f;
+constexpr float kComboToggleX = 552.0f;
 constexpr float kComboToggleY = 452.0f;
 constexpr float kComboToggleW = 40.0f;
 constexpr float kComboToggleH = 22.0f;
@@ -1759,9 +1762,28 @@ struct AndroidTargetPickerState
     float dragStartY = 0.0f;
     float dragLastY = 0.0f;
     SHORT pressedKey = 0;
+
+    // Dragging the whole box by its header - separate from the row-scroll
+    // drag above (dragging/dragFingerId/...), which owns the row list itself
+    // and would otherwise fight over the same gesture. See
+    // GetAndroidTargetPickerHeaderRect and HandleAndroidTargetPickerFinger*.
+    bool boxDragging = false;
+    bool boxDragMoved = false;
+    SDL_FingerID boxDragFingerId = static_cast<SDL_FingerID>(-1);
+    float boxDragDownX = 0.0f;
+    float boxDragDownY = 0.0f;
+    float boxDragStartX = 0.0f;
+    float boxDragStartY = 0.0f;
 };
 
 AndroidTargetPickerState g_androidTargetPicker{};
+
+// User-draggable position - see AndroidTargetPickerState::boxDragging. Starts
+// at the default and stays wherever the player last dragged it for the rest
+// of the session.
+float g_androidTargetPickerX = kTargetPickerDefaultX;
+float g_androidTargetPickerY = kTargetPickerDefaultY;
+constexpr float kTargetPickerBoxDragThresholdUi = 10.0f;
 
 // Same shape as AndroidTargetPickerState (scroll offset + drag tracking), but
 // entries are skill-list indices (into CharacterAttribute->Skill[], or a
@@ -4489,8 +4511,15 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
         return false;
     }
 
+    // Only a second finger landing while the first is driving the joystick is
+    // a pinch attempt - otherwise any second touch (tapping a Q/W/E/R hotkey
+    // while ATK is held down for repeat-fire, say) got claimed here and never
+    // reached its own button at all, since this runs before every other hit
+    // test in HandleVirtualFingerDown. Matches what ClearVirtualJoystick just
+    // below already assumed about finger A.
     if (g_androidPinch.fingerB == static_cast<SDL_FingerID>(-1)
-        && touch.fingerId != g_androidPinch.fingerA)
+        && touch.fingerId != g_androidPinch.fingerA
+        && IsVirtualJoystickCaptured(g_androidPinch.fingerA))
     {
         g_androidPinch.fingerB = touch.fingerId;
         g_androidPinch.bx = px;
@@ -5059,8 +5088,8 @@ int GetAndroidTargetPickerRowCount()
 AndroidUiRect GetAndroidTargetPickerRect()
 {
     return {
-        kTargetPickerX,
-        kTargetPickerY,
+        g_androidTargetPickerX,
+        g_androidTargetPickerY,
         kTargetPickerW,
         kTargetPickerHeaderH
             + (static_cast<float>(GetAndroidTargetPickerRowCount()) * kTargetPickerRowH)
@@ -5068,11 +5097,17 @@ AndroidUiRect GetAndroidTargetPickerRect()
     };
 }
 
+AndroidUiRect GetAndroidTargetPickerHeaderRect()
+{
+    const AndroidUiRect rect = GetAndroidTargetPickerRect();
+    return { rect.x, rect.y, rect.w, kTargetPickerHeaderH };
+}
+
 AndroidUiRect GetAndroidTargetPickerRowRect(int row)
 {
     return {
-        kTargetPickerX + 6.0f,
-        kTargetPickerY + kTargetPickerHeaderH + (static_cast<float>(row) * kTargetPickerRowH),
+        g_androidTargetPickerX + 6.0f,
+        g_androidTargetPickerY + kTargetPickerHeaderH + (static_cast<float>(row) * kTargetPickerRowH),
         kTargetPickerW - 12.0f,
         kTargetPickerRowH - 2.0f
     };
@@ -5880,24 +5915,22 @@ void DrawVirtualRightPanelButtonBox(const AndroidUiRect& rect, bool active);
 // world, so the character never walks just because you touched an item. Pick Up
 // runs MU's normal walk-to-it-and-collect; Cancel dismisses.
 // ---------------------------------------------------------------------------
-constexpr float kItemMenuIconSize = 34.0f;
-constexpr float kItemMenuWidth   = 168.0f + kItemMenuIconSize;
-constexpr float kItemMenuRowH    = 15.0f;
-constexpr float kItemMenuPad     = 4.0f;
-
-// Header bar is always drawn; the body below it is what the toggle hides.
-constexpr float kItemMenuHeaderH = kItemMenuRowH;
-constexpr float kItemMenuBodyH   = kItemMenuIconSize;
-constexpr float kItemMenuTextX   = kItemMenuPad + kItemMenuIconSize + 6.0f;
+constexpr float kItemMenuIconSize = 48.0f;
+constexpr float kItemMenuWidth    = 88.0f;
+constexpr float kItemMenuRowH     = 16.0f;
+constexpr float kItemMenuPad      = 4.0f;
 
 bool  g_itemMenuOpen = false;
 int   g_itemMenuItemKey = -1;
 float g_itemMenuX = 0.0f;
 float g_itemMenuY = 0.0f;
 
-// Collapsed to just its title bar. Sticky across items so a player who wants
-// the screen clear keeps it clear as they walk over drop after drop.
-bool g_itemMenuCollapsed = false;
+// Off by default - picture and Pick Up only, which is the whole point of this
+// redesign (the old menu always rendered the full item tooltip underneath,
+// which is what made it feel oversized). One tap on the icon reveals it.
+// Reset to false whenever the item under it changes, so a stale tooltip for
+// a different drop never lingers - see UpdateItemMenuNearCharacter.
+bool g_itemMenuShowTooltip = false;
 
 // Every drop currently in range, nearest first, with one shown at a time. The
 // player pages through them rather than the menu guessing which one they meant.
@@ -5910,17 +5943,87 @@ int g_itemMenuPage  = 0;
 // How close a drop has to be, in tiles, before its menu appears.
 constexpr int kItemMenuRangeTiles = 5;
 
+// User-draggable (see AndroidItemMenuDragState below) - this is only where it
+// starts the first time. -1,-1 means "never dragged yet, use the default spot
+// in UpdateItemMenuNearCharacter".
+float g_itemMenuDraggedX = -1.0f;
+float g_itemMenuDraggedY = -1.0f;
+
+// Tap-vs-drag on the menu box, decided the same way the target/skill pickers
+// already do it: FingerDown inside the box just records the press,
+// FingerMotion promotes it to a drag once it moves past a threshold
+// (repositioning the whole box instead), and FingerUp only runs the tap
+// action (icon toggle / page / Pick Up - see HandleItemMenuTap) if it never
+// moved enough to count as a drag. See HandleItemMenuFingerDown/Motion/Up.
+struct AndroidItemMenuDragState
+{
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    float downX = 0.0f;
+    float downY = 0.0f;
+    float boxStartX = 0.0f;
+    float boxStartY = 0.0f;
+    bool moved = false;
+};
+AndroidItemMenuDragState g_itemMenuDrag{};
+constexpr float kItemMenuDragMoveThresholdUi = 10.0f;
+
+// Icon centred in the box; nav and Pick Up below it span the full width.
+AndroidUiRect GetItemMenuIconRect()
+{
+    return {
+        g_itemMenuX + ((kItemMenuWidth - kItemMenuIconSize) * 0.5f),
+        g_itemMenuY + kItemMenuPad,
+        kItemMenuIconSize,
+        kItemMenuIconSize
+    };
+}
+
+// Only meaningful when g_itemMenuCount > 1 - callers gate on that themselves,
+// same as the old page row did.
+AndroidUiRect GetItemMenuNavRect()
+{
+    const AndroidUiRect icon = GetItemMenuIconRect();
+    return {
+        g_itemMenuX + kItemMenuPad,
+        icon.y + icon.h + kItemMenuPad,
+        kItemMenuWidth - (kItemMenuPad * 2.0f),
+        kItemMenuRowH
+    };
+}
+
+AndroidUiRect GetItemMenuPickRect()
+{
+    const AndroidUiRect icon = GetItemMenuIconRect();
+    float y = icon.y + icon.h + kItemMenuPad;
+    if (g_itemMenuCount > 1)
+    {
+        y += kItemMenuRowH + kItemMenuPad;
+    }
+
+    return {
+        g_itemMenuX + kItemMenuPad,
+        y,
+        kItemMenuWidth - (kItemMenuPad * 2.0f),
+        kItemMenuRowH
+    };
+}
+
 float ItemMenuHeight()
 {
-    const float body = g_itemMenuCollapsed ? 0.0f : (kItemMenuBodyH + kItemMenuPad);
-
-    return (kItemMenuPad * 2.0f) + kItemMenuHeaderH + body;
+    float h = kItemMenuPad + kItemMenuIconSize + kItemMenuPad;
+    if (g_itemMenuCount > 1)
+    {
+        h += kItemMenuRowH + kItemMenuPad;
+    }
+    h += kItemMenuRowH + kItemMenuPad;
+    return h;
 }
 
 void CloseItemMenu()
 {
     g_itemMenuOpen = false;
     g_itemMenuItemKey = -1;
+    g_itemMenuShowTooltip = false;
 
     // Otherwise the container is sized from a stale tooltip the next time a
     // drop comes into range.
@@ -6006,6 +6109,65 @@ int FindItemNearTap(float uiX, float uiY)
     return bestItem;
 }
 
+// Called from HandleVirtualFingerDown. Just records the press - see
+// AndroidItemMenuDragState's comment for why this doesn't dispatch a tap
+// action itself; HandleItemMenuFingerUp does that once it knows the finger
+// never moved far enough to count as a drag.
+bool HandleItemMenuFingerDown(float uiX, float uiY, SDL_FingerID fingerId)
+{
+    if (!g_itemMenuOpen)
+    {
+        return false;
+    }
+
+    if (uiX < g_itemMenuX || uiX > (g_itemMenuX + kItemMenuWidth)
+        || uiY < g_itemMenuY || uiY > (g_itemMenuY + ItemMenuHeight()))
+    {
+        // Outside the box, the tap belongs to the game.
+        return false;
+    }
+
+    g_itemMenuDrag.fingerId = fingerId;
+    g_itemMenuDrag.downX = uiX;
+    g_itemMenuDrag.downY = uiY;
+    g_itemMenuDrag.boxStartX = g_itemMenuX;
+    g_itemMenuDrag.boxStartY = g_itemMenuY;
+    g_itemMenuDrag.moved = false;
+    return true;
+}
+
+// Called from HandleVirtualFingerMotion.
+bool HandleItemMenuFingerMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (g_itemMenuDrag.fingerId != touch.fingerId)
+    {
+        return false;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+
+    const float dx = uiX - g_itemMenuDrag.downX;
+    const float dy = uiY - g_itemMenuDrag.downY;
+
+    if (!g_itemMenuDrag.moved
+        && ((dx * dx) + (dy * dy)) > (kItemMenuDragMoveThresholdUi * kItemMenuDragMoveThresholdUi))
+    {
+        g_itemMenuDrag.moved = true;
+    }
+
+    if (g_itemMenuDrag.moved)
+    {
+        g_itemMenuX = std::clamp(g_itemMenuDrag.boxStartX + dx, 0.0f, 640.0f - kItemMenuWidth);
+        g_itemMenuY = std::clamp(g_itemMenuDrag.boxStartY + dy, 0.0f, 480.0f - ItemMenuHeight());
+        g_itemMenuDraggedX = g_itemMenuX;
+        g_itemMenuDraggedY = g_itemMenuY;
+    }
+
+    return true;
+}
+
 // Returns true when the tap was inside the menu (and therefore consumed).
 bool HandleItemMenuTap(float uiX, float uiY)
 {
@@ -6022,47 +6184,70 @@ bool HandleItemMenuTap(float uiX, float uiY)
         return false;
     }
 
-    const float localY = uiY - (g_itemMenuY + kItemMenuPad);
-
-    if (localY < kItemMenuHeaderH)
+    if (HitTestAndroidUiRect(uiX, uiY, GetItemMenuIconRect()))
     {
-        // Title bar doubles as the show/hide toggle.
-        g_itemMenuCollapsed = !g_itemMenuCollapsed;
+        // Single tap reveals the tooltip instead of it always being on -
+        // that always-on tooltip was what made the old menu feel oversized.
+        // Tap the icon again to hide it.
+        g_itemMenuShowTooltip = !g_itemMenuShowTooltip;
         return true;
     }
 
-    if (g_itemMenuCollapsed)
+    if (g_itemMenuCount > 1 && HitTestAndroidUiRect(uiX, uiY, GetItemMenuNavRect()))
     {
-        return true;
-    }
+        // Previous on the left third, next on the right third - middle third
+        // (the page count text) does nothing.
+        const AndroidUiRect navRect = GetItemMenuNavRect();
+        const float local = uiX - navRect.x;
 
-    const float bodyY = localY - kItemMenuHeaderH - kItemMenuPad;
-
-    if (bodyY < kItemMenuRowH)
-    {
-        // Page row: previous on the left third, next on the right third.
-        if (g_itemMenuCount > 1)
+        if (local < (navRect.w / 3.0f))
         {
-            const float local = uiX - (g_itemMenuX + kItemMenuTextX);
-            const float navW  = kItemMenuWidth - kItemMenuTextX - kItemMenuPad;
-
-            if (local < (navW / 3.0f))
-            {
-                g_itemMenuPage = (g_itemMenuPage + g_itemMenuCount - 1) % g_itemMenuCount;
-            }
-            else if (local > (navW * 2.0f / 3.0f))
-            {
-                g_itemMenuPage = (g_itemMenuPage + 1) % g_itemMenuCount;
-            }
-
-            g_itemMenuItemKey = g_itemMenuList[g_itemMenuPage];
+            g_itemMenuPage = (g_itemMenuPage + g_itemMenuCount - 1) % g_itemMenuCount;
         }
+        else if (local > (navRect.w * 2.0f / 3.0f))
+        {
+            g_itemMenuPage = (g_itemMenuPage + 1) % g_itemMenuCount;
+        }
+
+        g_itemMenuItemKey = g_itemMenuList[g_itemMenuPage];
+        g_itemMenuShowTooltip = false;
+        return true;
     }
-    else
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetItemMenuPickRect()))
     {
         StartItemPickupFromMenu();
+        return true;
     }
 
+    // Inside the box but not on a control - swallow it rather than let it
+    // fall through to the world.
+    return true;
+}
+
+// Called from HandleVirtualFingerUp. Only actually taps something if the
+// press never moved past the drag threshold - a real drag has already done
+// its job in HandleItemMenuFingerMotion and must not also fire whatever
+// control happens to be under the finger when it lifts.
+bool HandleItemMenuFingerUp(const SDL_TouchFingerEvent& touch)
+{
+    if (g_itemMenuDrag.fingerId != touch.fingerId)
+    {
+        return false;
+    }
+
+    const bool wasDrag = g_itemMenuDrag.moved;
+    g_itemMenuDrag = AndroidItemMenuDragState{};
+
+    if (wasDrag)
+    {
+        return true;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+    HandleItemMenuTap(uiX, uiY);
     return true;
 }
 
@@ -6155,13 +6340,22 @@ void UpdateItemMenuNearCharacter()
         }
     }
 
-    // Fixed, always-visible spot rather than following the item around. Kept
-    // clear of the skill pad down the right edge, since the tooltip that hangs
-    // below the box is centred on it and is wider than the box itself.
+    // Fixed spot rather than following the item around, so it does not jump
+    // around as the player moves - unless the player has dragged it
+    // somewhere else, in which case that spot sticks for the rest of the
+    // session (see AndroidItemMenuDragState). Default clears the minimap and
+    // top bar, both of which the old spot (640-width-90, 60) sat under.
     g_itemMenuOpen = true;
     g_itemMenuItemKey = g_itemMenuList[g_itemMenuPage];
-    g_itemMenuX = 640.0f - kItemMenuWidth - 90.0f;
-    g_itemMenuY = 60.0f;
+    g_itemMenuX = (g_itemMenuDraggedX >= 0.0f) ? g_itemMenuDraggedX : (640.0f - kItemMenuWidth - 20.0f);
+    g_itemMenuY = (g_itemMenuDraggedY >= 0.0f) ? g_itemMenuDraggedY : 180.0f;
+
+    // A tooltip left open for whatever drop used to be here would be showing
+    // the wrong item's info the moment this one replaces it.
+    if (g_itemMenuItemKey != previousKey)
+    {
+        g_itemMenuShowTooltip = false;
+    }
 }
 
 void RenderItemMenu()
@@ -6196,7 +6390,7 @@ void RenderItemMenu()
     float boxR = g_itemMenuX + kItemMenuWidth;
     float boxB = g_itemMenuY + menuH;
 
-    const bool haveTip = (!g_itemMenuCollapsed && g_fLastTipW > 1.0f && g_fLastTipH > 1.0f);
+    const bool haveTip = (g_itemMenuShowTooltip && g_fLastTipW > 1.0f && g_fLastTipH > 1.0f);
 
     if (haveTip)
     {
@@ -6222,76 +6416,77 @@ void RenderItemMenu()
     DrawVirtualRectFilled(boxX - 3.0f, boxY - 3.0f, boxW + 6.0f, boxH + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
     DrawVirtualRectFilled(boxX, boxY, boxW, boxH, 0.10f, 0.04f, 0.05f, 0.78f);
     DrawVirtualRectFilled(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
-    DrawVirtualRectFilled(boxX + 3.0f, boxY + 3.0f, boxW - 6.0f, kItemMenuHeaderH - 2.0f, 0.62f, 0.24f, 0.24f, 0.36f);
     DrawVirtualRectOutline(boxX, boxY, boxW, boxH, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
     DrawVirtualRectOutline(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
 
-    HFONT headerFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
-    HFONT rowFont    = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    HFONT rowFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    char szLine[16];
 
-    char szLine[128];
+    const AndroidUiRect iconRect = GetItemMenuIconRect();
 
-    // Header, which is also the show/hide toggle.
-    snprintf(szLine, sizeof(szLine) - 1, "%s Items (%d)",
-             g_itemMenuCollapsed ? "[+]" : "[-]", g_itemMenuCount);
-    szLine[sizeof(szLine) - 1] = '\0';
-    TextDraw(headerFont,
-             static_cast<int>(g_itemMenuX + kItemMenuPad),
-             static_cast<int>(g_itemMenuY + kItemMenuPad),
-             0xFFFFFFFF, 0x0,
-             static_cast<int>(kItemMenuWidth - kItemMenuPad * 2.0f), 0, 3,
-             "%s", szLine);
-
-    if (g_itemMenuCollapsed)
+    // RenderItem3DFree does not clip to the box it's asked to draw into - a
+    // model's glow/particle effects (torches, wings, anything lit) can extend
+    // well past its nominal Width/Height, which the old wide-and-roomy menu
+    // never made obvious but this tight box does: without a scissor, that
+    // spilled out over the minimap above and the Pick Up button below. Scissor
+    // rect is in real screen pixels, bottom-left origin - same UI-space-to-
+    // screen conversion UiToScreenX/Y do, inlined because they are declared
+    // later in the file than this function.
     {
-        EndBitmap();
-        return;
+        const float sx = iconRect.x * static_cast<float>(WindowWidth) / 640.0f;
+        const float sw = iconRect.w * static_cast<float>(WindowWidth) / 640.0f;
+        const float syTop = iconRect.y * static_cast<float>(WindowHeight) / 480.0f;
+        const float sh = iconRect.h * static_cast<float>(WindowHeight) / 480.0f;
+        const float sy = static_cast<float>(WindowHeight) - syTop - sh;
+
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(static_cast<GLint>(sx), static_cast<GLint>(sy),
+                  static_cast<GLsizei>(sw), static_cast<GLsizei>(sh));
     }
 
-    const float bodyTop = g_itemMenuY + kItemMenuPad + kItemMenuHeaderH + kItemMenuPad;
-
-    // Item picture on the left, text to its right. RenderItem3DFree draws the
-    // item's own model and takes 640x480 UI coordinates directly. It swaps in
-    // a perspective projection to draw the model, which is why it has to step
-    // outside the 2D bitmap state this is called from - the disabled
-    // EndBitmap() at the top of that function is the same thing, done by
-    // whoever wrote it.
+    // RenderItem3DFree draws the item's own model and takes 640x480 UI
+    // coordinates directly. It swaps in a perspective projection to draw the
+    // model, which is why it has to step outside the 2D bitmap state this is
+    // called from - the disabled EndBitmap() here is the same thing, done by
+    // whoever wrote it. FixY (last arg) defaults true and pushes the render
+    // down by a per-item-type amount (20-35 UI units, see its switch in
+    // NewUISystem.cpp) meant for a taller, unclipped context - inside this
+    // box, combined with the scissor above, that pushed the item below the
+    // clipped area entirely. CBInterface.cpp/CB_NewQuest.cpp's fixed-icon-box
+    // previews already disable it for exactly this reason.
     EndBitmap();
-    g_pNewUISystem->RenderItem3DFree(g_itemMenuX + kItemMenuPad, bodyTop,
-                                     kItemMenuIconSize, kItemMenuIconSize,
+    g_pNewUISystem->RenderItem3DFree(iconRect.x, iconRect.y,
+                                     iconRect.w, iconRect.h,
                                      item.Type, item.Level,
                                      item.Option1, item.ExtOption,
-                                     false, 1.2f);
+                                     false, 1.2f, false);
     BeginBitmap();
+    glDisable(GL_SCISSOR_TEST);
     DisableTexture();
     glDisable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Page row. Arrows only mean anything with more than one drop in range,
-    // but the count is worth showing either way so the player knows there is
-    // no second item hiding behind the first. Split matches HandleItemMenuTap's
-    // thirds exactly, so the drawn buttons line up with what's tappable.
-    const float navW = kItemMenuWidth - kItemMenuTextX - kItemMenuPad;
+    // A faint outline around the picture is the only hint it is tappable (for
+    // the tooltip) - nothing about a bare item render otherwise reads as
+    // interactive.
+    DrawVirtualRectOutline(iconRect.x - 1.0f, iconRect.y - 1.0f, iconRect.w + 2.0f, iconRect.h + 2.0f,
+                           0.7f, 0.7f, 0.8f, 0.5f, 1.0f);
+
+    // Page row. Arrows only shown with more than one drop in range - matches
+    // HandleItemMenuTap's thirds exactly, so the drawn buttons line up with
+    // what's tappable.
     if (g_itemMenuCount > 1)
     {
-        const AndroidUiRect prevRect{ g_itemMenuX + kItemMenuTextX, bodyTop, navW / 3.0f, kItemMenuRowH };
-        const AndroidUiRect nextRect{ g_itemMenuX + kItemMenuTextX + navW * 2.0f / 3.0f, bodyTop, navW / 3.0f, kItemMenuRowH };
-        DrawVirtualRightPanelButtonBox(prevRect, false);
-        DrawVirtualRightPanelButtonBox(nextRect, false);
-        TextDraw(rowFont, static_cast<int>(prevRect.x), static_cast<int>(prevRect.y + 2.0f), 0xFFFFFFFF, 0x0, static_cast<int>(prevRect.w), 0, 3, "%s", "<");
-        TextDraw(rowFont, static_cast<int>(nextRect.x), static_cast<int>(nextRect.y + 2.0f), 0xFFFFFFFF, 0x0, static_cast<int>(nextRect.w), 0, 3, "%s", ">");
-        snprintf(szLine, sizeof(szLine) - 1, "%d/%d", g_itemMenuPage + 1, g_itemMenuCount);
+        const AndroidUiRect navRect = GetItemMenuNavRect();
+        DrawVirtualRightPanelButtonBox(navRect, false);
+        snprintf(szLine, sizeof(szLine) - 1, "< %d/%d >", g_itemMenuPage + 1, g_itemMenuCount);
+        szLine[sizeof(szLine) - 1] = '\0';
+        TextDraw(rowFont, static_cast<int>(navRect.x), static_cast<int>(navRect.y + 2.0f),
+                 0xFFE8D8A0, 0x0, static_cast<int>(navRect.w), 0, 3, "%s", szLine);
     }
-    else
-    {
-        snprintf(szLine, sizeof(szLine) - 1, "1/1");
-    }
-    szLine[sizeof(szLine) - 1] = '\0';
-    TextDraw(rowFont, static_cast<int>(g_itemMenuX + kItemMenuTextX), static_cast<int>(bodyTop + 2.0f),
-             0xFFE8D8A0, 0x0, static_cast<int>(navW), 0, 3, "%s", szLine);
 
-    const AndroidUiRect pickRect{ g_itemMenuX + kItemMenuTextX, bodyTop + kItemMenuRowH, navW, kItemMenuRowH };
+    const AndroidUiRect pickRect = GetItemMenuPickRect();
     DrawVirtualRightPanelButtonBox(pickRect, true);
     TextDraw(g_hFontBold != nullptr ? g_hFontBold : g_hFont,
              static_cast<int>(pickRect.x), static_cast<int>(pickRect.y + 2.0f),
@@ -6300,11 +6495,15 @@ void RenderItemMenu()
     // The client's own tooltip, so the name, level, excellent options, sockets
     // and requirements all read exactly as they do in the inventory. Its
     // background is suppressed because the container above already covers it.
-    g_bTipSuppressBG = true;
-    RenderItemInfo(static_cast<int>(g_itemMenuX + kItemMenuWidth * 0.5f),
-                   static_cast<int>(g_itemMenuY + menuH),
-                   &item, false, 0, false, false);
-    g_bTipSuppressBG = false;
+    // Only drawn once the icon has been tapped - see g_itemMenuShowTooltip.
+    if (g_itemMenuShowTooltip)
+    {
+        g_bTipSuppressBG = true;
+        RenderItemInfo(static_cast<int>(g_itemMenuX + kItemMenuWidth * 0.5f),
+                       static_cast<int>(g_itemMenuY + menuH),
+                       &item, false, 0, false, false);
+        g_bTipSuppressBG = false;
+    }
 
     EndBitmap();
 }
@@ -8482,6 +8681,18 @@ bool HandleAndroidTargetPickerFingerDown(const SDL_TouchFingerEvent& touch, floa
         return true;
     }
 
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTargetPickerHeaderRect()))
+    {
+        g_androidTargetPicker.boxDragging = true;
+        g_androidTargetPicker.boxDragMoved = false;
+        g_androidTargetPicker.boxDragFingerId = touch.fingerId;
+        g_androidTargetPicker.boxDragDownX = uiX;
+        g_androidTargetPicker.boxDragDownY = uiY;
+        g_androidTargetPicker.boxDragStartX = g_androidTargetPickerX;
+        g_androidTargetPicker.boxDragStartY = g_androidTargetPickerY;
+        return true;
+    }
+
     g_androidTargetPicker.dragging = false;
     g_androidTargetPicker.dragMoved = false;
     g_androidTargetPicker.dragFingerId = static_cast<SDL_FingerID>(-1);
@@ -8509,6 +8720,33 @@ bool HandleAndroidTargetPickerFingerDown(const SDL_TouchFingerEvent& touch, floa
 
 bool HandleAndroidTargetPickerFingerMotion(const SDL_TouchFingerEvent& touch)
 {
+    if (g_androidTargetPicker.visible
+        && g_androidTargetPicker.boxDragging
+        && g_androidTargetPicker.boxDragFingerId == touch.fingerId)
+    {
+        float uiX = 0.0f;
+        float uiY = 0.0f;
+        TouchToVirtualUi(touch, uiX, uiY);
+
+        const float dx = uiX - g_androidTargetPicker.boxDragDownX;
+        const float dy = uiY - g_androidTargetPicker.boxDragDownY;
+
+        if (!g_androidTargetPicker.boxDragMoved
+            && ((dx * dx) + (dy * dy)) > (kTargetPickerBoxDragThresholdUi * kTargetPickerBoxDragThresholdUi))
+        {
+            g_androidTargetPicker.boxDragMoved = true;
+        }
+
+        if (g_androidTargetPicker.boxDragMoved)
+        {
+            const AndroidUiRect rect = GetAndroidTargetPickerRect();
+            g_androidTargetPickerX = std::clamp(g_androidTargetPicker.boxDragStartX + dx, 0.0f, 640.0f - rect.w);
+            g_androidTargetPickerY = std::clamp(g_androidTargetPicker.boxDragStartY + dy, 0.0f, 480.0f - rect.h);
+        }
+
+        return true;
+    }
+
     if (!g_androidTargetPicker.visible
         || !g_androidTargetPicker.dragging
         || g_androidTargetPicker.dragFingerId != touch.fingerId)
@@ -8550,6 +8788,14 @@ bool HandleAndroidTargetPickerFingerMotion(const SDL_TouchFingerEvent& touch)
 
 bool HandleAndroidTargetPickerFingerUp(const SDL_TouchFingerEvent& touch)
 {
+    if (g_androidTargetPicker.boxDragFingerId == touch.fingerId)
+    {
+        g_androidTargetPicker.boxDragging = false;
+        g_androidTargetPicker.boxDragMoved = false;
+        g_androidTargetPicker.boxDragFingerId = static_cast<SDL_FingerID>(-1);
+        return true;
+    }
+
     if (!g_androidTargetPicker.dragging
         || g_androidTargetPicker.dragFingerId != touch.fingerId)
     {
@@ -8900,6 +9146,11 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     }
 
     if (HandleAndroidComboSettingsFingerDown(uiX, uiY))
+    {
+        return true;
+    }
+
+    if (HandleItemMenuFingerDown(uiX, uiY, touch.fingerId))
     {
         return true;
     }
@@ -9259,6 +9510,11 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    if (HandleItemMenuFingerMotion(touch))
+    {
+        return true;
+    }
+
     if (FindActiveVirtualTouchSlot(touch.fingerId) >= 0)
     {
         return true;
@@ -9414,6 +9670,11 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     }
 
     if (HandleAndroidTargetPickerFingerUp(touch))
+    {
+        return true;
+    }
+
+    if (HandleItemMenuFingerUp(touch))
     {
         return true;
     }
@@ -11275,6 +11536,15 @@ void RenderAndroidTargetPicker()
     HFONT rowFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
     HFONT smallFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
 
+    // Header had no label at all before - doubles as a hint that it is what
+    // you drag to move the box (see GetAndroidTargetPickerHeaderRect).
+    TextDraw(smallFont,
+             static_cast<int>(pickerRect.x + 7.0f),
+             static_cast<int>(pickerRect.y + 6.0f),
+             0xFFE0C0C0, 0x0,
+             static_cast<int>(pickerRect.w - 14.0f), 0, 3,
+             "%s", "AIM  (drag to move)");
+
     if (g_androidTargetPicker.entryCount <= 0)
     {
         TextDraw(smallFont,
@@ -12610,8 +12880,15 @@ void RenderVirtualPad()
             // "this one's active" language across the touch UI.
             if (selected || selectorOpen)
             {
-                glLineWidth(2.6f);
-                DrawVirtualCircle(button.cx, button.cy, button.radius + 2.0f, 1.0f, 0.82f, 0.10f, 0.95f, false);
+                // A thin 2.6px ring alone read as barely-there mid-combat - a
+                // filled glow behind the icon plus a thicker double ring make
+                // the armed slot readable at a glance instead of something you
+                // have to look for.
+                DrawVirtualCircle(button.cx, button.cy, button.radius + 5.0f, 1.0f, 0.82f, 0.10f, 0.30f, true);
+                glLineWidth(4.2f);
+                DrawVirtualCircle(button.cx, button.cy, button.radius + 3.0f, 1.0f, 0.86f, 0.20f, 1.0f, false);
+                glLineWidth(1.6f);
+                DrawVirtualCircle(button.cx, button.cy, button.radius + 6.5f, 1.0f, 0.82f, 0.10f, 0.55f, false);
                 glLineWidth(1.0f);
             }
 
@@ -13052,6 +13329,16 @@ bool IsAndroidVirtualJoystickHoldingMovement()
     return g_virtualJoystickHoldingMovement;
 }
 
+// IsVirtualPadAvailable() itself lives inside the anonymous namespace that
+// covers most of this file (internal linkage - not reachable from another
+// translation unit), so ZzzInterface.cpp's click-to-move fallback goes
+// through this thin wrapper instead, same as AndroidUpdateGroundAimCast wraps
+// UpdateAndroidGroundAimCast for the same reason.
+bool AndroidIsVirtualPadAvailable()
+{
+    return IsVirtualPadAvailable();
+}
+
 // Called on map change and disconnect. The lock does clear itself once its
 // target can no longer be resolved, but character Keys are reused between maps,
 // so without an explicit reset a lock could survive a teleport and land on
@@ -13069,6 +13356,44 @@ void AndroidClearTargetLock()
 void AndroidUpdateGroundAimCast()
 {
     UpdateAndroidGroundAimCast();
+}
+
+// A picked-up inventory item, tapped onto the ground to drop it, hits the
+// exact same trap as the ground-aim skill cast above: NewUIMyInventory.cpp's
+// drop handling (IsPress(VK_LBUTTON) in CNewUIMyInventory::UpdateMouseEvent)
+// picks the drop tile from whatever terrain ray the last completed render
+// built from MouseX/MouseY. On desktop that ray is always fresh, since the
+// mouse has been hovering continuously before the click; a touch tap gives it
+// no such hover, so setting MouseLButton true on the very same frame the tap
+// parks a brand new MouseX/MouseY picks up the STALE ray from wherever the
+// mouse last was - typically still over the inventory, from the double-tap
+// that picked the item up - and drops it there instead of where the tap
+// landed. Same fix as ground-aim: park the position (already done by
+// UpdateMouseFromTouch before this is armed) and give the render phase a
+// couple of frames to rebuild the ray before letting the click through.
+struct AndroidPendingItemDrop
+{
+    bool pending = false;
+    int settleFrames = 0;
+};
+AndroidPendingItemDrop g_androidPendingItemDrop{};
+
+void UpdateAndroidPendingItemDrop()
+{
+    if (!g_androidPendingItemDrop.pending)
+    {
+        return;
+    }
+
+    if (g_androidPendingItemDrop.settleFrames > 0)
+    {
+        --g_androidPendingItemDrop.settleFrames;
+        return;
+    }
+
+    g_androidPendingItemDrop.pending = false;
+    MouseLButtonPush = !MouseLButton;
+    MouseLButton = true;
 }
 
 // Called from the main scene's render path the moment the 3D world is done and
@@ -14596,17 +14921,12 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
 
         // Dropped items open a menu rather than being interacted with directly,
         // so touching an item never makes the character walk. The menu itself
-        // gets first refusal on the tap while it is open.
-        if (SceneFlag == MAIN_SCENE)
-        {
-            if (HandleItemMenuTap(static_cast<float>(MouseX), static_cast<float>(MouseY)))
-            {
-                break;
-            }
-
-            // The menu opens by itself when a drop is near the character, so a
-            // tap on the world no longer needs to hunt for items.
-        }
+        // gets first refusal on the tap while it is open - now handled inside
+        // HandleVirtualFingerDown (HandleItemMenuFingerDown), alongside the
+        // rest of the touch overlay's modal panels, so it can also track the
+        // drag gesture across FingerMotion/FingerUp. The menu opens by itself
+        // when a drop is near the character, so a tap on the world never needs
+        // to hunt for items.
 #if defined(__ANDROID__) || defined(MU_IOS)
         if (kLogInputEvents)
         {
@@ -14638,8 +14958,21 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
             }
 
             MouseLButtonPop  = false;
-            MouseLButtonPush = !MouseLButton;
-            MouseLButton     = true;
+
+            // See UpdateAndroidPendingItemDrop's comment: a picked-up item
+            // dropped by tapping the ground needs the terrain ray to catch up
+            // to this tap's MouseX/MouseY before the click is allowed through,
+            // or it drops wherever the ray was last pointing instead.
+            if (SEASON3B::CNewUIInventoryCtrl::GetPickedItem() != nullptr)
+            {
+                g_androidPendingItemDrop.pending = true;
+                g_androidPendingItemDrop.settleFrames = 2;
+            }
+            else
+            {
+                MouseLButtonPush = !MouseLButton;
+                MouseLButton     = true;
+            }
         } else {
             MouseRButtonPop  = false;
             MouseRButtonPush = !MouseRButton;

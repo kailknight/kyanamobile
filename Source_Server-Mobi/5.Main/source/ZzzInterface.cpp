@@ -93,6 +93,7 @@ extern char *g_lpszMp3[NUM_MUSIC];
 extern vec3_t MousePosition, MouseTarget;
 #ifdef __ANDROID__
 extern bool IsAndroidVirtualJoystickHoldingMovement();
+extern bool AndroidIsVirtualPadAvailable();
 #endif
 
 extern void RegisterBuff( eBuffState buff, OBJECT* o, const int bufftime = 0 );
@@ -8418,7 +8419,23 @@ void MoveHero()
 							c->MovementType = MOVEMENT_MOVE;
 						}
 					}
-					else if(HIBYTE(GetAsyncKeyState(VK_SHIFT)) != 128)
+					else if(HIBYTE(GetAsyncKeyState(VK_SHIFT)) != 128
+#ifdef __ANDROID__
+						// Movement is the virtual stick's job alone on mobile - unlike
+						// the SelectedOperate/SelectedNpc/SelectedItem branches above,
+						// which only skip while the stick is actively held (so a tap
+						// on an NPC/item still works when the player's thumb is off
+						// the stick), this is the bare "nothing else claimed the
+						// click, walk to wherever it landed" fallback and has no
+						// legitimate reason to fire on mobile at all. It ran
+						// unconditionally before this guard: any tap the virtual pad's
+						// own touch handling did not claim (falls outside the stick's
+						// grab radius, but still simulates a raw MouseLButton click for
+						// other desktop-shared UI to see) walked the character there,
+						// coexisting badly with the stick.
+						&& !AndroidIsVirtualPadAvailable()
+#endif
+						)
 					{
 						RenderTerrain ( true );
 						bool Success = RenderTerrainTile(SelectXF,SelectYF,(int)SelectXF,(int)SelectYF,1.f,1,true);

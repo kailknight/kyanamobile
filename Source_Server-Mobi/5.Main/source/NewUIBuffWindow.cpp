@@ -72,8 +72,14 @@ void SEASON3B::CNewUIBuffWindow::SetPos(int iScreenWidth)
 {
 #if defined(__ANDROID__) || defined(MU_IOS)
 	// Buffs sit under the status panel on mobile rather than across the top
-	// centre, where they collided with the boss/event banners.
-	SetPos(57, 81);
+	// centre, where they collided with the boss/event banners. X/Y are literal
+	// (this file has no access to android_main.cpp's kPortraitBarLeft/
+	// kStatRowBottom constants) but line up with them: kPortraitBarLeft = 58
+	// (kPortraitPanelX 6 + kPortraitAvatarSize 46 + 6), kStatRowBottom = 85
+	// (the bottom of the LVL/EXP row) plus a small gap - keep in sync if
+	// either changes. Previously (57,81) sat beside the LVL/EXP row instead
+	// of under it.
+	SetPos(58, 89);
 	return;
 #else
 	float FixX = 60;

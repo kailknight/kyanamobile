@@ -2369,6 +2369,12 @@ void MoveMainScene()
 		// touch handler, where the camera matrices are not set up yet.
 		extern void AndroidUpdateGroundAimCast();
 		AndroidUpdateGroundAimCast();
+
+		// Same reasoning: a picked-up item dropped on the ground needs a
+		// couple of frames here before its terrain ray is fresh - see
+		// UpdateAndroidPendingItemDrop's comment.
+		extern void UpdateAndroidPendingItemDrop();
+		UpdateAndroidPendingItemDrop();
 	}
 #endif
     MoveCharactersClient();
