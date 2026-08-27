@@ -538,6 +538,18 @@ namespace SEASON3B
 		static CALLBACK_RESULT CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
 	};
 
+	// Mobile-only "quit the app?" confirmation, opened on the second back
+	// press when nothing else is open. Distinct from CSystemMenuMsgBoxLayout
+	// (the PC-style Exit/ChooseServer/ChooseCharacter/Option/Cancel menu),
+	// which the Android UX explicitly does not want.
+	class CQuitGameMsgBoxLayout : public TMsgBoxLayout<CNewUICommonMessageBox>
+	{
+	public:
+		bool SetLayout();
+		static CALLBACK_RESULT OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+		static CALLBACK_RESULT CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+	};
+
 #ifdef ASG_ADD_TIME_LIMIT_QUEST
 	class CQuestCountLimitMsgBoxLayout : public TMsgBoxLayout<CNewUICommonMessageBox>
 	{

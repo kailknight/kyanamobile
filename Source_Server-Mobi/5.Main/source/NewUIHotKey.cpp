@@ -128,7 +128,11 @@ bool SEASON3B::CNewUIHotKey::UpdateKeyEvent()
 		gInterface.CloseAllWindowCustom();
 		if(g_MessageBox->IsEmpty())
 		{
+#if defined(__ANDROID__)
+			SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CQuitGameMsgBoxLayout));
+#else
 			SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CSystemMenuMsgBoxLayout));
+#endif
 			PlayBuffer(SOUND_CLICK01);
 			return false;
 		}

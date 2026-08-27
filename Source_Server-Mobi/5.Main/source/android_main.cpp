@@ -126,6 +126,7 @@ int AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel);
 #include "Platform/AndroidGDI.h"
 #include "Platform/RenderBackend.h"
 #include "Platform/gl_compat.h"
+#include "Platform/MobilePlatform.h"
 #include "android/AndroidNetwork.h"
 #include "android/SimpleModulusCrypt.h"
 #include "wsclientinline.h"
@@ -13466,14 +13467,14 @@ void RenderVirtualPortraitHud()
 
     DrawVirtualBarH(kPortraitBarLeft, ySD, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curSD) / static_cast<float>(maxSD),
-                    0.30f, 0.75f, 0.90f, 0.05f, 0.13f, 0.16f);
+                    0.90f, 0.85f, 0.20f, 0.16f, 0.15f, 0.04f);
 
     // AG. The legacy frame had a gauge for this and removing the frame took it
     // with it - which matters because skills check it and refuse silently when
     // it runs dry, leaving no way to tell why a cast did nothing.
     DrawVirtualBarH(kPortraitBarLeft, yAG, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curAG) / static_cast<float>(maxAG),
-                    0.90f, 0.78f, 0.30f, 0.16f, 0.13f, 0.04f);
+                    0.62f, 0.28f, 0.85f, 0.11f, 0.05f, 0.16f);
 
     // Experience, in the strip under the panel. Light green, so it does not
     // read as another resource gauge alongside the four above it.
@@ -17025,7 +17026,7 @@ static void RunAndroidGameFrame()
             if (!g_AndroidQuitRequested)
             {
                 g_AndroidQuitRequested = true;
-                sapp_request_quit();
+                MU_MobileRequestAppQuit();
             }
             return;
         }
@@ -17036,7 +17037,7 @@ static void RunAndroidGameFrame()
         if (!g_AndroidQuitRequested)
         {
             g_AndroidQuitRequested = true;
-            sapp_request_quit();
+            MU_MobileRequestAppQuit();
         }
         return;
     }
@@ -17055,7 +17056,7 @@ static void RunAndroidGameFrame()
         if (!g_AndroidQuitRequested)
         {
             g_AndroidQuitRequested = true;
-            sapp_request_quit();
+            MU_MobileRequestAppQuit();
         }
         return;
     }
@@ -17760,7 +17761,7 @@ static void OnAndroidSappInit()
     if (!InitializeAndroidGame() && !g_AndroidQuitRequested)
     {
         g_AndroidQuitRequested = true;
-        sapp_request_quit();
+        MU_MobileRequestAppQuit();
     }
 }
 

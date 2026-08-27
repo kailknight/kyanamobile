@@ -22,6 +22,16 @@
 #include "GambleSystem.h"
 #include "CharacterManager.h"
 #include "SkillManager.h"
+#include "ZzzOpenData.h"
+
+// Declared at file scope, not inside CQuitGameMsgBoxLayout::OkBtnDown: an
+// extern declared at block scope inside a member function defined via a
+// qualified-id (SEASON3B::CQuitGameMsgBoxLayout::OkBtnDown) still resolves
+// its linkage against the enclosing namespace of that class (SEASON3B), not
+// the real global ::Destroy from Winmain.h - that mismatch is a linker
+// error (undefined symbol: SEASON3B::Destroy). Declaring it here up front
+// lets ordinary unqualified lookup inside the function find this one.
+extern bool Destroy;
 
 
 extern int DisplayWinCDepthBox;
@@ -1942,7 +1952,7 @@ bool  SEASON3B::CLuckyItemMsgBoxLayout::SetLayout()
 	if(false == pMsgBox->Create(MSGBOX_COMMON_TYPE_OKCANCEL))
 		return false;
 	
-	// ¾ÆÀÌÅÛ Á¦¸ñ
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
 	int				nTextIndex[10]	= {0, };
 	eLUCKYITEMTYPE	eAct		 = g_pLuckyItemWnd->GetAct();
 	
@@ -2519,7 +2529,48 @@ CALLBACK_RESULT SEASON3B::CQuestGiveUpMsgBoxLayout::CancelBtnDown(class CNewUIMe
 {
 	PlayBuffer(SOUND_CLICK01);
 	g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
-	
+
+	return CALLBACK_BREAK;
+}
+
+// No existing GlobalText entry is a Yes/No confirmation sentence - the
+// nearby indices are all short button labels, and the string data itself
+// lives outside this repo in text_eng.bmd. A plain literal is simplest
+// here since this popup is Android-only.
+bool SEASON3B::CQuitGameMsgBoxLayout::SetLayout()
+{
+	CNewUICommonMessageBox* pMsgBox = GetMsgBox();
+	if(0 == pMsgBox)
+		return false;
+	if(false == pMsgBox->Create(MSGBOX_COMMON_TYPE_OKCANCEL))
+		return false;
+
+	pMsgBox->AddMsg("Quit the game?");
+
+	pMsgBox->AddCallbackFunc(CQuitGameMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
+	pMsgBox->AddCallbackFunc(CQuitGameMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
+
+	return true;
+}
+
+CALLBACK_RESULT SEASON3B::CQuitGameMsgBoxLayout::OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+	SaveOptions();
+	SaveMacro("Data\\Macro.txt");
+
+	PlayBuffer(SOUND_CLICK01);
+	g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+	Destroy = true;
+
+	return CALLBACK_BREAK;
+}
+
+CALLBACK_RESULT SEASON3B::CQuitGameMsgBoxLayout::CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+	PlayBuffer(SOUND_CLICK01);
+	g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
 	return CALLBACK_BREAK;
 }
 
