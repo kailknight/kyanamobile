@@ -206,6 +206,10 @@ namespace
 #endif
     }
 
+    // Tested forced-true while chasing the "player body invisible, wings still
+    // drawn" report: bodies still vanished with the entire adaptive character
+    // cull/LOD path disabled, so that system is NOT the cause and this stays
+    // false (leaving it on gives up the frame-time these systems buy).
     inline bool IsAndroidFullCharacterVisibilityMode()
     {
         return false;

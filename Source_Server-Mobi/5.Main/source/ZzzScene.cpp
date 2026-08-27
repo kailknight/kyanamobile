@@ -3097,6 +3097,14 @@ void MainScene(HDC hDC)
 			// the running binary. Computed once - __DATE__/__TIME__ are
 			// compile-time constants - and cached rather than reformatted
 			// every frame.
+			//
+			// CAVEAT: __DATE__/__TIME__ are baked in when THIS FILE is
+			// compiled, so an incremental build that only touches other
+			// translation units leaves the stamp unchanged even though the
+			// build really is new. It proves "at least this new", never "the
+			// build is stale" - do not read an unchanged stamp as the app
+			// running old code. CMakeLists.txt force-recompiles this file
+			// every build to keep it honest.
 			static char s_szBuildStamp[32] = { 0 };
 			if (s_szBuildStamp[0] == '\0')
 			{

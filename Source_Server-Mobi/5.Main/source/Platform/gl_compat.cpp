@@ -2591,8 +2591,42 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
     if (boneCount > kMaxSkinBones) {
         boneCount = kMaxSkinBones;
     }
+    // The whole buffer is written every time, never just the boneCount bones
+    // actually in use, with identity in the unused tail.
+    //
+    // Partially filling it was the cause of characters rendering wrong: some
+    // draw indexes a bone slot past boneCount, and whatever happened to be in
+    // that slot got used as a bone matrix. With the buffer reused in place
+    // that was the previous character's leftover bones, which skinned the mesh
+    // into a degenerate shape that collapsed off-screen - player bodies
+    // vanishing in crowded areas while their wings (a separate, non-skinned
+    // model that never takes this path) still drew. Orphaning alone made it
+    // louder rather than better: the tail became freshly-undefined memory and
+    // the same meshes exploded across the screen instead of disappearing,
+    // which is what confirmed out-of-range slots were being read at all.
+    //
+    // Identity is the safe value for an unused slot: a vertex that lands on
+    // one is drawn at its rest position instead of somewhere undefined, so a
+    // stray index can no longer wreck the mesh (or leak another character's
+    // pose into it). Cheap enough to do unconditionally - 200 bones is 9.6KB,
+    // and this buffer is already fully rewritten once per skinned draw.
+    static float s_boneUpload[kMaxSkinBones][3][4];
+    memcpy(s_boneUpload, boneMatrix3x4, sizeof(float) * 3 * 4 * boneCount);
+    for (int i = boneCount; i < kMaxSkinBones; ++i) {
+        memset(s_boneUpload[i], 0, sizeof(s_boneUpload[i]));
+        s_boneUpload[i][0][0] = 1.0f;
+        s_boneUpload[i][1][1] = 1.0f;
+        s_boneUpload[i][2][2] = 1.0f;
+    }
+
     glBindBuffer(GL_UNIFORM_BUFFER, s_skinBoneUbo);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float) * 4 * 3 * boneCount, boneMatrix3x4);
+    // Orphan first: this single UBO is rewritten immediately before each
+    // skinned draw, so writing in place can land in memory the GPU is still
+    // reading for an already-queued draw. Same hazard the 2D quad path in this
+    // file documents for its VBO, where per-draw orphaning measured as the
+    // correct choice on Mali.
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(s_boneUpload), nullptr, GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_boneUpload), s_boneUpload);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 

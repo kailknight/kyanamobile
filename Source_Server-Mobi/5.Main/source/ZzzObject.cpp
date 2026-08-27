@@ -235,11 +235,21 @@ namespace
     inline bool IsAdaptiveStaticSceneObject(const OBJECT* o)
     {
 #if defined(__ANDROID__) || defined(MU_IOS)
+        // Player characters were missing from this exclusion list, so a
+        // distant player in a crowded scene was misclassified as "static
+        // scenery" - which let ShouldSkipAdaptiveObjectRenderPass disable
+        // their chrome/metal/bright meshes as "supplemental" under load.
+        // Those flags are what most armor and character effects render their
+        // actual visible mesh with, not a decorative overlay the way they are
+        // for a building, so this silently dropped the body (or parts of it)
+        // while unrelated plain-textured meshes like a wing effect kept
+        // rendering - reported as "can't see characters" near crowded spots.
         return o != nullptr &&
             o->Kind != KIND_MONSTER &&
             o->Kind != KIND_NPC &&
             o->Kind != KIND_OPERATE &&
-            o->Kind != KIND_TRAP;
+            o->Kind != KIND_TRAP &&
+            o->Kind != KIND_PLAYER;
 #else
         (void)o;
         return false;
@@ -982,6 +992,23 @@ namespace
 #if defined(__ANDROID__) || defined(MU_IOS)
         if (IsAndroidFullObjectVisibilityMode() ||
             !IsObjectAdaptiveEnabled() || o == nullptr)
+        {
+            return;
+        }
+
+        // Living characters never get their supplemental (chrome/metal/bright)
+        // meshes disabled, at any distance bucket or crowd pressure - not just
+        // fixed for the "static" misclassification IsAdaptiveStaticSceneObject
+        // used to have (players are excluded there too now), but for the
+        // separate far-bucket path below that already applied to correctly
+        // classified non-static objects like monsters. Those render flags are
+        // how most armor sets and character effects paint their actual visible
+        // mesh, not a decorative extra the way they are for a building, so
+        // skipping them dropped bodies (or parts of them) while unrelated
+        // plain-textured meshes - a wing effect, say - kept rendering. Leaving
+        // g_objectRenderLodContext.active at its reset false is enough:
+        // ShouldSkipAdaptiveObjectRenderPass requires it true to skip anything.
+        if (o->Kind == KIND_PLAYER || o->Kind == KIND_MONSTER)
         {
             return;
         }

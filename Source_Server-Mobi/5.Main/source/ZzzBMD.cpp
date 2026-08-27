@@ -93,6 +93,14 @@ vec3_t LightTransform[MAX_MESH][MAX_VERTICES];
 //
 // TEMP kill switch for this test: flip to false to fall back to the
 // existing CPU path everywhere, with zero other code changes needed.
+//
+// Setting this false was how the "player body invisible, wings still drawn"
+// bug was traced here (bodies returned immediately, at a heavy FPS cost)
+// after the object- and character-side adaptive LOD systems were both ruled
+// out the same way. The actual defect was in GL_UpdateSkinningBones
+// (gl_compat.cpp), which rewrote the shared bone UBO with no orphaning, so a
+// queued draw could skin with another character's bones - see the comment
+// there. Fixed, so this stays true.
 bool g_GpuSkinningTestEnabled = true;
 
 float  g_SkinBoneMatrixCache[MAX_BONES][3][4];
@@ -404,6 +412,20 @@ void BMD::Transform(float (*BoneMatrix)[3][4],vec3_t BoundingBoxMin,vec3_t Bound
 	for(int i=0;i<NumMeshs;i++)
 	{
        	Mesh_t *m = &Meshs[i];
+
+		// NO CPU SKIP HERE - do not re-add one keyed only on GPU-skin
+		// eligibility. That was tried and reverted: skipping this loop for
+		// GPU-skinned meshes drew large black polygons over the terrain,
+		// because BMD::RenderBodyShadow (further down this file) reads
+		// VertexTransform directly to build shadow geometry and is called
+		// for ordinary objects from ~10 sites (ZzzObject.cpp:1900/1972/
+		// 2116/2183/11371/12390, GMBattleCastle.cpp:1215, GOBoid.cpp:1815/
+		// 1854) - it never goes through RenderMesh, so it silently consumed
+		// the stale vertices this skip left behind. RenderMeshTranslate and
+		// RenderMeshAlternative read them the same way. Whether any of those
+		// run for a given object is not knowable here, before the frame's
+		// draws have happened, which is what makes the skip unsafe rather
+		// than just needing a wider eligibility test.
 		for(int j=0;j<m->NumVertices;j++)
 		{
 			Vertex_t *v = &m->Vertices[j];
