@@ -25,4 +25,10 @@ const void* MU_MobileGetNativeWindow();
 const void* MU_MobileGetEglDisplay();
 const void* MU_MobileGetEglContext();
 
+// Battery percentage 0-100, or -1 if not yet known.
+int MU_MobileGetBatteryPercent();
+// Wifi RSSI in dBm (roughly -30 excellent .. -90 unusable), or INT32_MIN if
+// wifi is off/disconnected.
+int MU_MobileGetWifiRssiDbm();
+
 #endif // defined(__ANDROID__) || defined(MU_IOS)

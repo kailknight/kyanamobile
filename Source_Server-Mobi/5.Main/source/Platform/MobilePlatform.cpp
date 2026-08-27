@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstring>
 #include <initializer_list>
 
@@ -140,8 +141,75 @@ void MU_CallKeyboardBridge(const char* methodName)
         env->ExceptionClear();
     }
 }
+
+jmethodID g_batteryPercentMethod = nullptr;
+jmethodID g_wifiRssiMethod = nullptr;
 #endif
 } // namespace
+
+int MU_MobileGetBatteryPercent()
+{
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return -1;
+    }
+
+    if (g_batteryPercentMethod == nullptr)
+    {
+        g_batteryPercentMethod =
+            env->GetStaticMethodID(g_keyboardBridgeClass, "getBatteryPercentFromNative", "()I");
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return -1;
+        }
+    }
+
+    const int result = env->CallStaticIntMethod(g_keyboardBridgeClass, g_batteryPercentMethod);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return -1;
+    }
+    return result;
+#else
+    return -1;
+#endif
+}
+
+int MU_MobileGetWifiRssiDbm()
+{
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return INT32_MIN;
+    }
+
+    if (g_wifiRssiMethod == nullptr)
+    {
+        g_wifiRssiMethod =
+            env->GetStaticMethodID(g_keyboardBridgeClass, "getWifiRssiFromNative", "()I");
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return INT32_MIN;
+        }
+    }
+
+    const int result = env->CallStaticIntMethod(g_keyboardBridgeClass, g_wifiRssiMethod);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return INT32_MIN;
+    }
+    return result;
+#else
+    return INT32_MIN;
+#endif
+}
 
 // Defined in android_link_stubs.cpp - see the note there on why the audio JNI
 // bridge attaches from here instead of a JNI_OnLoad.

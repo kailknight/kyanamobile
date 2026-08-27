@@ -689,7 +689,12 @@ void CCharMakeWin::RenderCreateCharacter()
 	vec3_t savedAngle;
 	const float savedScale = o->Scale;
 
- 	Vector(1.0f,1.0f,1.0f,o->Light);
+ 	// Not full white: BodyLight() (ZzzObject.cpp) adds the scene's own terrain
+	// light on top of this rather than blending with it, so 1.0 plus any
+	// ambient/torch light at this spot pushes every channel past 1.0 and
+	// clips to flat white, wiping out the model's shading. Leaving headroom
+	// here keeps the preview bright without blowing it out.
+	Vector(0.6f,0.6f,0.6f,o->Light);
 	Vector(10,-500.f,48.f,Position);
 	Vector(-90.f,0.f,0.f,Angle);
     CameraFOV = 10.f;

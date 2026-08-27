@@ -15,6 +15,7 @@
 #include "ZzzOpenData.h"
 #include "ZzzOpenglUtil.h"
 #include "ServerListManager.h"
+#include "LoginWin.h"
 extern int DisplayWinCDepthBox;
 extern int DisplayWin;
 extern int DisplayWinMid;
@@ -47,6 +48,19 @@ void CCharSelMainWin::Create()
 	m_aBtn[CSMW_BTN_MENU].Create(54, 30, BITMAP_LOG_IN+4, 3, 2, 1);
 	m_aBtn[CSMW_BTN_CONNECT].Create(54, 30, BITMAP_LOG_IN+5, 4, 2, 1, 3);
 	m_aBtn[CSMW_BTN_DELETE].Create(54, 30, BITMAP_LOG_IN+6, 4, 2, 1, 3);
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Create() above builds each button's sprite frames off the native 54x30
+	// art, so the SetSize calls below only inflate the render/click box (same
+	// two-step pattern LoginWin.cpp uses for its own buttons) - a real 54x30
+	// px button is a couple percent of a modern phone's screen height and all
+	// but untappable, which is exactly why Create/Menu/Connect/Delete could
+	// not be hit.
+	for (int i = 0; i < CSMW_BTN_MAX; ++i)
+	{
+		m_aBtn[i].SetSize(ScaleLoginMetric(54), ScaleLoginMetric(30));
+	}
+#endif
 
 	CWin::Create(
 		m_aBtn[0].GetWidth() * CSMW_BTN_MAX + m_asprBack[CSMW_SPR_INFO].GetWidth() + 6,

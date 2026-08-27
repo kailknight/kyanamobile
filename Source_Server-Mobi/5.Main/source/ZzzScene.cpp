@@ -25,6 +25,8 @@
 #include "ZzzAI.h"
 #include "DSPlaySound.h"
 #include "wsclientinline.h"
+#include "android/AndroidNetwork.h"
+#include <algorithm>
 #include "SMD.h"
 #include "Local.h"
 #include "MatchEvent.h"
@@ -3088,12 +3090,84 @@ void MainScene(HDC hDC)
 		{
 			BeginBitmap();
 
-			unicode::t_char szFpsOnly[64];
-			// Compile timestamp, not a maintained counter - there is no build
-			// pipeline bumping a version number, and this auto-updates on every
-			// rebuild so it is trustworthy: it says whether a fresh install
-			// actually replaced the running binary.
-			unicode::_sprintf(szFpsOnly, "FPS %.1f  " __DATE__ " " __TIME__, FPS_AVG);
+			// Build stamp: v.1.0.DDMMYY.hhmm off the compile timestamp, not a
+			// maintained counter - there is no build pipeline bumping a version
+			// number, and this auto-updates on every rebuild so it is
+			// trustworthy: it says whether a fresh install actually replaced
+			// the running binary. Computed once - __DATE__/__TIME__ are
+			// compile-time constants - and cached rather than reformatted
+			// every frame.
+			static char s_szBuildStamp[32] = { 0 };
+			if (s_szBuildStamp[0] == '\0')
+			{
+				static const char* const s_months[] = {
+					"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+					"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+				};
+				char szMonth[4] = { 0 };
+				int nDay = 0, nYear = 0, nHour = 0, nMinute = 0, nSecond = 0;
+				sscanf(__DATE__, "%3s %d %d", szMonth, &nDay, &nYear);
+				sscanf(__TIME__, "%d:%d:%d", &nHour, &nMinute, &nSecond);
+
+				int nMonth = 1;
+				for (int i = 0; i < 12; ++i)
+				{
+					if (_stricmp(szMonth, s_months[i]) == 0)
+					{
+						nMonth = i + 1;
+						break;
+					}
+				}
+
+				sprintf(s_szBuildStamp, "v.1.0.%02d%02d%02d.%02d%02d",
+					nDay, nMonth, nYear % 100, nHour, nMinute);
+			}
+
+			// Battery / server ping, refreshed every 2s rather than every frame -
+			// a JNI round trip for battery and a getsockopt for ping are cheap
+			// individually but pointless to repeat 60x/sec for numbers that do
+			// not change that fast.
+			static int s_batteryPercent = -1;
+			static char s_szPing[16] = "--";
+			static uint32_t s_lastStatusPollMs = 0;
+			const uint32_t nowStatusMs = static_cast<uint32_t>(GetTickCount());
+			if (nowStatusMs - s_lastStatusPollMs >= 2000 || s_lastStatusPollMs == 0)
+			{
+				s_lastStatusPollMs = nowStatusMs;
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+				extern int MU_MobileGetBatteryPercent();
+				s_batteryPercent = MU_MobileGetBatteryPercent();
+#else
+				s_batteryPercent = -1;
+#endif
+				const AndroidNetworkOverlayStats netStats =
+					AndroidQueryNetworkOverlayStats(static_cast<int32_t>(SocketClient.GetSocket()));
+				if (!netStats.connected || netStats.latencyMs < 0)
+				{
+					strcpy(s_szPing, "--");
+				}
+				else
+				{
+					sprintf(s_szPing, "%dms", netStats.latencyMs);
+				}
+			}
+
+			// Text half of the line - the battery percentage sits here as a
+			// number, the icon drawn separately to its left below.
+			char szBatteryPct[8];
+			if (s_batteryPercent < 0)
+			{
+				strcpy(szBatteryPct, "--%");
+			}
+			else
+			{
+				sprintf(szBatteryPct, "%d%%", s_batteryPercent);
+			}
+
+			unicode::t_char szFpsOnly[96];
+			unicode::_sprintf(szFpsOnly, "%s   Ping %s   FPS %.1f   %s",
+				szBatteryPct, s_szPing, FPS_AVG, s_szBuildStamp);
 
 			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
 			g_pRenderText->SetBgColor(0, 0, 0, 140);
@@ -3102,12 +3176,67 @@ void MainScene(HDC hDC)
 			SIZE sizeFpsOnly = {};
 			g_pMultiLanguage->_GetTextExtentPoint32(
 				g_pRenderText->GetFontDC(), szFpsOnly, lstrlen(szFpsOnly), &sizeFpsOnly);
-			const int hudWidthFpsOnly = (DisplayWinReal > 0) ? DisplayWinReal : DisplayWin;
+
+			// _GetTextExtentPoint32 measures the font as actually rasterised,
+			// i.e. in real device pixels, but RenderText's x/y are logical
+			// 0-640x0-480 (it multiplies by g_fScreenRate_x/y itself - see
+			// CUIRenderTextOriginal::RenderText). Comparing the raw real-pixel
+			// width against the 640-wide logical screen always lost (a few
+			// hundred real pixels is already "wider" than 640), which is why
+			// this sat pinned near the left edge instead of right-aligning -
+			// dividing back down to logical units first fixes that.
+			const float safeScreenRateX = (g_fScreenRate_x > 0.0f) ? g_fScreenRate_x : 1.0f;
+			const int textWidthLogical = static_cast<int>(sizeFpsOnly.cx / safeScreenRateX);
+
+			// Battery glyph reserves its own space to the left of the text -
+			// drawn as flat rects (outline, background, charge fill, tip) in
+			// the same logical space RenderColor/RenderText already share
+			// (both scale by g_fScreenRate_x/y internally), rather than baked
+			// into the font, so its fill level can move independently of text.
+			constexpr int kBatteryBodyW = 16;
+			constexpr int kBatteryBodyH = 8;
+			constexpr int kBatteryTipW = 2;
+			constexpr int kBatteryGap = 6;
+			const int iconTotalW = kBatteryBodyW + kBatteryTipW + kBatteryGap;
+
 			const int fpsOnlyX =
-				(((hudWidthFpsOnly - sizeFpsOnly.cx) - 12) > 10)
-					? ((hudWidthFpsOnly - sizeFpsOnly.cx) - 12)
-					: 10;
-			g_pRenderText->RenderText(fpsOnlyX, DisplayHeight - 26, szFpsOnly);
+				(((DisplayWin - textWidthLogical) - 12) > (10 + iconTotalW))
+					? ((DisplayWin - textWidthLogical) - 12)
+					: (10 + iconTotalW);
+			const int rowY = DisplayHeight - 26;
+
+			g_pRenderText->RenderText(fpsOnlyX, rowY, szFpsOnly);
+
+			const int iconX = fpsOnlyX - iconTotalW;
+			const int iconY = rowY + 2;
+
+			float fillR = 0.3f, fillG = 0.85f, fillB = 0.3f;
+			if (s_batteryPercent >= 0 && s_batteryPercent < 20)
+			{
+				fillR = 0.9f; fillG = 0.25f; fillB = 0.2f;
+			}
+			else if (s_batteryPercent >= 0 && s_batteryPercent < 50)
+			{
+				fillR = 0.95f; fillG = 0.75f; fillB = 0.15f;
+			}
+
+			EnableAlphaTest();
+			glColor4f(0.85f, 0.85f, 0.85f, 0.9f);
+			RenderColor((float)iconX, (float)iconY, (float)kBatteryBodyW, (float)kBatteryBodyH);
+			glColor4f(0.05f, 0.05f, 0.05f, 0.9f);
+			RenderColor((float)(iconX + 1), (float)(iconY + 1), (float)(kBatteryBodyW - 2), (float)(kBatteryBodyH - 2));
+			if (s_batteryPercent >= 0)
+			{
+				const int fillW = ((kBatteryBodyW - 4) * std::clamp(s_batteryPercent, 0, 100)) / 100;
+				if (fillW > 0)
+				{
+					glColor4f(fillR, fillG, fillB, 1.0f);
+					RenderColor((float)(iconX + 2), (float)(iconY + 2), (float)fillW, (float)(kBatteryBodyH - 4));
+				}
+			}
+			glColor4f(0.85f, 0.85f, 0.85f, 0.9f);
+			RenderColor((float)(iconX + kBatteryBodyW), (float)(iconY + 2), (float)kBatteryTipW, (float)(kBatteryBodyH - 4));
+			EndRenderColor();
 
 			g_pRenderText->SetFont(g_hFont);
 			EndBitmap();
