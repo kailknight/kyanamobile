@@ -308,16 +308,16 @@ void MU_MobileSetTextInputRect(const SDL_Rect* rect)
 std::string MU_MobileGetExternalDataPath()
 {
     return MU_GetFirstExistingPath({
-        "/sdcard/Android/data/com.muonline.client/files",
-        "/storage/emulated/0/Android/data/com.muonline.client/files"
+        "/sdcard/Android/data/com.worldofkira/files",
+        "/storage/emulated/0/Android/data/com.worldofkira/files"
     });
 }
 
 std::string MU_MobileGetInternalDataPath()
 {
     return MU_GetFirstExistingPath({
-        "/data/user/0/com.muonline.client/files",
-        "/data/data/com.muonline.client/files"
+        "/data/user/0/com.worldofkira/files",
+        "/data/data/com.worldofkira/files"
     });
 }
 

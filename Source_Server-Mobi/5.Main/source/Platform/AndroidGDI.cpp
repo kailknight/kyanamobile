@@ -111,17 +111,17 @@ static TTF_Font* GetCachedFont(int size, bool bold) {
 
     // 2. Absolute paths to the app data directory
     static const char* sGameFontsNormal[] = {
-        "/sdcard/Android/data/com.muonline.client/files/Data/fonts/font_.ttf",
-        "/storage/emulated/0/Android/data/com.muonline.client/files/Data/fonts/font_.ttf",
-        "/data/user/0/com.muonline.client/files/Data/fonts/font_.ttf",
-        "/data/data/com.muonline.client/files/Data/fonts/font_.ttf",
+        "/sdcard/Android/data/com.worldofkira/files/Data/fonts/font_.ttf",
+        "/storage/emulated/0/Android/data/com.worldofkira/files/Data/fonts/font_.ttf",
+        "/data/user/0/com.worldofkira/files/Data/fonts/font_.ttf",
+        "/data/data/com.worldofkira/files/Data/fonts/font_.ttf",
         nullptr
     };
     static const char* sGameFontsBold[] = {
-        "/sdcard/Android/data/com.muonline.client/files/Data/fonts/font_2.ttf",
-        "/storage/emulated/0/Android/data/com.muonline.client/files/Data/fonts/font_2.ttf",
-        "/data/user/0/com.muonline.client/files/Data/fonts/font_2.ttf",
-        "/data/data/com.muonline.client/files/Data/fonts/font_2.ttf",
+        "/sdcard/Android/data/com.worldofkira/files/Data/fonts/font_2.ttf",
+        "/storage/emulated/0/Android/data/com.worldofkira/files/Data/fonts/font_2.ttf",
+        "/data/user/0/com.worldofkira/files/Data/fonts/font_2.ttf",
+        "/data/data/com.worldofkira/files/Data/fonts/font_2.ttf",
         nullptr
     };
     const char** gameFonts = bold ? sGameFontsBold : sGameFontsNormal;
