@@ -58,7 +58,13 @@ public:
         }
 
         // Total threads = nWorkers + 1 (main thread handles last chunk).
-        const int nChunks = std::min(nWorkers + 1, count);
+        // A plain ternary, not min()/std::min(): PlatformDefs.h #defines a
+        // global min/max macro that mangles a qualified std::min(...) call
+        // into invalid syntax wherever it's in scope (e.g. from this file's
+        // callers), but this header is also compiled from MuParallel.cpp,
+        // which doesn't pull that macro in at all - so neither name is safe
+        // to assume either way.
+        const int nChunks = (nWorkers + 1 < count) ? (nWorkers + 1) : count;
         const int base    = count / nChunks;
         const int rem     = count % nChunks;   // first `rem` chunks get +1
 
@@ -67,7 +73,7 @@ public:
         // Dispatch worker chunks (0 .. nChunks-2)
         for (int c = 0; c < nChunks - 1; ++c)
         {
-            const int start = c * base + std::min(c, rem);
+            const int start = c * base + ((c < rem) ? c : rem);
             const int end   = start + base + (c < rem ? 1 : 0);
 
             Enqueue([start, end, &fn, &doneCtr]()
@@ -82,7 +88,7 @@ public:
         // Main thread handles last chunk (overlaps with worker execution).
         {
             const int c     = nChunks - 1;
-            const int start = c * base + std::min(c, rem);
+            const int start = c * base + ((c < rem) ? c : rem);
             fn(start, count);
         }
 

@@ -17,10 +17,12 @@
 #include "GMCrywolf1st.h"
 #include "MapManager.h"
 #include "NewUISystem.h"
+#include <vector>
+#include <mutex>
 #if defined(__ANDROID__) || defined(MU_IOS)
 #include "Platform/gl_compat.h"
+#include "Platform/MuThreadPool.h"
 #include <cstdint>
-#include <vector>
 #endif
 
 namespace
@@ -959,7 +961,7 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 					inter = (Light[0] - inter) / 15.0f;
 					Vector(0.f, inter, 0.f, o->Velocity);
 
-					//  »ö.
+					//  ï¿½ï¿½.
 					Luminosity = (float)sinf(WorldTime * 0.002f) * 0.3f + 0.7f;
 					Vector(Luminosity, Luminosity * 0.5f, Luminosity * 0.5f, o->Light);
 				}
@@ -1339,7 +1341,7 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 					o->Position[2] -= (20.f) * FPS_ANIMATION_FACTOR;
 					o->Gravity = (float)(rand() % 10 + 5) * 0.1f;
 				}
-				else if (o->SubType == 6)	// ¡Ý
+				else if (o->SubType == 6)	// ï¿½ï¿½
 				{
 					o->LifeTime = 25;
 					o->Scale = (float)(rand() % 8 + 50) * 0.01f * Scale;
@@ -1384,7 +1386,7 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 					o->Velocity[2] = -((1.2f) + ((float)(rand() % 20 - 10) * 0.025f));
 					o->Gravity = 2.f + ((float)(rand() % 20 - 10) * 0.05f);
 				}
-				else if (o->SubType == 10)	// BITMAP_FIRE_CURSEDLICH o->SubType == 1°ú ºñ½Á.
+				else if (o->SubType == 10)	// BITMAP_FIRE_CURSEDLICH o->SubType == 1ï¿½ï¿½ ï¿½ï¿½ï¿½.
 				{
 					o->Position[0] += ((rand() % 10 - 5) * 0.2f) * FPS_ANIMATION_FACTOR;
 					o->Position[1] += ((rand() % 10 - 5) * 0.2f) * FPS_ANIMATION_FACTOR;
@@ -2986,7 +2988,7 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 					VectorCopy(vSpeed, o->Velocity);
 
 					o->Alpha = 1.0f;
-					//o->Scale = (float)(rand()%20)/20.0f+1.0f;	//(1~2 20´Ü°è)
+					//o->Scale = (float)(rand()%20)/20.0f+1.0f;	//(1~2 20ï¿½Ü°ï¿½)
 					o->LifeTime = rand() % 30 + 20;
 					o->Angle[2] = (float)(rand() % 360);
 					o->Rotation = (float)(rand() % 360);
@@ -4188,6 +4190,36 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 	return false;
 }
 
+// MoveParticles queues CreateParticle/CreateSprite calls into these instead of
+// calling them directly - both functions linearly scan and write into their own
+// shared array (Particles[]/Sprites[]) for a free slot, the same array
+// MoveParticles is iterating, so calling them mid-loop would be a data race
+// once that loop runs on multiple threads (Android/iOS). Queued per-chunk
+// requests are merged and flushed serially after the loop finishes. PC keeps
+// the same queue-and-flush shape (single chunk covering the whole array) so
+// the loop body below is shared by both platforms rather than duplicated.
+struct ParticleSpawnRequest
+{
+	int Type;
+	vec3_t Position;
+	vec3_t Angle;
+	vec3_t Light;
+	int SubType;
+	float Scale;
+	OBJECT* Owner;
+};
+
+struct SpriteSpawnRequest
+{
+	int Type;
+	vec3_t Position;
+	float Scale;
+	vec3_t Light;
+	OBJECT* Owner;
+	float Rotation;
+	int SubType;
+};
+
 void MoveParticles()
 {
 	//if (!g_pOption->GetRenderAllEffects())
@@ -4209,15 +4241,64 @@ void MoveParticles()
 		g_vParticleWind[i] *= FPS_ANIMATION_FACTOR;
 	}
 
-	int count = 0;
+	// Guards the 4 AddTerrainLight call sites below - not MU_EFFECT_LOCK(),
+	// because ParallelFor's calling thread runs its own chunk concurrently
+	// with the worker chunks it dispatches, so a lock that no-ops on the
+	// main thread would leave that chunk's writes unprotected against the
+	// others. A plain always-on lock, taken by every chunk including the
+	// main thread's own, is what's actually needed here.
+	std::mutex terrainLightMutex;
 
-	for (int i = 0; i < MAX_PARTICLES; i++)
+	// Collects spawn requests from every chunk (see ParticleSpawnRequest's
+	// comment above) so they can be flushed once, serially, after all chunks
+	// (parallel or not) have finished.
+	std::vector<ParticleSpawnRequest> pendingParticles;
+	std::vector<SpriteSpawnRequest> pendingSprites;
+	std::mutex pendingSpawnMergeMutex;
+
+	auto ProcessParticleRange = [&](int start, int end)
+	{
+		// Chunk-local: CreateParticle/CreateSprite scan-and-allocate into the
+		// same Particles[]/Sprites[] arrays other chunks are concurrently
+		// reading, so nothing in this chunk calls them directly - it queues
+		// requests here instead, merged into the shared queues only once
+		// this chunk's range is fully processed.
+		std::vector<ParticleSpawnRequest> localParticles;
+		std::vector<SpriteSpawnRequest> localSprites;
+		localParticles.reserve(8);
+		localSprites.reserve(4);
+
+		auto QueueParticleSpawn = [&localParticles](int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int SubType = 0, float Scale = 1.f, OBJECT* Owner = NULL)
+		{
+			ParticleSpawnRequest req;
+			req.Type = Type;
+			VectorCopy(Position, req.Position);
+			VectorCopy(Angle, req.Angle);
+			VectorCopy(Light, req.Light);
+			req.SubType = SubType;
+			req.Scale = Scale;
+			req.Owner = Owner;
+			localParticles.push_back(req);
+		};
+		auto QueueSpriteSpawn = [&localSprites](int Type, vec3_t Position, float Scale, vec3_t Light, OBJECT* Owner, float Rotation = 0.f, int SubType = 0)
+		{
+			SpriteSpawnRequest req;
+			req.Type = Type;
+			VectorCopy(Position, req.Position);
+			req.Scale = Scale;
+			VectorCopy(Light, req.Light);
+			req.Owner = Owner;
+			req.Rotation = Rotation;
+			req.SubType = SubType;
+			localSprites.push_back(req);
+		};
+
+	for (int i = start; i < end; i++)
 	{
 		PARTICLE* o = &Particles[i];
 
 		if (o->Live)
 		{
-			count++;
 			o->LifeTime -= FPS_ANIMATION_FACTOR;
 			if (o->LifeTime <= 0.f)
 			{
@@ -4570,10 +4651,10 @@ void MoveParticles()
 							VectorRotate(p, Matrix, Position);
 							VectorAdd(Position, o->Position, Position);
 							Vector(1.f, 1.0f, 1.0f, Light);
-							CreateParticle(BITMAP_SMOKE, Position, o->Angle, Light, 35, 2.5f);
+							QueueParticleSpawn(BITMAP_SMOKE, Position, o->Angle, Light, 35, 2.5f);
 
 							Vector(1.f, 1.f, 1.f, Light);
-							CreateParticle(BITMAP_EXPLOTION, Position, o->Angle, Light, 1);
+							QueueParticleSpawn(BITMAP_EXPLOTION, Position, o->Angle, Light, 1);
 							//							Vector(0.3f,0.3f,0.3f,Light);
 							//							CreateParticle ( BITMAP_SMOKE+1, Position, o->Angle, Light );
 						}
@@ -4590,8 +4671,8 @@ void MoveParticles()
 								VectorRotate(p, Matrix, Position);
 								VectorAdd(Position, o->Position, Position);
 								Vector(0.6f, 0.6f, 0.6f, Light);
-								CreateParticle(BITMAP_SMOKE, Position, o->Angle, Light, 35, 2.5f);
-								CreateParticle(BITMAP_EXPLOTION, Position, o->Angle, Light, 1);
+								QueueParticleSpawn(BITMAP_SMOKE, Position, o->Angle, Light, 35, 2.5f);
+								QueueParticleSpawn(BITMAP_EXPLOTION, Position, o->Angle, Light, 1);
 								//							Vector(0.3f,0.3f,0.3f,Light);
 								//							CreateParticle ( BITMAP_SMOKE+1, Position, o->Angle, Light );
 							}
@@ -4608,8 +4689,8 @@ void MoveParticles()
 									VectorRotate(p, Matrix, Position);
 									VectorAdd(Position, o->Position, Position);
 									Vector(0.3f, 0.3f, 0.3f, Light);
-									CreateParticle(BITMAP_SMOKE, Position, o->Angle, Light, 35, 2.5f);
-									CreateParticle(BITMAP_EXPLOTION, Position, o->Angle, Light, 1);
+									QueueParticleSpawn(BITMAP_SMOKE, Position, o->Angle, Light, 35, 2.5f);
+									QueueParticleSpawn(BITMAP_EXPLOTION, Position, o->Angle, Light, 1);
 								}
 							}
 				}
@@ -4617,7 +4698,11 @@ void MoveParticles()
 				{
 					Luminosity = (float)(o->LifeTime) / 20.f;
 					Vector(Luminosity * 0.5f, Luminosity * 0.3f, Luminosity * 0.1f, Light);
-					AddTerrainLight(o->Position[0], o->Position[1], Light, 4, PrimaryTerrainLight);
+					{
+						// terrainLightMutex - see its declaration comment above.
+						std::lock_guard<std::mutex> terrainLightLock(terrainLightMutex);
+						AddTerrainLight(o->Position[0], o->Position[1], Light, 4, PrimaryTerrainLight);
+					}
 				}
 				break;
 			case BITMAP_SUMMON_SAHAMUTT_EXPLOSION:
@@ -4633,7 +4718,11 @@ void MoveParticles()
 				o->Rotation = (float)((int)WorldTime % 1000) * 0.001f;
 				Luminosity = (float)(o->LifeTime) / 10.f;
 				Vector(Luminosity * 0.5f, Luminosity * 1.f, Luminosity * 0.8f, Light);
-				AddTerrainLight(o->Position[0], o->Position[1], Light, 3, PrimaryTerrainLight);
+				{
+					// terrainLightMutex - see its declaration comment above.
+					std::lock_guard<std::mutex> terrainLightLock(terrainLightMutex);
+					AddTerrainLight(o->Position[0], o->Position[1], Light, 3, PrimaryTerrainLight);
+				}
 				if (o->SubType == 2)
 				{
 					o->Scale += FPS_ANIMATION_FACTOR * 0.1f;
@@ -4647,9 +4736,17 @@ void MoveParticles()
 				Luminosity = (float)(o->LifeTime) / 5.f;
 				Vector(Luminosity * 1.f, Luminosity * 1.f, Luminosity * 1.f, o->Light);
 				Vector(-Luminosity * 0.6f, -Luminosity * 0.6f, -Luminosity * 0.6f, Light);
-				AddTerrainLight(o->Position[0], o->Position[1], Light, 6, PrimaryTerrainLight);
+				{
+					// terrainLightMutex - see its declaration comment above.
+					std::lock_guard<std::mutex> terrainLightLock(terrainLightMutex);
+					AddTerrainLight(o->Position[0], o->Position[1], Light, 6, PrimaryTerrainLight);
+				}
 				Vector(Luminosity * 0.2f, Luminosity * 0.4f, Luminosity * 1.f, Light);
-				AddTerrainLight(o->Position[0], o->Position[1], Light, 4, PrimaryTerrainLight);
+				{
+					// terrainLightMutex - see its declaration comment above.
+					std::lock_guard<std::mutex> terrainLightLock(terrainLightMutex);
+					AddTerrainLight(o->Position[0], o->Position[1], Light, 4, PrimaryTerrainLight);
+				}
 				break;
 			case BITMAP_CHROME_ENERGY2:
 				o->Gravity = 0.0f;
@@ -7380,18 +7477,18 @@ void MoveParticles()
 				{
 					o->Frame = (16 - o->LifeTime) / 4;
 
-					// ÇÃ·¹ÀÌ¾î ¸ðµ¨
+					// ï¿½Ã·ï¿½ï¿½Ì¾ï¿½ ï¿½ï¿½
 					BMD * pModel = &Models[o->Target->Type];
 					vec3_t vPos;
 
 					switch (o->SubType)
 					{
 					case 2:
-						// ÇÃ·¹ÀÌ¾î ¿Þ¼Õ
+						// ï¿½Ã·ï¿½ï¿½Ì¾ï¿½ ï¿½Þ¼ï¿½
 						pModel->TransformByObjectBone(vPos, o->Target, 37);
 						break;
 					case 3:
-						// ÇÃ·¹ÀÌ¾î ¿À¸¥¼Õ
+						// ï¿½Ã·ï¿½ï¿½Ì¾ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 						pModel->TransformByObjectBone(vPos, o->Target, 28);
 						break;
 					}
@@ -7434,7 +7531,7 @@ void MoveParticles()
 					o->Light[1] *= powf(1.0f / (1.05f), FPS_ANIMATION_FACTOR);
 					o->Light[2] *= powf(1.0f / (1.05f), FPS_ANIMATION_FACTOR);
 
-					CreateSprite(BITMAP_LIGHT, o->Position, o->Scale / 1.5f, o->Light, NULL);
+					QueueSpriteSpawn(BITMAP_LIGHT, o->Position, o->Scale / 1.5f, o->Light, NULL);
 				}
 				else if (o->SubType == 3)
 				{
@@ -7572,7 +7669,7 @@ void MoveParticles()
 							Position[1] = o->Position[1] + rand() % 40 - 20;
 							Position[2] = o->Position[2];
 							Vector(0.8f + (rand() % 200) * 0.001f, 0.5f + (rand() % 200) * 0.001f, 0.1f + (rand() % 100) * 0.001f, Light);
-							CreateParticle(BITMAP_SHINY, Position, o->Angle, Light, 8);
+							QueueParticleSpawn(BITMAP_SHINY, Position, o->Angle, Light, 8);
 						}
 					}
 				}
@@ -9080,7 +9177,7 @@ void MoveParticles()
 					vec3_t Light;
 					Vector(0.8f, 0.3f, 0.3f, Light);
 					if (rand() % 2 == 1)
-						CreateParticle(BITMAP_CURSEDTEMPLE_EFFECT_MASKER, o->StartPosition, o->Angle, Light, 1, 1.3f);
+						QueueParticleSpawn(BITMAP_CURSEDTEMPLE_EFFECT_MASKER, o->StartPosition, o->Angle, Light, 1, 1.3f);
 				}
 			}
 			break;
@@ -9130,7 +9227,7 @@ void MoveParticles()
 					v3OffsetPos_ShinyStar[2] = BASERANGE_SHINYSTAR * fRand3;
 
 					VectorAdd(o->Position, v3OffsetPos_ShinyStar, v3Pos_ShinyStar);
-					CreateParticle(BITMAP_SHINY + 6, v3Pos_ShinyStar, o->Angle, o->Light, 0, 0.5f);
+					QueueParticleSpawn(BITMAP_SHINY + 6, v3Pos_ShinyStar, o->Angle, o->Light, 0, 0.5f);
 				}
 			}
 			break;
@@ -9187,11 +9284,11 @@ void MoveParticles()
 				{
 					float _Scale = (rand() % 20 + 20.0f) / 50.0f;
 					if (o->SubType == 0)
-						CreateParticle(BITMAP_AG_ADDITION_EFFECT, Temp_Pos, o->Angle, o->Light, 0, 1.0f, o->Target);
+						QueueParticleSpawn(BITMAP_AG_ADDITION_EFFECT, Temp_Pos, o->Angle, o->Light, 0, 1.0f, o->Target);
 					else if (o->SubType == 1)
-						CreateParticle(BITMAP_AG_ADDITION_EFFECT, Temp_Pos, o->Angle, o->Light, 1, 1.0f, o->Target);
+						QueueParticleSpawn(BITMAP_AG_ADDITION_EFFECT, Temp_Pos, o->Angle, o->Light, 1, 1.0f, o->Target);
 					else if (o->SubType == 2)
-						CreateParticle(BITMAP_AG_ADDITION_EFFECT, Temp_Pos, o->Angle, o->Light, 2, 1.0f, o->Target);
+						QueueParticleSpawn(BITMAP_AG_ADDITION_EFFECT, Temp_Pos, o->Angle, o->Light, 2, 1.0f, o->Target);
 				}
 			}
 			break;
@@ -9242,6 +9339,31 @@ void MoveParticles()
 			}
 		}
 	}
+
+		if (!localParticles.empty() || !localSprites.empty())
+		{
+			std::lock_guard<std::mutex> lk(pendingSpawnMergeMutex);
+			pendingParticles.insert(pendingParticles.end(), localParticles.begin(), localParticles.end());
+			pendingSprites.insert(pendingSprites.end(), localSprites.begin(), localSprites.end());
+		}
+	};
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Splits [0, MAX_PARTICLES) across worker threads + this thread; see
+	// ProcessParticleRange above for how spawns and terrain-light writes stay
+	// race-free across chunks.
+	MuThreadPool::Get().ParallelFor(MAX_PARTICLES, ProcessParticleRange);
+#else
+	ProcessParticleRange(0, MAX_PARTICLES);
+#endif
+
+	// Non-const refs: CreateParticle/CreateSprite take vec3_t (i.e. float[3])
+	// params, which decay to float* - a const ParticleSpawnRequest& here would
+	// decay r.Position/Angle/Light to const float*, which doesn't convert.
+	for (ParticleSpawnRequest& r : pendingParticles)
+		CreateParticle(r.Type, r.Position, r.Angle, r.Light, r.SubType, r.Scale, r.Owner);
+	for (SpriteSpawnRequest& r : pendingSprites)
+		CreateSprite(r.Type, r.Position, r.Scale, r.Light, r.Owner, r.Rotation, r.SubType);
 }
 
 void RenderParticles(BYTE byRenderOneMore)
