@@ -13,6 +13,9 @@
 #include "SocketSystem.h"
 #include "MapManager.h"
 #include "MixMgr.h"
+#if defined(__ANDROID__) || defined(MU_IOS)
+#include "Platform/UIAtlas.h"
+#endif
 using namespace SEASON3B;
 
 SEASON3B::CNewUIPickedItem::CNewUIPickedItem()
@@ -223,6 +226,14 @@ void SEASON3B::CNewUIInventoryCtrl::LoadImages()
 	LoadBitmap("Interface\\newui_item_table03(Dw).tga", IMAGE_ITEM_TABLE_BOTTOM_PIXEL);
 	LoadBitmap("Interface\\newui_item_table03(L).tga", IMAGE_ITEM_TABLE_LEFT_PIXEL);
 	LoadBitmap("Interface\\newui_item_table03(R).tga", IMAGE_ITEM_TABLE_RIGHT_PIXEL);
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// These 8 border pieces are now freshly loaded and shared by well over a
+	// dozen other windows under their own aliased IDs (see Platform/UIAtlas.h)
+	// - pack them into a shared atlas so the immediate-mode batcher can
+	// actually coalesce their draws instead of forcing a flush on every one.
+	MU_BuildUIAtlasPilot();
+#endif
 
 #ifdef LJH_ADD_SYSTEM_OF_EQUIPPING_ITEM_FROM_INVENTORY
 	LoadBitmap("Interface\\newui_inven_usebox_01.tga", IMAGE_ITEM_SQUARE_FOR_1_BY_1);

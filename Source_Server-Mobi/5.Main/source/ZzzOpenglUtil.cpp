@@ -403,6 +403,32 @@ void BindTexture(int tex)
 	}
 }
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+// UI texture atlasing (mobile only, see GlobalBitmap.h's BITMAP_t comment and
+// Platform/UIAtlas.h). If Texture is a named (non-negative, non-streamed) ID
+// that has been packed into a shared UI atlas, repoints Texture at the
+// atlas's raw GL handle (reusing BindTexture's existing negative-ID = raw
+// handle convention, so no BindTexture change is needed) and composes the
+// caller's own UV sub-rect - already routinely non-0..1, e.g. 9-slice window
+// borders - with the atlas member's sub-rect within the shared sheet, rather
+// than replacing it. A no-op for anything not atlased.
+void ResolveUIAtlas(int& Texture, float& u, float& v, float& uWidth, float& vHeight)
+{
+	if (Texture < 0)
+		return;
+
+	BITMAP_t* b = Bitmaps.FindTexture(Texture);
+	if (b == NULL || !b->bAtlasMember)
+		return;
+
+	u      = b->AtlasU + u * b->AtlasUWidth;
+	v      = b->AtlasV + v * b->AtlasVHeight;
+	uWidth  *= b->AtlasUWidth;
+	vHeight *= b->AtlasVHeight;
+	Texture = -static_cast<int>(b->AtlasTextureNumber);
+}
+#endif
+
 bool TextureStream = false;
 
 extern  int test;
@@ -1521,6 +1547,15 @@ void RenderColorBitmap(int Texture,float x,float y,float Width,float Height,floa
 
 void RenderBitmap(int Texture,float x,float y,float Width,float Height,float u,float v,float uWidth,float vHeight,bool Scale,bool StartScale,float Alpha)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Pilot for UI texture atlasing - see ResolveUIAtlas's comment above
+	// BindTexture. RenderBitmap is the primary target since window borders
+	// (NewUICommon.cpp's RenderImage/DrawFrame) and most other 2D UI drawing
+	// already route through it. Other 2D UV-taking draw functions
+	// (RenderBitmapUV, RenderColorBitmap, RenderBitmapRotate, ...) are not
+	// wired in yet - expand coverage incrementally once this is verified.
+	ResolveUIAtlas(Texture, u, v, uWidth, vHeight);
+#endif
 #ifdef __ANDROID__
 	++g_ProfBitmapCalls;
 	const unsigned long long profBitmapStart = static_cast<unsigned long long>(MU_MobilePerfNow());

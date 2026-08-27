@@ -26,6 +26,23 @@ typedef struct
 	BYTE	Ref;
 	BYTE*   Buffer;
 
+	// UI texture atlasing (mobile only - see Platform/UIAtlas.h). When set,
+	// this bitmap's pixels live inside a shared atlas texture rather than
+	// their own GL texture: BindTexture-family callers should bind
+	// AtlasTextureNumber instead of TextureNumber, and compose any UV
+	// sub-rect they were going to sample against TextureNumber with
+	// (AtlasU, AtlasV, AtlasUWidth, AtlasVHeight) instead of sampling 0..1
+	// directly. The point is packing many small, frequently-swapped UI
+	// textures so consecutive draws bind the same GL texture and the
+	// existing immediate-mode batcher (Platform/gl_compat.cpp) can actually
+	// coalesce them, instead of forcing a flush on every single draw.
+	bool	bAtlasMember;
+	GLuint	AtlasTextureNumber;
+	float	AtlasU;
+	float	AtlasV;
+	float	AtlasUWidth;
+	float	AtlasVHeight;
+
 private:
 	friend class CBitmapCache;
 	DWORD	dwCallCount;
