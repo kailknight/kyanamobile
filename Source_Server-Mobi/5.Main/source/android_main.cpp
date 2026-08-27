@@ -4742,6 +4742,13 @@ bool IsAndroidPinchActive()
 
 // Called for every finger that goes down. Returns true only once the pinch has
 // actually begun, so a normal single touch falls through untouched.
+// Defined further down, next to the rest of the virtual button hit tests -
+// forward declared here so HandleAndroidPinchFingerDown can check finger B's
+// own target before deciding whether to claim it as a pinch partner.
+int HitTestVirtualMirrorHotKeySlot(float uiX, float uiY);
+int HitTestVirtualAttackButton(float uiX, float uiY);
+int HitTestVirtualSkillButton(float uiX, float uiY);
+
 bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
 {
     if (!IsVirtualPadAvailable())
@@ -4760,15 +4767,27 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
         return false;
     }
 
-    // Only a second finger landing while the first is driving the joystick is
-    // a pinch attempt - otherwise any second touch (tapping a Q/W/E/R hotkey
-    // while ATK is held down for repeat-fire, say) got claimed here and never
-    // reached its own button at all, since this runs before every other hit
-    // test in HandleVirtualFingerDown. Matches what ClearVirtualJoystick just
-    // below already assumed about finger A.
+    // Gated on finger B's own target, not finger A's: requiring finger A to
+    // already be driving the joystick (the previous fix for the bug below)
+    // meant a normal two-finger pinch out in the open world - neither finger
+    // on any control - never registered as a pinch at all, since the world
+    // itself is not the joystick. Checking finger B instead keeps both cases
+    // working: an ordinary pinch in open space (finger A is a plain world
+    // touch, not gated at all here), and holding ATK/a hotkey with finger A
+    // while finger B lands on its own separate hotkey - which needs finger B
+    // to reach that button's own hit test rather than being claimed here as
+    // a pinch partner, since this runs before every other hit test in
+    // HandleVirtualFingerDown.
+    float bUiX = 0.0f, bUiY = 0.0f;
+    TouchToVirtualUi(touch, bUiX, bUiY);
+    const bool fingerBOnExclusiveButton =
+        HitTestVirtualMirrorHotKeySlot(bUiX, bUiY) >= 0
+        || HitTestVirtualAttackButton(bUiX, bUiY) == kVirtualAttackButton
+        || HitTestVirtualSkillButton(bUiX, bUiY) >= kVirtualSkillButtonBase;
+
     if (g_androidPinch.fingerB == static_cast<SDL_FingerID>(-1)
         && touch.fingerId != g_androidPinch.fingerA
-        && IsVirtualJoystickCaptured(g_androidPinch.fingerA))
+        && !fingerBOnExclusiveButton)
     {
         g_androidPinch.fingerB = touch.fingerId;
         g_androidPinch.bx = px;
@@ -9751,7 +9770,19 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // except while a ground-targeted skill is armed, which claims unconditionally
     // regardless of where the tap lands; that is pre-existing behaviour this
     // does not change, just reaches from a new place.
-    if (IsAndroidMovementAllowedWithOpenWindows() && HandleVirtualJoystickFingerDown(touch))
+    //
+    // Excluded here even though it is checked again, properly, further down:
+    // IsInsideVirtualJoystickDynamicArea treats the whole bottom-left quadrant
+    // as the stick's grab area (see its own comment) with no radius limit, and
+    // the Q/W/E/R potion slots sit inside that exact quadrant. Without this,
+    // the stick claimed every potion tap before HitTestVirtualMirrorHotKeySlot
+    // ever ran, and a ground-targeted skill being armed still takes priority
+    // over both.
+    const bool tapOnMirrorHotKey = !g_androidGroundAim.armed
+        && HitTestVirtualMirrorHotKeySlot(uiX, uiY) >= 0;
+    if (!tapOnMirrorHotKey
+        && IsAndroidMovementAllowedWithOpenWindows()
+        && HandleVirtualJoystickFingerDown(touch))
     {
         return true;
     }
@@ -16074,7 +16105,12 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
 #endif
         switch (ev.key.keysym.sym) {
         case SDLK_AC_BACK:   // Android back button
-            Destroy = true;
+            // Scancode already mapped to SDL_SCANCODE_ESCAPE above (see
+            // AndroidKeycodeToSDLScancode) - CInput::IsKeyDown(VK_ESCAPE)
+            // picks this up next frame same as a real ESC key, so nothing
+            // else to do here. Used to hard-exit the whole app on a single
+            // tap; that was jarring and skipped every window's own
+            // close-on-ESC handling and the exit confirmation.
             break;
         case SDLK_BACKSPACE:
             if (g_charNameInputActive) {
@@ -16369,7 +16405,14 @@ static SDL_Scancode ConvertAndroidKeycodeToSDLScancode(jint keyCode)
     case AKEYCODE_NUMPAD_ENTER: return SDL_SCANCODE_KP_ENTER;
     case AKEYCODE_DEL: return SDL_SCANCODE_BACKSPACE;
     case AKEYCODE_ESCAPE: return SDL_SCANCODE_ESCAPE;
-    case AKEYCODE_BACK: return SDL_SCANCODE_AC_BACK;
+    // Mapped to the same scancode as ESCAPE (not AC_BACK) so the back
+    // gesture drives CInput::IsKeyDown(VK_ESCAPE) exactly like a PC ESC key
+    // press - every window that already closes itself on ESC (bag, shop, NPC
+    // dialogs, ...) closes on back too, and pressing it again with nothing
+    // open reaches UIMng.cpp's own ESC handler, which opens the sys menu
+    // (Exit Game there already goes through the normal confirmation) instead
+    // of the old SDLK_AC_BACK case below just killing the process outright.
+    case AKEYCODE_BACK: return SDL_SCANCODE_ESCAPE;
     case AKEYCODE_COMMA: return SDL_SCANCODE_COMMA;
     case AKEYCODE_PERIOD: return SDL_SCANCODE_PERIOD;
     case AKEYCODE_MINUS: return SDL_SCANCODE_MINUS;
