@@ -3089,7 +3089,11 @@ void MainScene(HDC hDC)
 			BeginBitmap();
 
 			unicode::t_char szFpsOnly[64];
-			unicode::_sprintf(szFpsOnly, "FPS %.1f", FPS_AVG);
+			// Compile timestamp, not a maintained counter - there is no build
+			// pipeline bumping a version number, and this auto-updates on every
+			// rebuild so it is trustworthy: it says whether a fresh install
+			// actually replaced the running binary.
+			unicode::_sprintf(szFpsOnly, "FPS %.1f  " __DATE__ " " __TIME__, FPS_AVG);
 
 			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
 			g_pRenderText->SetBgColor(0, 0, 0, 140);

@@ -114,8 +114,12 @@ void CLoginWin::Create()
 
 	m_pIDInputBox = new CUITextInputBox;
 	m_pIDInputBox->Init(g_hWnd, ScaleLoginMetric(140), ScaleLoginMetric(14), MAX_ID_SIZE);
-	m_pIDInputBox->SetBackColor(0, 0, 0, 255);
-	m_pIDInputBox->SetTextColor(255, 255, 230, 210);
+	// CUITextInputBox::Set{Back,Text}Color take (a, r, g, b) - these were
+	// written (r, g, b, a), so the intended opaque black box was landing as
+	// alpha 0 (invisible), leaving typed text with nothing behind it for
+	// contrast against the login background art.
+	m_pIDInputBox->SetBackColor(255, 0, 0, 0);
+	m_pIDInputBox->SetTextColor(210, 255, 255, 230);
 	m_pIDInputBox->SetFont(g_hFixFont);
 	m_pIDInputBox->SetState(UISTATE_NORMAL);
 	 m_pIDInputBox->SetOption(UIOPTION_NOLOCALIZEDCHARACTERS | UIOPTION_ENTERASTAB);
@@ -125,8 +129,8 @@ void CLoginWin::Create()
 
 	m_pPassInputBox = new CUITextInputBox;
 	m_pPassInputBox->Init(g_hWnd, ScaleLoginMetric(140), ScaleLoginMetric(14), MAX_PASSWORD_SIZE, TRUE);
-	m_pPassInputBox->SetBackColor(0, 0, 0, 25);
-	m_pPassInputBox->SetTextColor(255, 255, 230, 210);
+	m_pPassInputBox->SetBackColor(25, 0, 0, 0);
+	m_pPassInputBox->SetTextColor(210, 255, 255, 230);
 	m_pPassInputBox->SetFont(g_hFixFont);
 	m_pPassInputBox->SetState(UISTATE_NORMAL);
 	 m_pPassInputBox->SetOption(UIOPTION_NOLOCALIZEDCHARACTERS);
@@ -343,14 +347,32 @@ void CLoginWin::UpdateWhileShow(double dDeltaTick)
 	}
 #endif
 
-	m_pIDInputBox->DoAction();
-	m_pPassInputBox->DoAction();
-
 #if defined(__ANDROID__) || defined(MU_IOS)
+	// CUITextInputBox::DoMouseAction() (UIControls.cpp) grabs focus off the
+	// bare global MouseX/MouseY the moment it sees the button down inside its
+	// own (padded +4/+8px) rect - it knows nothing about CB_AutoLogin's arrow,
+	// checkbox or list rows sitting on top of that same rect, so it steals
+	// focus and pops the keyboard even though FocusInputAt below already
+	// guards its own tap-to-focus shortcut against exactly this overlap. Skip
+	// DoAction() entirely for both boxes while the tap belongs to CB_AutoLogin
+	// instead of teaching DoMouseAction() a second copy of that geometry.
+	const bool tapOnAutoLogin = gCB_AutoLogin != nullptr
+		&& CInput::Instance().IsLBtnDn()
+		&& gCB_AutoLogin->HitsControlArea(CWin::GetXPos(), CWin::GetYPos(),
+			static_cast<float>(MouseX), static_cast<float>(MouseY));
+	if (!tapOnAutoLogin)
+	{
+		m_pIDInputBox->DoAction();
+		m_pPassInputBox->DoAction();
+	}
+
 	if (CInput::Instance().IsLBtnDn())
 	{
 		FocusInputAt(static_cast<float>(MouseX), static_cast<float>(MouseY));
 	}
+#else
+	m_pIDInputBox->DoAction();
+	m_pPassInputBox->DoAction();
 #endif
 }
 

@@ -104,6 +104,7 @@ static void android_set_data_dir_early()
 #include "NewUIMessageBox.h"
 #include "NewUISystem.h"
 #include "NewUIFriendWindow.h"
+#include "CBInterface.h"
 #include "Translation/i18n.h"
 #include "Time/Timer.h"
 #include "UIMng.h"
@@ -899,6 +900,13 @@ constexpr int kTopBarActionSwitchChar = -7;
 // Ends the session and returns to server select - SendRequestLogOut(2),
 // mirroring ChooseServerBtnDown the same way.
 constexpr int kTopBarActionSwitchServer = -8;
+// Toggles the private-server "Features" menu (CBInterface.cpp's F5 handler:
+// gInterface.Data[eMenu_MAIN].OnShow ^= 1) - VIP shop, ranking, change class,
+// jewel bank and the rest of gCustomMenu's grid (MenuCustom.cpp). Bespoke for
+// the same reason as the two above: it is a raw CBInterface flag, not an
+// INTERFACE_ enum g_pNewUISystem knows about, so it has no slot in the
+// generic utility-action switch.
+constexpr int kTopBarActionFeatures = -9;
 
 // Three rows of four, read as one 4x3 grid: Guild/Shop/Settings/Bags, then
 // Friend/CMD/Jewel/Skill Tree, then Switch Character/Switch Server and two
@@ -926,7 +934,7 @@ constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
     kTopBarActionMasterSkill,
     kTopBarActionSwitchChar,
     kTopBarActionSwitchServer,
-    kTopBarActionNone,
+    kTopBarActionFeatures,
     kTopBarActionNone,
     kVirtualRightPanelUtilityActionHelper,
     kTopBarActionHelperPlay,
@@ -943,7 +951,7 @@ constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
     _T("ML"),
     _T("Char"),
     _T("Server"),
-    _T(""),
+    _T("Features"),
     _T(""),
     _T("Helper"),
     _T("Play"),
@@ -951,8 +959,8 @@ constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
 
 // Optional per-button art. Missing files are fine: DrawIconButton skips an
 // unloaded texture, and the box and label underneath are drawn regardless, so
-// the grid stays usable until real icons exist. The two empty slots' paths
-// are never loaded (EnsureUITextures skips kTopBarActionNone slots too).
+// the grid stays usable until real icons exist. The remaining empty slot's
+// path is never loaded (EnsureUITextures skips kTopBarActionNone slots too).
 constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_guild.png",
     "ui/topbar_shop.png",
@@ -964,7 +972,7 @@ constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_ML.png",
     "ui/topbar_switch_char.png",
     "ui/topbar_switch_server.png",
-    "",
+    "ui/topbar_features.png",
     "",
     "ui/topbar_helper.png",
     "ui/topbar_play.png",
@@ -7822,6 +7830,16 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidMovementFriendlyWindows[] = {
 
 bool IsAndroidGameWindowOpen()
 {
+    // The Features menu (gInterface.Data[eMenu_MAIN], F5 on PC) is a raw
+    // CBInterface flag, not an INTERFACE_ enum g_pNewUISystem tracks, so it
+    // cannot live in kAndroidScreenOwningWindows above - checked directly
+    // instead. 230x290 centred on screen (MenuCustom.cpp's Draw()), reaching
+    // well into where the attack wheel and skill buttons sit.
+    if (gInterface.Data[eMenu_MAIN].OnShow)
+    {
+        return true;
+    }
+
     if (g_pNewUISystem == nullptr)
     {
         return false;
@@ -9793,6 +9811,19 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
                 {
                     g_pChatListBox->AddText("", GlobalText[592], SEASON3B::TYPE_ERROR_MESSAGE);
                 }
+            }
+            else if (topBarAction == kTopBarActionFeatures)
+            {
+                // Exact mirror of CBInterface.cpp's own VK_F5 handler. EventTick
+                // must be refreshed here too, matching every other window's own
+                // OpenOnOff (e.g. CBJewelBank::OpenOnOff) - NewUIBCustomMenu.cpp's
+                // close button gates on "GetTickCount() - EventTick > 300", and
+                // without this the guard is left stale from whenever the window
+                // last closed, so the very tap that opens it can immediately
+                // satisfy that gate too and close it again in the same touch.
+                gInterface.Data[eMenu_MAIN].OnShow ^= 1;
+                gInterface.Data[eMenu_MAIN].EventTick = GetTickCount();
+                PlayBuffer(SOUND_CLICK01);
             }
             else if (topBarAction == kTopBarActionHelperPlay)
             {
@@ -12627,6 +12658,11 @@ bool IsTopBarSlotActive(int slot)
     if (kTopBarActions[slot] == kTopBarActionMasterSkill)
     {
         return g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL);
+    }
+
+    if (kTopBarActions[slot] == kTopBarActionFeatures)
+    {
+        return gInterface.Data[eMenu_MAIN].OnShow != 0;
     }
 
     // Lit while the helper is actually running, not while its window is open -
