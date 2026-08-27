@@ -6,6 +6,7 @@
 #include "GlobalBitmap.h"
 #include "ZzzTexture.h"
 #include "NewUIInventoryCtrl.h"
+#include "NewUIMainFrameWindow.h"
 #include <GLES3/gl32.h>
 #include <vector>
 
@@ -33,7 +34,32 @@ namespace
 		std::vector<PlacedImage> placed;
 		placed.reserve(ids.size());
 
+		// Sheet width must fit the single widest source image (plus padding
+		// on both sides) or the shelf-wrap check below can never trigger for
+		// that image, leaving it placed with p.x + p.w past the sheet edge -
+		// glTexSubImage2D would then write outside the destination texture.
+		// A HUD gauge fill can easily be wider than the 256px this started
+		// at (a full-width bar), so this has to be sized from the actual
+		// inputs, not assumed.
+		int maxSingleWidth = 0;
+		for (size_t i = 0; i < ids.size(); ++i)
+		{
+			BITMAP_t* b = Bitmaps.FindTexture(ids[i]);
+			if (b != NULL && b->Buffer != NULL && b->Width > 0.f && b->Height > 0.f)
+			{
+				const int w = static_cast<int>(b->Width);
+				if (w > maxSingleWidth)
+				{
+					maxSingleWidth = w;
+				}
+			}
+		}
+
 		int sheetW = 256;
+		while (sheetW < maxSingleWidth + 2 * kAtlasPadding)
+		{
+			sheetW *= 2;
+		}
 		int sheetH = 256;
 		int cursorX = kAtlasPadding;
 		int cursorY = kAtlasPadding;
@@ -89,7 +115,20 @@ namespace
 		GLuint atlasTexture = 0;
 		glGenTextures(1, &atlasTexture);
 		glBindTexture(GL_TEXTURE_2D, atlasTexture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sheetW, sheetH, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		// Zero-fill the sheet up front (not NULL) - the padding gaps between
+		// packed images are never written by the per-image glTexSubImage2D
+		// calls below, and with GL_LINEAR filtering a UV sample right at a
+		// packed image's edge bilinear-blends with whatever's in that gap.
+		// Left as driver-allocated NULL data, that's uninitialized GPU
+		// memory - garbage that reads as a solid-looking but wrong color
+		// (black, gray, stray colored specks) and, since the atlas is built
+		// once and never changes, shows up as the SAME artifact at the SAME
+		// screen position every frame. Zero-filling guarantees the gap is at
+		// least defined (transparent black) instead of undefined memory.
+		{
+			std::vector<unsigned char> zeroFill(static_cast<size_t>(sheetW) * sheetH * 4, 0);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sheetW, sheetH, 0, GL_RGBA, GL_UNSIGNED_BYTE, zeroFill.data());
+		}
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -147,26 +186,39 @@ void MU_BuildUIAtlasPilot()
 	}
 	s_built = true;
 
-	// Pilot set: the shared item-table border pieces. Small (14x14 corners,
-	// thin edge strips) and drawn many times per frame whenever any
-	// inventory-style window is open - reused as-is (same numeric IDs) by
-	// well over a dozen other window classes via their own aliased enum
-	// constants (search CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_ across the
-	// source tree). Already identified as a real, measured bottleneck:
+	// Pilot set: the shared item-table CORNER pieces only (14x14, drawn at
+	// or near 1:1 scale). Reused as-is (same numeric IDs) by well over a
+	// dozen other window classes via their own aliased enum constants
+	// (search CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_ across the source
+	// tree). Already identified as a real, measured bottleneck:
 	// NewUIGuildInfoWindow.cpp's Render_Guild_History comment traces the
 	// per-piece immediate-mode draws for one window's border alone to ~830
 	// draw calls pinning the phone at 6 FPS before that particular window
 	// switched to fewer, larger draws - this atlas is the general fix,
 	// letting the existing batcher coalesce the draws instead.
+	//
+	// Deliberately NOT included here: IMAGE_ITEM_TABLE_TOP_PIXEL/
+	// BOTTOM_PIXEL/LEFT_PIXEL/RIGHT_PIXEL. Those source images are only
+	// 1x14 / 14x1 (newui_item_table03(Up/Dw/L/R).tga - a single-texel-wide
+	// strip meant to be stretched across a whole window edge, e.g.
+	// ~700px for the inventory window's top/bottom frame -
+	// NewUIInventoryCtrl.cpp:981-982). That's several-hundred-times
+	// horizontal magnification of ONE atlas-packed texel column: any
+	// bilinear sample landing a fraction of a texel past this image's own
+	// edge (into a packed neighbor or the padding gap) gets stretched
+	// across hundreds of screen pixels into an obvious, wide artifact -
+	// this is what caused the black/white-bar/green-speck glitch reported
+	// in the inventory window's top and bottom frame seams. These four
+	// draw only twice per window (not once per grid cell like
+	// IMAGE_ITEM_SQUARE below), so atlasing them was never a meaningful
+	// batching win to begin with - leaving them as standalone textures
+	// costs nothing and removes the only atlas members at real risk of
+	// visible edge bleed under extreme stretch.
 	std::vector<GLuint> ids;
 	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_TOP_LEFT);
 	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_TOP_RIGHT);
 	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_BOTTOM_LEFT);
 	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_BOTTOM_RIGHT);
-	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_TOP_PIXEL);
-	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_BOTTOM_PIXEL);
-	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_LEFT_PIXEL);
-	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_TABLE_RIGHT_PIXEL);
 
 	// IMAGE_ITEM_SQUARE: the empty-slot background, drawn once per inventory
 	// grid cell (NewUIInventoryCtrl.cpp:967, inside the grid's x/y loop) -
@@ -176,6 +228,54 @@ void MU_BuildUIAtlasPilot()
 	// same-texture batcher. Highest single repeat-count candidate found so
 	// far, hence first addition past the pilot border set.
 	ids.push_back(SEASON3B::CNewUIInventoryCtrl::IMAGE_ITEM_SQUARE);
+
+	PackBitmapsIntoAtlas(ids);
+}
+
+void MU_BuildSkillBoxAtlas()
+{
+	static bool s_built = false;
+	if (s_built)
+	{
+		return;
+	}
+	s_built = true;
+
+	// IMAGE_SKILLBOX / IMAGE_SKILLBOX_USE: the normal vs active-slot
+	// background, drawn once per visible skill slot (NewUIMainFrameWindow.cpp,
+	// ~5-6 draws for the hotkey bar, up to MAX_MAGIC when the full picker is
+	// open) - mutually exclusive per slot, same "shared, reused, loaded early"
+	// character as the inventory border pieces.
+	std::vector<GLuint> ids;
+	ids.push_back(SEASON3B::CNewUISkillList::IMAGE_SKILLBOX);
+	ids.push_back(SEASON3B::CNewUISkillList::IMAGE_SKILLBOX_USE);
+
+	PackBitmapsIntoAtlas(ids);
+}
+
+void MU_BuildHudGaugeAtlas()
+{
+	static bool s_built = false;
+	if (s_built)
+	{
+		return;
+	}
+	s_built = true;
+
+	// HP/MP/SD/BP/EXP gauge fills - 5-6 RenderBitmap draws every single
+	// frame regardless of what UI is open (NewUIMainFrameWindow.cpp's
+	// RenderLifeMana/RenderGuageSD/RenderGuageAG/RenderExperience and their
+	// SS2-skin equivalents). Smaller draw count than the border-piece case,
+	// but a guaranteed background tax on every frame rather than only when a
+	// specific window is open.
+	std::vector<GLuint> ids;
+	ids.push_back(SEASON3B::CNewUIMainFrameWindow::IMAGE_GAUGE_RED);
+	ids.push_back(SEASON3B::CNewUIMainFrameWindow::IMAGE_GAUGE_GREEN);
+	ids.push_back(SEASON3B::CNewUIMainFrameWindow::IMAGE_GAUGE_BLUE);
+	ids.push_back(SEASON3B::CNewUIMainFrameWindow::IMAGE_GAUGE_AG);
+	ids.push_back(SEASON3B::CNewUIMainFrameWindow::IMAGE_GAUGE_SD);
+	ids.push_back(SEASON3B::CNewUIMainFrameWindow::IMAGE_GAUGE_EXBAR);
+	ids.push_back(SEASON3B::CNewUIMainFrameWindow::IMAGE_MASTER_GAUGE_BAR);
 
 	PackBitmapsIntoAtlas(ids);
 }

@@ -36,4 +36,23 @@
 // something this pilot needs to solve up front.
 void MU_BuildUIAtlasPilot();
 
+// Packs the skill-slot background pair (CNewUISkillList::IMAGE_SKILLBOX /
+// IMAGE_SKILLBOX_USE - normal vs active/selected slot) into their own small
+// atlas. These two are mutually exclusive per slot (never both drawn for the
+// same slot the same frame) and are reused across the hotkey bar (5-6 slots)
+// and the full skill picker (up to MAX_MAGIC slots when open). Call once,
+// after these are loaded - currently hooked at the end of
+// CNewUISkillList::LoadImages(), which loads this exact set.
+void MU_BuildSkillBoxAtlas();
+
+// Packs the always-on-screen HUD gauge textures (HP/MP/SD/BP/EXP -
+// CNewUIMainFrameWindow::IMAGE_GAUGE_RED/GREEN/BLUE/AG/SD/EXBAR plus
+// IMAGE_MASTER_GAUGE_BAR) into their own small atlas. Small draw count (5-6
+// bars/frame) but guaranteed every single frame regardless of what UI is
+// open. Call once, after these are loaded - currently hooked at the end of
+// CNewUIMainFrameWindow::LoadImages(), after both the SS2-skin and
+// default-skin branches (which load the same IDs from different files, so
+// either one leaves the set fully loaded by the time this runs).
+void MU_BuildHudGaugeAtlas();
+
 #endif

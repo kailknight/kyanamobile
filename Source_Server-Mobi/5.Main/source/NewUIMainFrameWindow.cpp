@@ -36,6 +36,9 @@
 #include "CBInterface.h"
 #include "CustomEventTime.h"
 #include "CustomRanking.h"
+#if defined(__ANDROID__) || defined(MU_IOS)
+#include "Platform/UIAtlas.h"
+#endif
 
 extern float g_fScreenRate_x;
 extern float g_fScreenRate_y;
@@ -336,6 +339,12 @@ void SEASON3B::CNewUIMainFrameWindow::LoadImages()
 	LoadBitmap("Interface\\partCharge1\\newui_menu_Bt04.jpg", IMAGE_MENU_BTN_WINDOW, GL_LINEAR, GL_CLAMP_TO_EDGE);
 	LoadBitmap("Interface\\partCharge1\\Decor.tga", IMAGE_DECOR_WIDE, GL_LINEAR, GL_CLAMP_TO_EDGE);
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// The gauge textures are now freshly loaded regardless of which skin
+	// branch above ran - pack them into their own shared atlas (see
+	// Platform/UIAtlas.h).
+	MU_BuildHudGaugeAtlas();
+#endif
 }
 
 void SEASON3B::CNewUIMainFrameWindow::UnloadImages()
@@ -2464,6 +2473,12 @@ void SEASON3B::CNewUISkillList::LoadImages()
 	LoadBitmap("Interface\\newui_skill3.jpg", IMAGE_SKILL3, GL_LINEAR);
 	LoadBitmap("Interface\\newui_non_skill3.jpg", IMAGE_NON_SKILL3, GL_LINEAR);
 #endif //PBG_ADD_NEWCHAR_MONK_SKILL
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// IMAGE_SKILLBOX/IMAGE_SKILLBOX_USE are now freshly loaded - pack them
+	// into their own shared atlas (see Platform/UIAtlas.h).
+	MU_BuildSkillBoxAtlas();
+#endif
 }
 
 void SEASON3B::CNewUISkillList::UnloadImages()

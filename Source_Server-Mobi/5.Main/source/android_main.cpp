@@ -36,14 +36,14 @@ __attribute__((constructor(101)))
 static void android_set_data_dir_early()
 {
     // External files dir 鑺掗埀顑解偓?accessible via adb push, no root needed
-    int r1 = chdir("/sdcard/Android/data/com.muonline.client/files");
+    int r1 = chdir("/sdcard/Android/data/com.worldofkira/files");
 #if !defined(MU_ANDROID_DISABLE_LOG)
     __android_log_print(ANDROID_LOG_INFO, "MuMain",
         "early chdir(/sdcard/.../files) = %d (errno=%d)", r1, errno);
 #endif
     if (r1 == 0) return;
     // Fallback: internal storage
-    int r2 = chdir("/data/data/com.muonline.client/files");
+    int r2 = chdir("/data/data/com.worldofkira/files");
 #if !defined(MU_ANDROID_DISABLE_LOG)
     __android_log_print(ANDROID_LOG_INFO, "MuMain",
         "fallback chdir(/data/.../files) = %d (errno=%d)", r2, errno);
@@ -249,10 +249,10 @@ static std::string ReadAndroidSystemProperty(const char* key)
 static void SetWorkingDirectoryToMobileDataRoot()
 {
     static constexpr const char* kMobileDataRoots[] = {
-        "/sdcard/Android/data/com.muonline.client/files",
-        "/storage/emulated/0/Android/data/com.muonline.client/files",
-        "/data/user/0/com.muonline.client/files",
-        "/data/data/com.muonline.client/files"
+        "/sdcard/Android/data/com.worldofkira/files",
+        "/storage/emulated/0/Android/data/com.worldofkira/files",
+        "/data/user/0/com.worldofkira/files",
+        "/data/data/com.worldofkira/files"
     };
 
     for (const char* workingDir : kMobileDataRoots)
@@ -14602,8 +14602,8 @@ static std::string ResolveMusicPath(const char* name)
     }
 
     static constexpr std::array<const char*, 2> kExternalBaseDirs = {
-        "/sdcard/Android/data/com.muonline.client/files",
-        "/storage/emulated/0/Android/data/com.muonline.client/files"
+        "/sdcard/Android/data/com.worldofkira/files",
+        "/storage/emulated/0/Android/data/com.worldofkira/files"
     };
 
     for (const char* baseRaw : kExternalBaseDirs)
