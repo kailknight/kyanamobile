@@ -5,12 +5,14 @@
 #include "stdafx.h"
 #include "ServerListManager.h"
 #include "./Utilities/Log/ErrorReport.h"
+#include "Protect.h"
 
 CServerListManager::CServerListManager()
 {
 	m_iTotalServer = 0;
 	m_szSelectServerName[0] = '\0';
 	m_iSelectServerIndex = -1;
+	m_bSelectServerNameIsCustom = false;
 }
 
 CServerListManager::~CServerListManager()
@@ -146,7 +148,7 @@ bool CServerListManager::MakeServerGroup(IN int iServerGroupIndex, OUT CServerGr
 	if (NULL == pServerGroupInfo)
 		return false;
 
-	::strcpy(pServerGroup->m_szName, pServerGroupInfo->m_szName);
+	::strcpy(pServerGroup->m_szName, gCustomServerName.m_szDefaultName);
 	::strcpy(pServerGroup->m_szDescription, pServerGroupInfo->m_strDescript.c_str());
 	pServerGroup->m_iSequence = (int)pServerGroupInfo->m_bySequence;
 	pServerGroup->m_iWidthPos = (int)pServerGroupInfo->m_byPos;
@@ -186,6 +188,15 @@ void CServerListManager::InsertServer(CServerGroup* pServerGroup, int iConnectIn
 	else
 	{
 		iTextIndex = 562;
+	}
+
+	if (iConnectIndex >= 0 && iConnectIndex < MAX_CUSTOM_SERVER_NAME
+		&& gCustomServerName.m_CustomServerName[iConnectIndex].Index != -1)
+	{
+		sprintf(pServerInfo->m_bName, "%s %s", gCustomServerName.m_CustomServerName[iConnectIndex].Name,
+			GlobalText[iTextIndex]);
+		pServerGroup->InsertServerInfo(pServerInfo);
+		return;
 	}
 
 	switch (pServerInfo->m_byNonPvP)
@@ -255,18 +266,24 @@ CServerGroup* CServerListManager::GetServerGroupByBtnPos(int iBtnPos)
 	return NULL;
 }
 
-void CServerListManager::SetSelectServerInfo(unicode::t_char* pszName, int iIndex, int iCensorshipIndex, BYTE byNonPvP, bool bTestServer)
+void CServerListManager::SetSelectServerInfo(unicode::t_char* pszName, int iIndex, int iCensorshipIndex, BYTE byNonPvP, bool bTestServer, bool bCustomName)
 {
 	strcpy(m_szSelectServerName, pszName);
 	m_iSelectServerIndex = iIndex;
 	m_iCensorshipIndex = iCensorshipIndex;
 	m_byNonPvP = byNonPvP;
 	m_bTestServer = bTestServer;
+	m_bSelectServerNameIsCustom = bCustomName;
 }
 
 unicode::t_char* CServerListManager::GetSelectServerName()
 {
 	return m_szSelectServerName;
+}
+
+bool CServerListManager::IsSelectServerNameCustom()
+{
+	return m_bSelectServerNameIsCustom;
 }
 
 int CServerListManager::GetSelectServerIndex()

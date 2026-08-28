@@ -47,7 +47,7 @@ void CB_BotTrader::DrawXemItemMix()
 	char* NameCoin[] = { "Zen","WCoin","WCoinP", "GobinPoint","NULL" };
 	int CountTextInfo = 0;
 	gInterface.Data[eWindowListItemTrader].AllowMove = false;
-	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowListItemTrader, "Công Thức Trader Mix"))
+	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowListItemTrader, "Trader Mix Recipe"))
 	{
 
 		StartX = StartX + 10;
@@ -64,7 +64,7 @@ void CB_BotTrader::DrawXemItemMix()
 			return;
 		}
 
-		TextDraw((HFONT)g_hFont, StartX + 15, StartY + 35, 0xFF00EEDFF, 0x0, WindowW, 0, 1, "Danh Sách Item Cần");
+		TextDraw((HFONT)g_hFont, StartX + 15, StartY + 35, 0xFF00EEDFF, 0x0, WindowW, 0, 1, "Required Item List");
 
 		//Scroll Bar
 		int DataListItem = ListItemMix.ListItem.size();
@@ -127,23 +127,23 @@ void CB_BotTrader::DrawXemItemMix()
 		//===Coin
 		float PosYCoinNhan = StartY + 175;
 		CountTextInfo++;
-		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Cần :");
+		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Required:");
 		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo++), 0xFFFFFFFF, 0x0, WindowW-40, 0, 4, "%s : %s", NameCoin[ListItemMix.TypeCoin], gInterface.NumberFormat(ListItemMix.Coin));
 	
 		if (ListItemMix.KeepOption || ListItemMix.KeepLevel)
 		{
-			TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Thành Công :");
+			TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Success:");
 			std::ostringstream ossTextKeep;
-			if (ListItemMix.KeepLevel) ossTextKeep << "Giữ Cấp Độ ";
-			if (ListItemMix.KeepOption) ossTextKeep << "Giữ Tính Năng";
+			if (ListItemMix.KeepLevel) ossTextKeep << "Keep Level ";
+			if (ListItemMix.KeepOption) ossTextKeep << "Keep Option";
 			TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo++), 0xFFFFFFFF, 0x0, WindowW - 40, 0, 4, strdup(ossTextKeep.str().c_str()));
 		}
 		if (ListItemMix.KeepItemMixFail)
 		{
-			TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Thất Bại :");
-			TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo++), 0xFFFFFFFF, 0x0, WindowW - 40, 0, 4, "Giữ lại Item Chính");
+			TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Failure:");
+			TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo++), 0xFFFFFFFF, 0x0, WindowW - 40, 0, 4, "Keep Main Item");
 		}
-		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Tỷ lệ :");
+		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo), 0xFF8214FF, 0x0, WindowW - 40, 0, 1, "*Rate:");
 		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * CountTextInfo++), 0xFFFFFFFF, 0x0, WindowW - 40, 0, 4, "%d%%", ListItemMix.Rate);
 	}
 }
@@ -161,7 +161,7 @@ bool CB_BotTrader::DrawWindow(int X, int Y)
 
 	RenderImage(CNewUITrade::IMAGE_TRADE_BACK, StartX, StartY, W, H);
 
-	TextDraw(g_hFontBold, StartX, StartY, 0xFFFFFFFF, 0x0, W, 0, 3, "**Danh Sách Trader Mix**");
+	TextDraw(g_hFontBold, StartX, StartY, 0xFFFFFFFF, 0x0, W, 0, 3, "**Trader Mix List**");
 	g_pBCustomMenuInfo->DrawInfoBox(StartX + 3, StartY + 15, W-13, 130, 0x00000096, 0, 0);
 
 	////===ScrollBar
@@ -216,8 +216,8 @@ bool CB_BotTrader::DrawWindow(int X, int Y)
 		TextDraw(g_hFont, StartX+5, StartY+20+(14* CountText++), 0xFFFFFFFF, Color, 140, 0, 1, "%s [%d]", this->m_DataListMix[n].NameMix, this->m_DataListMix[n].MixIndex);
 		CountList++;
 	}
-	TextDraw((HFONT)g_hFont, StartX, StartY+160, 0x14FFC0FF, 0x0, W, 0, 1, "*Click 2 lần vào tên Mix để hiển thị công thức Mix!");
-	TextDraw((HFONT)g_hFont, StartX, StartY+175, 0xA9FFC0FF, 0x0, W, 0, 1, "*Mỗi BotTrader sẽ có danh sách mix riêng");
+	TextDraw((HFONT)g_hFont, StartX, StartY+160, 0x14FFC0FF, 0x0, W, 0, 1, "*Click the Mix name twice to show the Mix recipe!");
+	TextDraw((HFONT)g_hFont, StartX, StartY+175, 0xA9FFC0FF, 0x0, W, 0, 1, "*Each BotTrader has its own mix list");
 	//gInterface.DrawMessage(1, "Dupe Click %d", ClickCheck);
 	if (GetTickCount() > TimeClickCheck) ClickCheck =0;
 	//===

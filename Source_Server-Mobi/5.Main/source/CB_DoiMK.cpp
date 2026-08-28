@@ -79,17 +79,17 @@ void CB_DoiMK::DrawWindow()
 	float StartX = (MAX_WIN_WIDTH / 2) - (WindowW / 2);
 	float StartY = 30;
 
-	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowDoiMK, "Đổi Mật Khẩu Game");
+	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowDoiMK, "Change Game Password");
 	//===Info Text
 	float TextX = StartX + 15;
 	float TextY = StartY + 55;
 	int CountText = 0;
-	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFFFFFFF, 0x0, 0, 0, 1, "**Thay đổi Mật Khẩu Tài Khoản");
-	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFAE00FF, 0x0, 0, 0, 1, "● Lưu Ý: kiểm tra và ghi nhớ MK trước khi đổi !");
-	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0x00FFB3FF, 0x0, 0, 0, 1, "- Mật Khẩu chỉ dùng để Đăng Nhập Game");
+	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFFFFFFF, 0x0, 0, 0, 1, "**Change Account Password");
+	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFAE00FF, 0x0, 0, 0, 1, "● Note: Double-check and remember your password before changing it!");
+	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0x00FFB3FF, 0x0, 0, 0, 1, "- Password is only used to log in to the game");
 
 
-	TextDraw((HFONT)g_hFont, TextX, (TextY + (11 * CountText)) + 10, 0xFFFFFFFF, 0x0, 0, 0, 1, "Mật Khẩu Cũ: ");
+	TextDraw((HFONT)g_hFont, TextX, (TextY + (11 * CountText)) + 10, 0xFFFFFFFF, 0x0, 0, 0, 1, "Old Password: ");
 
 	float TCoinX = TextX + 70;
 	float TCoinY = (TextY + (11 * CountText)) + 11;
@@ -129,7 +129,7 @@ void CB_DoiMK::DrawWindow()
 
 	}
 	TextY += 20;
-	TextDraw((HFONT)g_hFont, TextX, (TextY + (11 * CountText)) + 10, 0xFFFFFFFF, 0x0, 0, 0, 1, "Mật Khẩu Mới: ");
+	TextDraw((HFONT)g_hFont, TextX, (TextY + (11 * CountText)) + 10, 0xFFFFFFFF, 0x0, 0, 0, 1, "New Password: ");
 
 	TCoinX = TextX + 70;
 	TCoinY = (TextY + (11 * CountText)) + 11;
@@ -168,11 +168,11 @@ void CB_DoiMK::DrawWindow()
 		}
 
 	}
-	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) - (90 / 2), StartY + (WindowH - 20 - 30), 100, 12, "Xác Nhận Đổi MK", 80))
+	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) - (90 / 2), StartY + (WindowH - 20 - 30), 100, 12, "Confirm Password Change", 80))
 	{
 		if (this->TimeSend > GetTickCount())
 		{
-			gInterface.OpenMessageBox("Warning", "Vui Lòng Thao Tác Chậm Lại !!");
+			gInterface.OpenMessageBox("Warning", "Please slow down!!");
 			return ;
 		}
 		//=== SEND GS

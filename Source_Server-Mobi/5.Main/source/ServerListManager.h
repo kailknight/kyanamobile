@@ -39,8 +39,9 @@ public:
 	int GetServerGroupSize();
 
 	void SetSelectServerInfo(unicode::t_char* pszName, int iIndex, int iCensorshipIndex,
-		BYTE byNonPvP, bool bTestServer);
+		BYTE byNonPvP, bool bTestServer, bool bCustomName = false);
 	unicode::t_char* GetSelectServerName();
+	bool IsSelectServerNameCustom();
 	int	GetSelectServerIndex();
 	int GetCensorshipIndex();
 	BYTE GetNonPVPInfo();
@@ -65,6 +66,7 @@ public:
 	int				m_iCensorshipIndex;
 	BYTE			m_byNonPvP;
 	bool			m_bTestServer;
+	bool			m_bSelectServerNameIsCustom;
 
 protected:
 	ServerListScriptMap		m_mapServerListScript;

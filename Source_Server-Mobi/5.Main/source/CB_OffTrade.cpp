@@ -171,27 +171,27 @@ void CB_OffTrade::ShowMessNotice()
 	{
 		if (this->TypeShop == 0)
 		{
-			g_pChatListBox->AddText("", "Bạn không đủ Bless", SEASON3B::TYPE_ERROR_MESSAGE);
+			g_pChatListBox->AddText("", "Not enough Bless", SEASON3B::TYPE_ERROR_MESSAGE);
 		}
 		else if (this->TypeShop == 1)
 		{
-			g_pChatListBox->AddText("", "Bạn không đủ Soul", SEASON3B::TYPE_ERROR_MESSAGE);
+			g_pChatListBox->AddText("", "Not enough Soul", SEASON3B::TYPE_ERROR_MESSAGE);
 		}
 		else if (this->TypeShop == 2)
 		{
-			g_pChatListBox->AddText("", "Bạn không đủ WCoin", SEASON3B::TYPE_ERROR_MESSAGE);
+			g_pChatListBox->AddText("", "Not enough WCoin", SEASON3B::TYPE_ERROR_MESSAGE);
 		}
 		else if (this->TypeShop == 3)
 		{
-			g_pChatListBox->AddText("", "Bạn không đủ WCoinP", SEASON3B::TYPE_ERROR_MESSAGE);
+			g_pChatListBox->AddText("", "Not enough WCoinP", SEASON3B::TYPE_ERROR_MESSAGE);
 		}
 		else if (this->TypeShop == 4)
 		{
-			g_pChatListBox->AddText("", "Bạn không đủ GobinPoint", SEASON3B::TYPE_ERROR_MESSAGE);
+			g_pChatListBox->AddText("", "Not enough GobinPoint", SEASON3B::TYPE_ERROR_MESSAGE);
 		}
 		else if (this->TypeShop == 5)
 		{
-			g_pChatListBox->AddText("", "Bạn không đủ Zen", SEASON3B::TYPE_ERROR_MESSAGE);
+			g_pChatListBox->AddText("", "Not enough Zen", SEASON3B::TYPE_ERROR_MESSAGE);
 		}
 		else
 		{
@@ -213,27 +213,27 @@ void CB_OffTrade::RenderTextNotice(float X, float Y)
 	{
 		if (this->TypeShop == 0)
 		{
-			sprintf(Text, "Chỉ có thể giao dịch bằng Bless");
+			sprintf(Text, "Can only trade using Bless");
 		}
 		else if (this->TypeShop == 1)
 		{
-			sprintf(Text, "Chỉ có thể giao dịch bằng Soul");
+			sprintf(Text, "Can only trade using Soul");
 		}
 		else if (this->TypeShop == 2)
 		{
-			sprintf(Text, "Chỉ có thể giao dịch bằng Chaos");
+			sprintf(Text, "Can only trade using Chaos");
 		}
 		else if (this->TypeShop == 3)
 		{
-			sprintf(Text, "Chỉ có thể giao dịch bằng WCoin");
+			sprintf(Text, "Can only trade using WCoin");
 		}
 		else if (this->TypeShop == 4)
 		{
-			sprintf(Text, "Chỉ có thể giao dịch bằng WCoinP");
+			sprintf(Text, "Can only trade using WCoinP");
 		}
 		else if (this->TypeShop == 5)
 		{
-			sprintf(Text, "Chỉ có thể giao dịch bằng GobinP");
+			sprintf(Text, "Can only trade using GobinP");
 		}
 		else
 		{

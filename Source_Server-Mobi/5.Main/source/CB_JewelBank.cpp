@@ -97,7 +97,7 @@ void CBJewelBank::DrawWindow()
 		g_pNewUISystem->RenderItem3DFree(LineX, LineY, 15, 15, this->ItemJewelry[i+5 * this->Pagina], 0, 1, 0, 0, 1.0);//BMD MOdel
 		TextDraw((HFONT)g_hFontBold, LineX + 15, LineY + 22, 0xFFDE26FF, 0x3a4b3978, WInfo, 0, 3, BGetItemName(this->ItemJewelry[i+5 * this->Pagina], 0));
 		LineY += 10;
-		TextDraw((HFONT)g_hFont, LineX + 15, LineY + 22, 0xFFDE26FF, 0x0, WInfo, 0, 3, "Đang có: %d (Viên)", this->BankJewelry[i+5 * this->Pagina]);
+		TextDraw((HFONT)g_hFont, LineX + 15, LineY + 22, 0xFFDE26FF, 0x0, WInfo, 0, 3, "Currently have: %d (pcs)", this->BankJewelry[i+5 * this->Pagina]);
 
 		//==Button
 		float ButtonX = LineX + WInfo + 20;

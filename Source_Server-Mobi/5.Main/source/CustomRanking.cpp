@@ -182,7 +182,7 @@ void DrawPlayerRank(int X, int Y, int W, int H)
 		if (gCustomRanking->CacheDataUserTop.GuildName[0] != 0xFFFFFFFF && strlen(gCustomRanking->CacheDataUserTop.GuildName) > 1)
 		{
 			//=Guild
-			TextDraw(g_hFontBold, X + (W / 2) - 15, Y + 145, 0xFFFFFFFF, 0x0, 0, 0, 1, "Hội:");//
+			TextDraw(g_hFontBold, X + (W / 2) - 15, Y + 145, 0xFFFFFFFF, 0x0, 0, 0, 1, "Guild:");//
 			TextDraw(g_hFontBold, X + (W / 2), Y + 145, 0x00FBFFFF, 0x0, 0, 0, 1, gCustomRanking->CacheDataUserTop.GuildName);//
 			//==Logo Guild
 			g_pBCustomMenuInfo->DrawInfoBox((X + W) - 30, Y + 125, 27, 27, 0x00000096, 0, 0);
@@ -194,13 +194,13 @@ void DrawPlayerRank(int X, int Y, int W, int H)
 		float TextX = X + 10;
 		//==Tong Point
 		g_pBCustomMenuInfo->DrawInfoBox(TextX - 10, (Y + H) + 13, W, 42, 0x00000096, 0, 0);
-		TextDraw(g_hFont, TextX, (Y + H) + 15, 0xEBA000FF, 0x0, (W / 4), 0, 3, "Tổng Điểm:");//
+		TextDraw(g_hFont, TextX, (Y + H) + 15, 0xEBA000FF, 0x0, (W / 4), 0, 3, "Total Points:");//
 		TextDraw(g_hFontBold, TextX + (W / 4), (Y + H) + 15, 0x43F72FFF, 0x0, (W / 4), 0, 3, "%s", gInterface.NumberFormat(gCustomRanking->CacheDataUserTop.TongPoint));//
 		//Tong Reset
 		TextDraw(g_hFont, TextX + ((W / 4) * 2), (Y + H) + 15, 0xEBA000FF, 0x0, (W / 4), 0, 3, "Reset:");//
 		TextDraw(g_hFontBold, TextX + ((W / 4) * 3), (Y + H) + 15, 0x43F72FFF, 0x0, (W / 4), 0, 3, "%s", gInterface.NumberFormat(gCustomRanking->CacheDataUserTop.Reset));//
 		//Cấp Độ
-		TextDraw(g_hFont, TextX, (Y + H) + 25, 0xEBA000FF, 0x0, (W / 4), 0, 3, "Cấp:");//
+		TextDraw(g_hFont, TextX, (Y + H) + 25, 0xEBA000FF, 0x0, (W / 4), 0, 3, "Level:");//
 		TextDraw(g_hFontBold, TextX + (W / 4), (Y + H) + 25, 0x43F72FFF, 0x0, (W / 4), 0, 3, "%s", gInterface.NumberFormat(gCustomRanking->CacheDataUserTop.Level));//
 		//Cấp Master
 		TextDraw(g_hFont, TextX + ((W / 4) * 2), (Y + H) + 25, 0xEBA000FF, 0x0, (W / 4), 0, 3, "Master:");//
@@ -338,7 +338,7 @@ void CustomRanking::DrawRankPanelWindow()
 	{
 		DWORD Color = eGray100;
 
-		gInterface.DrawFormat(eExcellent, (int)StartX + MainWidth / 3 - 15, (int)StartY + 10, 210, 3, " Bảng Xếp Hạng %s", this->rankname);
+		gInterface.DrawFormat(eExcellent, (int)StartX + MainWidth / 3 - 15, (int)StartY + 10, 210, 3, " Leaderboard %s", this->rankname);
 
 
 		if (SEASON3B::IsPress(VK_LBUTTON) && SEASON3B::CheckMouseIn(StartX + 258.0, gInterface.Data[eRankPANEL_MAIN].Y + 99, 14, 14))

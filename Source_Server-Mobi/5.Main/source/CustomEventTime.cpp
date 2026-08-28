@@ -124,7 +124,7 @@ void CCustomEventTime::DrawEventTimePanelWindow()
 	{
 		g_pBCustomMenuInfo->DrawInfoBox(StartX + 20, StartBody + 37, MainWidth - 140, 10, 0x00000096, 0); //1vs3
 		TextDraw(g_hFontBold, StartX+10, StartBody + 39, 0xFFFFFFA8, 0x0, RowCol, 0, 3, gOther.Text_Chung[1]);
-		TextDraw(g_hFontBold, StartX + 10 + (RowCol*1), StartBody + 39, 0xFFFFFFA8, 0x0, RowCol, 0, 3,"Vị Trí");
+		TextDraw(g_hFontBold, StartX + 10 + (RowCol*1), StartBody + 39, 0xFFFFFFA8, 0x0, RowCol, 0, 3,"Location");
 		TextDraw(g_hFontBold, StartX + 10 + (RowCol*2), StartBody + 39, 0xFFFFFFA8, 0x0, RowCol, 0, 3, gOther.Text_Chung[2]);
 
 		if ((GetTickCount() - this->EventTimeTickCount) > 1000)

@@ -115,7 +115,7 @@ void CVongQuay::DrawWindowVQ()
 	gInterface.Data[eWindowVongQuay].Width = WindowW;
 	float StartX = (MAX_WIN_WIDTH / 2) - (WindowW / 2);
 	float StartY = ((MAX_WIN_HEIGHT - 51) / 2) - (WindowH / 2);
-	if (g_pBCustomMenuInfo->gDrawWindowCustom( &StartX, &StartY, WindowW, WindowH, eWindowVongQuay, "Vòng Quay New"))
+	if (g_pBCustomMenuInfo->gDrawWindowCustom( &StartX, &StartY, WindowW, WindowH, eWindowVongQuay, "New Spin Wheel"))
 	{
 
 		EnableAlphaBlend();
@@ -218,7 +218,7 @@ void CVongQuay::DrawWindowVQ()
 		if ((GetTickCount() - gInterface.Data[eTickCount].EventTick) > 6000)
 		{
 
-			if (g_pBCustomMenuInfo->DrawButton(StartX + 115, StartY + 200, 100, 11, "Quay", 60) && (GetTickCount() - gInterface.Data[eTickCount].EventTick) > 6000) //"Nhận"
+			if (g_pBCustomMenuInfo->DrawButton(StartX + 115, StartY + 200, 100, 11, "Spin", 60) && (GetTickCount() - gInterface.Data[eTickCount].EventTick) > 6000) //"Nhận"
 			{
 				XULY_CGPACKET_SOLAN pMsg;
 				pMsg.header.set(0xD3, 0x8A, sizeof(pMsg));
@@ -292,16 +292,16 @@ void CVongQuay::DrawWindowVQ()
 		}
 
 		float PosYCoinNhan = StartY + 185;
-		TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan - 5, 0xFFDE26FF, 0x3a4b3978, 90, 0, 3, "Yêu Cầu"); //);
+		TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan - 5, 0xFFDE26FF, 0x3a4b3978, 90, 0, 3, "Requirement"); //);
 		TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 1), 0xFF8214FF, 0x0, WindowW, 0, 1, "+WCoin : %s", gInterface.NumberFormat(gVongQuay.WCYC));			//Text3 = "+ WCoin : %s
 		TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 2), 0xFF8214FF, 0x0, WindowW, 0, 1, "+WCoinP :%s", gInterface.NumberFormat(gVongQuay.WPYC));		  //Text4 = "+ WCoinP : %
 		TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 3), 0xFF8214FF, 0x0, WindowW, 0, 1, "+GobinP :%s", gInterface.NumberFormat(gVongQuay.GPYC));		  //Text5 = "+ GobinP : %
 		if (gVongQuay.CountItem > 0)
 		{
-			TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 4), 0xFF8214FF, 0x0, WindowW, 0, 1, "+Cần : %s", gInterface.NumberFormat(gVongQuay.CountItem));		  //Text6 = " + Ruud : % s"
+			TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 4), 0xFF8214FF, 0x0, WindowW, 0, 1, "+Need : %s", gInterface.NumberFormat(gVongQuay.CountItem));		  //Text6 = " + Ruud : % s"
 			TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 5) + 5, 0x26FFD7A4, 0x0, WindowW, 0, 1, "%s", BGetItemName(gVongQuay.IndexYC, 0));//
 		}
-		TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 7), 0xFF8214FF, 0x0, WindowW, 0, 1, "Nhập Số Vòng");		  //Text5 = "+ GobinP : %
+		TextDraw(g_hFont, (StartX + WindowW) - 105, PosYCoinNhan + (10 * 7), 0xFF8214FF, 0x0, WindowW, 0, 1, "Enter Number of Spins");		  //Text5 = "+ GobinP : %
 
 
 		int DataListItem = gVongQuay.ListItemVongQuay.size();

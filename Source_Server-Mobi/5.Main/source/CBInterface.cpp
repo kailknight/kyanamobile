@@ -651,8 +651,8 @@ void Interface::Work()
 	//===Kep Chuot Tu dong
 	if (gInterface.Data[eStatus_KepChuot].OnShow)
 	{
-		gInterface.DrawFormat(eGold, 120, 45, 200, 1, "Tự động đánh bật");
-		gInterface.DrawFormat(eGold, 120, 60, 100, 1, "END: Tắt Auto");
+		gInterface.DrawFormat(eGold, 120, 45, 200, 1, "Auto Attack Enabled");
+		gInterface.DrawFormat(eGold, 120, 60, 100, 1, "END: Turn Off Auto");
 		MouseRButton = 1;
 	}
 	if (gProtect.m_MainInfo.LoadAntihack)
@@ -975,11 +975,11 @@ void Interface::DrawInfoMini()
 		}
 		if (g_pBCustomMenuInfo->AutoCtrlPK)
 		{
-			TextDraw((HFONT)g_hFontBold, gProtect.m_MainInfo.ViTriAutoPK[0], gProtect.m_MainInfo.ViTriAutoPK[1] + DisplayHeightExt + 6, 0xFFC738FF, 0x0, 55, 0, 3, "HP và PK [ON]");
+			TextDraw((HFONT)g_hFontBold, gProtect.m_MainInfo.ViTriAutoPK[0], gProtect.m_MainInfo.ViTriAutoPK[1] + DisplayHeightExt + 6, 0xFFC738FF, 0x0, 55, 0, 3, "HP and PK [ON]");
 		}
 		else
 		{
-			TextDraw((HFONT)g_hFontBold, gProtect.m_MainInfo.ViTriAutoPK[0], gProtect.m_MainInfo.ViTriAutoPK[1] + DisplayHeightExt + 6, 0xFFFFFFFF, 0x0, 55, 0, 3, "HP và PK [OFF]");
+			TextDraw((HFONT)g_hFontBold, gProtect.m_MainInfo.ViTriAutoPK[0], gProtect.m_MainInfo.ViTriAutoPK[1] + DisplayHeightExt + 6, 0xFFFFFFFF, 0x0, 55, 0, 3, "HP and PK [OFF]");
 		}
 	}
 

@@ -25,6 +25,7 @@
 #include "MonsterEffect.h"
 #include "CustomCommandInfo.h"
 #include "CustomDmgColor.h"
+#include "CustomServerName.h"
 
 struct RenderTooltipBuff
 {
@@ -163,6 +164,9 @@ struct MAIN_FILE_INFO
 
 	BYTE			OnBangChiSo;
 	BYTE			OnHealBar;
+
+	char DefaultServerName[32];
+	CUSTOM_SERVER_NAME_INFO CustomServerName[MAX_CUSTOM_SERVER_NAME];
 };
 
 class CProtect

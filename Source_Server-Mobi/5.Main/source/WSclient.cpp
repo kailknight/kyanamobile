@@ -5015,7 +5015,7 @@ BOOL ReceiveMagic(BYTE *ReceiveBuffer,int Size, BOOL bEncrypted)
 			
 			if(sc == Hero)
 			{
-				g_ConsoleDebug->Write(MCD_NORMAL, "RêciveMagic _nSkill %d", so->CurrentAction);
+				g_ConsoleDebug->Write(MCD_NORMAL, "ReceiveMagic _nSkill %d", so->CurrentAction);
 				if(so->CurrentAction == PLAYER_SKILL_ATT_UP_OURFORCES)
 				{
 					

@@ -74,7 +74,7 @@ void CB_BXHTopDmg::DrawWindowMini()
 	if (gInterface.Data[eWindowBXHDmg].BActiveHiden) return;
 
 	TextDraw((HFONT)g_hFontBold, StartX + 3, StartY + 25, 0xFFC421FF, 0x0, 60, 0, 3, "Top");
-	TextDraw((HFONT)g_hFontBold, StartX + 5 + 50, StartY + 25, 0xFFC421FF, 0x0, 85, 0, 3, "Sát Thương");
+	TextDraw((HFONT)g_hFontBold, StartX + 5 + 50, StartY + 25, 0xFFC421FF, 0x0, 85, 0, 3, "Damage");
 	int TextY = StartY + 25 + 13;
 	for (int i = 0; i < this->m_DataTopBXHDMG.size(); i++)
 	{

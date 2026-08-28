@@ -24,6 +24,7 @@
 
 //================
 #define MAX_CUSTOM_COMMAND 100
+#define MAX_CUSTOM_SERVER_NAME 40
 #define MAX_CUSTOM_MESSAGE							500
 #define MAX_CUSTOM_JEWEL							25
 #define MAX_POSITION_ITEM							1000

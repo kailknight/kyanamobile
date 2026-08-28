@@ -133,7 +133,7 @@ void CB_DrawCustomRank::Draw()
 	float InfoX = MAX_WIN_WIDTH - (InfoW + 20) - 45;
 	float InfoY = MAX_WIN_HEIGHT - (InfoH + 60);
 
-	if (g_pBCustomMenuInfo->DrawButton(InfoX - 3, InfoY - 28, 113, 12, "BXH Sự Kiện") && (GetTickCount() - gInterface.Data[eWindowDrawCustomRank].EventTick) > 300)
+	if (g_pBCustomMenuInfo->DrawButton(InfoX - 3, InfoY - 28, 113, 12, "Event Ranking") && (GetTickCount() - gInterface.Data[eWindowDrawCustomRank].EventTick) > 300)
 	{
 		////===BXH
 		gInterface.Data[eWindowDrawCustomRank].OnShow ^= 1;

@@ -93,17 +93,17 @@ void CBAutoResetInfo::DrawWindowRelife()
 	float TextStartY = StartY;
 
 	int ct = 4;
-	TextDraw(g_hFont, (StartX + (CuaSoW / 10)), TextStartY + (12 * ct++), 0xEBFFFBFF, 0x0, CuaSoW, 0, 1, "• Bạn đã đạt giới hạn Reset , cần Relife để tiếp tục Reset"); //
-	TextDraw(g_hFont, (StartX + (CuaSoW / 10)), TextStartY + (12 * ct++), 0xEBFFFBFF, 0x0, CuaSoW, 0, 1, "• Sau khi Relife bạn sẽ nhận được %d Point", this->m_PointRelife); //
-	TextDraw(g_hFont, (StartX + (CuaSoW / 10)), TextStartY + (12 * ct++), 0xEBFFFBFF, 0x0, CuaSoW, 0, 1, "• Reset về %d Level về %d !", this->m_ResetSauKhiRL, this->m_LevelSauKhiRL); //
+	TextDraw(g_hFont, (StartX + (CuaSoW / 10)), TextStartY + (12 * ct++), 0xEBFFFBFF, 0x0, CuaSoW, 0, 1, "• You have reached the Reset limit, Relife is required to continue Reset"); //
+	TextDraw(g_hFont, (StartX + (CuaSoW / 10)), TextStartY + (12 * ct++), 0xEBFFFBFF, 0x0, CuaSoW, 0, 1, "• After Relife you will receive %d Point", this->m_PointRelife); //
+	TextDraw(g_hFont, (StartX + (CuaSoW / 10)), TextStartY + (12 * ct++), 0xEBFFFBFF, 0x0, CuaSoW, 0, 1, "• Reset returns to %d, Level returns to %d!", this->m_ResetSauKhiRL, this->m_LevelSauKhiRL); //
 	ct += 1;
-	TextDraw(g_hFont, StartX, TextStartY + (12 * ct++), 0xFFD51CFF, 0x0, CuaSoW, 0, 3, "Yêu cầu Level %d để Relife", this->m_LevelRelife); //
-	TextDraw(g_hFont, StartX, TextStartY + (12 * ct++), 0xFFD51CFF, 0x0, CuaSoW, 0, 3, "Bạn sẽ được +%d Relife cho lần tiếp theo", this->m_RelifeCong); //
-	TextDraw(g_hFont, StartX, TextStartY + (12 * ct++), 0xFFD51CFF, 0x0, CuaSoW, 0, 3, "Bạn được Relife tối đa %d lần !", this->m_MaxRelife); //
+	TextDraw(g_hFont, StartX, TextStartY + (12 * ct++), 0xFFD51CFF, 0x0, CuaSoW, 0, 3, "Requires Level %d to Relife", this->m_LevelRelife); //
+	TextDraw(g_hFont, StartX, TextStartY + (12 * ct++), 0xFFD51CFF, 0x0, CuaSoW, 0, 3, "You will get +%d Relife for the next time", this->m_RelifeCong); //
+	TextDraw(g_hFont, StartX, TextStartY + (12 * ct++), 0xFFD51CFF, 0x0, CuaSoW, 0, 3, "You can Relife a maximum of %d times!", this->m_MaxRelife); //
 
 
 
-	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) - (120 / 2), StartY + (WindowH - 60), 150, 12, "Thực Hiện Relife", 120) && (GetTickCount() - gInterface.Data[eWindowRelife].EventTick) > 300)
+	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) - (120 / 2), StartY + (WindowH - 60), 150, 12, "Perform Relife", 120) && (GetTickCount() - gInterface.Data[eWindowRelife].EventTick) > 300)
 	{
 		XULY_CGPACKET pMsg;
 		pMsg.header.set(0xD3, 0x36, sizeof(pMsg));
@@ -180,7 +180,7 @@ CUITextInputBox* InputAddPointReset[5] = { nullptr };
 CUITextInputBox* InputCodeReset = { nullptr };
 char TextInputAddPoint[4][6] = { 0 };
 char TextInputCodeReset[11] = { 0 };
-char* NameTypeReset[] = { "Giữ Point", "Point*Reset", "Giữ Point + Point" };
+char* NameTypeReset[] = { "Keep Point", "Point*Reset", "Keep Point + Point" };
 
 int PointReAdd = 0;
 
@@ -191,7 +191,7 @@ void WindowDieuKienResetInfo(int X, int Y, int W)
 	float WindowW = W;
 	StartY += 35;
 	//TextDraw((HFONT)g_hFontBold, StartX + 10, StartY, 0xEB8213FF, 0x0, WindowW, 0, 1, "**Coin:");
-	TextDraw((HFONT)g_hFontBold, StartX + 10, StartY, 0xEB8213FF, 0x0, WindowW, 0, 1, "- Nguyên Liệu Yêu Cầu:");
+	TextDraw((HFONT)g_hFontBold, StartX + 10, StartY, 0xEB8213FF, 0x0, WindowW, 0, 1, "- Required Materials:");
 	StartY += 15;
 
 	float XText = 25;
@@ -237,7 +237,7 @@ void WindowDieuKienResetInfo(int X, int Y, int W)
 	{
 		StartY += 35;
 
-		TextDraw((HFONT)g_hFontBold, StartX + 10, StartY, 0xEB8213FF, 0x0, WindowW, 0, 1, "**Vật Phẩm:");
+		TextDraw((HFONT)g_hFontBold, StartX + 10, StartY, 0xEB8213FF, 0x0, WindowW, 0, 1, "**Items:");
 		//===Draw List
 		StartY += 15;
 		float InfoListX = StartX + 10;
@@ -327,20 +327,20 @@ void CBAutoResetInfo::DrawWindow()
 	g_pBCustomMenuInfo->DrawInfoBox(StartInfoBoxX, StartInfoBoxY, WBox - 2, HBox, 0x00000096, 0, 0);
 	float TextX = StartInfoBoxX;
 	float TextY = StartInfoBoxY + 3;
-	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xEB8213FF, 0x0, WBox, 0, 3, "[%s] Reset Tiếp Theo: %d", CharacterAttribute->Name, gCBAutoResetInfo->ViewInfoResetWindow.ResetView + 1);
+	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xEB8213FF, 0x0, WBox, 0, 3, "[%s] Next Reset: %d", CharacterAttribute->Name, gCBAutoResetInfo->ViewInfoResetWindow.ResetView + 1);
 	TextY += 7;
 	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xFFFFFFFF, 0x0, WBox + 2, 0, 3, "-------------------------------------------------------");
 	TextY += 12;
-	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Level Yêu Cầu:");
+	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Required Level:");
 	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xEBE313FF, 0x0, WBox, 0, 4, "%d/%d", CharacterAttribute->Level, gCBAutoResetInfo->ViewInfoResetWindow.Level);
 	TextY += 12;
 	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- GHRS:");
 	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xEBE313FF, 0x0, WBox, 0, 4, "%d/%d", gCBAutoResetInfo->ViewInfoResetWindow.ResetDay, gCBAutoResetInfo->ViewInfoResetWindow.MaxGHRS);
 	TextY += 12;
-	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Dạng Reset:");
+	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Reset Type:");
 	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xE11FFFFF, 0x0, WBox, 0, 4, NameTypeReset[gCBAutoResetInfo->ViewInfoResetWindow.LoaiReset]);
 	TextY += 12;
-	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Điểm nhận Reset:");
+	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Points received on Reset:");
 	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0x1FFFC7FF, 0x0, WBox, 0, 4, "%s", gInterface.NumberFormat(gCBAutoResetInfo->ViewInfoResetWindow.Point));
 	//TextY += 14;
 	//TextDraw((HFONT)g_hFont, TextX + 3, TextY + 1, 0xB1EB13FF, 0x0, WBox, 0, 1, "*** Nguyên Liệu Yêu Cầu:");
@@ -355,7 +355,7 @@ void CBAutoResetInfo::DrawWindow()
 	//===Check Type Reset
 	if (gCBAutoResetInfo->ViewInfoResetWindow.OnResetType & 1)
 	{
-		if (g_pBCustomMenuInfo->RenderCheckBox(InfoMidX + 5, InfoMidY, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 1 ? 0x13EBDCFF : 0xFFFFFFFF, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 1 ? TRUE : FALSE, "Reset Thường"))
+		if (g_pBCustomMenuInfo->RenderCheckBox(InfoMidX + 5, InfoMidY, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 1 ? 0x13EBDCFF : 0xFFFFFFFF, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 1 ? TRUE : FALSE, "Normal Reset"))
 		{
 			XULY_CGPACKET pMsg;
 			pMsg.header.set(0xD3, 0x36, sizeof(pMsg));
@@ -376,8 +376,8 @@ void CBAutoResetInfo::DrawWindow()
 	InfoMidY += 17;
 	if (gCBAutoResetInfo->ViewInfoResetWindow.LoaiReset > 0)
 	{
-		TextDraw((HFONT)g_hFont, InfoMidX + 3, InfoMidY + 1, 0xEB8213FF, 0x0, WBox, 0, 1, "Cộng Điểm Reset");
-		TextDraw((HFONT)g_hFont, InfoMidX + 3 + (WBox / 2) + 10, InfoMidY + 1, 0x13EBDCFF, 0x0, WBox, 0, 1, "Điểm dư: %s", gInterface.NumberFormat(gCBAutoResetInfo->ViewInfoResetWindow.Point - PointReAdd));
+		TextDraw((HFONT)g_hFont, InfoMidX + 3, InfoMidY + 1, 0xEB8213FF, 0x0, WBox, 0, 1, "Add Reset Points");
+		TextDraw((HFONT)g_hFont, InfoMidX + 3 + (WBox / 2) + 10, InfoMidY + 1, 0x13EBDCFF, 0x0, WBox, 0, 1, "Remaining Points: %s", gInterface.NumberFormat(gCBAutoResetInfo->ViewInfoResetWindow.Point - PointReAdd));
 		//===Add Point
 		char* TypeName[5] = { strdup(GlobalText[166]), strdup(GlobalText[167]),strdup(GlobalText[169]),strdup(GlobalText[168]),strdup(GlobalText[939]) };
 		//float NTCoinY = InfoMidY + 20;
@@ -453,14 +453,14 @@ void CBAutoResetInfo::DrawWindow()
 		PointReAdd = CaclPointAdd;
 		//===
 	}
-	int GetCountLine = TextDraw((HFONT)g_hFont, InfoMidX + 3, InfoMidY + 1, 0xFFFFFFFA9, 0x0, WBox, 0, 1, "*Lưu Ý: hãy cộng điểm cho lần Reset tiếp# theo hình thức này sẽ không có điểm danh# vọng reset");
+	int GetCountLine = TextDraw((HFONT)g_hFont, InfoMidX + 3, InfoMidY + 1, 0xFFFFFFFA9, 0x0, WBox, 0, 1, "*Note: add points for the next Reset,# this method will not give any reputation# points on reset");
 	InfoMidY += GetCountLine * 12;
 	float ButtonW = 80;
 	if (gCBAutoResetInfo->ViewInfoResetWindow.AutoResetEnable)
 	{
 		//==OK Reset
 		InfoMidY += 25;
-		if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 4) - (ButtonW / 2), StartY + (WindowH - 40), 150, 12, "<Tắt Auto Reset>", ButtonW) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
+		if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 4) - (ButtonW / 2), StartY + (WindowH - 40), 150, 12, "<Turn Off Auto Reset>", ButtonW) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
 		{
 			gInterface.Data[eWindowAutoReset].EventTick = GetTickCount();
 			RESETCODE_SEND pMsg;
@@ -479,7 +479,7 @@ void CBAutoResetInfo::DrawWindow()
 	//==OK Reset
 	InfoMidY += 25;
 
-	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) + (ButtonW / 2), StartY + (WindowH - 40), 150, 12, "Thực Hiện Reset", ButtonW) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
+	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) + (ButtonW / 2), StartY + (WindowH - 40), 150, 12, "Perform Reset", ButtonW) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
 	{
 		gInterface.Data[eWindowAutoReset].EventTick = GetTickCount();
 		RESETCODE_SEND pMsg;

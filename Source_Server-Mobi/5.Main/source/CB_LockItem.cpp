@@ -87,7 +87,7 @@ void CB_LockItem::DrawWindow()
 	float StartX = (MAX_WIN_WIDTH/2)-(WindowW/2);
 	float StartY = 30;
 
-	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowLockItem, "Khoá Giao Dịch");
+	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowLockItem, "Lock Trading");
 	//===Info Text
 	float TextX = StartX + 15;
 	float TextY = StartY + 55;
@@ -95,17 +95,17 @@ void CB_LockItem::DrawWindow()
 
 	if (!StatusLock)
 	{
-		TextDraw((HFONT)g_hFont, TextX + 60, TextY, 0xFF6600FF, 0x0, 0, 0, 1, "Chưa Khoá Giao Dịch");
+		TextDraw((HFONT)g_hFont, TextX + 60, TextY, 0xFF6600FF, 0x0, 0, 0, 1, "Trading Not Locked");
 	}
 	else
 	{
-		TextDraw((HFONT)g_hFont, TextX + 60, TextY, 0x0077FFFF, 0x0, 0, 0, 1, "Đã Khoá Giao Dịch");
+		TextDraw((HFONT)g_hFont, TextX + 60, TextY, 0x0077FFFF, 0x0, 0, 0, 1, "Trading Locked");
 	}
-	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFFFFFFF, 0x0, 0, 0, 1, "**Trạng Thái:");
-	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFAE00FF, 0x0, 0, 0, 1, "● Lưu Ý: Nhập mật khẩu để khoá  trạng thái !");
-	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0x00FFB3FF, 0x0, 0, 0, 1, "- Giao Dịch - Cửa Hàng - Phi Shop - Xoá Nhân Vật");
+	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFFFFFFF, 0x0, 0, 0, 1, "**Status:");
+	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0xFFAE00FF, 0x0, 0, 0, 1, "● Note: Enter password to lock the status!");
+	TextDraw((HFONT)g_hFont, TextX, TextY + (11 * CountText++), 0x00FFB3FF, 0x0, 0, 0, 1, "- Trading - Shop - Cash Shop - Delete Character");
 
-	TextDraw((HFONT)g_hFont, TextX, (TextY + (11 * CountText)) + 10, 0xFFFFFFFF, 0x0, 0, 0, 1, "Mật Khẩu Khoá");
+	TextDraw((HFONT)g_hFont, TextX, (TextY + (11 * CountText)) + 10, 0xFFFFFFFF, 0x0, 0, 0, 1, "Lock Password");
 	
 	float TCoinX = TextX + 70;
 	float TCoinY = (TextY + (11 * CountText)) + 11;
@@ -144,9 +144,9 @@ void CB_LockItem::DrawWindow()
 		}
 
 	}
-	TextDraw((HFONT)g_hFontBold, TextX, TCoinY + 25, 0xFF009DFF, 0x0, WindowW - 30, 0, 3, "Chú Ý : Vui lòng ghi nhớ mật khẩu ## nếu quên thì liên hệ Admin !");
+	TextDraw((HFONT)g_hFontBold, TextX, TCoinY + 25, 0xFF009DFF, 0x0, WindowW - 30, 0, 3, "Note: Please remember the password ## if you forget it, contact Admin!");
 	//===Captcha
-	TextDraw((HFONT)g_hFontBold, TextX, TCoinY + 55, 0x62FF00FF, 0x0, WindowW - 30, 0, 3, "Mã Xác Nhận");
+	TextDraw((HFONT)g_hFontBold, TextX, TCoinY + 55, 0x62FF00FF, 0x0, WindowW - 30, 0, 3, "Verification Code");
 	float CaptChaX = TextX + 40;
 	float CaptChaY = TCoinY + 70;
 	if (!InputCaptCha)
@@ -170,12 +170,12 @@ void CB_LockItem::DrawWindow()
 	std::string CaptchaInput(GetTextCaptCha);
 	//==Lock // UnLock
 	//if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) - (90 / 2), StartY - 20 - 30, 90, 30, FALSE, (char*)((char*)((!StatusLock) ? "Khoá Giao Dịch" : "Mở Khoá Giao Dịch"))))
-	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) - (90 / 2), StartY+(WindowH - 20 - 30), 100, 12, (char*)((char*)((!StatusLock) ? "Khoá Giao Dịch" : "Mở Khoá Giao Dịch")), 80))
+	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) - (90 / 2), StartY+(WindowH - 20 - 30), 100, 12, (char*)((char*)((!StatusLock) ? "Lock Trading" : "Unlock Trading")), 80))
 	{
 
 		if (!gInterface.check_Captcha(gInterface.vCaptcha, CaptchaInput))
 		{
-			gInterface.DrawMessage(1, "[Lỗi] Sai mã Captcha !!");
+			gInterface.DrawMessage(1, "[Error] Incorrect Captcha code!!");
 		}
 		else
 		{

@@ -1396,6 +1396,9 @@
     <ClCompile Include="source\CustomCommandInfo.cpp">
       <Filter>MU\Client\BCustomLoad</Filter>
     </ClCompile>
+    <ClCompile Include="source\CustomServerName.cpp">
+      <Filter>MU\Client\BCustomLoad</Filter>
+    </ClCompile>
     <ClCompile Include="source\PrintPlayer.cpp">
       <Filter>MU\Client\BCustomLoad</Filter>
     </ClCompile>
@@ -2764,6 +2767,9 @@
       <Filter>MU\Client\Header Files</Filter>
     </ClInclude>
     <ClInclude Include="source\CustomCommandInfo.h">
+      <Filter>MU\Client\BCustomLoad</Filter>
+    </ClInclude>
+    <ClInclude Include="source\CustomServerName.h">
       <Filter>MU\Client\BCustomLoad</Filter>
     </ClInclude>
     <ClInclude Include="source\PrintPlayer.h">

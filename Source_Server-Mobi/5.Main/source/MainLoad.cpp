@@ -130,5 +130,6 @@ void MainLoad::ApplyProtectData()
 	gCustomBuyVip.Load(gProtect.m_MainInfo.CustomBuyVipInfo);
 
 	gCustomCommandInfo.Load(gProtect.m_MainInfo.CustomCommandInfo);
+	gCustomServerName.Load(gProtect.m_MainInfo.DefaultServerName, gProtect.m_MainInfo.CustomServerName);
 	gCustomDmgColor.Load(gProtect.m_MainInfo.CustomDmgColor); //Dmg Color
 }

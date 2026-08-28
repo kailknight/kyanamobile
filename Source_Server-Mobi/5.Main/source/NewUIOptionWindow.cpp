@@ -393,7 +393,7 @@ void SEASON3B::CNewUIOptionWindow::RenderCustomFrame()
 	{
 		mShowMiniMap ^= 1;
 	}
-	if (g_pBCustomMenuInfo->RenderCheckBox(x + 15+80, y + 15, 0xFFCC00C8, mShowDanhHieu == 1 ? TRUE : FALSE, "Show Danh Hiệu"))
+	if (g_pBCustomMenuInfo->RenderCheckBox(x + 15+80, y + 15, 0xFFCC00C8, mShowDanhHieu == 1 ? TRUE : FALSE, "Show Title"))
 	{
 		mShowDanhHieu ^= 1;
 	}

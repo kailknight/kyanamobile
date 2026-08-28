@@ -13370,23 +13370,18 @@ float GetAndroidExperienceRatio()
 
     if (masterLevel)
     {
+        // Unlike regular Experience (cumulative since level 1, hence the
+        // "prior threshold" subtraction below), lMasterLevel_Experince is
+        // already progress *within the current master level* - WSclient.cpp's
+        // own iExp = lNext_MasterLevel_Experince - lMasterLevel_Experince
+        // (remaining-to-level) and ZzzInfomation.cpp's lMasterLevel_Experince
+        // = lNext_MasterLevel_Experince snap-to-100%-on-level-up both treat
+        // the two fields as directly comparable. prior stays 0: subtracting
+        // a "level below" threshold here (the previous version's approach)
+        // double-counted the level's own base, which is what put the bar at
+        // ~50% immediately after levelling instead of 0%.
         current = static_cast<double>(Master_Level_Data.lMasterLevel_Experince);
         next = static_cast<double>(Master_Level_Data.lNext_MasterLevel_Experince);
-
-        // Master levels continue the normal curve from 400, and the threshold
-        // for the level below is the base this level is measured from.
-        const __int64 total = static_cast<__int64>(Master_Level_Data.nMLevel) + 400;
-        const __int64 priorLevel = total - 1;
-        if (priorLevel > 0)
-        {
-            __int64 base = ((9 + priorLevel) * priorLevel * priorLevel * 10);
-            if (priorLevel > 255)
-            {
-                const __int64 over = priorLevel - 255;
-                base += (9 + over) * over * over * 1000;
-            }
-            prior = static_cast<double>((base - static_cast<__int64>(3892250000)) / 2);
-        }
     }
     else
     {

@@ -272,6 +272,7 @@
     <ClCompile Include="source\CustomBuyVip.cpp" />
     <ClCompile Include="source\CustomCloak.cpp" />
     <ClCompile Include="source\CustomCommandInfo.cpp" />
+    <ClCompile Include="source\CustomServerName.cpp" />
     <ClCompile Include="source\CustomDmgColor.cpp" />
     <ClCompile Include="source\CustomEventTime.cpp" />
     <ClCompile Include="source\CustomGloves.cpp" />
@@ -711,6 +712,7 @@
     <ClInclude Include="source\CustomBuyVip.h" />
     <ClInclude Include="source\CustomCloak.h" />
     <ClInclude Include="source\CustomCommandInfo.h" />
+    <ClInclude Include="source\CustomServerName.h" />
     <ClInclude Include="source\CustomDmgColor.h" />
     <ClInclude Include="source\CustomEventTime.h" />
     <ClInclude Include="source\CustomGloves.h" />

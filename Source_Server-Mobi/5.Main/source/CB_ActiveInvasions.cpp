@@ -86,11 +86,11 @@ void CB_ActiveInvasions::DrawWindow()
 	gInterface.DrawBarForm(X + 30, Y, width - 60, height-4, 0.0, 0.0, 0.0, 0.7);//Background
 	if ((int)NoticeInverse % 20 < 5)
 	{
-		TextDraw(g_hFontBold, X, Y + 3, 0xFFD51CFF, 0x0, width, height, 3, "[Thông Tin Boss]"); //
+		TextDraw(g_hFontBold, X, Y + 3, 0xFFD51CFF, 0x0, width, height, 3, "[Boss Info]"); //
 	}
 	else
 	{
-		TextDraw(g_hFont, X, Y + 3, 0xFFD51CFF, 0x0, width, height, 3, "[Thông Tin Boss]"); //
+		TextDraw(g_hFont, X, Y + 3, 0xFFD51CFF, 0x0, width, height, 3, "[Boss Info]"); //
 	}
 
 	if (SEASON3B::CheckMouseIn(X, Y, width, height) == true)
@@ -111,7 +111,7 @@ void CB_ActiveInvasions::DrawWindow()
 	float StartY = 0;
 
 
-	g_pBCustomMenuInfo->DrawWindowCustomMini(&StartX, &StartY, WindowW, WindowH, eActiveInvasionsMain, "Thông Tin BOSS");
+	g_pBCustomMenuInfo->DrawWindowCustomMini(&StartX, &StartY, WindowW, WindowH, eActiveInvasionsMain, "Boss Info");
 	int InfoX = StartX + 5;
 	int InfoY = StartY + 10;
 	int HText = 12;

@@ -439,10 +439,20 @@ void CLoginWin::RenderControls()
 
 	unicode::t_char szServerName[MAX_TEXT_LENGTH];
 
-	const char* apszGlobalText[4]
-		= { GlobalText[461], GlobalText[460], GlobalText[3130], GlobalText[3131] };
-	sprintf(szServerName, apszGlobalText[g_ServerListManager->GetNonPVPInfo()],
-		g_ServerListManager->GetSelectServerName(), g_ServerListManager->GetSelectServerIndex());
+	if (g_ServerListManager->IsSelectServerNameCustom())
+	{
+		// A full custom name (CommonManager\CustomServerName.txt) replaces the
+		// whole "[Group - Index | Type]" template, same rule as the server
+		// list itself - no index, no NonPVP-type wording tacked on.
+		strcpy(szServerName, g_ServerListManager->GetSelectServerName());
+	}
+	else
+	{
+		const char* apszGlobalText[4]
+			= { GlobalText[461], GlobalText[460], GlobalText[3130], GlobalText[3131] };
+		sprintf(szServerName, apszGlobalText[g_ServerListManager->GetNonPVPInfo()],
+			g_ServerListManager->GetSelectServerName(), g_ServerListManager->GetSelectServerIndex());
+	}
 
 	g_pRenderText->RenderText(int((CWin::GetXPos() + ScaleLoginMetric(111)) / g_fScreenRate_x),
 		int((CWin::GetYPos() + ScaleLoginMetric(80)) / g_fScreenRate_y), szServerName);

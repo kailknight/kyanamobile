@@ -198,7 +198,7 @@ void CBDanhHieu::DrawWindow()
 	int v2 = (m_DataDanhHieu.DANH_HIEU - (v1)) / 10;
 
 	gInterface.DrawFormat(eYellow, StartX + 145, StartY + 105, 210, 1, "%s WCoinC", gInterface.NumberFormat(m_DataDanhHieu.rCoint));
-	gInterface.DrawFormat(eYellow, StartX + 145, StartY + 125, 210, 1, ": x%d (viên)", m_DataDanhHieu.rCount);
+	gInterface.DrawFormat(eYellow, StartX + 145, StartY + 125, 210, 1, ": x%d (pcs)", m_DataDanhHieu.rCount);
 
 	g_pNewUISystem->RenderItem3DFree(StartX + 135, StartY + 105, 0, 0, GET_ITEM(m_DataDanhHieu.rType, m_DataDanhHieu.rIndex), 0, 1, 0, 0);
 
@@ -210,7 +210,7 @@ void CBDanhHieu::DrawWindow()
 	gInterface.DrawFormat(eYellow, StartX + 110, StartY + 280, 300, 1, gOther.Text_Chung[41], m_DataDanhHieu.SD);
 	gInterface.DrawFormat(eYellow, StartX + 110, StartY + 295, 300, 1, gOther.Text_Chung[42], m_DataDanhHieu.GST);
 
-	gInterface.DrawFormat(eSocket, StartX + 215, StartY + 105, 210, 1, "Cấp %d", v2);
+	gInterface.DrawFormat(eSocket, StartX + 215, StartY + 105, 210, 1, "Level %d", v2);
 	EnableAlphaTest(true);
 	glColor3f(1.0, 1.0, 1.0);
 	switch (TRANG_DANH_HIEU)

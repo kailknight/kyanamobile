@@ -15,6 +15,7 @@
 #include "UIControls.h"
 #include "GameCensorship.h"
 #include "ServerListManager.h"
+#include "CustomServerName.h"
 
 #define	SSW_GAP_WIDTH	28
 #define	SSW_GAP_HEIGHT	5
@@ -393,12 +394,23 @@ bool CServerSelWin::ConnectServerButtonIndex(int iIndex)
 		bTestServer = true;
 	}
 
+	bool bCustomServerName = false;
+	char* pszDisplayName = m_pSelectServerGroup->m_szName;
+
+	if (pServerInfo->m_iConnectIndex >= 0 && pServerInfo->m_iConnectIndex < MAX_CUSTOM_SERVER_NAME
+		&& gCustomServerName.m_CustomServerName[pServerInfo->m_iConnectIndex].Index != -1)
+	{
+		pszDisplayName = gCustomServerName.m_CustomServerName[pServerInfo->m_iConnectIndex].Name;
+		bCustomServerName = true;
+	}
+
 	g_ServerListManager->SetSelectServerInfo(
-		m_pSelectServerGroup->m_szName,
+		pszDisplayName,
 		pServerInfo->m_iIndex,
 		iCensorshipIndex,
 		pServerInfo->m_byNonPvP,
-		bTestServer);
+		bTestServer,
+		bCustomServerName);
 
 	return true;
 }

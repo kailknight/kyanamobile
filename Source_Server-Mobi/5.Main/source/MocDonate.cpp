@@ -97,7 +97,7 @@ void MocDonate::DrawXemMocNap()
 
 	float StartX = (MAX_WIN_WIDTH / 2) - (WindowW / 2);
 	float StartY = 25.0;
-	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowMocNapList, "Mốc Nạp"))
+	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowMocNapList, "Top Up Milestone"))
 	{
 
 		StartX = StartX + 10;
@@ -105,7 +105,7 @@ void MocDonate::DrawXemMocNap()
 		float WInfo = (WindowW - 20);
 		float HInfo = WindowH - 100;
 
-		TextDraw((HFONT)g_hFont, StartX + 15, StartY + 35, 0xFF00EEDFF, 0x0, WindowW, 0, 1, "Danh Sách Item Nhận");
+		TextDraw((HFONT)g_hFont, StartX + 15, StartY + 35, 0xFF00EEDFF, 0x0, WindowW, 0, 1, "Item Reward List");
 
 		//Scroll Bar
 		int DataListItem = mDataListItemMocNapClient.ListItemMocNap.size();
@@ -191,14 +191,14 @@ void MocDonate::DrawXemMocNap()
 
 		//===Coin
 		float PosYCoinNhan = StartY + 185;
-		TextDraw((HFONT)g_hFont, StartX + 15, PosYCoinNhan, 0xFF00EEDFF, 0x0, WindowW, 0, 1, "*Coin Nhận");
+		TextDraw((HFONT)g_hFont, StartX + 15, PosYCoinNhan, 0xFF00EEDFF, 0x0, WindowW, 0, 1, "*Coin Received");
 		PosYCoinNhan += 5;
 		TextDraw((HFONT)g_hFont, StartX + 25, PosYCoinNhan + (10 * 1), 0xFF8214FF, 0x0, WindowW, 0, 1, "+WCoin : %s", gInterface.NumberFormat(mDataListItemMocNapClient.WC));			//Text3 = "+ WCoin : %s
 		TextDraw((HFONT)g_hFont, StartX + 25, PosYCoinNhan + (10 * 2), 0xFF8214FF, 0x0, WindowW, 0, 1, "+WCoinP :%s", gInterface.NumberFormat(mDataListItemMocNapClient.WP));		  //Text4 = "+ WCoinP : %
 		TextDraw((HFONT)g_hFont, StartX + 25, PosYCoinNhan + (10 * 3), 0xFF8214FF, 0x0, WindowW, 0, 1, "+GobinP :%s", gInterface.NumberFormat(mDataListItemMocNapClient.GP));		  //Text5 = "+ GobinP : %
 		TextDraw((HFONT)g_hFont, StartX + 25, PosYCoinNhan + (10 * 4), 0xFF8214FF, 0x0, WindowW, 0, 1, "+Ruud : %s", gInterface.NumberFormat(mDataListItemMocNapClient.Ruud));		  //Text6 = " + Ruud : % s"
 
-		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * 5) + 5, 0x14FFC0FF, 0x0, WindowW, 0, 3, "*Phần thưởng bao gồm các Item \n và Coin Nhận !!");
+		TextDraw((HFONT)g_hFont, StartX, PosYCoinNhan + (10 * 5) + 5, 0x14FFC0FF, 0x0, WindowW, 0, 3, "*Reward includes Items \n and Coin Received!!");
 		//===Show Info
 		if (BBShowInfoItem != -1)
 		{
@@ -235,13 +235,13 @@ void MocDonate::DrawWindow()
 	float StartY = ((MAX_WIN_HEIGHT - 51) / 2) - (WindowH / 2);
 
 #if MaNap
-	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW + 160, WindowH, eWindowMocNap, "Mốc Nạp"))
+	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW + 160, WindowH, eWindowMocNap, "Top Up Milestone"))
 	{
 		int TongSoDaNap = mDataMocNapClient.TongNap;
 		int MocDaNhan = mDataMocNapClient.NhanMocNap;
-		TextDraw((HFONT)g_hFont, StartX, StartY + 25, 0x00FFDDFF, 0x0, WindowW, 0, 3, "*Hệ thống nhận thưởng theo Mốc Nạp");
-		TextDraw((HFONT)g_hFont, StartX, StartY + 35, 0xFF9100FF, 0x0, WindowW, 0, 3, "Quét Mã QR Bên Dưới Để Nạp Tiền Nhanh Nhất !!");
-		TextDraw((HFONT)g_hFont, StartX, StartY + 50, 0x3CFF00FF, 0x0, WindowW, 0, 3, "[Bạn Đã Nạp : %s]", gInterface.NumberFormat(TongSoDaNap));
+		TextDraw((HFONT)g_hFont, StartX, StartY + 25, 0x00FFDDFF, 0x0, WindowW, 0, 3, "*Reward system based on Top Up Milestone");
+		TextDraw((HFONT)g_hFont, StartX, StartY + 35, 0xFF9100FF, 0x0, WindowW, 0, 3, "Scan the QR Code Below to Top Up the Fastest!!");
+		TextDraw((HFONT)g_hFont, StartX, StartY + 50, 0x3CFF00FF, 0x0, WindowW, 0, 3, "[You Have Topped Up: %s]", gInterface.NumberFormat(TongSoDaNap));
 
 		//TextDraw((HFONT)g_hFont, StartX + 225, StartY + 30, 0xffffffff, 0x00FBFF69, 140, 0, 3, "★THÔNG TIN NHẬN DONATE SERVER★");
 		//TextDraw((HFONT)g_hFont, StartX + 235, StartY + 45, 0xffffffff, 0xff222299, 120, 0, 3, "CTK : NGUYEN NGOC MINH");
@@ -249,13 +249,13 @@ void MocDonate::DrawWindow()
 		//TextDraw((HFONT)g_hFont, StartX + 235, StartY + 75, 0xffffffff, 0xff222299, 120, 0, 3, "Ngân Hàng : ACB BANK");
 		//RenderBitmap(IMG_4046, StartX + 225, StartY + 93, 180, 180, 0, 0, 1, 1, 1, 1, 0);
 #else
-	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowMocNap, "Mốc Nạp"))
+	if (g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowMocNap, "Top Up Milestone"))
 	{
 		int TongSoDaNap = mDataMocNapClient.TongNap;
 		int MocDaNhan = mDataMocNapClient.NhanMocNap;
-		TextDraw((HFONT)g_hFont, StartX, StartY + 25, 0x00FFDDFF, 0x0, WindowW, 0, 3, "*Hệ thống nhận thưởng theo Mốc Nạp");
-		TextDraw((HFONT)g_hFont, StartX, StartY + 35, 0xFF9100FF, 0x0, WindowW, 0, 3, "Quét Mã QR Bên Dưới Để Nạp Tiền Nhanh Nhất !!");
-		TextDraw((HFONT)g_hFont, StartX, StartY + 50, 0x3CFF00FF, 0x0, WindowW, 0, 3, "[Bạn Đã Nạp : %s]", gInterface.NumberFormat(TongSoDaNap));
+		TextDraw((HFONT)g_hFont, StartX, StartY + 25, 0x00FFDDFF, 0x0, WindowW, 0, 3, "*Reward system based on Top Up Milestone");
+		TextDraw((HFONT)g_hFont, StartX, StartY + 35, 0xFF9100FF, 0x0, WindowW, 0, 3, "Scan the QR Code Below to Top Up the Fastest!!");
+		TextDraw((HFONT)g_hFont, StartX, StartY + 50, 0x3CFF00FF, 0x0, WindowW, 0, 3, "[You Have Topped Up: %s]", gInterface.NumberFormat(TongSoDaNap));
 #endif
 		//===Info Yeu Cau Moc Nap
 		float InfoMocNapX = (StartX + 10) + 3;
@@ -265,7 +265,7 @@ void MocDonate::DrawWindow()
 		float WProcess = (WInfo * (TyleInfoYeuCau - 2.7));
 		float WButton = 38;
 		float HInfo = WindowH - 100;
-		TextDraw((HFONT)g_hFont, InfoMocNapX, InfoMocNapY, 0xFFDE26FF, 0x3a4b3978, WInfo * TyleInfoYeuCau + 40, 0, 3, "Yêu Cầu"); //"Yêu Cầu");
+		TextDraw((HFONT)g_hFont, InfoMocNapX, InfoMocNapY, 0xFFDE26FF, 0x3a4b3978, WInfo * TyleInfoYeuCau + 40, 0, 3, "Required"); //"Yêu Cầu");
 		//Scroll Bar
 		int DataListMocNap = mDataMocNapClient.DanhSachMocNap.size();
 		if (!ListMocNap)
@@ -298,7 +298,7 @@ void MocDonate::DrawWindow()
 		{
 			//==List MocNap
 			gInterface.DrawBarForm(InfoMocNapX, InfoMocNapY + 15, WInfo * TyleInfoYeuCau + 40, 30, 0.0, 0.0, 0.0, 0.5);
-			TextDraw((HFONT)g_hFont, InfoMocNapX + 5, InfoMocNapY + 20, 0xFFDE26FF, 0x0, WProcess, 0, 3, "Mốc(%d) %s", mDataMocNapClient.DanhSachMocNap[n].IndexMocNap, gInterface.NumberFormat(mDataMocNapClient.DanhSachMocNap[n].GiaTriNap)); //"Mốc(%d) %s"
+			TextDraw((HFONT)g_hFont, InfoMocNapX + 5, InfoMocNapY + 20, 0xFFDE26FF, 0x0, WProcess, 0, 3, "Milestone(%d) %s", mDataMocNapClient.DanhSachMocNap[n].IndexMocNap, gInterface.NumberFormat(mDataMocNapClient.DanhSachMocNap[n].GiaTriNap)); //"Mốc(%d) %s"
 			//==Process
 			gInterface.DrawBarForm(InfoMocNapX + 5, InfoMocNapY + 20 + 11, WProcess, 6, 0.29, 0.2767, 0.2581, 0.6); //Process BG
 			//=Calc Tyle 
@@ -321,7 +321,7 @@ void MocDonate::DrawWindow()
 			if (MocDaNhan < mDataMocNapClient.DanhSachMocNap[n].IndexMocNap) //Kiem tra neu da nhan roi thi khong cho nhan nua
 			{
 				//==Nhận
-				if( g_pBCustomMenuInfo->DrawButton(InfoMocNapX + 5 + WProcess + 3 + WButton + 3, InfoMocNapY + 20, 110, 11, "Nhận", WButton) && (GetTickCount() - gInterface.Data[eWindowMocNapList].EventTick) > 300) //"Nhận"
+				if( g_pBCustomMenuInfo->DrawButton(InfoMocNapX + 5 + WProcess + 3 + WButton + 3, InfoMocNapY + 20, 110, 11, "Claim", WButton) && (GetTickCount() - gInterface.Data[eWindowMocNapList].EventTick) > 300) //"Nhận"
 				{
 					XULY_CGPACKET pMsg;
 					pMsg.header.set(0xD3, 0x9A, sizeof(pMsg));

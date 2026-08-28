@@ -24,12 +24,12 @@ CB_OffMuHelper::~CB_OffMuHelper()
 }
 void CB_OffMuHelper::Render(float X, float Y)
 {
-	if (g_pBCustomMenuInfo->RenderCheckBox(X + 8, Y+5, 0xFFFFFFFF, this->ActiveOfflineMode == 1 ? TRUE : FALSE, "Treo Máy Offline"))
+	if (g_pBCustomMenuInfo->RenderCheckBox(X + 8, Y+5, 0xFFFFFFFF, this->ActiveOfflineMode == 1 ? TRUE : FALSE, "AFK Offline Mode"))
 	{
 		this->ActiveOfflineMode ^= 1;
 	}
 	g_pRenderText->SetTextColor(0xFF00B4FF);
-	g_pRenderText->RenderText(X + 8, Y + 25, "*Kích hoạt chế độ Offline", 0, 0, RT3_SORT_CENTER);
+	g_pRenderText->RenderText(X + 8, Y + 25, "*Activate Offline Mode", 0, 0, RT3_SORT_CENTER);
 }
 void CB_OffMuHelper::RunningOffHelper()
 {
