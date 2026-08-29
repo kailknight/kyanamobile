@@ -2685,7 +2685,13 @@ bool pSetTooltipValueText(std::string* new_text, std::string Format, int* line, 
 	}
 	else
 	{
-		*new_text = Format;
+		// No case above populated Buffer (unmatched `type`, or a case's own
+		// guard - e.g. case 0's `if(item->DamageMin)` - didn't fire), so
+		// there's nothing real to show. Skip the line instead of falling
+		// back to the raw, unsubstituted template ("Format" still has its
+		// literal %d/%s placeholders) - matches the return-0-to-skip
+		// pattern already used by cases 201-206 above.
+		return 0;
 	}
 	size_t pos = 0;
 	while ((pos = (*new_text).find("%%", pos)) != std::string::npos)
@@ -2709,6 +2715,27 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 	}
 
 	ITEM_ATTRIBUTE* item = &ItemAttribute[ip->Type];
+
+	// Items reaching this tooltip renderer as a ground-drop/preview (as
+	// opposed to already being in inventory/equipment) never go through
+	// ItemConvert(), so DamageMin/Defense/MagicDefense and the excellent-
+	// option Special[]/SpecialValue[]/SpecialNum stay at their zeroed
+	// defaults even though ip->Level/Option1/ExtOption are already set
+	// correctly (confirmed via diagnostic: item_attr's table Defense was
+	// nonzero while ip->Defense read 0, and Option1 was nonzero while
+	// SpecialNum stayed 0).
+	// IMPORTANT: only call this for items that look never-converted (all
+	// three base fields still zero). Calling it unconditionally on every
+	// render regressed inventory/equipment tooltips - those items go
+	// through ItemConvert once already, then have socket/Jewel-of-Harmony/
+	// set-item bonuses layered on top by other code; recomputing here on
+	// every hover wiped those extra layers back off (base-stats-only),
+	// which showed up as a flickering/wrong-stat "grid glitch".
+	if (ip->Defense == 0 && ip->DamageMin == 0 && ip->SpecialNum == 0)
+	{
+		ItemConvert(ip, ip->Level, ip->Option1, ip->ExtOption);
+	}
+
 	TextNum = 0;
 	SkipNum = 0;
 	int item_level = (ip->Level >> 3) & 15;
@@ -3051,8 +3078,6 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 
 					std::string text_ = it->second.text;
 					std::string new_;
-
-
 
 					int v146 = 0;
 

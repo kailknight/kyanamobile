@@ -8120,7 +8120,12 @@ void MoveItems()
 				else
 					o->Angle[0] = -o->Gravity * 10.f * FPS_ANIMATION_FACTOR;
 			}
-            CreateShiny(o);
+			// Only sparkle items the frustum cull (RenderItems, o->Visible)
+			// is actually drawing a model+name for this frame - otherwise
+			// a culled item keeps spawning this particle forever, showing
+			// as an orphan white dot with no model or name above it.
+			if (o->Visible)
+				CreateShiny(o);
 		}
 	}
 }
