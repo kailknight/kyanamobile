@@ -104,6 +104,12 @@ void OBJECT::Initialize()
 	ContrastEnable = false;
 	ChromeEnable = false;
 	m_bRenderAfterCharacter = false;
+	HorseQuakeSpawned = false;
+	HorseFurySpawned = false;
+
+	// Was never initialised, so a fresh object started out comparing garbage
+	// against WorldTime and could suppress the Dark Horse shock wave.
+	LastHorseWaveEffect = 0.f;
 
 	AI = 0;
 	CurrentAction = 0;

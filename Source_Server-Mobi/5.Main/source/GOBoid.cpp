@@ -910,6 +910,14 @@ void RenderBugs()
 }
 constexpr float HorseEffectInterval = 10 * (1000.f / 25.f); // every 10 frames on a 25fps basis (400 ms)
 
+// Dark Horse earthquake dust ring. Tune the look here - these are world units
+// (one map tile is TERRAIN_SCALE, 100 units), and they are the whole story now
+// that the radius no longer depends on a frame counter or the frame rate.
+constexpr float QUAKE_RING_FRAME  = 8.f;    // animation frame the stomp lands on
+constexpr float QUAKE_RING_SPAN   = 1.5f;   // frames over which the ring expands
+constexpr float QUAKE_RING_RADIUS = 250.f;  // radius of the first ring
+constexpr float QUAKE_RING_GROWTH = 200.f;  // extra radius per animation frame
+
 void RenderDarkHorseSkill ( OBJECT* o, BMD* b )
 {
 	if (o == NULL)	return;
@@ -925,30 +933,108 @@ void RenderDarkHorseSkill ( OBJECT* o, BMD* b )
 		o->LastHorseWaveEffect = WorldTime;
 	}
 
-	if (o->AnimationFrame >= 8.f && o->AnimationFrame <= 9.5f)
-	{
-		if (rand_fps_check(2))
-		{
-			float  Matrix[3][4];
-			vec3_t Angle, p, Position;
-			Vector(0.f, 150.f * (o->WeaponLevel / 2) * FPS_ANIMATION_FACTOR, 0.f, p);
-			Vector(0.f, 0.f, (float)(rand() % 360), Angle);
-			for (int i = 0; i < 6; ++i)
-			{
-				Angle[2] += 60.f;
-				AngleMatrix(Angle, Matrix);
-				VectorRotate(p, Matrix, Position);
-				VectorAdd(o->Position, Position, Position);
+	// Two separate reasons the dust ring misbehaved, both fixed here.
+	//
+	// 1. It grew with every cast until it vanished. The radius used to be
+	//    scaled by WeaponLevel, the free-running frame counter above, whose
+	//    only reset was the exact-equality test at the bottom of this function
+	//    against (BYTE)(19.f / FPS_ANIMATION_FACTOR) - a moving target, since
+	//    FPS_ANIMATION_FACTOR is low-pass filtered and so changes every frame.
+	//    Step past that one value without landing on it and the counter never
+	//    resets; it carries straight on into the next cast, throwing the ring
+	//    further out each time until the plumes spawn outside the visible area.
+	//    (And being a BYTE it wraps at 256, so the radius would collapse and
+	//    start growing again - a sawtooth.) The radius no longer depends on it
+	//    at all, and it is reset per stomp besides.
+	//
+	// 2. It sometimes did not appear at all. The spawn used to be gated purely
+	//    on rand_fps_check(2) inside the trigger window, which is two more ways
+	//    to show nothing: that check is a per-frame coin flip whose odds get
+	//    *worse* the higher the frame rate (it scales by FPS_ANIMATION_FACTOR,
+	//    so ~21% per frame at 60fps and ~10% at 120fps), and the window is only
+	//    QUAKE_RING_SPAN frames wide while AnimationFrame advances by play speed
+	//    scaled by the same factor - so a low frame rate can step straight over
+	//    it. One ring is now latched on the first frame at or past the trigger,
+	//    with no upper bound, so a skipped window cannot lose it.
+	bool bQuakeRing = false;
 
-				CreateEffect(MODEL_GROUND_STONE + rand() % 2, Position, o->Angle, o->Light);
-			}
+	if (o->AnimationFrame >= QUAKE_RING_FRAME)
+	{
+		if (o->HorseQuakeSpawned == false)
+		{
+			o->HorseQuakeSpawned = true;
+			bQuakeRing = true;
 		}
+	}
+	else if (o->HorseQuakeSpawned)
+	{
+		// Animation has wrapped back below the trigger, so a new stomp is
+		// starting - re-arm both one-shots and rebase the frame counter.
+		o->HorseQuakeSpawned = false;
+		o->HorseFurySpawned = false;
+		o->WeaponLevel = 0;
+	}
+
+	if (o->AnimationFrame >= QUAKE_RING_FRAME && o->AnimationFrame <= QUAKE_RING_FRAME+QUAKE_RING_SPAN)
+	{
+		if (bQuakeRing == false && rand_fps_check(2))
+		{
+			bQuakeRing = true;
+		}
+
 		EarthQuake = (rand() % 3 - 3) * 0.7f;
 	}
-	else if (o->WeaponLevel == (BYTE)(19.f / FPS_ANIMATION_FACTOR))
+
+	if (bQuakeRing)
 	{
+		float  Matrix[3][4];
+		vec3_t Angle, p, Position;
+
+		// The radius used to be 150.f * (WeaponLevel / 2) * FPS_ANIMATION_FACTOR,
+		// i.e. driven by the free-running frame counter. That cannot be made
+		// reliable: how many frames it takes the animation to reach the trigger
+		// depends on the horse action's play speed, which lives in the .bmd and
+		// not in this source, so the counter's value at spawn time is anyone's
+		// guess - too small and all six plumes stack on top of the horse, too
+		// large and they spawn outside the visible area.
+		//
+		// AnimationFrame is the right clock: it is bounded, it resets with the
+		// animation, and it advances in real time regardless of frame rate. So
+		// the first ring is always the same size, and it expands smoothly while
+		// the animation crosses the window.
+		float  fProgress = o->AnimationFrame-QUAKE_RING_FRAME;
+
+		if (fProgress < 0.f)
+		{
+			fProgress = 0.f;
+		}
+		else if (fProgress > QUAKE_RING_SPAN)
+		{
+			fProgress = QUAKE_RING_SPAN;
+		}
+
+		Vector(0.f, QUAKE_RING_RADIUS+(fProgress*QUAKE_RING_GROWTH), 0.f, p);
+		Vector(0.f, 0.f, (float)(rand() % 360), Angle);
+		for (int i = 0; i < 6; ++i)
+		{
+			Angle[2] += 60.f;
+			AngleMatrix(Angle, Matrix);
+			VectorRotate(p, Matrix, Position);
+			VectorAdd(o->Position, Position, Position);
+
+			CreateEffect(MODEL_GROUND_STONE + rand() % 2, Position, o->Angle, o->Light);
+		}
+	}
+	else if (o->HorseFurySpawned == false && o->WeaponLevel >= (BYTE)(19.f / FPS_ANIMATION_FACTOR))
+	{
+		// Was an exact-equality test that also doubled as this counter's only
+		// reset (via WeaponLevel = -3, which on a BYTE is really 253 and only
+		// worked by wrapping round). The threshold moves every frame because
+		// FPS_ANIMATION_FACTOR is low-pass filtered, so the counter could step
+		// straight past it - losing the explosion and, worse, the reset with
+		// it. Latched >= instead; the counter is now reset per stomp above.
+		o->HorseFurySpawned = true;
 		CreateEffect(MODEL_SKILL_FURY_STRIKE, o->Position, o->Angle, o->Light, 0, o, -1, 0, 2);
-		o->WeaponLevel = -3;
 	}
 }
 

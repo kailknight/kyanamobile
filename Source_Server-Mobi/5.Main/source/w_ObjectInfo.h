@@ -205,6 +205,8 @@ public:
 	float         Alpha;
 
 	float       LastHorseWaveEffect;
+	bool        HorseQuakeSpawned;	// dust ring already fired for this stomp
+	bool        HorseFurySpawned;	// fury strike already fired for this stomp
 	float         PKKey;
 	
 public:
