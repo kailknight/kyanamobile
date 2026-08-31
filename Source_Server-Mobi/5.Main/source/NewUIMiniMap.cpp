@@ -57,7 +57,7 @@ bool SEASON3B::CNewUIMiniMap::Create(CNewUIManager* pNewUIMng, int x, int y)
 
 	m_BtnExit.ChangeButtonImgState( true, IMAGE_MINIMAP_INTERFACE + 6, false );
 	m_BtnExit.ChangeButtonInfo( m_Pos.x+610, 3, 85, 85 );		
-	m_BtnExit.ChangeToolTipText( GlobalText[1002], true );	// 1002 "´Ý±â"
+	m_BtnExit.ChangeToolTipText( GlobalText[1002], true );	// 1002 "ï¿½Ý±ï¿½"
 	//==Set Map Size
 	m_MapWidth.x = 350;
 	m_MapWidth.y = 350;
@@ -496,9 +496,24 @@ bool SEASON3B::CNewUIMiniMap::Check_Mouse(int mx,int my)
 {
 	if (MouseX > m_MapPos.x && MouseY > m_MapPos.y && MouseX < m_MapPos.x + m_MapWidth.x && MouseY < m_MapPos.y + m_MapWidth.y)
 	{
-		if (ViTriChon.x >0 && ViTriChon.y > 0)
+		// Computed here from the click position rather than reused from
+		// ViTriChon. ViTriChon is a side effect of Render()'s hover readout, so
+		// it only holds a usable value if the cursor was already sitting over
+		// the map on a previous frame. With a mouse that is always true; with a
+		// touch screen the finger arrives and clicks in the same frame, leaving
+		// ViTriChon at 0 and silently dropping the first tap. Same formula as
+		// Render() (the two must agree, or the marker lands off the target).
+		const int bx = (mx - m_MapPos.x) + 1;
+		const int by = (my - m_MapPos.y) + 1;
+
+		POINT picked;
+		picked.x = (LONG)(bx / (m_MapWidth.x / 256.f));
+		picked.y = (LONG)(256.0 - (by / (m_MapWidth.y / 256.f)));
+
+		if (picked.x > 0 && picked.y > 0)
 		{
-			ViTriDiChuyen = ViTriChon;
+			ViTriChon = picked;
+			ViTriDiChuyen = picked;
 			Movement = true;
 			CGAutoMove(1);
 		}

@@ -425,6 +425,17 @@ void DestroyWindow()
 	WritePrivateProfileStringA("Custom", "ShowHPBar", itoa(mShowHPBar, string, 10), "./config.ini");
 	WritePrivateProfileStringA("Custom", "ShowMiniMap", itoa(mShowMiniMap, string, 10), "./config.ini");
 	WritePrivateProfileStringA("Custom", "ShowDanhHieu", itoa(mShowDanhHieu, string, 10), "./config.ini");
+	// Music/Sound/Resolution live in the registry instead (see OpenInitFile),
+	// and are written the moment they change rather than only on a clean
+	// exit - SaveConfigDword(), called from the Config System window.
+	// Unlike the four writes just above, CNewUINameWindow isn't built until
+	// LoadMainSceneInterface() (main scene load, well after this early
+	// bootstrap) - null here means the client exited before ever loading a
+	// character (e.g. closed at server select), so there's nothing to save.
+	if(g_pNewUISystem->GetUI_NewNameWindow() != NULL)
+	{
+		WritePrivateProfileStringA("Custom", "ShowItemNames", itoa(g_pNewUISystem->GetUI_NewNameWindow()->IsShowItemName(), string, 10), "./config.ini");
+	}
 	//===
 	WritePrivateProfileStringA("Graphics", "GlowEffect", itoa(g_pNewUISystem->GetUI_NewOptionWindow()->OnOffGrap[g_pNewUISystem->GetUI_NewOptionWindow()->eGlowEffect], string, 10), "./config.ini");
 	WritePrivateProfileStringA("Graphics", "EffectDynamic", itoa(g_pNewUISystem->GetUI_NewOptionWindow()->OnOffGrap[g_pNewUISystem->GetUI_NewOptionWindow()->eEffectDynamic], string, 10), "./config.ini");
@@ -1146,6 +1157,36 @@ int mShowHPBar;
 int mShowMiniMap;
 int mShowDanhHieu;
 
+// wzAudioCreate is gated on m_MusicOnOff at startup (below), which reads as
+// false on every run - nothing in this codebase ever writes the "MusicOnOff"
+// registry value the read at the bottom of this file checks, so that read
+// always takes its != ERROR_SUCCESS branch and defaults to false. wzAudio
+// has therefore never actually been created by this code path. Anything
+// that turns music on later (e.g. NewUIOptionWindow.cpp's checkbox) has to
+// check this and create it lazily first, or wzAudioPlay crashes into an
+// instance that was never set up.
+bool g_bWzAudioCreated = false;
+
+// Same gap, same shape, different subsystem: InitDirectSound (below) only
+// runs if m_SoundOnOff was already true at startup. Unlike MusicOnOff,
+// nothing here forces that false - the registry read defaults it to true
+// when the (also never-written) "SoundOnOff" key is missing - but a machine
+// that happens to have that key set to 0 from an unrelated, older install
+// (this is a real, historically-used Webzen registry path) hits the exact
+// same never-initialized gap SetEnableSound() can walk into. Confirmed via
+// a crash inside CreateStaticBuffer (DSplaysound.cpp) the first time a
+// monster's sound buffer loaded after the Sound checkbox was turned on with
+// DirectSound never created - g_lpDS was still null.
+bool g_bDirectSoundCreated = false;
+
+void SaveConfigDword(const char* lpszName, int iValue)
+{
+	leaf::CRegKey regkey;
+	regkey.SetKey(leaf::CRegKey::_HKEY_CURRENT_USER, "SOFTWARE\\Webzen\\Mu\\Config");
+	regkey.WriteDword(lpszName, (DWORD)iValue);
+}
+
+
 char g_aszMLSelection[MAX_LANGUAGE_NAME_LENGTH] = {'\0'};
 std::string g_strSelectedML = "";
 
@@ -1202,7 +1243,7 @@ BOOL OpenInitFile()
 	m_FontSizePlus = GetPrivateProfileInt("FONT", "FontSizeBonus", 0, szIniFilePath);
 
 	//===Custom Config
-	mShowName = GetPrivateProfileInt("Custom", "ShowName", 0, szIniFilePath);
+	mShowName = GetPrivateProfileInt("Custom", "ShowName", 1, szIniFilePath);
 	mShowHPBar = GetPrivateProfileInt("Custom", "ShowHPBar", 0, szIniFilePath);
 	mShowMiniMap = GetPrivateProfileInt("Custom", "ShowMiniMap", 0, szIniFilePath);
 	mShowDanhHieu = GetPrivateProfileInt("Custom", "ShowDanhHieu", 0, szIniFilePath);
@@ -1236,9 +1277,12 @@ BOOL OpenInitFile()
 			m_SoundOnOff = true;
 		}
 		dwSize = sizeof ( int);
+		// Defaults on, like SoundOnOff above. It defaulted *off*, which meant
+		// a fresh install with no registry value never created wzAudio at all
+		// (see the audio init in WinMain) and so had no music by default.
 		if ( RegQueryValueEx (hKey, "MusicOnOff", 0, NULL, (LPBYTE) & m_MusicOnOff, &dwSize) != ERROR_SUCCESS)
 		{
-			m_MusicOnOff = false;
+			m_MusicOnOff = true;
 		}
 		dwSize = sizeof ( int);
 		if ( RegQueryValueEx (hKey, "Resolution", 0, NULL, (LPBYTE) & m_Resolution, &dwSize) != ERROR_SUCCESS)
@@ -1275,6 +1319,14 @@ BOOL OpenInitFile()
 		g_strSelectedML = g_aszMLSelection;
 	}
 	RegCloseKey( hKey);
+
+	// MusicOnOff / SoundOnOff / VolumeLevel stay in the registry under
+	// SOFTWARE\Webzen\Mu\Config - the same values Scripts\*.reg toggles
+	// externally - so the in-game checkboxes and those scripts drive one
+	// shared setting instead of disagreeing. The reads above are unchanged;
+	// what was missing was any *write*, which is why the checkboxes could not
+	// survive a restart. SaveConfigDword() below is now called whenever one
+	// is changed.
 
 #if(WIDE_SCREEN)
 	float GetPos = 0.0f;
@@ -1934,29 +1986,55 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLin
 
 	g_pNewUISystem->Create();
 
-	if(m_MusicOnOff)
+	// Both audio engines are created unconditionally now, and the on/off
+	// flags are applied afterwards as mutes. They used to gate creation
+	// itself, which turned each flag into a one-shot startup decision that
+	// could not be undone from the new Config System checkboxes: with sound
+	// off at launch the wave table never loaded at all (see LoadWaveFile,
+	// DSplaysound.cpp) so enabling it later stayed silent, and with music
+	// off wzAudio was never created so the first PlayMp3 crashed into it.
+	// Creating both up front costs one device init plus the wave table's
+	// memory - exactly what an ordinary sound-on launch already paid.
+	if(wzAudioCreate(g_hWnd) == 0)
 	{
-		wzAudioCreate(g_hWnd);
+		g_bWzAudioCreated = true;
 		wzAudioOption(WZAOPT_STOPBEFOREPLAY, 1);
 	}
 
-	if(m_SoundOnOff)
+	if(SUCCEEDED(InitDirectSound(g_hWnd)))
 	{
-		InitDirectSound(g_hWnd);
+		g_bDirectSoundCreated = true;
+
 		leaf::CRegKey regkey;
 		regkey.SetKey(leaf::CRegKey::_HKEY_CURRENT_USER, "SOFTWARE\\Webzen\\Mu\\Config");
 		DWORD value;
 		if(!regkey.ReadDword("VolumeLevel", value))
 		{
-			value = 5;	//. default setting
+			value = SOUND_VOLUME_FULL;
 			regkey.WriteDword("VolumeLevel", value);
 		}
-		if(value<0 || value>=10)
-			value = 5;
-		
+
+		// 0 is total silence - SetEffectVolumeLevel(0) calls
+		// SetMasterVolume(-10000) - and a stale VolumeLevel=0 in the registry
+		// is exactly what silenced every skill/UI effect while music kept
+		// playing, since wzAudio has its own separate volume. Now that the
+		// draggable volume bar is gone and Sound is a plain on/off checkbox,
+		// silence is the checkbox's job, so 0 here means "unset" and gets the
+		// full level. The old clamp also turned a perfectly valid 10 (what
+		// Scripts\Sound&MusicON.reg writes, and the actual maximum) into 5.
+		if(value < 1 || value > SOUND_VOLUME_FULL)
+			value = SOUND_VOLUME_FULL;
+
 		g_pOption->SetVolumeLevel(int(value));
 		SetEffectVolumeLevel(g_pOption->GetVolumeLevel());
 	}
+
+	// InitDirectSound sets g_EnableSound true on success, so apply the
+	// user's actual preference now that the engine is up. Kept false if the
+	// device failed to initialise - SetEnableSound only assigns the flag, so
+	// letting it go true with no DirectSound behind it is the exact
+	// null-g_lpDS state the LoadWaveFile guard now also refuses.
+	SetEnableSound(g_bDirectSoundCreated && m_SoundOnOff != 0);
 
 	SetTimer(g_hWnd, HACK_TIMER, 20*1000, NULL);
 

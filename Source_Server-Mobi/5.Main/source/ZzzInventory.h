@@ -171,8 +171,8 @@ void BCreateGuildMark(BYTE* MarkBuffer, bool blend = true);
 void RenderGuildColor(float x,float y,int SizeX,int SizeY,int Index);
 void CreateCastleMark ( int Type, BYTE* buffer=NULL, bool blend=true );
 
-void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,int Option1,int ExtOption,bool PickUp=false);
-void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t Target,int Select,bool PickUp);
+void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,int Option1,int ExtOption,bool PickUp=false,float ScaleMul=1.0f);
+void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t Target,int Select,bool PickUp,float ScaleMul=1.0f);
 bool GetAttackDamage ( int* iMinDamage, int* iMaxDamage );
 void GetItemName ( int iType, int iLevel, char* Text );
 #ifdef PBG_ADD_NEWCHAR_MONK_SKILL

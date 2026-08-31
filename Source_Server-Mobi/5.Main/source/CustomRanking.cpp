@@ -208,8 +208,6 @@ void DrawPlayerRank(int X, int Y, int W, int H)
 		//Class
 		TextDraw(g_hFont, TextX, (Y + H) + 35, 0xEBA000FF, 0x0, (W / 4), 0, 3, "Class:");//
 		TextDraw(g_hFontBold, (TextX + (W / 2)) - 40, (Y + H) + 35, 0x43F72FFF, 0x0, 0, 0, 1, "%s", CharacterCode(gCustomRanking->CacheDataUserTop.Class));//
-		HFONT CHFontMini = CreateFontA(22, 0, 0, 0, 400, 0, 0, 0, 0x1, 0, 0, 3u, 0, "Arial");
-		DeleteObject(CHFontMini);
 		//==Set Item Char
 
 		if (!gCustomRanking->SetItemCharTop)

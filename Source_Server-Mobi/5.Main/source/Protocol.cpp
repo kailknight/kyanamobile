@@ -64,6 +64,7 @@
 #include "CB_BotTrader.h"
 #include "CB_BXHTopDmg.h"
 #include "VongQuay.h"
+#include "RedeemCodeWindow.h"
 
 extern int g_iLimitAttackTimeSet;
 bool StatusAutoReset = false;
@@ -387,6 +388,34 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 		case 0x0D:
 		{
 			PMSG_NOTICE_SEND* RecvlpMsg = (PMSG_NOTICE_SEND*)lpMsg;
+
+			// header.size is a single BYTE (PBMSG_HEAD), so the whole packet is
+			// capped at 255 bytes on the wire - message[] here is declared 256
+			// bytes, more room than a real packet can ever fill (255 total minus
+			// the ~13-byte fixed header in front of it). Everything past what
+			// header.size actually covers is whatever was last sitting in this
+			// shared, reused receive buffer from an earlier, unrelated packet -
+			// nothing zeroes it between messages. Both consumers below (the
+			// popup and DATA_NOTICEPK::Mess) trusted the full fixed-size array
+			// and rendered that leftover memory as garbage characters after the
+			// real text - visible or not purely depending on what happened to be
+			// lying around, which is why this looked device/emulator-specific
+			// rather than a real platform difference. Clip to exactly what the
+			// wire declared before either path touches it.
+			{
+				const int messageOffset = (int)offsetof(PMSG_NOTICE_SEND, message);
+				int validLen = (int)RecvlpMsg->header.size - messageOffset;
+				if (validLen < 0)
+				{
+					validLen = 0;
+				}
+				else if (validLen >= (int)sizeof(RecvlpMsg->message))
+				{
+					validLen = (int)sizeof(RecvlpMsg->message) - 1;
+				}
+				RecvlpMsg->message[validLen] = '\0';
+			}
+
 			if (RecvlpMsg->type == 0xFF) //CUstomNotice Popup
 			{
 				gInterface.OpenMessageBox("Warning", RecvlpMsg->message);
@@ -400,6 +429,11 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				kill.Time = GetTickCount() + (RecvlpMsg->delay * 1000);
 				kill.Color = RecvlpMsg->color;
 				memcpy(kill.Mess, RecvlpMsg->message, sizeof(kill.Mess));
+				// Belt and suspenders: RecvlpMsg->message is already clipped to
+				// the real wire length above, but a legitimate message long
+				// enough to fill all of Mess would still leave no room in this
+				// fixed 90-byte copy for that terminator to land in.
+				kill.Mess[sizeof(kill.Mess) - 1] = '\0';
 
 				if (gInterface.m_DataNoticePK.size() >= 8)
 				{
@@ -414,6 +448,18 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 		case 0xD3:
 			switch (((lpMsg[0] == 0xC1) ? lpMsg[3] : lpMsg[4]))
 			{
+#if(REDEEMCODE)
+			case 0xA1: //Redeem code - preview result
+			{
+				if (gCB_RedeemCodeWindow) gCB_RedeemCodeWindow->RecvPreviewResult((PMSG_REDEEM_CODE_RECV*)lpMsg);
+			}
+			break;
+			case 0xA3: //Redeem code - redeem result
+			{
+				if (gCB_RedeemCodeWindow) gCB_RedeemCodeWindow->RecvRedeemResult((PMSG_REDEEM_CODE_RECV*)lpMsg);
+			}
+			break;
+#endif
 			case 0x8A:
 			{
 				gVongQuay.GetListVQ(lpMsg);

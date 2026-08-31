@@ -147,8 +147,17 @@ int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 	//wsprintf(TextList[TextNum++], "\n");
 	bool SetColorGray = false;
 
+	// TextList is a fixed char[60][512] (ZzzInventory.cpp) and every matching
+	// entry below can add up to 19 rows without either loop checking the
+	// bound. Stop while there is still room for a whole entry rather than
+	// writing past the end of the array.
+	const int kMaxTextRows = 60;
+	const int kRowsPerEntry = 19;
+
 	for (int i = 0; i < this->m_CustomInfoSet.size(); i++)
 	{
+		if (TextNum > (kMaxTextRows - kRowsPerEntry)) break;
+
 		if (this->m_CustomInfoSet[i].ItemIndexMin == -1 || this->m_CustomInfoSet[i].ItemIndexMax == -1) continue;
 
 		if (ItemSearch->Type < (MODEL_HELM - 1171) || ItemSearch->Type >= (MODEL_WING - 1171)) continue;
@@ -158,7 +167,15 @@ int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 		if (GetIndexItemSet >= this->m_CustomInfoSet[i].ItemIndexMin && GetIndexItemSet <= this->m_CustomInfoSet[i].ItemIndexMax)
 		{
 
-			wsprintf(TextList[TextNum], this->m_CustomInfoSet[i].OptionName);
+			// "%s" and a bounded write, NOT wsprintf(dst, OptionName). Passing
+			// config data straight in as the format string made any '%' an
+			// operator: wsprintf then pulled arguments that were never passed
+			// and kept writing until it ran off the stack (SIGSEGV in
+			// vsnprintf, via RenderItemInfo, on tooltipping an item whose Type
+			// happened to match an entry). TextList rows are 512 bytes and
+			// OptionName is 32, so the cap is belt-and-braces. Same shape the
+			// TextIndex lines below already use.
+			snprintf(TextList[TextNum], sizeof(TextList[TextNum]), "%s", this->m_CustomInfoSet[i].OptionName);
 			TextListColor[TextNum] = this->m_CustomInfoSet[i].OptionColor;
 			TextBold[TextNum++] = 1;
 
@@ -191,10 +208,13 @@ int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 
 	for (int iT = 0; iT < this->m_CustomInfo.size(); iT++)
 	{
+		if (TextNum > (kMaxTextRows - kRowsPerEntry)) break;
+
 		if (ItemSearch->Type >= this->m_CustomInfo[iT].ItemIndexMin && ItemSearch->Type <= this->m_CustomInfo[iT].ItemIndexMax)
 		{
 
-			wsprintf(TextList[TextNum], this->m_CustomInfo[iT].OptionName);
+			// Same format-string fix as the set-option loop above.
+			snprintf(TextList[TextNum], sizeof(TextList[TextNum]), "%s", this->m_CustomInfo[iT].OptionName);
 			TextListColor[TextNum] = this->m_CustomInfo[iT].OptionColor;
 			TextBold[TextNum++] = 1;
 

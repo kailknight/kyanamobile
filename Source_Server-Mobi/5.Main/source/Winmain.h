@@ -101,6 +101,17 @@ extern int mShowName;
 extern int mShowHPBar;
 extern int mShowMiniMap;
 extern int mShowDanhHieu;
+extern bool g_bWzAudioCreated;
+extern bool g_bDirectSoundCreated;
+
+// Maximum level SetEffectVolumeLevel() accepts (SceneCommon.cpp clamps to
+// this, and level 10 works out to master volume 0 = full). 0 is silence.
+#define SOUND_VOLUME_FULL 10
+
+// Writes one DWORD into SOFTWARE\Webzen\Mu\Config - the same place the
+// startup reads in OpenInitFile() come from and the same values the
+// Scripts\*.reg files set, so in-game changes and those scripts agree.
+extern void SaveConfigDword(const char* lpszName, int iValue);
 
 //#if defined _DEBUG || defined PBG_LOG_PACKET_WINSOCKERROR
 //	#include "./Utilities/Log/DebugAngel.h"

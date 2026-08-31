@@ -405,7 +405,11 @@ void DrawWindowVipChar()
 		RenderBitmap(gInterface.Data[IMG_31765].ModelID, BarX + 3, BarY + 3, ExpVipChar3, BarH - 6, 0.0, 0.0, 0.5, 1.0, 1, 1, 0.0);
 		//=== Exp Text
 		TextDraw((HFONT)g_hFontBold, BarX, BarY - 25, 0xFFFFFFFF, 0xB59A0096, BarW, 0, 3, gOther.Text_VIPCHAR[2], LevelVipChar);//
-		HFONT CHFontMini = CreateFontA(12, 0, 0, 0, 400, 0, 0, 0, 0x1, 0, 0, 3u, 0, "Arial");
+		// Was CreateFontA()+DeleteObject() every single frame this window is
+		// drawn (i.e. most of the time it's open) for a plain 12pt Arial that
+		// never changes - created once instead, same lifetime as g_hFont and
+		// friends elsewhere in this codebase.
+		static HFONT CHFontMini = CreateFontA(12, 0, 0, 0, 400, 0, 0, 0, 0x1, 0, 0, 3u, 0, "Arial");
 		TextDraw((HFONT)g_hFont, BarX, BarY - 10, 0xFF8103FF, 0x0, BarW, 0, 1, gOther.Text_VIPCHAR[3]);//
 		TextDraw(CHFontMini, BarX, BarY + 2, 0xFFFFFFFF, 0x0, BarW, 0, 3, "%s/%s", gInterface.NumberFormat(ExpDangCo), gInterface.NumberFormat(ExpYeuCauUp));//
 		//===
@@ -424,7 +428,6 @@ void DrawWindowVipChar()
 
 		TextDraw((HFONT)g_hFont, StartX, ButtonY - 55, 0xC06EFFFF, 0x000000A5, WindowW, 0, 3, gOther.Text_VIPCHAR[4]);
 		//===Draw Button Show List Item Point
-		DeleteObject(CHFontMini);
 
 		if (g_pBCustomMenuInfo->DrawButton(ButtonX, ButtonY - 30, SizeButton, 12, gOther.Text_VIPCHAR[5]))
 		{

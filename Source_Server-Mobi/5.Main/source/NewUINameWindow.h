@@ -11,7 +11,7 @@
 
 namespace SEASON3B
 {
-	// ¾ÆÀÌÅÛ ÀÌ¸§
+	// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ì¸ï¿½
 	class CNewUINameWindow  : public CNewUIObj  
 	{
 	public:
@@ -30,11 +30,14 @@ namespace SEASON3B
 
 		float GetLayerDepth();		// 1.0f
 
+		void SetShowItemName(bool bShow);
+		bool IsShowItemName();
+
 	private:
 		void RenderName();
 
-		CNewUIManager* m_pNewUIMng;		// UI ¸Å´ÏÀú.
-		POINT m_Pos;					// Ã¢ÀÇ À§Ä¡.
+		CNewUIManager* m_pNewUIMng;		// UI ï¿½Å´ï¿½ï¿½ï¿½.
+		POINT m_Pos;					// Ã¢ï¿½ï¿½ ï¿½ï¿½Ä¡.
 
 		bool m_bShowItemName;
 	};

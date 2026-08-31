@@ -32,7 +32,14 @@ SEASON3B::CNewUINameWindow::CNewUINameWindow()
 	m_pNewUIMng = NULL;
 	m_Pos.x = m_Pos.y = 0;
 
-	m_bShowItemName = false;
+	// Same pattern CNewUIOptionWindow's constructor uses for its own
+	// persisted On/Off Custom flags - reads its own setting on construction
+	// rather than requiring an outside caller to know when this object
+	// exists and push a value in. This object isn't constructed until
+	// LoadMainSceneInterface() (ZzzScene.cpp, once the main game scene
+	// loads) - not at CNewUISystem::Create() during early WinMain bootstrap,
+	// which is well before that and does not create this window at all.
+	m_bShowItemName = GetPrivateProfileInt("Custom", "ShowItemNames", 1, ".\\config.ini") != 0;
 }
 
 SEASON3B::CNewUINameWindow::~CNewUINameWindow()
@@ -209,6 +216,16 @@ void SEASON3B::CNewUINameWindow::RenderName()
 			}
 		}
 	}	
+}
+
+void SEASON3B::CNewUINameWindow::SetShowItemName(bool bShow)
+{
+	m_bShowItemName = bShow;
+}
+
+bool SEASON3B::CNewUINameWindow::IsShowItemName()
+{
+	return m_bShowItemName;
 }
 
 float SEASON3B::CNewUINameWindow::GetLayerDepth()

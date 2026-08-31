@@ -1898,58 +1898,124 @@ bool SEASON3B::CNewUISystem::IsImpossibleHideInterface(DWORD dwKey)
 	return false;
 }
 
+// The Y (and, for equipment, X) nudge RenderItem3DFree applies per item Type
+// before drawing - factored out so a batched multi-item caller (see
+// BeginItem3DFreeBatch below) can apply the exact same per-item positioning
+// without going through the whole free function again.
+void SEASON3B::CNewUISystem::GetItem3DFixYPosition(int Type, float sx, float sy, float* outX, float* outY)
+{
+	float x = sx;
+	float y = sy;
+
+	if (Type >= BConverITEM(0, 0) && Type < BConverITEM(1, 0))
+	{
+		x = sx - 5;
+		if (Type == BConverITEM(0, 16) || Type == BConverITEM(0, 19)) { y = sy + 30; }
+		else if ((Type >= BConverITEM(0, 32) && Type <= BConverITEM(0, 35)) /*|| gCustomBattleGloves.CheckGloves(Type) == true*/) { y = sy + 15; }
+		else if (Type >= BConverITEM(0, 15) && Type < BConverITEM(0, 32)) { y = sy + 25; }
+		else if (Type > BConverITEM(0, 35)) { y = sy + 20; }
+		else if (Type == BConverITEM(0, 0)) { y = sy + 30; }
+		else { y = sy + 20; }
+	}
+	else if (Type >= BConverITEM(3, 0) && Type < BConverITEM(4, 0))
+	{
+		y = sy + 30;
+	}
+	else if (Type >= BConverITEM(7, 0) && Type < BConverITEM(8, 0)) { y = sy + 25; }
+	else if (Type >= BConverITEM(8, 0) && Type < BConverITEM(9, 0))
+	{
+		if ((Type >= BConverITEM(8, 2) && Type <= BConverITEM(8, 4))
+			|| Type == BConverITEM(8, 7) || Type == BConverITEM(8, 8)
+			|| Type == BConverITEM(8, 15))
+		{
+			y = sy + 20;
+		}
+		else if (Type == BConverITEM(8, 34) || Type == BConverITEM(8, 35)) { y = sy + 25; }
+		else if (Type <= BConverITEM(8, 73)) { y = sy + 25; }
+		else if (Type > BConverITEM(8, 73)) { y = sy + 35; }
+	}
+	else if (Type >= BConverITEM(9, 0) && Type < BConverITEM(12, 0)) { y = sy + 25; }
+	else if (Type >= 2048)
+	{
+		y = sy + 25;
+
+		if (Type == BConverITEM(12, 40)) { y = sy + 10; }
+	}
+	else { y = sy + 20; }
+
+	(*outX) = x;
+	(*outY) = y;
+}
+
 void SEASON3B::CNewUISystem::RenderItem3DFree(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp, float Scale, bool FixY)
+{
+	//EndBitmap();
+	BeginItem3DFreeBatch();
+
+	RenderItem3DInBatch(sx, sy, Width, Height, Type, Level, Option1, ExtOption, PickUp, Scale, FixY);
+	//BeginBitmap();
+}
+
+// Split out of RenderItem3DFree above so a loop rendering several item icons
+// can pay for the viewport/alpha-test/depth-clear setup once instead of once
+// per icon - found while chasing a real FPS drop (30->12) reported for two
+// windows (Jewel Bank, the player market) whose listing loops called
+// RenderItem3DFree once per row.
+//
+// IMPORTANT: unlike CNewUIMyInventory::Render3D() (NewUIMyInventory.cpp),
+// which loops bare RenderItem3D() calls back-to-back with nothing else in
+// between, these listing loops interleave 2D draws (TextDraw/DrawBarForm/
+// buttons) between item icons. Those 2D draws run in whatever GL_PROJECTION/
+// GL_MODELVIEW is currently active and don't set it up themselves - so the
+// 3D projection/camera and the depth-test enable/disable pairing MUST stay
+// scoped per-item (see RenderItem3DInBatch below), never held open across a
+// 2D draw call, or every 2D element drawn inside the batch gets rendered
+// through the item-icon's 3D perspective instead of the normal 2D view
+// (this is exactly what went wrong the first time this was batched: item
+// rows collapsed onto the wrong part of the screen because the 3D
+// projection was still active when TextDraw/buttons ran).
+//
+// What's safe to hoist here is only the order-independent, single-shot
+// state: the viewport (same full-window rect every call), alpha test
+// (RenderItem3DFree never disabled it anyway - only alpha *blend*, further
+// down), and the depth-buffer clear (rows occupy disjoint screen regions,
+// so one clear at the top of the batch covers all of them).
+void SEASON3B::CNewUISystem::BeginItem3DFreeBatch()
+{
+	EnableAlphaTest();
+	glViewport2(0, 0, WindowWidth, WindowHeight);
+	glClear(GL_DEPTH_BUFFER_BIT);
+}
+
+// Safety reset only - RenderItem3DInBatch() already fully tears down its own
+// per-item state (depth test, alpha blend, color, matrix stack), since it
+// also has to work standalone from RenderItem3DFree() above.
+void SEASON3B::CNewUISystem::EndItem3DFreeBatch()
+{
+	DisableAlphaBlend();
+	glColor4f(1.f, 1.f, 1.f, 1.f);
+}
+
+// The actual per-item 3D setup/draw/teardown that used to be all of
+// RenderItem3DFree - projection+modelview push/load/perspective, the
+// depth-test enable/disable pairing, and the matching pop, all scoped
+// tightly around just this one RenderItem3D() call so any 2D draw that
+// runs before the next call (or after the last one) sees the normal 2D
+// GL state, exactly as if RenderItem3DFree() had been called directly.
+void SEASON3B::CNewUISystem::RenderItem3DInBatch(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp, float Scale, bool FixY)
 {
 	float x = sx;
 	float y = sy;
 	if (FixY == true)
 	{
-		if (Type >= BConverITEM(0, 0) && Type < BConverITEM(1, 0))
-		{
-			x = sx - 5;
-			if (Type == BConverITEM(0, 16) || Type == BConverITEM(0, 19)) { y = sy + 30; }
-			else if ((Type >= BConverITEM(0, 32) && Type <= BConverITEM(0, 35)) /*|| gCustomBattleGloves.CheckGloves(Type) == true*/) { y = sy + 15; }
-			else if (Type >= BConverITEM(0, 15) && Type < BConverITEM(0, 32)) { y = sy + 25; }
-			else if (Type > BConverITEM(0, 35)) { y = sy + 20; }
-			else if (Type == BConverITEM(0, 0)) { y = sy + 30; }
-			else { y = sy + 20; }
-		}
-		else if (Type >= BConverITEM(3, 0) && Type < BConverITEM(4, 0))
-		{
-			y = sy + 30;
-		}
-		else if (Type >= BConverITEM(7, 0) && Type < BConverITEM(8, 0)) { y = sy + 25; }
-		else if (Type >= BConverITEM(8, 0) && Type < BConverITEM(9, 0))
-		{
-			if ((Type >= BConverITEM(8, 2) && Type <= BConverITEM(8, 4))
-				|| Type == BConverITEM(8, 7) || Type == BConverITEM(8, 8)
-				|| Type == BConverITEM(8, 15))
-			{
-				y = sy + 20;
-			}
-			else if (Type == BConverITEM(8, 34) || Type == BConverITEM(8, 35)) { y = sy + 25; }
-			else if (Type <= BConverITEM(8, 73)) { y = sy + 25; }
-			else if (Type > BConverITEM(8, 73)) { y = sy + 35; }
-		}
-		else if (Type >= BConverITEM(9, 0) && Type < BConverITEM(12, 0)) { y = sy + 25; }
-		else if (Type >= 2048)
-		{
-			y = sy + 25;
-
-			if (Type == BConverITEM(12, 40)) { y = sy + 10; }
-		}
-		else { y = sy + 20; }
+		GetItem3DFixYPosition(Type, sx, sy, &x, &y);
 	}
-	//EndBitmap();
-	EnableAlphaTest();
+
 	glMatrixMode(GL_PROJECTION);
 	glPushMatrix();
 	glLoadIdentity();
-	glViewport2(0, 0, WindowWidth, WindowHeight);
 	//DAT Fix Size Item Wide ITEM NPC
 	float SizeItem = Scale;
-	//if (m_Resolution >= 3) { SizeItem += 0.70f; }
-	//if (m_Resolution >= 3) { SizeItem += 0.20f; }
 	switch ((int)m_Resolution)
 	{
 	case 3: SizeItem += 0.30f; break;	//1280x1024
@@ -1968,14 +2034,6 @@ void SEASON3B::CNewUISystem::RenderItem3DFree(float sx, float sy, float Width, f
 	EnableDepthTest();
 	EnableDepthMask();
 
-	glClear(GL_DEPTH_BUFFER_BIT);
-
-	//	int Type = ITEM_POTION + 21;
-		//int Level = 0;
-		//float x = 640.f - 120.f;
-		//float y = 200.f;
-	float BWidth = (float)ItemAttribute[Type].Width * INVENTORY_SCALE;
-	float BHeight = (float)ItemAttribute[Type].Height * INVENTORY_SCALE;
 	RenderItem3D(x, y, Width, Height, Type, Level, Option1, ExtOption, PickUp);
 
 	UpdateMousePositionn();
@@ -1988,7 +2046,6 @@ void SEASON3B::CNewUISystem::RenderItem3DFree(float sx, float sy, float Width, f
 	DisableDepthTest();
 	DisableAlphaBlend();
 	glColor4f(1.f, 1.f, 1.f, 1.f);
-	//BeginBitmap();
 }
 /*
 	//===Render Khung Custom
@@ -2341,6 +2398,11 @@ CNewUIWindowMenu* SEASON3B::CNewUISystem::GetUI_NewWindowMenu() const
 CNewUIOptionWindow* SEASON3B::CNewUISystem::GetUI_NewOptionWindow() const
 {
 	return m_pNewOptionWindow;
+}
+
+CNewUINameWindow* SEASON3B::CNewUISystem::GetUI_NewNameWindow() const
+{
+	return m_pNewNameWindow;
 }
 
 CNewUIHeroPositionInfo* SEASON3B::CNewUISystem::GetUI_NewHeroPositionInfo() const

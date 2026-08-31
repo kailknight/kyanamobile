@@ -330,4 +330,78 @@ struct INFOITEM_DOIITEM_CLIENT
 };
 #endif
 
+#if(REDEEMCODE)
+//-----------------------------------
+// Redemption code system. Byte-for-byte duplicate of the same structs in
+// GameServer's Protocol.h - this codebase keeps client<->GameServer wire
+// structs duplicated rather than shared between the two projects. Two full
+// request/reply round trips: 0xA0/0xA1 for the non-binding "Check Code"
+// preview, 0xA2/0xA3 for the actual "Redeem" - see NewUIRedeemCodeWindow for
+// how the window uses them.
+//-----------------------------------
+struct PMSG_REDEEM_CODE_SEND
+{
+	PSBMSG_HEAD header;
+	char Code[33];
+};
+
+enum eRedeemCodeResult
+{
+	REDEEM_SUCCESS = 0,
+	REDEEM_OK_TO_REDEEM,
+	REDEEM_NOT_FOUND,
+	REDEEM_INACTIVE,
+	REDEEM_EXPIRED,
+	REDEEM_CAP_REACHED,
+	REDEEM_ALREADY_REDEEMED,
+	REDEEM_INVENTORY_FULL,
+	REDEEM_BUSY,
+	REDEEM_SERVER_ERROR,
+};
+
+struct REDEEM_ITEM_DETAIL
+{
+	WORD ItemIndex;
+	BYTE ItemLevel;
+	BYTE ItemSkill;
+	BYTE ItemLuck;
+	BYTE ItemOption;
+	BYTE ItemExcellent;
+	BYTE Quantity;
+	BYTE SocketOption[5]; // literal 5, not MAX_SOCKETS - keeps this struct self-contained regardless of include order
+	BYTE SocketOptionBonus;
+	BYTE Item380;           // 0/1 - ITEM::option_380
+	BYTE HarmonyOption;     // category-relative option index (0-10 depending on weapon/staff/defense), 0 = none - ITEM::Jewel_Of_Harmony_Option
+	BYTE HarmonyOptionLevel; // 0-15 - ITEM::Jewel_Of_Harmony_OptionLevel
+};
+
+#define REDEEM_CODE_BUNDLE_MAX 8
+
+struct PMSG_REDEEM_CODE_RECV
+{
+	PSBMSG_HEAD header;
+	BYTE Result;
+	BYTE ItemCount;
+	REDEEM_ITEM_DETAIL Items[REDEEM_CODE_BUNDLE_MAX];
+	// Per-code currency rewards (W Coin C / W Coin P / Goblin Point / Ruud).
+	// After Items[] on purpose - see the assert below.
+	DWORD RewardWCoinC;
+	DWORD RewardWCoinP;
+	DWORD RewardGoblinPoint;
+	DWORD RewardRuud;
+};
+
+// This struct is hand-duplicated in GameServer's own Protocol.h (this codebase
+// shares no headers between the two projects), so nothing but this assert
+// stops the two copies from silently drifting apart. They must agree on the
+// STRIDE, not just the field list: Items[] is an array, so a stride that
+// differs by even one byte leaves Items[0] readable while every later entry
+// lands at the wrong offset - which reads as a plausible-but-wrong item
+// (index 0, level 0, five zeroed sockets) rather than as an obvious error.
+// If this fires, fix the field list/padding on whichever side changed; never
+// just update the number.
+static_assert(sizeof(REDEEM_ITEM_DETAIL) == 18, "REDEEM_ITEM_DETAIL must stay 18 bytes and byte-identical to GameServer's copy in its own Protocol.h");
+static_assert(sizeof(PMSG_REDEEM_CODE_RECV) <= 255, "PSBMSG_HEAD stores the packet size in a single BYTE - this packet must never exceed 255 bytes or header.set() silently truncates it");
+#endif
+
 void CGAutoMove(int Type);

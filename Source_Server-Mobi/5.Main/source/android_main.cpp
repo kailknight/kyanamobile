@@ -105,10 +105,15 @@ static void android_set_data_dir_early()
 #include "NewUISystem.h"
 #include "NewUIFriendWindow.h"
 #include "CBInterface.h"
+#include "RedeemCodeWindow.h"
+#include "WindowClass.h"
 #include "Translation/i18n.h"
 #include "Time/Timer.h"
 #include "UIMng.h"
 #include "UIManager.h"
+// CutStr - the client's own measure-and-break word wrap, used by the tutorial
+// captions. TextDraw itself does not wrap.
+#include "UIControls.h"
 #include "UIMapName.h"
 
 float GetAdaptiveEffectSpawnScale();
@@ -659,7 +664,7 @@ constexpr int kVirtualSkillSelectorVisualSlot = -1;
 // Skill buttons select rather than fire: tap a skill to arm it, then tap attack.
 constexpr int kVirtualUtilityButtonCount = 4;
 constexpr int kVirtualUtilityButtonChat = 3;
-constexpr int kVirtualRightPanelUtilityActionCount = 12;
+constexpr int kVirtualRightPanelUtilityActionCount = 13;
 constexpr int kVirtualRightPanelGridColumns = 3;
 constexpr int kVirtualRightPanelGridRows = 4;
 constexpr int kVirtualRightPanelModeGridSlot = -1;
@@ -726,12 +731,19 @@ constexpr float kVirtualPadInputMaxY = 480.0f;
 constexpr float kInventoryWindowWidth = 190.0f;
 constexpr float kInventoryWindowHeight = 429.0f;
 constexpr float kVirtualAutoAcquireMaxDistance = 10.0f;
-// The stick has one home and never moves off it. It used to recentre on
-// whichever finger grabbed it, anywhere in the lower-left quadrant, and only
-// appear while touched - so there was nothing on screen to aim at and no way to
-// tell which way you were pushing relative to it.
+// Idle-state placeholder only - while a grab is active, the real home is
+// ActiveVirtualJoystick::originX/Y (wherever that finger touched down),
+// read by GetVirtualJoystickGeometry(). Nothing renders or hit-tests
+// against this pair while idle, so its exact value doesn't matter; kept
+// non-zero just so it doesn't read as an obviously-uninitialized 0,0.
 constexpr float kVirtualJoystickDefaultCenterX = 94.0f;
 constexpr float kVirtualJoystickDefaultCenterY = 356.0f;
+
+// Left-side spawn zone for a fresh grab, in UI units (640 wide) - tap down
+// anywhere at or left of this and the stick appears right there. Half the
+// play area; the attack/skill buttons live well past x=570 on the right
+// (see kVirtualAttackButtonCx), so there's no overlap to worry about.
+constexpr float kVirtualJoystickSpawnZoneMaxX = 320.0f;
 
 // Sized and hit-tested in device pixels, not UI units. UI space is a 640x480
 // stretch of whatever the panel is (see TouchToVirtualUi), so on the 2480x1116
@@ -859,6 +871,7 @@ enum VirtualRightPanelUtilityAction
     kVirtualRightPanelUtilityActionCommand,
     kVirtualRightPanelUtilityActionFriend,
     kVirtualRightPanelUtilityActionGuild,
+    kVirtualRightPanelUtilityActionRedeemCode,
 };
 
 constexpr std::array<const TCHAR*, kVirtualRightPanelUtilityActionCount> kVirtualRightPanelUtilityLabels = {
@@ -874,6 +887,7 @@ constexpr std::array<const TCHAR*, kVirtualRightPanelUtilityActionCount> kVirtua
     _T("CMD"),
     _T("FRD"),
     _T("GuilD"),
+    _T("CODE"),
 };
 constexpr const TCHAR* kVirtualRightPanelModeButtonLabel = _T("CHG");
 
@@ -936,7 +950,7 @@ constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
     kTopBarActionSwitchChar,
     kTopBarActionSwitchServer,
     kTopBarActionFeatures,
-    kTopBarActionNone,
+    kVirtualRightPanelUtilityActionRedeemCode,
     kVirtualRightPanelUtilityActionHelper,
     kTopBarActionHelperPlay,
 };
@@ -953,7 +967,7 @@ constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
     _T("Char"),
     _T("Server"),
     _T("Features"),
-    _T(""),
+    _T("Code"),
     _T("Helper"),
     _T("Play"),
 };
@@ -974,7 +988,7 @@ constexpr std::array<const char*, kTopBarButtonCount> kTopBarIconAssets = {
     "ui/topbar_switch_char.png",
     "ui/topbar_switch_server.png",
     "ui/topbar_features.png",
-    "",
+    "ui/topbar_redeemcode.png",
     "ui/topbar_helper.png",
     "ui/topbar_play.png",
 };
@@ -1241,18 +1255,40 @@ constexpr std::array<const char*, kClassPortraitCount> kClassPortraitAssets = {
 static std::array<UITexture, kClassPortraitCount> g_uiTex_classPortrait;
 static bool g_uiTexturesLoaded = false;
 
-constexpr float kSkillLineU = 157.0f / 677.0f;
-constexpr float kSkillLineV = 3.0f / 369.0f;
-constexpr float kSkillLineUW = 363.0f / 677.0f;
-constexpr float kSkillLineVH = 363.0f / 369.0f;
-constexpr float kJoystickKnobU = 203.0f / 677.0f;
-constexpr float kJoystickKnobV = 41.0f / 369.0f;
-constexpr float kJoystickKnobUW = 286.0f / 677.0f;
-constexpr float kJoystickKnobVH = 290.0f / 369.0f;
-constexpr float kJoystickRingU = 181.0f / 677.0f;
-constexpr float kJoystickRingV = 15.0f / 369.0f;
-constexpr float kJoystickRingUW = 356.0f / 677.0f;
-constexpr float kJoystickRingVH = 353.0f / 369.0f;
+// skillline.png is a 612x408 canvas with a decorative ring (four gem accents,
+// N/E/S/W) inscribed in it with real left/right margin - not edge-to-edge
+// like the joystick ring turned out to be. Cropped to its actual alpha
+// bounds (measured with the same per-pixel scan as the joystick fix, see
+// [[mu-android-ui-asset-pipeline]]), +3px padding: content is (122,28)-
+// (488,370), padded to (119,25)-(491,373).
+constexpr float kSkillLineU = 119.0f / 612.0f;
+constexpr float kSkillLineV = 25.0f / 408.0f;
+constexpr float kSkillLineUW = 372.0f / 612.0f;
+constexpr float kSkillLineVH = 348.0f / 408.0f;
+// skillbox.png is a tight 69x70 icon with no padding - content fills the
+// whole canvas edge to edge, so no crop is needed.
+constexpr float kSkillBoxU = 0.0f;
+constexpr float kSkillBoxV = 0.0f;
+constexpr float kSkillBoxUW = 1.0f;
+constexpr float kSkillBoxVH = 1.0f;
+// These four crop rectangles were tuned for an earlier joystick1/2.png (same
+// 677x369 canvas convention as kSkillLineU/V/UW/VH above, but a different
+// drawing inside it) - reusing them against the current art cropped into the
+// ring's solid interior, since the knob's real artwork sits in a smaller,
+// differently-positioned region of the canvas and the ring's ellipse now
+// touches all four canvas edges with no margin at all. Recomputed from the
+// actual non-transparent pixel bounds of the current joystick1.png/
+// joystick2.png (checked with a per-pixel alpha scan, +3px padding on the
+// knob for anti-aliasing headroom): re-derive these again next time the art
+// changes shape or padding, rather than assuming the divisors still apply.
+constexpr float kJoystickKnobU = 182.0f / 677.0f;
+constexpr float kJoystickKnobV = 100.0f / 369.0f;
+constexpr float kJoystickKnobUW = 312.0f / 677.0f;
+constexpr float kJoystickKnobVH = 172.0f / 369.0f;
+constexpr float kJoystickRingU = 0.0f;
+constexpr float kJoystickRingV = 0.0f;
+constexpr float kJoystickRingUW = 1.0f;
+constexpr float kJoystickRingVH = 1.0f;
 
 struct AndroidUiRect
 {
@@ -1648,8 +1684,15 @@ struct ActiveVirtualJoystick
 {
     SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
 
-    // Thumb position as an offset from the fixed home, in UI units, clamped to
-    // the ring. Only the knob draw uses it; direction comes from octant.
+    // Where this grab's ring is centred - the point the finger first went
+    // down at, in UI units. Set once in StartVirtualJoystick and never
+    // moved for the life of the grab; GetVirtualJoystickGeometry() clamps
+    // it to keep the ring fully on screen.
+    float originX = 0.0f;
+    float originY = 0.0f;
+
+    // Thumb position as an offset from the home above, in UI units, clamped
+    // to the ring. Only the knob draw uses it; direction comes from octant.
     float thumbOffsetX = 0.0f;
     float thumbOffsetY = 0.0f;
 
@@ -3831,12 +3874,20 @@ VirtualJoystickGeometry GetVirtualJoystickGeometry()
     geometry.knobDiameterUiY = knobDiameterPx / geometry.pxPerUiY;
 
     // Nudge the home in only as far as it takes to keep the whole ring on screen.
+    // While a grab is active, home is wherever that finger first touched down
+    // (see ActiveVirtualJoystick::originX/Y) - the stick floats there instead
+    // of always living at one fixed spot. Idle, there is no home to read yet
+    // and nothing renders or hit-tests against this value anyway, so the old
+    // default is just a harmless placeholder.
+    const bool joystickActive = g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1);
+    const float homeX = joystickActive ? g_virtualJoystick.originX : kVirtualJoystickDefaultCenterX;
+    const float homeY = joystickActive ? g_virtualJoystick.originY : kVirtualJoystickDefaultCenterY;
     const float ringRadiusUiX = geometry.ringDiameterUiX * 0.5f;
     const float ringRadiusUiY = geometry.ringDiameterUiY * 0.5f;
     const float minX = ringRadiusUiX + 4.0f;
     const float minY = ringRadiusUiY + 4.0f;
-    geometry.centerX = std::clamp(kVirtualJoystickDefaultCenterX, minX, std::max(minX, 640.0f - minX));
-    geometry.centerY = std::clamp(kVirtualJoystickDefaultCenterY, minY, std::max(minY, kVirtualPadInputMaxY - minY));
+    geometry.centerX = std::clamp(homeX, minX, std::max(minX, 640.0f - minX));
+    geometry.centerY = std::clamp(homeY, minY, std::max(minY, kVirtualPadInputMaxY - minY));
 
     return geometry;
 }
@@ -3915,12 +3966,41 @@ void ClearVirtualJoystick()
     g_virtualJoystickHoldingMovement = false;
 }
 
-// A thumb's width around the ring, and nothing else. The whole lower-left
-// quadrant used to grab the stick, which is why a tap on the ground down there
-// walked the character instead of doing what a tap anywhere else does.
+// Defined with the rest of the tutorial further down; the movement and
+// world-tap gates below it need to know whether the tour is running.
+bool IsAndroidTutorialActive();
+
+// Two different questions depending on whether the stick is already held:
+//
+// Idle - deciding whether a fresh tap should spawn a new grab: anywhere on
+// the left half of the play area (kVirtualJoystickSpawnZoneMaxX) does,
+// mirroring the old fixed pad's deliberate claim on that whole corner (a
+// tap there resolves to ground that is always down and to the left of the
+// centred character, so letting it fall through to tap-to-walk sent the
+// character the wrong way with conviction - see git history on this
+// function for that fix). The potion hotkey row and any window/picker
+// sitting in this same area are still checked ahead of this in the input
+// dispatch chain, so they keep first claim as before.
+//
+// Already held (e.g. a second finger tapping near an in-progress drag):
+// a thumb's width around the ring that's actually on screen right now,
+// via the floating geometry.
 bool IsInsideVirtualJoystickDynamicArea(float uiX, float uiY)
 {
     if (!IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    // Never while the first-time tutorial is up. It normally claims every
+    // touch itself, but the Travel and Stats steps deliberately let touches
+    // through to the real window they opened - and the character sheet is one
+    // of the windows IsAndroidMovementAllowedWithOpenWindows keeps the stick
+    // alive under, so a tap that missed the portrait by a few pixels spawned
+    // the movement ring and walked the character. The tour has its own
+    // practice stick (see RenderAndroidTutorialPracticeStick); the real one
+    // has no business starting during it.
+    if (IsAndroidTutorialActive())
     {
         return false;
     }
@@ -3935,18 +4015,12 @@ bool IsInsideVirtualJoystickDynamicArea(float uiX, float uiY)
         return false;
     }
 
-    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
-
-    // The screen corner behind the stick belongs to the stick. Nobody taps the
-    // bottom-left corner to walk somewhere - and a tap there resolves to ground
-    // that is always down and to the left of the centred character, so missing the
-    // grab circle by a few pixels did not fall through harmlessly, it walked the
-    // character the wrong way with conviction.
-    if (uiX <= geometry.centerX && uiY >= geometry.centerY)
+    if (g_virtualJoystick.fingerId == static_cast<SDL_FingerID>(-1))
     {
-        return true;
+        return uiX <= kVirtualJoystickSpawnZoneMaxX;
     }
 
+    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
     const float pxX = (uiX - geometry.centerX) * geometry.pxPerUiX;
     const float pxY = (uiY - geometry.centerY) * geometry.pxPerUiY;
 
@@ -4022,6 +4096,11 @@ void StartVirtualJoystick(SDL_FingerID fingerId, float uiX, float uiY)
     g_virtualJoystick = ActiveVirtualJoystick{};
     g_virtualJoystick.fingerId = fingerId;
     g_virtualJoystick.pressedMs = MU_MobileGetTicks();
+
+    // The ring floats to wherever this tap landed - set before the geometry
+    // read below (and every one after, while this grab lasts) picks it up.
+    g_virtualJoystick.originX = uiX;
+    g_virtualJoystick.originY = uiY;
 
     // "Tap the ground" (spec) to break off an attack-skill's auto-chase - the
     // stick is the closest equivalent to that on a joystick-driven build, so
@@ -4887,6 +4966,26 @@ void ToggleVirtualSkillPickerByTouch();
 bool HandleVirtualTopControlTap(float uiX, float uiY)
 {
     const uint32_t nowMs = MU_MobileGetTicks();
+
+    // The always-on rotating minimap panel under the location chip is itself
+    // the way into the full-screen map now - the old circular "MINI" button was
+    // removed (IsMiniMapToggleAvailable is hardcoded false), which left no way
+    // to open it at all on touch. Tapping the panel opens the real
+    // INTERFACE_MINI_MAP, which is full-canvas and click-to-move; it is in
+    // kAndroidScreenOwningWindows, so the overlay hides itself while it is up
+    // and the taps inside reach the map instead of the joystick.
+    if (!IsMiniMapPanelVisible()
+        && IsVirtualPadAvailable()
+        && HitTestAndroidUiRect(uiX, uiY, GetTopBarMiniMapPanelRect()))
+    {
+        if ((nowMs - g_virtualLastMiniMapTapMs) >= kVirtualMiniMapButtonCooldownMs)
+        {
+            g_virtualLastMiniMapTapMs = nowMs;
+            ToggleMiniMapByVirtualButton();
+        }
+
+        return true;
+    }
 
     if (HitTestMiniMapToggleButton(uiX, uiY))
     {
@@ -6182,6 +6281,7 @@ void ClearTappedItemIfGone()
 // helpers - forward-declared here so RenderItemMenu can match their look.
 void DrawVirtualRectFilled(float uiX, float uiY, float uiW, float uiH, float red, float green, float blue, float alpha);
 void DrawVirtualRectOutline(float uiX, float uiY, float uiW, float uiH, float red, float green, float blue, float alpha, float lineWidth);
+void DrawVirtualCircle(float uiX, float uiY, float uiRadius, float red, float green, float blue, float alpha, bool filled);
 void DrawVirtualRightPanelButtonBox(const AndroidUiRect& rect, bool active);
 
 // ---------------------------------------------------------------------------
@@ -6242,55 +6342,82 @@ AndroidItemMenuDragState g_itemMenuDrag{};
 constexpr float kItemMenuDragMoveThresholdUi = 10.0f;
 
 // Icon centred in the box; nav and Pick Up below it span the full width.
-AndroidUiRect GetItemMenuIconRect()
+//
+// The *At variants take the box origin (and, for the rows below the icon,
+// whether the page row is present) explicitly rather than reading g_itemMenu*.
+// That exists so the first-time tutorial can lay out an example menu by these
+// exact rules without disturbing the live menu's globals - see DrawItemMenuBox
+// and RenderAndroidTutorialItemMenuExample. The no-argument versions below are
+// the live menu's own, and just feed the globals in.
+AndroidUiRect GetItemMenuIconRectAt(float menuX, float menuY)
 {
     return {
-        g_itemMenuX + ((kItemMenuWidth - kItemMenuIconSize) * 0.5f),
-        g_itemMenuY + kItemMenuPad,
+        menuX + ((kItemMenuWidth - kItemMenuIconSize) * 0.5f),
+        menuY + kItemMenuPad,
         kItemMenuIconSize,
         kItemMenuIconSize
     };
 }
 
-// Only meaningful when g_itemMenuCount > 1 - callers gate on that themselves,
-// same as the old page row did.
-AndroidUiRect GetItemMenuNavRect()
+AndroidUiRect GetItemMenuNavRectAt(float menuX, float menuY)
 {
-    const AndroidUiRect icon = GetItemMenuIconRect();
+    const AndroidUiRect icon = GetItemMenuIconRectAt(menuX, menuY);
     return {
-        g_itemMenuX + kItemMenuPad,
+        menuX + kItemMenuPad,
         icon.y + icon.h + kItemMenuPad,
         kItemMenuWidth - (kItemMenuPad * 2.0f),
         kItemMenuRowH
     };
 }
 
-AndroidUiRect GetItemMenuPickRect()
+AndroidUiRect GetItemMenuPickRectAt(float menuX, float menuY, bool hasNav)
 {
-    const AndroidUiRect icon = GetItemMenuIconRect();
+    const AndroidUiRect icon = GetItemMenuIconRectAt(menuX, menuY);
     float y = icon.y + icon.h + kItemMenuPad;
-    if (g_itemMenuCount > 1)
+    if (hasNav)
     {
         y += kItemMenuRowH + kItemMenuPad;
     }
 
     return {
-        g_itemMenuX + kItemMenuPad,
+        menuX + kItemMenuPad,
         y,
         kItemMenuWidth - (kItemMenuPad * 2.0f),
         kItemMenuRowH
     };
 }
 
-float ItemMenuHeight()
+float ItemMenuHeightFor(bool hasNav)
 {
     float h = kItemMenuPad + kItemMenuIconSize + kItemMenuPad;
-    if (g_itemMenuCount > 1)
+    if (hasNav)
     {
         h += kItemMenuRowH + kItemMenuPad;
     }
     h += kItemMenuRowH + kItemMenuPad;
     return h;
+}
+
+AndroidUiRect GetItemMenuIconRect()
+{
+    return GetItemMenuIconRectAt(g_itemMenuX, g_itemMenuY);
+}
+
+// Only meaningful when g_itemMenuCount > 1 - callers gate on that themselves,
+// same as the old page row did.
+AndroidUiRect GetItemMenuNavRect()
+{
+    return GetItemMenuNavRectAt(g_itemMenuX, g_itemMenuY);
+}
+
+AndroidUiRect GetItemMenuPickRect()
+{
+    return GetItemMenuPickRectAt(g_itemMenuX, g_itemMenuY, g_itemMenuCount > 1);
+}
+
+float ItemMenuHeight()
+{
+    return ItemMenuHeightFor(g_itemMenuCount > 1);
 }
 
 void CloseItemMenu()
@@ -6632,39 +6759,30 @@ void UpdateItemMenuNearCharacter()
     }
 }
 
-void RenderItemMenu()
+// Everything that actually draws the menu, with the box origin, the item and
+// the page state passed in instead of read from g_itemMenu*. Split out of
+// RenderItemMenu so the first-time tutorial's "here's what an item drop looks
+// like" step can show the real menu rather than a hand-drawn imitation of it
+// (see RenderAndroidTutorialItemMenuExample) - anything that changes here
+// changes there too, and the two cannot drift apart.
+//
+// `item` is taken by value because RenderItemInfo wants a writable ITEM*, and
+// because callers pass one they have already run through ItemConvert.
+void DrawItemMenuBox(ITEM item, float menuX, float menuY, int page, int count, bool showTooltip)
 {
-    UpdateItemMenuNearCharacter();
-
-    if (!g_itemMenuOpen)
-    {
-        return;
-    }
-
-    // Ground drops only ever get Type, Level, Durability, Option1 and ExtOption
-    // filled in (see CreateItem in ZzzObject.cpp) - the excellent options, the
-    // damage and the requirements are all derived, and inventory items get them
-    // by way of ItemConvert. Doing the same on a copy leaves the world item
-    // untouched while giving the tooltip everything it needs.
-    ITEM item = Items[g_itemMenuItemKey].Item;
-
-    if (item.Type != ITEM_POTION + 15)      // not money, whose Level is an amount
-    {
-        ItemConvert(&item, static_cast<BYTE>(item.Level), item.Option1, item.ExtOption);
-    }
-
-    const float menuH = ItemMenuHeight();
+    const bool hasNav = (count > 1);
+    const float menuH = ItemMenuHeightFor(hasNav);
 
     // One container around the whole thing - header, buttons and item info. The
     // tooltip's height is only known inside RenderTipTextList, which records the
     // rect it drew into, so the box is sized from the previous frame's values.
     // Content only changes when the player pages, so the lag is never visible.
-    float boxX = g_itemMenuX;
-    float boxY = g_itemMenuY;
-    float boxR = g_itemMenuX + kItemMenuWidth;
-    float boxB = g_itemMenuY + menuH;
+    float boxX = menuX;
+    float boxY = menuY;
+    float boxR = menuX + kItemMenuWidth;
+    float boxB = menuY + menuH;
 
-    const bool haveTip = (g_itemMenuShowTooltip && g_fLastTipW > 1.0f && g_fLastTipH > 1.0f);
+    const bool haveTip = (showTooltip && g_fLastTipW > 1.0f && g_fLastTipH > 1.0f);
 
     if (haveTip)
     {
@@ -6696,7 +6814,7 @@ void RenderItemMenu()
     HFONT rowFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
     char szLine[16];
 
-    const AndroidUiRect iconRect = GetItemMenuIconRect();
+    const AndroidUiRect iconRect = GetItemMenuIconRectAt(menuX, menuY);
 
     // RenderItem3DFree does not clip to the box it's asked to draw into - a
     // model's glow/particle effects (torches, wings, anything lit) can extend
@@ -6729,11 +6847,14 @@ void RenderItemMenu()
     // clipped area entirely. CBInterface.cpp/CB_NewQuest.cpp's fixed-icon-box
     // previews already disable it for exactly this reason.
     EndBitmap();
-    g_pNewUISystem->RenderItem3DFree(iconRect.x, iconRect.y,
-                                     iconRect.w, iconRect.h,
-                                     item.Type, item.Level,
-                                     item.Option1, item.ExtOption,
-                                     false, 1.2f, false);
+    if (g_pNewUISystem != nullptr)
+    {
+        g_pNewUISystem->RenderItem3DFree(iconRect.x, iconRect.y,
+                                         iconRect.w, iconRect.h,
+                                         item.Type, item.Level,
+                                         item.Option1, item.ExtOption,
+                                         false, 1.2f, false);
+    }
     BeginBitmap();
     glDisable(GL_SCISSOR_TEST);
     DisableTexture();
@@ -6750,17 +6871,17 @@ void RenderItemMenu()
     // Page row. Arrows only shown with more than one drop in range - matches
     // HandleItemMenuTap's thirds exactly, so the drawn buttons line up with
     // what's tappable.
-    if (g_itemMenuCount > 1)
+    if (hasNav)
     {
-        const AndroidUiRect navRect = GetItemMenuNavRect();
+        const AndroidUiRect navRect = GetItemMenuNavRectAt(menuX, menuY);
         DrawVirtualRightPanelButtonBox(navRect, false);
-        snprintf(szLine, sizeof(szLine) - 1, "< %d/%d >", g_itemMenuPage + 1, g_itemMenuCount);
+        snprintf(szLine, sizeof(szLine) - 1, "< %d/%d >", page + 1, count);
         szLine[sizeof(szLine) - 1] = '\0';
         TextDraw(rowFont, static_cast<int>(navRect.x), static_cast<int>(navRect.y + 2.0f),
                  0xFFE8D8A0, 0x0, static_cast<int>(navRect.w), 0, 3, "%s", szLine);
     }
 
-    const AndroidUiRect pickRect = GetItemMenuPickRect();
+    const AndroidUiRect pickRect = GetItemMenuPickRectAt(menuX, menuY, hasNav);
     DrawVirtualRightPanelButtonBox(pickRect, true);
     TextDraw(g_hFontBold != nullptr ? g_hFontBold : g_hFont,
              static_cast<int>(pickRect.x), static_cast<int>(pickRect.y + 2.0f),
@@ -6770,16 +6891,41 @@ void RenderItemMenu()
     // and requirements all read exactly as they do in the inventory. Its
     // background is suppressed because the container above already covers it.
     // Only drawn once the icon has been tapped - see g_itemMenuShowTooltip.
-    if (g_itemMenuShowTooltip)
+    if (showTooltip)
     {
         g_bTipSuppressBG = true;
-        RenderItemInfo(static_cast<int>(g_itemMenuX + kItemMenuWidth * 0.5f),
-                       static_cast<int>(g_itemMenuY + menuH),
+        RenderItemInfo(static_cast<int>(menuX + kItemMenuWidth * 0.5f),
+                       static_cast<int>(menuY + menuH),
                        &item, false, 0, false, false);
         g_bTipSuppressBG = false;
     }
 
     EndBitmap();
+}
+
+void RenderItemMenu()
+{
+    UpdateItemMenuNearCharacter();
+
+    if (!g_itemMenuOpen)
+    {
+        return;
+    }
+
+    // Ground drops only ever get Type, Level, Durability, Option1 and ExtOption
+    // filled in (see CreateItem in ZzzObject.cpp) - the excellent options, the
+    // damage and the requirements are all derived, and inventory items get them
+    // by way of ItemConvert. Doing the same on a copy leaves the world item
+    // untouched while giving the tooltip everything it needs.
+    ITEM item = Items[g_itemMenuItemKey].Item;
+
+    if (item.Type != ITEM_POTION + 15)      // not money, whose Level is an amount
+    {
+        ItemConvert(&item, static_cast<BYTE>(item.Level), item.Option1, item.ExtOption);
+    }
+
+    DrawItemMenuBox(item, g_itemMenuX, g_itemMenuY,
+                    g_itemMenuPage, g_itemMenuCount, g_itemMenuShowTooltip);
 }
 
 void ReleaseVirtualNovaCharge()
@@ -7759,6 +7905,14 @@ bool IsVirtualRightPanelUtilityActionActive(int button)
         return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND);
     case kVirtualRightPanelUtilityActionGuild:
         return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO);
+#if(REDEEMCODE)
+    case kVirtualRightPanelUtilityActionRedeemCode:
+        // Not a NewUISystem/INTERFACE_ window - CB_RedeemCodeWindow follows
+        // the plain-GL CB_ window convention (CB_DoiMK etc.), same as
+        // JewelBank above, so its own gInterface.Data[] flag is the "is this
+        // open" source of truth here.
+        return gInterface.Data[eWindowRedeemCode].OnShow != 0;
+#endif
     default:
         return false;
     }
@@ -7787,6 +7941,11 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidScreenOwningWindows[] = {
     SEASON3B::INTERFACE_NPCSHOP,
     SEASON3B::INTERFACE_MuHelper,
     SEASON3B::INTERFACE_MOVEMAP,
+    // The full-screen minimap. It covers the whole canvas and is click-to-move
+    // (CNewUIMiniMap::Check_Mouse), so leaving it out meant the joystick, top
+    // bar and attack wheel all drew over it AND ate the taps that were meant
+    // to pick a destination.
+    SEASON3B::INTERFACE_MINI_MAP,
     SEASON3B::INTERFACE_OPTION,
     SEASON3B::INTERFACE_COMMAND,
     SEASON3B::INTERFACE_FRIEND,
@@ -7848,14 +8007,87 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidMovementFriendlyWindows[] = {
     SEASON3B::INTERFACE_MuHelper,
 };
 
+// The Features menu (gInterface.Data[eMenu_MAIN], F5 on PC) and everything it
+// opens are raw CBInterface flags, not INTERFACE_ enums g_pNewUISystem tracks,
+// so none of them can live in kAndroidScreenOwningWindows/
+// kAndroidMovementFriendlyWindows above - checked directly here instead, and
+// shared by both IsAndroidGameWindowOpen (draw/touch-passthrough gate) and
+// IsAndroidMovementAllowedWithOpenWindows (joystick gate) below. Neither of
+// those two used to know about this whole family, which is what let the
+// joystick's base circle keep engaging - and rendering - centred over the
+// Features menu itself: tapping a menu button also fell inside the stick's
+// huge "left half of the screen" hit area, and nothing here told the joystick
+// to back off just because a raw popup, rather than an INTERFACE_ window, was
+// covering that same screen space.
+bool IsAndroidRawPopupWindowOpen()
+{
+    // 230x290 centred on screen (MenuCustom.cpp's Draw()), reaching well into
+    // where the attack wheel and skill buttons sit.
+    if (gInterface.Data[eMenu_MAIN].OnShow)
+    {
+        return true;
+    }
+
+    // Every button on that Features menu closes it immediately
+    // (cCustomMenu::ActionButton, MenuCustom.cpp: gInterface.Data[eMenu_MAIN]
+    // .OnShow = 0 unconditionally) and opens one of these instead - a
+    // separate window with its own OnShow flag the check above cannot see.
+    // Same raw-CBInterface flag style as eMenu_MAIN above, so checked the same
+    // way; WindowClass (Change Class) is the one exception with its own bool
+    // member, not a gInterface.Data[] slot, hence GetVisible() instead.
+    // ObjectID (CBInterface.h) - some of these entries only exist when their
+    // feature flag is on, matching how CBInterface.h itself only declares the
+    // enum value under the same guard, so the guards here have to match
+    // exactly or this fails to compile whenever one of them is off.
+    static const ObjectID kAndroidMenuSubWindows[] =
+    {
+        eWindowEventTime,    // Events
+        eVip_MAIN,           // VIP Shop
+        eRankPANEL_MAIN,     // Ranking
+        eWindowChotroi,      // Market (Cho Troi)
+        eWindowDanhHieu,     // Title
+        eWindowAutoBaking,   // Recharge
+        eWindowJewelBank,    // Jewel Bank
+#if(CB_VIP_CHAR)
+        eWindowVip,          // VIP Char
+#endif
+#if(CB_HUYDONGEXC)
+        eWindowHuyDongExc,   // Trade board
+#endif
+#if(DOIMK)
+        eWindowDoiMK,        // Change Password
+#endif
+        eWindowMocNap,       // Donate
+#if(CUSTOM_WINDOWLOCKITEM)
+        eWindowLockItem,     // Lock Item
+#endif
+        eWindowVongQuay,     // Wheel of Fortune
+#if(REDEEMCODE)
+        eWindowRedeemCode,   // Redeem Code - also opens straight from the top
+                             // bar's own "Code" button, not just the Features
+                             // menu, so it needs this entry either way.
+#endif
+    };
+
+    for (const ObjectID window : kAndroidMenuSubWindows)
+    {
+        if (gInterface.Data[window].OnShow)
+        {
+            return true;
+        }
+    }
+
+    if (WindowClass.GetVisible())
+    {
+        return true;
+    }
+
+    return false;
+}
+
 bool IsAndroidGameWindowOpen()
 {
-    // The Features menu (gInterface.Data[eMenu_MAIN], F5 on PC) is a raw
-    // CBInterface flag, not an INTERFACE_ enum g_pNewUISystem tracks, so it
-    // cannot live in kAndroidScreenOwningWindows above - checked directly
-    // instead. 230x290 centred on screen (MenuCustom.cpp's Draw()), reaching
-    // well into where the attack wheel and skill buttons sit.
-    if (gInterface.Data[eMenu_MAIN].OnShow)
+    if (IsAndroidRawPopupWindowOpen())
     {
         return true;
     }
@@ -7884,6 +8116,19 @@ bool IsAndroidGameWindowOpen()
 // what else is on screen.
 bool IsAndroidMovementAllowedWithOpenWindows()
 {
+    // None of the Features menu or its raw-CBInterface sub-windows are
+    // movement-friendly - they're small centred popups meant to be interacted
+    // with by tapping their own buttons, not backgrounds the player expects to
+    // keep walking through. This used to be missing entirely, which is why the
+    // joystick's base circle could engage - and kept rendering - centred right
+    // on top of the Features menu: nothing here knew that window existed, so
+    // the loop below found no INTERFACE_ window visible and allowed movement
+    // regardless of what was actually covering the screen.
+    if (IsAndroidRawPopupWindowOpen())
+    {
+        return false;
+    }
+
     if (g_pNewUISystem == nullptr)
     {
         return true;
@@ -8062,6 +8307,17 @@ void TriggerVirtualRightPanelUtilityAction(int button)
         g_pNewUISystem->Toggle(SEASON3B::INTERFACE_GUILDINFO);
         PlayBuffer(SOUND_CLICK01);
         break;
+
+#if(REDEEMCODE)
+    case kVirtualRightPanelUtilityActionRedeemCode:
+        // Same shared window the desktop Features-menu button opens
+        // (gCB_RedeemCodeWindow, RedeemCodeWindow.cpp) - not a separate
+        // Android-only window, matching JewelBank's own OpenOnOff() call
+        // above.
+        if (gCB_RedeemCodeWindow) gCB_RedeemCodeWindow->OpenWindow();
+        PlayBuffer(SOUND_CLICK01);
+        break;
+#endif
 
     default:
         break;
@@ -9523,6 +9779,2296 @@ bool HandleAndroidTradePickerFingerUp(const SDL_TouchFingerEvent& touch)
     return true;
 }
 
+// ============================================================================
+// First-time UI tutorial - a one-shot, step-by-step tour of the touch
+// overlay, shown once right after character select and never again. Follows
+// the exact shape of the modal overlay pickers above (dim + panel + claim
+// every touch while active), just with a per-step highlight instead of a
+// scrollable list, and with the steps that have something to try wired up to
+// live demos rather than described in prose.
+// ============================================================================
+
+// Defined further down with the rest of the overlay's drawing helpers; the
+// tutorial redraws several real controls crisply above its own dim layer, so
+// it needs them here. Defaults deliberately omitted - they live on the
+// definitions, and a default argument may only be introduced once.
+static void EnsureUITextures();
+void DrawVirtualCombatButtonFrame(float uiX, float uiY, float uiRadius, bool pressed, bool assignGlow);
+static void DrawIconButton(float uiX, float uiY, float uiW, float uiH,
+                           const UITexture& tex, float alpha, float bgR, float bgG, float bgB);
+static void DrawIconButtonUv(float uiX, float uiY, float uiW, float uiH,
+                             const UITexture& tex,
+                             float u0, float v0, float uW, float vH, float alpha);
+static void DrawVirtualSkillBoxFrame(float uiX, float uiY, float uiRadius, bool pressed, bool assignGlow);
+static void DrawVirtualSkillSelectedBorder(float uiX, float uiY, float uiRadius, float alpha);
+
+// Named rather than bare indices - the demo renderers, the highlight rects and
+// the tap handlers all switch on these, and inserting a step used to mean
+// renumbering three separate switch statements by hand.
+enum AndroidTutorialStepId
+{
+    kTutStepWelcome = 0,
+    kTutStepMove,
+    kTutStepCombat,
+    kTutStepSkillBind,
+    kTutStepPotions,
+    kTutStepPotionBind,
+    kTutStepTarget,
+    kTutStepItems,
+    kTutStepZoom,
+    kTutStepTravel,
+    kTutStepStats,
+    kTutStepTopBar,
+    kTutStepMiniMap,
+    kTutStepChat,
+    kTutStepDone,
+
+    kAndroidTutorialStepCount
+};
+
+struct AndroidTutorialStep
+{
+    const char* title;
+    const char* body;
+
+    // The "now you try it" line under the body, and the flag that makes the
+    // step interactive at all: non-null means taps outside the nav row are
+    // fed to that step's live demo instead of advancing, so practising can
+    // never accidentally skip past the thing being practised.
+    const char* hint;
+};
+
+// Step 4's body is overridden at render time when AIM isn't on screen (a
+// brand-new character spawns in a safe zone, where AIM doesn't exist at
+// all - see GetAndroidTutorialStepRect's case 4 and RenderAndroidTutorial's
+// own comment on this). The text here is the "AIM is available" version.
+constexpr std::array<AndroidTutorialStep, kAndroidTutorialStepCount> kAndroidTutorialSteps = {{
+    { "Welcome!",
+      "A quick tour of the touch controls. Use Next and Back to move through it, or Skip to jump straight into the game. Everything you tap in here is a practice copy - your character is never touched.",
+      nullptr },
+    { "Move",
+      "Touch and drag anywhere on the left half of the screen. The stick appears under your thumb and follows it - there is no fixed pad to find.",
+      "Try it: drag on the left side." },
+    { "Attack & Skills",
+      "ATK swings your weapon. The four slots around it are your bound skills, and the small toggles beside them are PK mode and Combo.",
+      "Try it: tap ATK, a skill slot, or a toggle." },
+    { "Bind a Skill",
+      "A skill slot holds one skill. Tap an empty slot to pick one; press and hold a filled slot to swap what is in it. A short tap on a filled slot arms that skill instead, ready for the next ATK.",
+      "Try it: tap the empty slot, pick a skill, then hold it to swap." },
+    { "Potion Slots",
+      "Q W E R hold your consumables. A short tap drinks from a slot; the number under it is how many you have left.",
+      "Try it: tap one of the four slots." },
+    { "Equip a Potion",
+      "Tap an empty Q/W/E/R slot and your bag opens - tap any consumable in it and that slot is bound. Press and hold a filled slot to empty it again.",
+      "Try it: tap the empty slot, pick a potion, then hold it to clear." },
+    { "Target & Page",
+      "AIM opens a list of the players near you. The button below it swaps between your two skill pages.",
+      "Try it: tap AIM to open the list, then tap a name to lock onto it." },
+    { "Item Pickups",
+      "Walk over a drop and this menu opens by itself. The picture is the item, the arrows page through everything in reach, and Pick Up walks you over and collects it.",
+      "Try it: tap the picture for details, the arrows to page, then Pick Up." },
+    { "Zoom",
+      "Put two fingers on the screen and pinch to pull the camera in or push it out. There are no zoom buttons - the gesture is the control, and it works anywhere in the world.",
+      "Try it: pinch with two fingers. This one is real - watch the world behind." },
+    { "Travel",
+      "The map name and coordinates at the top right are a button. Tap it to open the move list, then pick a map to warp there - it costs zen and needs the level that map asks for.",
+      "Try it: tap the map chip, then pick a destination." },
+    { "Stats",
+      "Tap your portrait, top left, to open your character sheet. Every level gives you points to spend - tap the + beside a stat to put one in.",
+      "Try it: tap the portrait, then add a point." },
+    { "Top Bar",
+      "Guild, Shop, Settings, Bags and more - tap an icon to open it, tap the arrow to hide the row.",
+      nullptr },
+    { "Minimap",
+      "Your position and nearby points of interest, right under your current location.",
+      nullptr },
+    { "Chat",
+      "Switch between All / Party / Guild / etc. and read messages here. Tap a name on a line to whisper that player privately.",
+      nullptr },
+    { "You're all set!",
+      "That is the whole tour. Tap Start Playing to jump in - nothing you did in here touched your character.",
+      nullptr },
+}};
+
+bool IsAndroidTutorialStepInteractive(int step)
+{
+    if (step < 0 || step >= kAndroidTutorialStepCount)
+    {
+        return false;
+    }
+    return kAndroidTutorialSteps[step].hint != nullptr;
+}
+
+// Vertical step between wrapped lines, in UI units. SEASON3B::TextDraw's own
+// built-in multi-line path steps by 10; one more than that reads better at the
+// sizes these captions use.
+constexpr float kAndroidTutorialLineH = 11.0f;
+
+// Both live with the drawing helpers further down, but the step demos above
+// them need them.
+void BeginAndroidTutorial2D();
+void RenderAndroidTutorialNoteBox(const AndroidUiRect& note, bool done, const char* text);
+
+// TextDraw does NOT word-wrap. SEASON3B::TextDraw (NewUICommon.cpp) only
+// splits on '\n'/'#' via strtok and steps PosY per fragment - a long string is
+// drawn as ONE line, centred on the width it was handed and clipped at both
+// ends. That is exactly how the first pass at these captions came out on
+// device ("...ap the picture for the item's details ... then Pick Up to tal").
+//
+// CutStr (UIControls.cpp) is the client's own measure-and-break helper: it
+// walks the string with _GetTextExtentPoint32 against the currently selected
+// font and breaks on real pixel width, so the font has to be set before
+// asking. Returns the number of lines drawn, so a caller can size a box to fit.
+int DrawAndroidTutorialWrappedText(HFONT font, float x, float y, float w, DWORD color, int align, const char* text)
+{
+    if (text == nullptr || g_pRenderText == nullptr)
+    {
+        return 0;
+    }
+
+    // Two things about CutStr's contract that both bite if you get them wrong,
+    // and did on the first attempt (the welcome caption drew its whole body on
+    // line one and then repeated the tail on line two):
+    //
+    //  - It fills a FLAT buffer, stepping by exactly the iOutStrLength it was
+    //    handed, so that argument has to equal the real row stride. It cannot
+    //    be shortened to leave room for a terminator.
+    //  - It copies each row with strncpy(dst, src, iOutStrLength), and strncpy
+    //    writes no terminator when the source fills the row exactly. A full row
+    //    therefore runs straight on into the next one when it is read back.
+    //
+    // So: keep the stride honest, then stamp a terminator on the last byte of
+    // every row afterwards. The stride is also kept well above the longest
+    // caption, because CutStr breaks on length as well as width and a stride
+    // near the text length makes it break mid-sentence for no visual reason.
+    constexpr int kMaxLines = 6;
+    constexpr int kStride = 256;
+    char buffer[(kMaxLines * kStride) + 1] = {};
+
+    g_pRenderText->SetFont(font);
+    int lineCount = CutStr(text, buffer, static_cast<int>(w), kMaxLines, kStride);
+    lineCount = std::clamp(lineCount, 0, kMaxLines);
+
+    for (int i = 0; i < kMaxLines; ++i)
+    {
+        buffer[(i * kStride) + kStride - 1] = '\0';
+    }
+
+    for (int i = 0; i < lineCount; ++i)
+    {
+        const char* line = &buffer[i * kStride];
+        if (line[0] == '\0')
+        {
+            continue;
+        }
+
+        TextDraw(font,
+                 static_cast<int>(x),
+                 static_cast<int>(y + (kAndroidTutorialLineH * static_cast<float>(i))),
+                 color, 0x0,
+                 static_cast<int>(w), 0, align,
+                 "%s", line);
+    }
+
+    return lineCount;
+}
+
+struct AndroidTutorialState
+{
+    bool active = false;
+    int step = -1;
+
+    // Per-step "the player actually tried it" flag. It only changes the hint
+    // line and puts a tick on the Next button - it never blocks Next, because
+    // a tutorial that refuses to move on is worse than one that gets ignored.
+    std::array<bool, kAndroidTutorialStepCount> tried{};
+
+    // Step 1 - a joystick that draws and tracks the finger exactly like the
+    // real one (same geometry helper, same clamp) but is wired to nothing, so
+    // practising cannot walk the character into a monster.
+    SDL_FingerID practiceFinger = static_cast<SDL_FingerID>(-1);
+    float practiceOriginX = 0.0f;
+    float practiceOriginY = 0.0f;
+    float practiceThumbX = 0.0f;    // offset from the origin, UI units
+    float practiceThumbY = 0.0f;
+
+    // Steps 2/3 - which control was last tapped and when, driving the press
+    // flash and the caption naming what that control does.
+    int   demoButton = -1;          // index into kVirtualButtons
+    int   demoHotKey = -1;          // index into kVirtualMirrorHotKeySlots
+    int   demoToggle = -1;          // 0 = PK, 1 = Combo
+    DWORD demoPressTick = 0;
+    int   demoArmedSkill = -1;      // slot left armed after a skill-slot tap
+
+    // Steps that distinguish a tap from a press-and-hold the way the real
+    // slots do (HandleVirtualFingerUp's kSkillSlotRebindHoldMs /
+    // kHotKeyRebindHoldMs branches). Recorded on finger-down and resolved on
+    // finger-up, same as the real ones - a hold is half the lesson in both
+    // bind steps, so the demo has to tell them apart rather than treating
+    // every touch as a tap.
+    SDL_FingerID holdFinger = static_cast<SDL_FingerID>(-1);
+    int      holdTarget = -1;      // meaning is per-step
+    uint32_t holdDownMs = 0;
+
+    // Step "Bind a Skill". stage: 0 idle, 1 picker open, 2 bound.
+    int  skillBindStage = 0;
+    int  skillBindSlot = -1;       // which mock slot the picker is binding
+    int  skillBindChoice = -1;     // row chosen from the mock list
+    bool skillBindWasSwap = false; // opened by a hold on a filled slot
+
+    // Step "Equip a Potion". stage: 0 idle, 1 bag open, 2 bound.
+    int  potionBindStage = 0;
+    int  potionBindSlot = -1;
+    int  potionBindChoice = -1;
+    bool potionBindCleared = false;
+
+    // Steps "Travel" and "Stats" keep no state of their own - they open the
+    // client's real windows and read straight from them
+    // (IsAndroidTutorialRealWindowOpen).
+
+    // Step "Zoom" - the camera distance when the step opened, so the demo can
+    // report movement rather than an absolute number that means nothing.
+    float zoomAtStepStart = 0.0f;
+
+    // Step 4 - the example target list and its simulated lock.
+    bool  aimListOpen = false;
+    int   aimLockedRow = -1;
+    int   demoSkillPage = 0;
+
+    // Step 5 - the example item menu.
+    int   itemPage = 0;
+    bool  itemTooltip = false;
+    DWORD itemPickTick = 0;
+
+    // RenderItemInfo writes the module-wide g_fLastTip* rect that the live
+    // item menu sizes its container from. The example keeps its own copy and
+    // swaps it in around the call, so neither box is ever sized from the
+    // other's tooltip - see RenderAndroidTutorialItemMenuExample.
+    float itemTipX = 0.0f;
+    float itemTipY = 0.0f;
+    float itemTipW = 0.0f;
+    float itemTipH = 0.0f;
+};
+static AndroidTutorialState g_androidTutorial;
+
+// Forward declared up by ClearVirtualJoystick - the movement gates need it.
+bool IsAndroidTutorialActive()
+{
+    return g_androidTutorial.active;
+}
+
+// The chat strip and its log are hidden for the whole tour except the step
+// that teaches them - they sit right where the captions and worked examples
+// go, and were reading through the dim on top of both. Read by
+// UpdateAndroidChatLogSuppression and RenderAndroidChatTabs, both further
+// down this file.
+bool ShouldSuppressAndroidChatForTutorial()
+{
+    return g_androidTutorial.active && g_androidTutorial.step != kTutStepChat;
+}
+
+// Two steps hand the screen to the player's own real window rather than a
+// stand-in: Travel opens the client's move list, Stats its character sheet.
+// Nothing about either is worth imitating - the point is to show what they
+// actually look like and let them actually be used.
+bool AndroidTutorialStepUsesRealWindow(int step)
+{
+    return step == kTutStepTravel || step == kTutStepStats;
+}
+
+// Whether that step's window is up right now.
+bool IsAndroidTutorialRealWindowOpen()
+{
+    if (g_pNewUISystem == nullptr || !g_androidTutorial.active)
+    {
+        return false;
+    }
+
+    if (g_androidTutorial.step == kTutStepTravel)
+    {
+        return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MOVEMAP) != FALSE;
+    }
+    if (g_androidTutorial.step == kTutStepStats)
+    {
+        return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER) != FALSE;
+    }
+    return false;
+}
+
+// Shuts the window a real-window step opened once the player moves off that
+// step (or ends the tour), so the tutorial never leaves a window behind that
+// the player did not open themselves. Called once per frame from
+// RenderAndroidTutorial's caller side - see RenderVirtualPad.
+void SyncAndroidTutorialRealWindow()
+{
+    static int s_openedFor = -1;
+
+    if (g_pNewUISystem == nullptr)
+    {
+        return;
+    }
+
+    const int current = (g_androidTutorial.active
+                         && AndroidTutorialStepUsesRealWindow(g_androidTutorial.step))
+        ? g_androidTutorial.step : -1;
+
+    if (current == s_openedFor)
+    {
+        return;
+    }
+
+    if (s_openedFor == kTutStepTravel)
+    {
+        g_pNewUISystem->Hide(SEASON3B::INTERFACE_MOVEMAP);
+    }
+    else if (s_openedFor == kTutStepStats)
+    {
+        g_pNewUISystem->Hide(SEASON3B::INTERFACE_CHARACTER);
+    }
+
+    s_openedFor = current;
+}
+
+void ResetAndroidTutorialStepDemo()
+{
+    g_androidTutorial.holdFinger = static_cast<SDL_FingerID>(-1);
+    g_androidTutorial.holdTarget = -1;
+    g_androidTutorial.holdDownMs = 0;
+    g_androidTutorial.skillBindStage = 0;
+    g_androidTutorial.skillBindSlot = -1;
+    g_androidTutorial.skillBindChoice = -1;
+    g_androidTutorial.skillBindWasSwap = false;
+    g_androidTutorial.potionBindStage = 0;
+    g_androidTutorial.potionBindSlot = -1;
+    g_androidTutorial.potionBindChoice = -1;
+    g_androidTutorial.potionBindCleared = false;
+    g_androidTutorial.zoomAtStepStart = 0.0f;
+    g_androidTutorial.practiceFinger = static_cast<SDL_FingerID>(-1);
+    g_androidTutorial.practiceThumbX = 0.0f;
+    g_androidTutorial.practiceThumbY = 0.0f;
+    g_androidTutorial.demoButton = -1;
+    g_androidTutorial.demoHotKey = -1;
+    g_androidTutorial.demoToggle = -1;
+    g_androidTutorial.demoPressTick = 0;
+    g_androidTutorial.demoArmedSkill = -1;
+    g_androidTutorial.aimListOpen = false;
+    g_androidTutorial.aimLockedRow = -1;
+    g_androidTutorial.demoSkillPage = 0;
+    g_androidTutorial.itemPage = 0;
+    g_androidTutorial.itemTooltip = false;
+    g_androidTutorial.itemPickTick = 0;
+    g_androidTutorial.itemTipX = 0.0f;
+    g_androidTutorial.itemTipY = 0.0f;
+    g_androidTutorial.itemTipW = 0.0f;
+    g_androidTutorial.itemTipH = 0.0f;
+}
+
+// The whole process already chdir's into the app's private writable
+// directory before main() runs (android_set_data_dir_early, top of this
+// file) - every other ad-hoc Android file (e.g. the joystick debug trace)
+// relies on the same thing, so a bare relative fopen() lands in per-device
+// storage with no JNI/SharedPreferences plumbing needed.
+constexpr const char* kAndroidTutorialFlagFile = "tutorial_shown.flag";
+
+bool IsAndroidTutorialAlreadyShown()
+{
+    FILE* f = fopen(kAndroidTutorialFlagFile, "rb");
+    if (f == nullptr)
+    {
+        return false;
+    }
+    fclose(f);
+    return true;
+}
+
+void MarkAndroidTutorialShown()
+{
+    FILE* f = fopen(kAndroidTutorialFlagFile, "wb");
+    if (f != nullptr)
+    {
+        fclose(f);
+    }
+}
+
+AndroidUiRect UnionAndroidUiRect(const AndroidUiRect& a, const AndroidUiRect& b)
+{
+    const float left = std::min(a.x, b.x);
+    const float top = std::min(a.y, b.y);
+    const float right = std::max(a.x + a.w, b.x + b.w);
+    const float bottom = std::max(a.y + a.h, b.y + b.h);
+    return { left, top, right - left, bottom - top };
+}
+
+AndroidUiRect InflateAndroidUiRect(const AndroidUiRect& r, float pad)
+{
+    return { r.x - pad, r.y - pad, r.w + pad * 2.0f, r.h + pad * 2.0f };
+}
+
+AndroidUiRect CircleBoundsAndroidUiRect(float cx, float cy, float radius)
+{
+    return { cx - radius, cy - radius, radius * 2.0f, radius * 2.0f };
+}
+
+// One highlight rect per step, in UI units - built from the same layout
+// getters/constants the real controls render from, so this can't drift out
+// of sync if a button's position ever changes. Steps 0 and (count-1) are the
+// welcome/closing steps and have no highlight.
+bool GetAndroidTutorialStepRect(int step, AndroidUiRect& outRect)
+{
+    switch (step)
+    {
+    case kTutStepMove: // Movement zone. The stick floats to wherever the finger lands
+            // inside it (kVirtualJoystickSpawnZoneMaxX), so the zone IS the
+            // control - a circle around the old fixed home would be pointing
+            // at a pad that no longer exists. Stops short of the Q/W/E/R row
+            // at the bottom, which outranks the joystick in the hit test and
+            // gets its own step.
+        outRect = {
+            4.0f,
+            200.0f,
+            kVirtualJoystickSpawnZoneMaxX - 8.0f,
+            (kVirtualMirrorHotKeySlots[0].cy - kVirtualMirrorHotKeySlots[0].radius - 6.0f) - 200.0f
+        };
+        return true;
+
+    case kTutStepCombat: // Attack + skill wheel + Combo/PK toggles
+    {
+        AndroidUiRect rect = CircleBoundsAndroidUiRect(kVirtualButtons[0].cx, kVirtualButtons[0].cy, kVirtualButtons[0].radius);
+        for (size_t i = 1; i < kVirtualButtons.size(); ++i)
+        {
+            rect = UnionAndroidUiRect(rect, CircleBoundsAndroidUiRect(kVirtualButtons[i].cx, kVirtualButtons[i].cy, kVirtualButtons[i].radius));
+        }
+        rect = UnionAndroidUiRect(rect, GetComboToggleRect());
+        rect = UnionAndroidUiRect(rect, GetPkToggleRect());
+        outRect = InflateAndroidUiRect(rect, 8.0f);
+        return true;
+    }
+
+    case kTutStepSkillBind: // Just the skill ring - the wheel is what gets bound.
+    {
+        AndroidUiRect rect = CircleBoundsAndroidUiRect(
+            kVirtualButtons[kVirtualSkillButtonBase].cx,
+            kVirtualButtons[kVirtualSkillButtonBase].cy,
+            kVirtualButtons[kVirtualSkillButtonBase].radius);
+        for (size_t i = kVirtualSkillButtonBase + 1; i < kVirtualButtons.size(); ++i)
+        {
+            rect = UnionAndroidUiRect(rect, CircleBoundsAndroidUiRect(
+                kVirtualButtons[i].cx, kVirtualButtons[i].cy, kVirtualButtons[i].radius));
+        }
+        outRect = InflateAndroidUiRect(rect, 8.0f);
+        return true;
+    }
+
+    case kTutStepPotions:
+    case kTutStepPotionBind: // Q/W/E/R potion slots
+    {
+        AndroidUiRect rect = CircleBoundsAndroidUiRect(
+            kVirtualMirrorHotKeySlots[0].cx, kVirtualMirrorHotKeySlots[0].cy, kVirtualMirrorHotKeySlots[0].radius);
+        for (size_t i = 1; i < kVirtualMirrorHotKeySlots.size(); ++i)
+        {
+            rect = UnionAndroidUiRect(rect, CircleBoundsAndroidUiRect(
+                kVirtualMirrorHotKeySlots[i].cx, kVirtualMirrorHotKeySlots[i].cy, kVirtualMirrorHotKeySlots[i].radius));
+        }
+        outRect = InflateAndroidUiRect(rect, 8.0f);
+        return true;
+    }
+
+    case kTutStepTarget: // AIM + skill page switch
+    {
+        // AIM doesn't exist on screen at all in a safe zone (see
+        // IsAndroidAimAvailable/RenderTargetSelectButton's hard early
+        // return), and a brand-new character always spawns in one - so
+        // RenderAndroidTutorial draws a simulated AIM button right here
+        // when it's not really there, and the highlight always includes
+        // this spot regardless, so the box has something to circle either way.
+        AndroidUiRect rect = CircleBoundsAndroidUiRect(kSkillPageButtonCx, kSkillPageButtonCy, kSkillPageButtonRadius);
+        rect = UnionAndroidUiRect(rect, CircleBoundsAndroidUiRect(kTargetSelectButtonCx, kTargetSelectButtonCy, kTargetSelectButtonRadius));
+        outRect = InflateAndroidUiRect(rect, 8.0f);
+        return true;
+    }
+
+    case kTutStepItems: // Item pickup menu - no real highlight, see
+                        // RenderAndroidTutorial's example for why (the menu
+                        // practically never exists on screen at the exact
+                        // moment the tutorial runs).
+        return false;
+
+    case kTutStepZoom: // Pinch is a whole-screen gesture, not a control - the
+                       // only thing worth framing is the world it acts on.
+        return false;
+
+    case kTutStepTravel: // The map/coords chip is the button that opens the
+                         // move list (kTopBarActionLocation).
+        outRect = InflateAndroidUiRect(GetTopBarLocationChipRect(), 5.0f);
+        return true;
+
+    case kTutStepStats: // The portrait doubles as the character-sheet button
+                        // (HitTestVirtualPortraitAvatar).
+        outRect = InflateAndroidUiRect(
+            AndroidUiRect{ kPortraitAvatarX, kPortraitAvatarY, kPortraitAvatarW, kPortraitAvatarH }, 5.0f);
+        return true;
+
+    case kTutStepTopBar: // Top bar buttons
+    {
+        AndroidUiRect rect = GetTopBarButtonRect(0);
+        for (int slot = 1; slot < kTopBarButtonCount; ++slot)
+        {
+            rect = UnionAndroidUiRect(rect, GetTopBarButtonRect(slot));
+        }
+        rect = UnionAndroidUiRect(rect, GetTopBarRowToggleButtonRect());
+        outRect = InflateAndroidUiRect(rect, 6.0f);
+        return true;
+    }
+
+    case kTutStepMiniMap: // Minimap + location chip
+        outRect = InflateAndroidUiRect(
+            UnionAndroidUiRect(GetTopBarLocationChipRect(), GetTopBarMiniMapPanelRect()),
+            6.0f);
+        return true;
+
+    case kTutStepChat: // Chat tabs + log
+        outRect = AndroidUiRect{
+            kChatLogX - 8.0f,
+            kChatTabsY - 4.0f,
+            ((kChatTabW + kChatTabGap) * static_cast<float>(kChatTabCount)) + 16.0f,
+            kChatLogBottomY - kChatTabsY + 8.0f
+        };
+        return true;
+
+    default: // 0 (welcome) and count-1 (done)
+        return false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Caption panel and its nav row. Both the renderer and the hit test go through
+// these, so what is drawn is exactly what is tappable. The panel is anchored
+// opposite whatever the step highlights (top-half highlight -> panel at the
+// bottom and vice versa) so it never covers the thing it is describing, and
+// Skip lives inside the nav row rather than floating in a screen corner, where
+// it used to overlap the panel whenever the panel was at the bottom.
+// ---------------------------------------------------------------------------
+constexpr float kAndroidTutorialPanelX = 40.0f;
+constexpr float kAndroidTutorialPanelW = 560.0f;
+constexpr float kAndroidTutorialPanelH = 112.0f;
+constexpr float kAndroidTutorialNavH = 20.0f;
+
+AndroidUiRect GetAndroidTutorialPanelRect(int step)
+{
+    AndroidUiRect highlight;
+    const bool hasHighlight = GetAndroidTutorialStepRect(step, highlight);
+    const bool highlightInTopHalf = hasHighlight && (highlight.y + highlight.h * 0.5f) < 240.0f;
+    const float panelY = highlightInTopHalf ? (480.0f - kAndroidTutorialPanelH - 10.0f) : 10.0f;
+    return { kAndroidTutorialPanelX, panelY, kAndroidTutorialPanelW, kAndroidTutorialPanelH };
+}
+
+AndroidUiRect GetAndroidTutorialNavRowRect(int step)
+{
+    const AndroidUiRect panel = GetAndroidTutorialPanelRect(step);
+    return {
+        panel.x + 10.0f,
+        panel.y + panel.h - kAndroidTutorialNavH - 6.0f,
+        panel.w - 20.0f,
+        kAndroidTutorialNavH
+    };
+}
+
+AndroidUiRect GetAndroidTutorialSkipRect(int step)
+{
+    const AndroidUiRect row = GetAndroidTutorialNavRowRect(step);
+    return { row.x, row.y, 56.0f, row.h };
+}
+
+AndroidUiRect GetAndroidTutorialBackRect(int step)
+{
+    const AndroidUiRect row = GetAndroidTutorialNavRowRect(step);
+    return { row.x + row.w - 148.0f, row.y, 68.0f, row.h };
+}
+
+AndroidUiRect GetAndroidTutorialNextRect(int step)
+{
+    const AndroidUiRect row = GetAndroidTutorialNavRowRect(step);
+    return { row.x + row.w - 72.0f, row.y, 72.0f, row.h };
+}
+
+// ---------------------------------------------------------------------------
+// Where the two worked examples sit. Steps 4 and 5 both highlight (or imply)
+// something in the lower half, so their panel is at the top and these are
+// placed clear of it. Step 4's list sits above and left of the real AIM
+// button, close enough for the connector line drawn between them to read as
+// "this button opens this list".
+//
+// Both use the LIVE controls' own layout constants (kTargetPicker*, the
+// GetItemMenu*RectAt family) rather than numbers of their own, so an example
+// cannot drift away from the control it is illustrating.
+// ---------------------------------------------------------------------------
+constexpr float kAndroidTutorialAimListX = 396.0f;
+constexpr float kAndroidTutorialAimListY = 148.0f;
+constexpr int   kAndroidTutorialAimRowCount = 2;
+
+AndroidUiRect GetAndroidTutorialAimListRect()
+{
+    return {
+        kAndroidTutorialAimListX,
+        kAndroidTutorialAimListY,
+        kTargetPickerW,
+        kTargetPickerHeaderH
+            + (kTargetPickerRowH * static_cast<float>(kAndroidTutorialAimRowCount))
+            + kTargetPickerFooterH
+    };
+}
+
+AndroidUiRect GetAndroidTutorialAimRowRect(int row)
+{
+    return {
+        kAndroidTutorialAimListX + 6.0f,
+        kAndroidTutorialAimListY + kTargetPickerHeaderH + (static_cast<float>(row) * kTargetPickerRowH),
+        kTargetPickerW - 12.0f,
+        kTargetPickerRowH - 2.0f
+    };
+}
+
+AndroidUiRect GetAndroidTutorialAimFooterRect()
+{
+    const AndroidUiRect rect = GetAndroidTutorialAimListRect();
+    return {
+        rect.x + 6.0f,
+        rect.y + rect.h - kTargetPickerFooterH + 2.0f,
+        rect.w - 12.0f,
+        kTargetPickerFooterH - 6.0f
+    };
+}
+
+// Names are obviously placeholders on purpose: the lesson is "a row is a
+// player and tapping it locks on", not who happens to be standing nearby.
+constexpr std::array<const char*, kAndroidTutorialAimRowCount> kAndroidTutorialAimNames = {
+    "Player_1",
+    "Player_2",
+};
+constexpr std::array<const char*, kAndroidTutorialAimRowCount> kAndroidTutorialAimDists = {
+    "3m",
+    "8m",
+};
+
+constexpr float kAndroidTutorialItemMenuX = 432.0f;
+constexpr float kAndroidTutorialItemMenuY = 158.0f;
+constexpr int   kAndroidTutorialItemCount = 2;
+
+// ---------------------------------------------------------------------------
+// Mock panels for the four "open a window and do a thing" steps. Each is laid
+// out with its live counterpart's own constants where they exist
+// (kSkillPickerList* for the skill picker) and mirrors the real box treatment
+// otherwise, so the shape the player learns here is the shape they meet in
+// game. None of them touch real state - see the handler comments.
+// ---------------------------------------------------------------------------
+
+// The real skill picker's box - its own width, header and row pitch, but
+// pushed down from the live kSkillPickerListY of 90, which sits underneath the
+// tutorial's caption panel. Everything the step teaches is the row layout, and
+// that is unchanged.
+constexpr int   kAndroidTutorialSkillRowCount = 4;
+constexpr float kAndroidTutorialSkillListY = 150.0f;
+
+AndroidUiRect GetAndroidTutorialSkillListRect()
+{
+    return {
+        kSkillPickerListX,
+        kAndroidTutorialSkillListY,
+        kSkillPickerListW,
+        kSkillPickerListHeaderH
+            + (kSkillPickerListRowH * static_cast<float>(kAndroidTutorialSkillRowCount))
+            + kSkillPickerListFooterH
+    };
+}
+
+AndroidUiRect GetAndroidTutorialSkillRowRect(int row)
+{
+    return {
+        kSkillPickerListX + 5.0f,
+        kAndroidTutorialSkillListY + kSkillPickerListHeaderH + (static_cast<float>(row) * kSkillPickerListRowH),
+        kSkillPickerListW - 10.0f,
+        kSkillPickerListRowH - 3.0f
+    };
+}
+
+constexpr std::array<const char*, kAndroidTutorialSkillRowCount> kAndroidTutorialSkillNames = {
+    "Twisting Slash",
+    "Death Stab",
+    "Rageful Blow",
+    "Fire Slash",
+};
+
+// Bag stand-in for the potion-bind step: the real flow opens INTERFACE_INVENTORY
+// and waits for a tap on a consumable, which is far too much window to
+// reproduce - this is the same idea reduced to the row of consumables that
+// matters, at a size that leaves the Q/W/E/R row it binds to visible.
+constexpr int kAndroidTutorialPotionRowCount = 3;
+
+AndroidUiRect GetAndroidTutorialPotionBagRect()
+{
+    return { 40.0f, 250.0f, 200.0f, 26.0f + (24.0f * static_cast<float>(kAndroidTutorialPotionRowCount)) + 8.0f };
+}
+
+AndroidUiRect GetAndroidTutorialPotionRowRect(int row)
+{
+    const AndroidUiRect rect = GetAndroidTutorialPotionBagRect();
+    return { rect.x + 5.0f, rect.y + 26.0f + (24.0f * static_cast<float>(row)), rect.w - 10.0f, 22.0f };
+}
+
+constexpr std::array<const char*, kAndroidTutorialPotionRowCount> kAndroidTutorialPotionNames = {
+    "Large Healing Potion",
+    "Large Mana Potion",
+    "Antidote",
+};
+
+// NOTE: the Travel and Stats steps have no stand-in layout here on purpose.
+// They open the client's real INTERFACE_MOVEMAP / INTERFACE_CHARACTER windows
+// and let the player use them - see RenderAndroidTutorialTravelDemo and
+// RenderAndroidTutorialStatsDemo, which draw nothing but the caption.
+
+// Two stand-in drops for the example menu. A weapon first, whose tooltip is
+// the full name/damage/requirement block, then a potion, whose tooltip is two
+// lines - between them the player has seen both shapes the real tooltip takes
+// before ever standing over a drop.
+ITEM GetAndroidTutorialExampleItem(int page)
+{
+    ITEM item;
+    memset(&item, 0, sizeof(item));
+
+    item.Type = static_cast<short>((page == 0) ? (ITEM_SWORD + 0) : (ITEM_POTION + 0));
+    item.Durability = 20;
+
+    // Same call RenderItemMenu makes on a real ground drop - it is what fills
+    // in the damage, the requirements and everything else the tooltip reads.
+    ItemConvert(&item, 0, 0, 0);
+    return item;
+}
+
+// Checked once (not once per frame) the first time the touch overlay
+// genuinely exists on screen - the same instant character-select finishes
+// handing off to the world, since IsVirtualPadAvailable() is exactly what
+// RenderVirtualPad() itself gates on every frame.
+void MaybeStartAndroidTutorial()
+{
+    static bool s_checked = false;
+    if (s_checked || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+    s_checked = true;
+
+    if (!IsAndroidTutorialAlreadyShown())
+    {
+        g_androidTutorial.active = true;
+        g_androidTutorial.step = 0;
+        g_androidTutorial.tried.fill(false);
+        ResetAndroidTutorialStepDemo();
+    }
+}
+
+void FinishAndroidTutorial()
+{
+    MarkAndroidTutorialShown();
+    g_androidTutorial.active = false;
+    g_androidTutorial.step = -1;
+    ResetAndroidTutorialStepDemo();
+}
+
+void AdvanceAndroidTutorial()
+{
+    g_androidTutorial.step++;
+    if (g_androidTutorial.step >= kAndroidTutorialStepCount)
+    {
+        FinishAndroidTutorial();
+        return;
+    }
+    ResetAndroidTutorialStepDemo();
+}
+
+void RewindAndroidTutorial()
+{
+    if (g_androidTutorial.step <= 0)
+    {
+        return;
+    }
+    g_androidTutorial.step--;
+    ResetAndroidTutorialStepDemo();
+}
+
+void MarkAndroidTutorialStepTried()
+{
+    const int step = g_androidTutorial.step;
+    if (step >= 0 && step < kAndroidTutorialStepCount)
+    {
+        g_androidTutorial.tried[step] = true;
+    }
+}
+
+// Per-step demo taps for the interactive steps. Returns true when the tap did
+// something in the demo; the caller swallows it either way, so a miss inside
+// an interactive step is simply ignored rather than skipping the step the
+// player is still in the middle of trying.
+bool HandleAndroidTutorialStepTap(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    switch (tut.step)
+    {
+    case kTutStepMove: // Practice stick - anywhere in the movement zone starts one.
+    {
+        if (uiX > kVirtualJoystickSpawnZoneMaxX || uiY >= kVirtualPadInputMaxY)
+        {
+            return false;
+        }
+
+        tut.practiceFinger = touch.fingerId;
+        tut.practiceOriginX = uiX;
+        tut.practiceOriginY = uiY;
+        tut.practiceThumbX = 0.0f;
+        tut.practiceThumbY = 0.0f;
+        MarkAndroidTutorialStepTried();
+        return true;
+    }
+
+    case kTutStepCombat: // Attack / skill wheel / the two toggles.
+    {
+        for (int i = 0; i < static_cast<int>(kVirtualButtons.size()); ++i)
+        {
+            const VirtualButtonLayout& button = kVirtualButtons[i];
+            const float dx = uiX - button.cx;
+            const float dy = uiY - button.cy;
+            if (((dx * dx) + (dy * dy)) > (button.radius * button.radius))
+            {
+                continue;
+            }
+
+            tut.demoButton = i;
+            tut.demoToggle = -1;
+            tut.demoPressTick = GetTickCount();
+
+            // A skill slot stays armed after the tap, the way the real wheel
+            // leaves the selected skill lit - tapping the same one again
+            // clears it, so both halves of that behaviour are visible.
+            if (i != kVirtualAttackButton)
+            {
+                tut.demoArmedSkill = (tut.demoArmedSkill == i) ? -1 : i;
+            }
+
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (HitTestAndroidUiRect(uiX, uiY, GetPkToggleRect())
+            || HitTestAndroidUiRect(uiX, uiY, GetComboToggleRect()))
+        {
+            tut.demoToggle = HitTestAndroidUiRect(uiX, uiY, GetPkToggleRect()) ? 0 : 1;
+            tut.demoButton = -1;
+            tut.demoPressTick = GetTickCount();
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        return false;
+    }
+
+    case kTutStepSkillBind:
+    {
+        // Slot 0 of the wheel is the one this step binds; the picker's rows
+        // do the choosing. Tap-vs-hold is resolved on finger-up (see
+        // HandleAndroidTutorialFingerUp) because that is where the real slot
+        // decides it too - a hold on a filled slot opens the picker to swap,
+        // a tap on a filled one just arms it.
+        if (tut.skillBindStage == 1)
+        {
+            for (int row = 0; row < kAndroidTutorialSkillRowCount; ++row)
+            {
+                if (!HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialSkillRowRect(row)))
+                {
+                    continue;
+                }
+
+                tut.skillBindChoice = row;
+                tut.skillBindStage = 2;
+                MarkAndroidTutorialStepTried();
+                PlayBuffer(SOUND_CLICK01);
+                return true;
+            }
+            return false;
+        }
+
+        for (int i = kVirtualSkillButtonBase; i < static_cast<int>(kVirtualButtons.size()); ++i)
+        {
+            const VirtualButtonLayout& button = kVirtualButtons[i];
+            const float dx = uiX - button.cx;
+            const float dy = uiY - button.cy;
+            if (((dx * dx) + (dy * dy)) > (button.radius * button.radius))
+            {
+                continue;
+            }
+
+            tut.holdFinger = touch.fingerId;
+            tut.holdTarget = i;
+            tut.holdDownMs = MU_MobileGetTicks();
+            return true;
+        }
+
+        return false;
+    }
+
+    case kTutStepPotions: // Q/W/E/R, tap to drink.
+    {
+        for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
+        {
+            const VirtualButtonLayout& button = kVirtualMirrorHotKeySlots[slot];
+            const float dx = uiX - button.cx;
+            const float dy = uiY - button.cy;
+            if (((dx * dx) + (dy * dy)) > (button.radius * button.radius))
+            {
+                continue;
+            }
+
+            tut.demoHotKey = slot;
+            tut.demoPressTick = GetTickCount();
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+        return false;
+    }
+
+    case kTutStepPotionBind:
+    {
+        if (tut.potionBindStage == 1)
+        {
+            for (int row = 0; row < kAndroidTutorialPotionRowCount; ++row)
+            {
+                if (!HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialPotionRowRect(row)))
+                {
+                    continue;
+                }
+
+                tut.potionBindChoice = row;
+                tut.potionBindStage = 2;
+                tut.potionBindCleared = false;
+                MarkAndroidTutorialStepTried();
+                PlayBuffer(SOUND_CLICK01);
+                return true;
+            }
+            return false;
+        }
+
+        for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
+        {
+            const VirtualButtonLayout& button = kVirtualMirrorHotKeySlots[slot];
+            const float dx = uiX - button.cx;
+            const float dy = uiY - button.cy;
+            if (((dx * dx) + (dy * dy)) > (button.radius * button.radius))
+            {
+                continue;
+            }
+
+            tut.holdFinger = touch.fingerId;
+            tut.holdTarget = slot;
+            tut.holdDownMs = MU_MobileGetTicks();
+            return true;
+        }
+
+        return false;
+    }
+
+    case kTutStepZoom:
+        // Nothing to claim: the pinch tracker sits AHEAD of the tutorial in
+        // HandleVirtualFingerDown/Motion, so a two-finger pinch already
+        // reaches the real camera while this step is up. The step just
+        // reports what the gesture did - see RenderAndroidTutorialZoomDemo.
+        return false;
+
+    // Travel and Stats open the player's REAL windows, so the only thing
+    // these two claim is the button that opens them. Once a window is up,
+    // HandleAndroidTutorialFingerDown stops claiming touches entirely for
+    // that step and the window is used for real - the whole point of showing
+    // the real thing rather than a drawing of it.
+    case kTutStepTravel:
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, InflateAndroidUiRect(GetTopBarLocationChipRect(), 6.0f)))
+        {
+            ToggleMapListByVirtualButton();
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+        return false;
+    }
+
+    case kTutStepStats:
+    {
+        // Inflated over HitTestVirtualPortraitAvatar's exact rect: the avatar
+        // is a ~52x56 UI box in the very corner of the screen, which is a
+        // small target under a thumb, and the tutorial has nothing else up
+        // there to steal the extra margin from.
+        const AndroidUiRect portrait = InflateAndroidUiRect(
+            AndroidUiRect{ kPortraitAvatarX, kPortraitAvatarY, kPortraitAvatarW, kPortraitAvatarH }, 8.0f);
+
+        if (HitTestAndroidUiRect(uiX, uiY, portrait))
+        {
+            if (g_pNewUISystem != nullptr)
+            {
+                g_pNewUISystem->Toggle(SEASON3B::INTERFACE_CHARACTER);
+            }
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+        return false;
+    }
+
+    case kTutStepTarget: // AIM button -> example list -> lock a row.
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
+        {
+            // HandleTargetSelectButtonTap, step for step: holding a lock, the
+            // tap releases it and does NOT reopen the list; otherwise it opens
+            // or closes the list.
+            if (tut.aimLockedRow >= 0)
+            {
+                tut.aimLockedRow = -1;
+                tut.aimListOpen = false;
+            }
+            else
+            {
+                tut.aimListOpen = !tut.aimListOpen;
+            }
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (HitTestAndroidUiRect(uiX, uiY, GetSkillPageButtonRect()))
+        {
+            tut.demoSkillPage = (tut.demoSkillPage + 1) % kVirtualSkillPageCount;
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (!tut.aimListOpen)
+        {
+            return false;
+        }
+
+        if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialAimFooterRect()))
+        {
+            tut.aimListOpen = false;
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        for (int row = 0; row < kAndroidTutorialAimRowCount; ++row)
+        {
+            if (!HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialAimRowRect(row)))
+            {
+                continue;
+            }
+
+            // The real picker locks the row's character and closes itself in
+            // the same breath (HandleAndroidTargetPickerFingerUp) - which is
+            // exactly the thing this step exists to show, so it happens here
+            // too rather than leaving the list up.
+            tut.aimLockedRow = row;
+            tut.aimListOpen = false;
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        return false;
+    }
+
+    case kTutStepItems: // The example item menu - same three controls as the real one.
+    {
+        const bool hasNav = (kAndroidTutorialItemCount > 1);
+
+        if (HitTestAndroidUiRect(uiX, uiY,
+                                 GetItemMenuIconRectAt(kAndroidTutorialItemMenuX, kAndroidTutorialItemMenuY)))
+        {
+            tut.itemTooltip = !tut.itemTooltip;
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (hasNav)
+        {
+            const AndroidUiRect navRect =
+                GetItemMenuNavRectAt(kAndroidTutorialItemMenuX, kAndroidTutorialItemMenuY);
+
+            if (HitTestAndroidUiRect(uiX, uiY, navRect))
+            {
+                // Same thirds as HandleItemMenuTap: previous on the left,
+                // next on the right, the page count in the middle inert.
+                const float local = uiX - navRect.x;
+                if (local < (navRect.w / 3.0f))
+                {
+                    tut.itemPage = (tut.itemPage + kAndroidTutorialItemCount - 1) % kAndroidTutorialItemCount;
+                }
+                else if (local > (navRect.w * 2.0f / 3.0f))
+                {
+                    tut.itemPage = (tut.itemPage + 1) % kAndroidTutorialItemCount;
+                }
+                else
+                {
+                    return true;
+                }
+
+                // The live menu drops the tooltip whenever the item under it
+                // changes (UpdateItemMenuNearCharacter) - do the same here.
+                tut.itemTooltip = false;
+                tut.itemTipW = 0.0f;
+                tut.itemTipH = 0.0f;
+                MarkAndroidTutorialStepTried();
+                PlayBuffer(SOUND_CLICK01);
+                return true;
+            }
+        }
+
+        if (HitTestAndroidUiRect(uiX, uiY,
+                                 GetItemMenuPickRectAt(kAndroidTutorialItemMenuX, kAndroidTutorialItemMenuY, hasNav)))
+        {
+            tut.itemPickTick = GetTickCount();
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        return false;
+    }
+
+    default:
+        return false;
+    }
+}
+
+// Outranks every other surface while active, same as the modal message box
+// right above it - checked first in HandleVirtualFingerDown, before the
+// joystick/skill wheel/world ever see the touch.
+bool HandleAndroidTutorialFingerDown(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    if (!g_androidTutorial.active)
+    {
+        return false;
+    }
+
+    const int step = std::clamp(g_androidTutorial.step, 0, kAndroidTutorialStepCount - 1);
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialSkipRect(step)))
+    {
+        FinishAndroidTutorial();
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
+    // Gated on step > 0 to match the renderer, which doesn't draw Back on the
+    // first step - a hit test for a button that isn't there would swallow the
+    // tap for nothing.
+    if (step > 0 && HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialBackRect(step)))
+    {
+        RewindAndroidTutorial();
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialNextRect(step)))
+    {
+        AdvanceAndroidTutorial();
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
+    // Anywhere else on the caption panel is inert - it is text, and a stray
+    // tap on it should not count as "Next".
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialPanelRect(step)))
+    {
+        return true;
+    }
+
+    if (IsAndroidTutorialStepInteractive(step))
+    {
+        // Interactive steps own the rest of the screen: taps go to the demo,
+        // and only the nav row above moves between steps. Without this, every
+        // attempt to practise would skip the step being practised.
+        if (HandleAndroidTutorialStepTap(touch, uiX, uiY))
+        {
+            return true;
+        }
+
+        // A real-window step with its window already up gets out of the way
+        // completely - the touch falls through to the window's own handlers,
+        // so the character sheet and the move list behave exactly as they
+        // will in game. Everywhere else an unclaimed touch is swallowed, so a
+        // near miss cannot skip the step being practised.
+        if (AndroidTutorialStepUsesRealWindow(step) && IsAndroidTutorialRealWindowOpen())
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    AdvanceAndroidTutorial();
+    return true;
+}
+
+// Only the practice stick tracks motion; everything else is tap-only. Still
+// claims every move while the tutorial is up, matching the finger-down rule
+// above - a drag that reached the world underneath would move the character.
+bool HandleAndroidTutorialFingerMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (!g_androidTutorial.active)
+    {
+        return false;
+    }
+
+    // A real-window step with its window up is hands-off, matching
+    // finger-down: dragging inside the character sheet or the move list has
+    // to reach them.
+    if (AndroidTutorialStepUsesRealWindow(g_androidTutorial.step) && IsAndroidTutorialRealWindowOpen())
+    {
+        return false;
+    }
+
+    if (g_androidTutorial.practiceFinger != touch.fingerId)
+    {
+        return true;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+
+    // Same clamp as the real stick (see the joystick's own motion handler):
+    // measured on the glass, not in UI units, so the ring stays a ring on a
+    // screen whose 640x480 mapping stretches differently across and down.
+    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+    float pxX = (uiX - g_androidTutorial.practiceOriginX) * geometry.pxPerUiX;
+    float pxY = (uiY - g_androidTutorial.practiceOriginY) * geometry.pxPerUiY;
+    const float distPx = std::sqrt((pxX * pxX) + (pxY * pxY));
+
+    if (distPx > geometry.ringRadiusPx && distPx > 0.0001f)
+    {
+        const float clamp = geometry.ringRadiusPx / distPx;
+        pxX *= clamp;
+        pxY *= clamp;
+    }
+
+    g_androidTutorial.practiceThumbX = pxX / geometry.pxPerUiX;
+    g_androidTutorial.practiceThumbY = pxY / geometry.pxPerUiY;
+    return true;
+}
+
+// Swallows every release while the tutorial is up. The finger-down handler
+// already claimed the press, so letting the up reach the handlers below would
+// hand them a release for a press they never saw.
+bool HandleAndroidTutorialFingerUp(const SDL_TouchFingerEvent& touch)
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    if (!tut.active)
+    {
+        return false;
+    }
+
+    // Hands-off while a real window is up, matching finger-down and motion.
+    if (AndroidTutorialStepUsesRealWindow(tut.step) && IsAndroidTutorialRealWindowOpen())
+    {
+        return false;
+    }
+
+    if (tut.practiceFinger == touch.fingerId)
+    {
+        tut.practiceFinger = static_cast<SDL_FingerID>(-1);
+        tut.practiceThumbX = 0.0f;
+        tut.practiceThumbY = 0.0f;
+    }
+
+    // Tap vs press-and-hold, resolved here for the same reason the real slots
+    // resolve it here (HandleVirtualFingerUp): you only know which one it was
+    // once the finger comes off. Both bind steps teach a hold, so the demo has
+    // to make the same distinction rather than treating every touch as a tap.
+    if (tut.holdFinger == touch.fingerId && tut.holdTarget >= 0)
+    {
+        const int target = tut.holdTarget;
+        const uint32_t heldMs = MU_MobileGetTicks() - tut.holdDownMs;
+
+        tut.holdFinger = static_cast<SDL_FingerID>(-1);
+        tut.holdTarget = -1;
+        tut.holdDownMs = 0;
+
+        if (tut.step == kTutStepSkillBind)
+        {
+            const bool slotIsBound = (tut.skillBindStage == 2) && (tut.skillBindSlot == target);
+
+            if (!slotIsBound || heldMs >= kSkillSlotRebindHoldMs)
+            {
+                // Empty slot tapped, or a filled one held: the picker opens to
+                // (re)bind it. Exactly the real slot's rule.
+                tut.skillBindSlot = target;
+                tut.skillBindWasSwap = slotIsBound;
+                tut.skillBindStage = 1;
+                MarkAndroidTutorialStepTried();
+            }
+            else
+            {
+                // Short tap on a bound slot arms/disarms it instead.
+                tut.demoArmedSkill = (tut.demoArmedSkill == target) ? -1 : target;
+            }
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (tut.step == kTutStepPotionBind)
+        {
+            const bool slotIsBound = (tut.potionBindStage == 2) && (tut.potionBindSlot == target);
+
+            if (slotIsBound && heldMs >= kHotKeyRebindHoldMs)
+            {
+                // Hold on a filled slot empties it - the real one's
+                // SetItemHotKey(-1) / g_androidHotKeySlotCleared branch.
+                tut.potionBindStage = 0;
+                tut.potionBindSlot = -1;
+                tut.potionBindChoice = -1;
+                tut.potionBindCleared = true;
+                MarkAndroidTutorialStepTried();
+            }
+            else if (!slotIsBound)
+            {
+                // Tap on an empty slot arms it and opens the bag.
+                tut.potionBindSlot = target;
+                tut.potionBindStage = 1;
+                tut.potionBindCleared = false;
+                MarkAndroidTutorialStepTried();
+            }
+            else
+            {
+                // Short tap on a filled slot drinks from it.
+                tut.demoHotKey = target;
+                tut.demoPressTick = GetTickCount();
+            }
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+    }
+
+    return true;
+}
+
+// Puts the 2D overlay's GL state back the way every DrawVirtual* helper here
+// assumes it: texturing and the alpha test off, straight alpha blending on.
+//
+// This is what was actually wrong with the old examples. TextDraw goes through
+// EnableAlphaTest(), which turns GL_TEXTURE_2D and GL_ALPHA_TEST back on and
+// leaves the font atlas bound; DrawIconButtonUv leaves an additive blend
+// behind. Anything drawn after either of those - the AIM preview, the target
+// list, the item menu, all of which ran after the caption text - was sampling
+// a font glyph through an alpha test instead of painting a flat quad, and
+// mostly vanished. Every geometry batch below re-establishes the state first,
+// exactly as RenderItemMenu already does after its 3D item render.
+void BeginAndroidTutorial2D()
+{
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+// The real AIM button, drawn at its real screen position by the same recipe
+// RenderTargetSelectButton uses, but ignoring IsAndroidAimAvailable(). Always
+// drawn during step 4, for two reasons: a brand-new character spawns in a
+// safe zone where the real button doesn't exist at all, and even where it
+// does exist the tutorial's dim layer is over it, so a crisp copy on top is
+// what the player actually sees.
+//
+// `locked` mirrors the real button's locked look, so tapping a name in the
+// example list visibly changes this button too - that is the whole answer to
+// "what happens when I tap a target".
+void RenderAndroidTutorialAimButtonPreview(bool locked, const char* lockedName)
+{
+    const AndroidUiRect rect = GetTargetSelectButtonRect();
+
+    BeginAndroidTutorial2D();
+
+    DrawVirtualCircle(kTargetSelectButtonCx, kTargetSelectButtonCy, kTargetSelectButtonRadius,
+                      locked ? 0.62f : 0.06f,
+                      locked ? 0.16f : 0.12f,
+                      locked ? 0.16f : 0.20f,
+                      0.86f,
+                      true);
+
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                           locked ? 0.98f : 0.42f,
+                           locked ? 0.54f : 0.60f,
+                           locked ? 0.30f : 0.86f,
+                           0.94f, 2.0f);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font, static_cast<int>(rect.x), static_cast<int>(rect.y + rect.h * 0.5f - 5.0f),
+             locked ? 0xFFB0B0FF : 0xFFFFFFFF, 0x0,
+             static_cast<int>(rect.w), 0, 3, "%s", locked ? "LOCK" : "AIM");
+
+    if (locked && lockedName != nullptr)
+    {
+        TextDraw(font, static_cast<int>(rect.x - 40.0f), static_cast<int>(rect.y - 12.0f),
+                 0xFFFFFFFF, 0x0, static_cast<int>(rect.w + 40.0f), 0, 3, "%s", lockedName);
+    }
+}
+
+// The skill-page button under AIM, same idea as the preview above - drawn
+// crisply over the dim so step 4 can show both halves of that corner, and
+// reading the tutorial's own demo page rather than the live one so tapping it
+// here cannot leave the player on a page they did not choose.
+void RenderAndroidTutorialSkillPagePreview()
+{
+    const AndroidUiRect rect = GetSkillPageButtonRect();
+
+    BeginAndroidTutorial2D();
+
+    DrawVirtualCircle(kSkillPageButtonCx, kSkillPageButtonCy, kSkillPageButtonRadius,
+                      0.06f, 0.06f, 0.09f, 0.70f, true);
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.55f, 0.55f, 0.60f, 0.80f, 1.5f);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font, static_cast<int>(rect.x), static_cast<int>(rect.y + rect.h * 0.5f - 5.0f),
+             0xFFC0C0C0, 0x0, static_cast<int>(rect.w), 0, 3,
+             "%d/%d", g_androidTutorial.demoSkillPage + 1, kVirtualSkillPageCount);
+}
+
+// The target list, drawn by RenderAndroidTargetPicker's exact recipe - same
+// layered box, same DrawVirtualRightPanelButtonBox rows, same header/footer -
+// with two placeholder entries in place of live AndroidTargetPickerEntry
+// data. The real picker cannot be shown here: right after character select
+// there is nobody nearby to list, and in a safe zone AIM does not even exist
+// to open it with.
+//
+// Tapping a row runs the real thing's visible consequences: the row lights up
+// as the locked one and the AIM button above turns into LOCK with the name
+// over it (see RenderAndroidTutorialAimButtonPreview).
+void RenderAndroidTutorialTargetPickerExample()
+{
+    const AndroidUiRect rect = GetAndroidTutorialAimListRect();
+    const AndroidUiRect aimRect = GetTargetSelectButtonRect();
+    const int lockedRow = g_androidTutorial.aimLockedRow;
+
+    BeginAndroidTutorial2D();
+
+    // Elbow from the list down to the AIM button, so it reads as "that button
+    // opened this" rather than as a box floating on its own.
+    DrawVirtualRectFilled(rect.x + rect.w - 2.0f, rect.y + rect.h,
+                          2.0f, (aimRect.y + aimRect.h * 0.5f) - (rect.y + rect.h),
+                          1.0f, 0.86f, 0.20f, 0.55f);
+    DrawVirtualRectFilled(rect.x + rect.w - 2.0f, aimRect.y + aimRect.h * 0.5f - 1.0f,
+                          aimRect.x - (rect.x + rect.w) + 2.0f, 2.0f,
+                          1.0f, 0.86f, 0.20f, 0.55f);
+
+    DrawVirtualRectFilled(rect.x - 3.0f, rect.y - 3.0f, rect.w + 6.0f, rect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.10f, 0.04f, 0.05f, 0.78f);
+    DrawVirtualRectFilled(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
+    DrawVirtualRectFilled(rect.x + 3.0f, rect.y + 3.0f, rect.w - 6.0f, kTargetPickerHeaderH - 6.0f, 0.62f, 0.24f, 0.24f, 0.36f);
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
+    DrawVirtualRectOutline(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
+
+    for (int row = 0; row < kAndroidTutorialAimRowCount; ++row)
+    {
+        DrawVirtualRightPanelButtonBox(GetAndroidTutorialAimRowRect(row), row == lockedRow);
+    }
+    DrawVirtualRightPanelButtonBox(GetAndroidTutorialAimFooterRect(), false);
+
+    HFONT rowFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+    HFONT smallFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    TextDraw(smallFont, static_cast<int>(rect.x + 7.0f), static_cast<int>(rect.y + 6.0f),
+             0xFFE0C0C0, 0x0, static_cast<int>(rect.w - 14.0f), 0, 3, "%s", "AIM  (drag to move)");
+    TextDraw(rowFont, static_cast<int>(rect.x + 7.0f), static_cast<int>(rect.y + 7.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(rect.w - 14.0f), 0, 3, "%s", "Select Target");
+
+    for (int row = 0; row < kAndroidTutorialAimRowCount; ++row)
+    {
+        const AndroidUiRect rowRect = GetAndroidTutorialAimRowRect(row);
+        const bool isLocked = (row == lockedRow);
+
+        TextDraw(rowFont, static_cast<int>(rowRect.x + 7.0f), static_cast<int>(rowRect.y + 8.0f),
+                 isLocked ? 0xFF90FFB0 : 0xFFFFFFFF, 0x0,
+                 static_cast<int>(rowRect.w - 40.0f), 0, 1, "%s", kAndroidTutorialAimNames[row]);
+        TextDraw(smallFont, static_cast<int>(rowRect.x + rowRect.w - 34.0f), static_cast<int>(rowRect.y + 9.0f),
+                 0xFFC8C8FF, 0x0, 30, 0, 3, "%s", kAndroidTutorialAimDists[row]);
+    }
+
+    const AndroidUiRect footerRect = GetAndroidTutorialAimFooterRect();
+    TextDraw(smallFont, static_cast<int>(footerRect.x + 4.0f), static_cast<int>(footerRect.y + 6.0f),
+             0xFFE0A0FF, 0x0, static_cast<int>(footerRect.w - 8.0f), 0, 3, "%s", "Close");
+}
+
+// Running commentary for step 4, drawn whether or not the list is up - the
+// most important state to explain is the one AFTER a name is tapped, and by
+// then the list has closed itself just like the real one does.
+void RenderAndroidTutorialAimNote()
+{
+    const int lockedRow = g_androidTutorial.aimLockedRow;
+    const bool listOpen = g_androidTutorial.aimListOpen;
+    // Stops short of x=574, where the list's elbow down to the AIM button
+    // runs (see RenderAndroidTutorialTargetPickerExample) - the elbow is
+    // drawn after this and would otherwise cut across the box.
+    const AndroidUiRect note = { 330.0f, 272.0f, 236.0f, 62.0f };
+
+    char locked[192];
+    const char* text = nullptr;
+
+    if (lockedRow >= 0)
+    {
+        snprintf(locked, sizeof(locked),
+                 "Locked on %s. The list closed itself and AIM is now LOCK with the name above it. ATK and your skills follow that player until you tap LOCK to let go.",
+                 kAndroidTutorialAimNames[lockedRow]);
+        text = locked;
+    }
+    else if (listOpen)
+    {
+        text = "Every player in range, nearest first. Tap a name to lock onto it - the list closes and AIM becomes LOCK. Close leaves without picking anyone.";
+    }
+    else
+    {
+        text = "Tap AIM (bottom right) to open the list of players near you. The 1/2 button under it swaps skill pages.";
+    }
+
+    RenderAndroidTutorialNoteBox(note, lockedRow >= 0, text);
+}
+
+// The item-pickup menu, drawn by the live menu's OWN function
+// (DrawItemMenuBox) on a stand-in item, rather than a hand-drawn imitation of
+// it. There is essentially never a real drop on the ground at the moment the
+// tutorial runs, so the item and the page count are fabricated - but every
+// pixel around them, the container, the 3D icon, the < 1/2 > row, the Pick Up
+// button and the client's real tooltip, is the same code the player will meet
+// thirty seconds later.
+//
+// All three controls are live: the picture toggles the tooltip, the arrows
+// page between the two stand-ins, and Pick Up reports what it would do.
+void RenderAndroidTutorialItemMenuExample()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+    const ITEM item = GetAndroidTutorialExampleItem(tut.itemPage);
+
+    // DrawItemMenuBox sizes its container from the module-wide g_fLastTip*
+    // rect, and RenderItemInfo overwrites that rect as it draws. Swap the
+    // example's own copy in for the duration so the live menu's container is
+    // never sized from this tooltip, or this one from the live menu's.
+    const float savedTipX = g_fLastTipX;
+    const float savedTipY = g_fLastTipY;
+    const float savedTipW = g_fLastTipW;
+    const float savedTipH = g_fLastTipH;
+
+    g_fLastTipX = tut.itemTipX;
+    g_fLastTipY = tut.itemTipY;
+    g_fLastTipW = tut.itemTipW;
+    g_fLastTipH = tut.itemTipH;
+
+    DrawItemMenuBox(item, kAndroidTutorialItemMenuX, kAndroidTutorialItemMenuY,
+                    tut.itemPage, kAndroidTutorialItemCount, tut.itemTooltip);
+
+    tut.itemTipX = g_fLastTipX;
+    tut.itemTipY = g_fLastTipY;
+    tut.itemTipW = g_fLastTipW;
+    tut.itemTipH = g_fLastTipH;
+
+    g_fLastTipX = savedTipX;
+    g_fLastTipY = savedTipY;
+    g_fLastTipW = savedTipW;
+    g_fLastTipH = savedTipH;
+
+    // Caption to the left of the box, tracking whichever control was last
+    // used. Left rather than below because the tooltip grows downward and
+    // would sit on top of anything placed under the menu.
+    const AndroidUiRect note = { 128.0f, kAndroidTutorialItemMenuY, 288.0f, 58.0f };
+    const bool justPicked = (tut.itemPickTick != 0) && ((GetTickCount() - tut.itemPickTick) < 2600);
+    const char* noteText = nullptr;
+
+    if (justPicked)
+    {
+        noteText = "Pick Up walks your character over to the drop and collects it. In game the menu closes as soon as it lands in your bag.";
+    }
+    else if (tut.itemTooltip)
+    {
+        noteText = "That is the item's full card - name, stats, requirements - exactly as it reads in your bag. Tap the picture again to close it.";
+    }
+    else
+    {
+        noteText = "Tap the picture for the item's details. Use < > to page through every drop within reach, then Pick Up to take one.";
+    }
+
+    BeginBitmap();
+    RenderAndroidTutorialNoteBox(note, justPicked, noteText);
+    EndBitmap();
+}
+
+// A joystick that draws and tracks the finger exactly like the real one -
+// same geometry helper, same art, same clamp - but wired to nothing, so
+// practising here cannot walk the character off anywhere.
+void RenderAndroidTutorialPracticeStick()
+{
+    if (g_androidTutorial.practiceFinger == static_cast<SDL_FingerID>(-1))
+    {
+        return;
+    }
+
+    BeginBitmap();
+    EnableAlphaBlend();
+    DisableTexture();
+    EnsureUITextures();
+
+    // The geometry helper's own centre reads g_virtualJoystick, which never
+    // starts while the tutorial owns the touch - only the sizes are taken
+    // from it, and the origin is clamped here by the same rule it uses.
+    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+    const float ringRadiusUiX = geometry.ringDiameterUiX * 0.5f;
+    const float ringRadiusUiY = geometry.ringDiameterUiY * 0.5f;
+    const float minX = ringRadiusUiX + 4.0f;
+    const float minY = ringRadiusUiY + 4.0f;
+    const float centerX = std::round(std::clamp(g_androidTutorial.practiceOriginX, minX, std::max(minX, 640.0f - minX)));
+    const float centerY = std::round(std::clamp(g_androidTutorial.practiceOriginY, minY, std::max(minY, kVirtualPadInputMaxY - minY)));
+    const float thumbX = std::round(centerX + g_androidTutorial.practiceThumbX);
+    const float thumbY = std::round(centerY + g_androidTutorial.practiceThumbY);
+
+    DrawIconButtonUv(
+        centerX - ringRadiusUiX, centerY - ringRadiusUiY,
+        geometry.ringDiameterUiX, geometry.ringDiameterUiY,
+        g_uiTex_joystick2,
+        kJoystickRingU, kJoystickRingV, kJoystickRingUW, kJoystickRingVH, 1.0f);
+
+    DrawIconButtonUv(
+        thumbX - geometry.knobDiameterUiX * 0.5f, thumbY - geometry.knobDiameterUiY * 0.5f,
+        geometry.knobDiameterUiX, geometry.knobDiameterUiY,
+        g_uiTex_joystick1,
+        kJoystickKnobU, kJoystickKnobV, kJoystickKnobUW, kJoystickKnobVH, 1.0f);
+
+    EndBitmap();
+}
+
+// Steps 2 and 3 redraw the real combat buttons / potion slots crisply over
+// the tutorial's dim layer, with a short press flash on whichever one was
+// last tapped. Drawn with the same helpers the live overlay uses, in the same
+// order, so what the player practises on looks identical to what they get.
+void RenderAndroidTutorialCombatPreview()
+{
+    const DWORD now = GetTickCount();
+    const bool flashing = (g_androidTutorial.demoPressTick != 0)
+        && ((now - g_androidTutorial.demoPressTick) < 200);
+
+    BeginBitmap();
+    EnsureUITextures();
+
+    // ATK keeps the original blue frame (plain GL circles, so texturing has
+    // to be off), while the four skill slots use the skillbox art (which
+    // manages its own texture state and leaves an additive blend behind -
+    // hence the reset before the text pass at the end).
+    const VirtualButtonLayout& attackButton = kVirtualButtons[kVirtualAttackButton];
+    const bool attackPressed = flashing && (g_androidTutorial.demoButton == kVirtualAttackButton);
+
+    BeginAndroidTutorial2D();
+    DrawVirtualCombatButtonFrame(attackButton.cx, attackButton.cy, attackButton.radius, attackPressed, false);
+
+    const float attackIconSize = attackButton.radius * 2.0f;
+    DrawIconButton(attackButton.cx - attackIconSize * 0.5f,
+                   attackButton.cy - attackIconSize * 0.5f,
+                   attackIconSize, attackIconSize,
+                   g_uiTex_attack, attackPressed ? 1.0f : 0.94f, 0.0f, 0.0f, 0.0f);
+
+    for (int i = kVirtualSkillButtonBase; i < static_cast<int>(kVirtualButtons.size()); ++i)
+    {
+        const VirtualButtonLayout& button = kVirtualButtons[i];
+        const bool pressed = flashing && (g_androidTutorial.demoButton == i);
+
+        DrawVirtualSkillBoxFrame(button.cx, button.cy, button.radius, pressed, false);
+
+        if (g_androidTutorial.demoArmedSkill == i)
+        {
+            DrawVirtualSkillSelectedBorder(button.cx, button.cy, button.radius, 1.0f);
+        }
+    }
+
+    BeginAndroidTutorial2D();
+
+    const AndroidUiRect pkRect = GetPkToggleRect();
+    const AndroidUiRect comboRect = GetComboToggleRect();
+    DrawVirtualRightPanelButtonBox(pkRect, flashing && g_androidTutorial.demoToggle == 0);
+    DrawVirtualRightPanelButtonBox(comboRect, flashing && g_androidTutorial.demoToggle == 1);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    for (int i = kVirtualSkillButtonBase; i < static_cast<int>(kVirtualButtons.size()); ++i)
+    {
+        const VirtualButtonLayout& button = kVirtualButtons[i];
+        TextDraw(font, static_cast<int>(button.cx - button.radius), static_cast<int>(button.cy - 5.0f),
+                 0xFFD0D0D0, 0x0, static_cast<int>(button.radius * 2.0f), 0, 3,
+                 "%d", i - kVirtualSkillButtonBase + 1);
+    }
+
+    TextDraw(font, static_cast<int>(pkRect.x), static_cast<int>(pkRect.y + pkRect.h * 0.5f - 5.0f),
+             0xFFFFC0C0, 0x0, static_cast<int>(pkRect.w), 0, 3, "%s", "PK");
+    TextDraw(font, static_cast<int>(comboRect.x), static_cast<int>(comboRect.y + comboRect.h * 0.5f - 5.0f),
+             0xFFC0D0FF, 0x0, static_cast<int>(comboRect.w), 0, 3, "%s", "CMB");
+
+    EndBitmap();
+}
+
+// Shared caption box for the new steps: a bordered panel whose text wraps to
+// fit, tinted green once the player has done the thing it is describing.
+void RenderAndroidTutorialNoteBox(const AndroidUiRect& note, bool done, const char* text)
+{
+    BeginAndroidTutorial2D();
+
+    DrawVirtualRectFilled(note.x, note.y, note.w, note.h, 0.04f, 0.09f, 0.06f, 0.88f);
+    DrawVirtualRectOutline(note.x, note.y, note.w, note.h,
+                           done ? 0.40f : 0.45f,
+                           done ? 1.00f : 0.45f,
+                           done ? 0.55f : 0.55f,
+                           0.90f, 1.5f);
+
+    HFONT smallFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    DrawAndroidTutorialWrappedText(smallFont, note.x + 6.0f, note.y + 5.0f, note.w - 12.0f,
+                                   done ? 0xFFC0FFD0 : 0xFFE0E0F0, 3, text);
+}
+
+// The skill wheel plus the real skill picker's box, driven through the real
+// slot's own rule: tap an empty slot (or hold a filled one) to open the
+// picker, tap a row to bind it. Nothing here touches g_pSkillList or
+// CharacterAttribute - the rows are named stand-ins, so a character who has
+// learned nothing yet still gets the lesson.
+void RenderAndroidTutorialSkillBindDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    BeginBitmap();
+    EnsureUITextures();
+
+    BeginAndroidTutorial2D();
+
+    for (int i = kVirtualSkillButtonBase; i < static_cast<int>(kVirtualButtons.size()); ++i)
+    {
+        const VirtualButtonLayout& button = kVirtualButtons[i];
+        const bool isBoundSlot = (tut.skillBindStage == 2) && (tut.skillBindSlot == i);
+        const bool isTargetSlot = (tut.skillBindStage == 1) && (tut.skillBindSlot == i);
+
+        DrawVirtualSkillBoxFrame(button.cx, button.cy, button.radius, isTargetSlot, false);
+
+        if (isBoundSlot && tut.demoArmedSkill == i)
+        {
+            DrawVirtualSkillSelectedBorder(button.cx, button.cy, button.radius, 1.0f);
+        }
+    }
+
+    BeginAndroidTutorial2D();
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    for (int i = kVirtualSkillButtonBase; i < static_cast<int>(kVirtualButtons.size()); ++i)
+    {
+        const VirtualButtonLayout& button = kVirtualButtons[i];
+        const bool isBoundSlot = (tut.skillBindStage == 2) && (tut.skillBindSlot == i);
+
+        TextDraw(font,
+                 static_cast<int>(button.cx - button.radius - 6.0f),
+                 static_cast<int>(button.cy - 5.0f),
+                 isBoundSlot ? 0xFF90FFB0 : 0xFFA0A0A0, 0x0,
+                 static_cast<int>((button.radius + 6.0f) * 2.0f), 0, 3,
+                 "%s", isBoundSlot ? "BOUND" : "+");
+    }
+
+    EndBitmap();
+
+    if (tut.skillBindStage == 1)
+    {
+        const AndroidUiRect rect = GetAndroidTutorialSkillListRect();
+
+        BeginBitmap();
+        BeginAndroidTutorial2D();
+
+        // RenderAndroidSkillPickerList's own box treatment, minus its
+        // full-screen dim (the tutorial already laid one down).
+        DrawVirtualRectFilled(rect.x - 3.0f, rect.y - 3.0f, rect.w + 6.0f, rect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+        DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.05f, 0.08f, 0.14f, 0.82f);
+        DrawVirtualRectFilled(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.10f, 0.14f, 0.24f, 0.66f);
+        DrawVirtualRectFilled(rect.x + 3.0f, rect.y + 3.0f, rect.w - 6.0f, kSkillPickerListHeaderH - 6.0f, 0.24f, 0.34f, 0.62f, 0.40f);
+        DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.34f, 0.52f, 0.90f, 0.94f, 2.0f);
+        DrawVirtualRectOutline(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.08f, 0.12f, 0.22f, 0.94f, 1.0f);
+
+        for (int row = 0; row < kAndroidTutorialSkillRowCount; ++row)
+        {
+            const AndroidUiRect rowRect = GetAndroidTutorialSkillRowRect(row);
+            DrawVirtualRectFilled(rowRect.x, rowRect.y, rowRect.w, rowRect.h, 0.0f, 0.0f, 0.0f, 0.20f);
+            DrawVirtualRectOutline(rowRect.x, rowRect.y, rowRect.w, rowRect.h, 0.30f, 0.42f, 0.70f, 0.60f, 1.0f);
+        }
+
+        HFONT titleFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+        TextDraw(titleFont, static_cast<int>(rect.x + 7.0f), static_cast<int>(rect.y + 5.0f),
+                 0xFFFFFFFF, 0x0, static_cast<int>(rect.w - 14.0f), 0, 3, "%s", "Select Skill");
+
+        for (int row = 0; row < kAndroidTutorialSkillRowCount; ++row)
+        {
+            const AndroidUiRect rowRect = GetAndroidTutorialSkillRowRect(row);
+            TextDraw(titleFont, static_cast<int>(rowRect.x + 8.0f), static_cast<int>(rowRect.y + 7.0f),
+                     0xFFFFFFFF, 0x0, static_cast<int>(rowRect.w - 16.0f), 0, 1,
+                     "%s", kAndroidTutorialSkillNames[row]);
+        }
+
+        EndBitmap();
+    }
+
+    const char* note = nullptr;
+    if (tut.skillBindStage == 1)
+    {
+        note = tut.skillBindWasSwap
+            ? "Same list, opened by holding a slot that already had something in it. Whatever you pick replaces what was there."
+            : "This is the picker. It lists every skill you have learned - tap one and it goes into the slot you opened it from.";
+    }
+    else if (tut.skillBindStage == 2)
+    {
+        note = "Bound. A short tap on that slot now arms the skill (the ring lights up) and the next ATK casts it. Press and hold the slot to open the picker again and swap it.";
+    }
+    else
+    {
+        note = "The four slots around ATK are your skill bar. Tap one to open the picker. There is no empty-a-skill-slot option - binding something else is how you replace one.";
+    }
+
+    // Left of the wheel and below the picker: the caption panel owns the top
+    // (this step's highlight is the wheel, so the panel anchors up there) and
+    // the wheel itself owns the bottom right.
+    RenderAndroidTutorialNoteBox({ 40.0f, 310.0f, 290.0f, 62.0f }, tut.skillBindStage == 2, note);
+}
+
+// Q/W/E/R plus a stand-in for the bag the real flow opens. The real path arms
+// g_androidPendingHotKeyBindSlot and shows INTERFACE_INVENTORY, then binds
+// whatever consumable is tapped in there - far too much window to reproduce,
+// so this is that step reduced to the row of consumables it is really about.
+void RenderAndroidTutorialPotionBindDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    BeginBitmap();
+    EnsureUITextures();
+
+    for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
+    {
+        const VirtualButtonLayout& button = kVirtualMirrorHotKeySlots[slot];
+        const bool isTargetSlot = (tut.potionBindStage == 1) && (tut.potionBindSlot == slot);
+        DrawVirtualSkillBoxFrame(button.cx, button.cy, button.radius, isTargetSlot, false);
+    }
+
+    BeginAndroidTutorial2D();
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
+    {
+        const VirtualButtonLayout& button = kVirtualMirrorHotKeySlots[slot];
+        const bool isBound = (tut.potionBindStage == 2) && (tut.potionBindSlot == slot);
+
+        TextDraw(font,
+                 static_cast<int>(button.cx - button.radius),
+                 static_cast<int>(button.cy - 5.0f),
+                 isBound ? 0xFF90FFB0 : 0xFFFFFFFF, 0x0,
+                 static_cast<int>(button.radius * 2.0f), 0, 3,
+                 "%s", kVirtualMirrorHotKeyLabels[slot]);
+
+        if (!isBound && tut.potionBindStage != 1)
+        {
+            TextDraw(font,
+                     static_cast<int>(button.cx - button.radius),
+                     static_cast<int>(button.cy + button.radius - 2.0f),
+                     0xFFA0A0A0, 0x0,
+                     static_cast<int>(button.radius * 2.0f), 0, 3, "%s", "+");
+        }
+    }
+
+    EndBitmap();
+
+    if (tut.potionBindStage == 1)
+    {
+        const AndroidUiRect rect = GetAndroidTutorialPotionBagRect();
+
+        BeginBitmap();
+        BeginAndroidTutorial2D();
+
+        DrawVirtualRectFilled(rect.x - 3.0f, rect.y - 3.0f, rect.w + 6.0f, rect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+        DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.05f, 0.08f, 0.14f, 0.86f);
+        DrawVirtualRectFilled(rect.x + 3.0f, rect.y + 3.0f, rect.w - 6.0f, 20.0f, 0.24f, 0.34f, 0.62f, 0.40f);
+        DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.34f, 0.52f, 0.90f, 0.94f, 2.0f);
+
+        for (int row = 0; row < kAndroidTutorialPotionRowCount; ++row)
+        {
+            DrawVirtualRightPanelButtonBox(GetAndroidTutorialPotionRowRect(row), false);
+        }
+
+        HFONT titleFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+        TextDraw(titleFont, static_cast<int>(rect.x + 7.0f), static_cast<int>(rect.y + 5.0f),
+                 0xFFFFFFFF, 0x0, static_cast<int>(rect.w - 14.0f), 0, 3, "%s", "Bag");
+
+        for (int row = 0; row < kAndroidTutorialPotionRowCount; ++row)
+        {
+            const AndroidUiRect rowRect = GetAndroidTutorialPotionRowRect(row);
+            TextDraw(font, static_cast<int>(rowRect.x + 8.0f), static_cast<int>(rowRect.y + 5.0f),
+                     0xFFFFFFFF, 0x0, static_cast<int>(rowRect.w - 16.0f), 0, 1,
+                     "%s", kAndroidTutorialPotionNames[row]);
+        }
+
+        EndBitmap();
+    }
+
+    const char* note = nullptr;
+    if (tut.potionBindStage == 1)
+    {
+        note = "Your bag opened with that slot waiting. Tap any consumable in it and it is bound to the slot.";
+    }
+    else if (tut.potionBindStage == 2)
+    {
+        note = "Bound. Tapping that slot now drinks one. To empty it again, press and hold it - a slot has to be empty before it will take something new.";
+    }
+    else if (tut.potionBindCleared)
+    {
+        note = "Cleared. The slot is empty again and shows a +. Tap it to open the bag and put something else there.";
+    }
+    else
+    {
+        note = "Tap an empty slot - the one marked + - to open your bag and pick what goes in it.";
+    }
+
+    // Beside the bag stand-in rather than under it, and well clear of the
+    // Q/W/E/R row along the bottom that the step is binding to.
+    RenderAndroidTutorialNoteBox({ 260.0f, 250.0f, 300.0f, 84.0f },
+                                 tut.potionBindStage == 2 || tut.potionBindCleared, note);
+}
+
+// The zoom step reports the real camera, because the real gesture is what the
+// player is using: the pinch tracker runs ahead of the tutorial in
+// HandleVirtualFingerDown/Motion, so two fingers already drive
+// CameraDistanceTarget with the tutorial up. Nothing to simulate - just a bar
+// showing where the camera is between kZoomMin and kZoomMax.
+void RenderAndroidTutorialZoomDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    const float zoom = GetCurrentAndroidZoom();
+    if (tut.zoomAtStepStart <= 0.0f)
+    {
+        tut.zoomAtStepStart = zoom;
+    }
+
+    // Anything past a nudge counts as "they did it" - the bar and the world
+    // behind are the real feedback.
+    if (std::fabs(zoom - tut.zoomAtStepStart) > 20.0f)
+    {
+        MarkAndroidTutorialStepTried();
+    }
+
+    const AndroidUiRect gauge = { 190.0f, 200.0f, 260.0f, 18.0f };
+    // kZoomMin is the closest camera, so a full bar means fully zoomed IN.
+    const float t = std::clamp((kZoomMax - zoom) / std::max(kZoomMax - kZoomMin, 1.0f), 0.0f, 1.0f);
+
+    BeginBitmap();
+    BeginAndroidTutorial2D();
+
+    DrawVirtualRectFilled(gauge.x - 3.0f, gauge.y - 3.0f, gauge.w + 6.0f, gauge.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.55f);
+    DrawVirtualRectFilled(gauge.x, gauge.y, gauge.w, gauge.h, 0.06f, 0.08f, 0.12f, 0.90f);
+    DrawVirtualRectFilled(gauge.x + 2.0f, gauge.y + 2.0f, (gauge.w - 4.0f) * t, gauge.h - 4.0f, 0.36f, 0.78f, 1.0f, 0.85f);
+    DrawVirtualRectOutline(gauge.x, gauge.y, gauge.w, gauge.h, 0.60f, 0.80f, 1.0f, 0.95f, 1.5f);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font, static_cast<int>(gauge.x), static_cast<int>(gauge.y + 4.0f),
+             0xFF08121C, 0x0, static_cast<int>(gauge.w), 0, 3,
+             "%s", "out  <  camera  >  in");
+
+    EndBitmap();
+
+    RenderAndroidTutorialNoteBox(
+        { 190.0f, 226.0f, 260.0f, 58.0f },
+        g_androidTutorial.tried[kTutStepZoom],
+        g_androidTutorial.tried[kTutStepZoom]
+            ? "That is the real camera moving, not a preview. Wherever you leave it is where it stays."
+            : "Pinch two fingers together to pull back, spread them to move in. Put them back where they started and the camera goes back with them.");
+}
+
+// Travel and Stats show the player's REAL windows - the client's own move
+// list (INTERFACE_MOVEMAP) and character sheet (INTERFACE_CHARACTER), opened
+// by the same buttons that open them in game and then used for real. There is
+// nothing drawn here but the running commentary; the window itself is the
+// demonstration, which is the only way the step can honestly claim to show
+// what the thing looks like.
+//
+// The caption sits opposite whichever corner the opening button is in, so it
+// never lands on the window. Both windows are centred by the client, so the
+// note hugs an edge.
+void RenderAndroidTutorialTravelDemo()
+{
+    const bool windowOpen = IsAndroidTutorialRealWindowOpen();
+
+    const char* note = windowOpen
+        ? "This is the real move list. Pick a map and you warp there for real - it costs zen, and one above your level is refused. Close it with its own X, or just tap Next."
+        : "The map name and coordinates at the top right are a button - the small arrow is the hint. Tap it to open your move list.";
+
+    RenderAndroidTutorialNoteBox({ 20.0f, 132.0f, 250.0f, 84.0f }, windowOpen, note);
+}
+
+void RenderAndroidTutorialStatsDemo()
+{
+    const bool windowOpen = IsAndroidTutorialRealWindowOpen();
+
+    const char* note = windowOpen
+        ? "Your real character sheet. The + beside a stat spends one of your points on it, for real and for good - only press it if you mean it. Tap Next when you are done looking."
+        : "Your portrait, top left, is the way into your character sheet - it is a button, not just a picture. Tap it.";
+
+    RenderAndroidTutorialNoteBox({ 370.0f, 132.0f, 250.0f, 84.0f }, windowOpen, note);
+}
+
+void RenderAndroidTutorialPotionPreview()
+{
+    const DWORD now = GetTickCount();
+    const bool flashing = (g_androidTutorial.demoPressTick != 0)
+        && ((now - g_androidTutorial.demoPressTick) < 200);
+
+    BeginBitmap();
+    EnsureUITextures();
+
+    for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
+    {
+        const VirtualButtonLayout& button = kVirtualMirrorHotKeySlots[slot];
+        const bool pressed = flashing && (g_androidTutorial.demoHotKey == slot);
+        DrawVirtualSkillBoxFrame(button.cx, button.cy, button.radius, pressed, false);
+    }
+
+    BeginAndroidTutorial2D();
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
+    {
+        const VirtualButtonLayout& button = kVirtualMirrorHotKeySlots[slot];
+        TextDraw(font, static_cast<int>(button.cx - button.radius), static_cast<int>(button.cy - 5.0f),
+                 0xFFFFFFFF, 0x0, static_cast<int>(button.radius * 2.0f), 0, 3,
+                 "%s", kVirtualMirrorHotKeyLabels[slot]);
+    }
+
+    EndBitmap();
+}
+
+void RenderAndroidTutorial()
+{
+    if (!g_androidTutorial.active || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const int step = std::clamp(g_androidTutorial.step, 0, kAndroidTutorialStepCount - 1);
+    const AndroidTutorialStep& content = kAndroidTutorialSteps[step];
+    const bool interactive = IsAndroidTutorialStepInteractive(step);
+    const bool tried = g_androidTutorial.tried[step];
+    const bool isLastStep = (step >= kAndroidTutorialStepCount - 1);
+
+    AndroidUiRect highlight;
+    const bool hasHighlight = GetAndroidTutorialStepRect(step, highlight);
+
+    // AIM doesn't exist in a safe zone (case 4 above already drops it from
+    // the highlight) - swap the caption too, or it'd still read as if the
+    // real button were right there to look at.
+    const char* body = content.body;
+    if (step == kTutStepTarget && !IsAndroidAimAvailable())
+    {
+        body = "You're in a safe zone, so the real AIM button isn't up right now - the one below is a working copy of it. It opens a list of the players near you, and the button under it swaps skill pages.";
+    }
+
+    // ---- dim + highlight -------------------------------------------------
+    BeginBitmap();
+    BeginAndroidTutorial2D();
+
+    // Heavier than the pickers' 0.24 dim - this is meant to hold attention
+    // for a moment, not just outrank whatever's underneath. Backed right off
+    // on a step showing a real window, though: the window IS the lesson there,
+    // and 0.62 over it made the client's own text hard to read.
+    const bool realWindowUp = AndroidTutorialStepUsesRealWindow(step) && IsAndroidTutorialRealWindowOpen();
+    DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, realWindowUp ? 0.18f : 0.62f);
+
+    if (hasHighlight)
+    {
+        // Slow pulse so the box reads as "look here" rather than as a static
+        // border the eye stops seeing after a second.
+        const float pulse = 0.72f + 0.28f * std::sin(static_cast<float>(GetTickCount() % 1600u) * 0.003926991f);
+        DrawVirtualRectOutline(highlight.x, highlight.y, highlight.w, highlight.h, 1.0f, 0.86f, 0.20f, pulse, 3.0f);
+        DrawVirtualRectOutline(highlight.x - 2.0f, highlight.y - 2.0f, highlight.w + 4.0f, highlight.h + 4.0f,
+                               1.0f, 0.82f, 0.10f, pulse * 0.5f, 1.5f);
+    }
+
+    EndBitmap();
+
+    // ---- the step's live demo, over the dim, under the caption panel -----
+    switch (step)
+    {
+    case kTutStepMove:
+        RenderAndroidTutorialPracticeStick();
+        break;
+
+    case kTutStepCombat:
+        RenderAndroidTutorialCombatPreview();
+        break;
+
+    case kTutStepSkillBind:
+        RenderAndroidTutorialSkillBindDemo();
+        break;
+
+    case kTutStepPotions:
+        RenderAndroidTutorialPotionPreview();
+        break;
+
+    case kTutStepPotionBind:
+        RenderAndroidTutorialPotionBindDemo();
+        break;
+
+    case kTutStepTarget:
+    {
+        BeginBitmap();
+        const int lockedRow = g_androidTutorial.aimLockedRow;
+        RenderAndroidTutorialAimButtonPreview(
+            lockedRow >= 0,
+            lockedRow >= 0 ? kAndroidTutorialAimNames[lockedRow] : nullptr);
+        RenderAndroidTutorialSkillPagePreview();
+        RenderAndroidTutorialAimNote();
+        EndBitmap();
+
+        if (g_androidTutorial.aimListOpen)
+        {
+            BeginBitmap();
+            RenderAndroidTutorialTargetPickerExample();
+            EndBitmap();
+        }
+        break;
+    }
+
+    case kTutStepItems:
+        // Draws its own Begin/EndBitmap pairs - it hands off to the live
+        // menu's own renderer, which needs to step outside the 2D state for
+        // the 3D item icon.
+        RenderAndroidTutorialItemMenuExample();
+        break;
+
+    case kTutStepZoom:
+        RenderAndroidTutorialZoomDemo();
+        break;
+
+    case kTutStepTravel:
+        RenderAndroidTutorialTravelDemo();
+        break;
+
+    case kTutStepStats:
+        RenderAndroidTutorialStatsDemo();
+        break;
+
+    default:
+        break;
+    }
+
+    // ---- caption panel, last so its buttons are never covered ------------
+    const AndroidUiRect panel = GetAndroidTutorialPanelRect(step);
+    const AndroidUiRect skipRect = GetAndroidTutorialSkipRect(step);
+    const AndroidUiRect backRect = GetAndroidTutorialBackRect(step);
+    const AndroidUiRect nextRect = GetAndroidTutorialNextRect(step);
+    const AndroidUiRect navRow = GetAndroidTutorialNavRowRect(step);
+
+    BeginBitmap();
+    BeginAndroidTutorial2D();
+
+    DrawVirtualRectFilled(panel.x, panel.y, panel.w, panel.h, 0.08f, 0.06f, 0.14f, 0.90f);
+    DrawVirtualRectOutline(panel.x, panel.y, panel.w, panel.h, 0.70f, 0.60f, 1.0f, 0.9f, 2.0f);
+
+    DrawVirtualRightPanelButtonBox(skipRect, false);
+    if (step > 0)
+    {
+        DrawVirtualRightPanelButtonBox(backRect, false);
+    }
+    // Next lights up once the step's demo has been tried, so "done, move on"
+    // is visible without ever locking the button.
+    DrawVirtualRightPanelButtonBox(nextRect, !interactive || tried);
+
+    // Progress dots between Skip and Back - a filled run up to the current
+    // step, hollow after it. Reads at a glance where "3 / 10" did not.
+    {
+        const float dotGap = 9.0f;
+        const float dotR = 2.6f;
+        const float dotsW = dotGap * static_cast<float>(kAndroidTutorialStepCount - 1);
+        const float dotsX = navRow.x + (navRow.w - dotsW) * 0.5f;
+        const float dotsY = navRow.y + navRow.h * 0.5f;
+
+        for (int i = 0; i < kAndroidTutorialStepCount; ++i)
+        {
+            const float cx = dotsX + (dotGap * static_cast<float>(i));
+            const bool done = (i <= step);
+            DrawVirtualCircle(cx, dotsY, dotR,
+                              done ? 1.0f : 0.42f,
+                              done ? 0.88f : 0.42f,
+                              done ? 0.36f : 0.52f,
+                              done ? 0.95f : 0.65f,
+                              true);
+        }
+    }
+
+    HFONT titleFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+    HFONT smallFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+
+    TextDraw(titleFont,
+             static_cast<int>(panel.x + 12.0f),
+             static_cast<int>(panel.y + 6.0f),
+             0xFFFFE080, 0x0,
+             static_cast<int>(panel.w - 24.0f), 0, 3,
+             "%s", content.title);
+
+    // Wrapped, not raw TextDraw - see DrawAndroidTutorialWrappedText for why
+    // (TextDraw centres a long line on the width it is given and clips it at
+    // both ends instead of breaking it).
+    DrawAndroidTutorialWrappedText(g_hFont,
+                                   panel.x + 12.0f,
+                                   panel.y + 24.0f,
+                                   panel.w - 24.0f,
+                                   0xFFFFFFFF, 3, body);
+
+    if (content.hint != nullptr)
+    {
+        // Turns into a confirmation once the player has actually done it, so
+        // the line stops nagging about something already finished.
+        DrawAndroidTutorialWrappedText(smallFont,
+                                       panel.x + 12.0f,
+                                       panel.y + panel.h - 42.0f,
+                                       panel.w - 24.0f,
+                                       tried ? 0xFF90FFB0 : 0xFFFFD070, 3,
+                                       tried ? "Got it - tap Next when you're ready." : content.hint);
+    }
+
+    TextDraw(smallFont,
+             static_cast<int>(skipRect.x),
+             static_cast<int>(skipRect.y + skipRect.h * 0.5f - 5.0f),
+             0xFFE0A0FF, 0x0,
+             static_cast<int>(skipRect.w), 0, 3,
+             "%s", "Skip");
+
+    if (step > 0)
+    {
+        TextDraw(smallFont,
+                 static_cast<int>(backRect.x),
+                 static_cast<int>(backRect.y + backRect.h * 0.5f - 5.0f),
+                 0xFFC0C0D8, 0x0,
+                 static_cast<int>(backRect.w), 0, 3,
+                 "%s", "Back");
+    }
+
+    TextDraw(smallFont,
+             static_cast<int>(nextRect.x),
+             static_cast<int>(nextRect.y + nextRect.h * 0.5f - 5.0f),
+             0xFF90FFB0, 0x0,
+             static_cast<int>(nextRect.w), 0, 3,
+             "%s", isLastStep ? "Start Playing" : "Next");
+
+    EndBitmap();
+}
+
 bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
 {
     float uiX = 0.0f;
@@ -9542,6 +12088,14 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // other surface, the same way it does on PC. See
     // HandleAndroidMessageBoxFingerDown.
     if (HandleAndroidMessageBoxFingerDown(touch, uiX, uiY))
+    {
+        return true;
+    }
+
+    // The first-time tutorial outranks everything else too, same reasoning
+    // as the message box right above - it needs to own every touch while
+    // it's walking the player through the controls.
+    if (HandleAndroidTutorialFingerDown(touch, uiX, uiY))
     {
         return true;
     }
@@ -9772,16 +12326,45 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // regardless of where the tap lands; that is pre-existing behaviour this
     // does not change, just reaches from a new place.
     //
-    // Excluded here even though it is checked again, properly, further down:
-    // IsInsideVirtualJoystickDynamicArea treats the whole bottom-left quadrant
-    // as the stick's grab area (see its own comment) with no radius limit, and
-    // the Q/W/E/R potion slots sit inside that exact quadrant. Without this,
-    // the stick claimed every potion tap before HitTestVirtualMirrorHotKeySlot
-    // ever ran, and a ground-targeted skill being armed still takes priority
-    // over both.
-    const bool tapOnMirrorHotKey = !g_androidGroundAim.armed
-        && HitTestVirtualMirrorHotKeySlot(uiX, uiY) >= 0;
-    if (!tapOnMirrorHotKey
+    // Excluded here even though they are checked again, properly, further
+    // down: IsInsideVirtualJoystickDynamicArea claims the whole LEFT HALF of
+    // the play area (see its own comment) with no radius limit, so any overlay
+    // button living in that half is hit by the stick first and never reaches
+    // its own handler below.
+    //
+    //  - The Q/W/E/R potion slots, bottom left. Without this the stick claimed
+    //    every potion tap before HitTestVirtualMirrorHotKeySlot ever ran.
+    //  - The portrait avatar, top left, which is the only way into the
+    //    character sheet (HitTestVirtualPortraitAvatar). Same bug, same shape,
+    //    just never noticed: tapping your own face spawned the movement ring
+    //    and walked the character instead of opening your stats.
+    //
+    //  - Any top-bar button. The Helper/Play stack (slots 12-13) sits off the
+    //    grid on the left side, so the stick claimed it first and tapping
+    //    Helper just walked the character - exactly the same bug as the
+    //    portrait. Covering the whole top bar rather than only Helper keeps
+    //    this correct if the grid is ever repositioned leftward too.
+    //
+    //  - The always-on minimap panel, docked under the location chip in that
+    //    same top-left corner (GetTopBarMiniMapPanelRect). It is its own rect,
+    //    not part of the kTopBarActions grid HitTestVirtualTopBarButton
+    //    covers, so tapping it to open the full map hit the exact same "left
+    //    half of the screen" trap and walked the character instead - or as
+    //    well as, since the stick claims the touch first and the map never
+    //    even got a chance to open. Same visibility/availability guard
+    //    HandleVirtualTopControlTap uses for the real tap handler: once the
+    //    full map is open this rect is irrelevant, and IsAndroidMovementAllowedWithOpenWindows
+    //    already takes movement away for that window on its own.
+    //
+    // A ground-targeted skill being armed still takes priority over all of them.
+    const bool tapOnOverlayButton = !g_androidGroundAim.armed
+        && (HitTestVirtualMirrorHotKeySlot(uiX, uiY) >= 0
+            || HitTestVirtualPortraitAvatar(uiX, uiY)
+            || HitTestVirtualTopBarButton(uiX, uiY) != kTopBarActionNone
+            || (!IsMiniMapPanelVisible()
+                && IsVirtualPadAvailable()
+                && HitTestAndroidUiRect(uiX, uiY, GetTopBarMiniMapPanelRect())));
+    if (!tapOnOverlayButton
         && IsAndroidMovementAllowedWithOpenWindows()
         && HandleVirtualJoystickFingerDown(touch))
     {
@@ -10071,6 +12654,14 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Then the tutorial, same rank it has at finger-down - it claimed the
+    // press, so it has to claim the drag too, or a practice swipe would
+    // reach the world and walk the character.
+    if (HandleAndroidTutorialFingerMotion(touch))
+    {
+        return true;
+    }
+
     // Does not claim the touch - see StartAndroidBagHold. Sliding off the slot
     // just abandons the hold, the same as sliding off a hotkey slot below does.
     UpdateAndroidBagHoldMotion(touch);
@@ -10168,6 +12759,14 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     // Modal box outranks everything below, matching the finger-down order. The
     // staged click keeps running after this - see the implementation.
     if (HandleAndroidMessageBoxFingerUp(touch))
+    {
+        return true;
+    }
+
+    // Then the tutorial, same rank it has at finger-down. Every press while
+    // it is up was claimed there, so the matching release must not reach the
+    // handlers below - they would be resolving a press they never saw.
+    if (HandleAndroidTutorialFingerUp(touch))
     {
         return true;
     }
@@ -11373,6 +13972,60 @@ static void DrawIconButtonUv(float uiX, float uiY, float uiW, float uiH,
     AlphaBlendType = -1;
 }
 
+// Skillbox-textured replacement for DrawVirtualCombatButtonFrame's plain blue
+// GL circle, used for the skill wheel and the Q/W/E/R potion slots (NOT the
+// attack button - that one keeps the original blue frame, since only the
+// skill/potion slots were asked to switch to skillbox.png). The assign-mode
+// glow ring is unrelated to the box art and stays a plain GL circle, same as
+// before - it's a distinct "pick a slot" cue during hotkey rebinding, not
+// part of the button's normal look.
+//
+// No BeginBitmap()/EndBitmap() here on purpose - that pair does a full
+// projection/modelview push+ortho-setup (see ZzzOpenglUtil.cpp), expensive
+// to redo once per slot the way RenderItem3DFree was before this session's
+// batching fix (see [[mu-client-legacy-window-leaks]]). DrawVirtualCircle
+// already draws raw screen-space vertices at this exact call site with no
+// Begin/End of its own and renders correctly, proving the ambient GL state
+// during the skill/QWER loops is already a valid 2D ortho - DrawIconButtonUv
+// has the same raw-vertex requirement, so it's just as safe to piggyback on
+// that ambient state instead of pushing/popping it again per slot.
+static void DrawVirtualSkillBoxFrame(float uiX, float uiY, float uiRadius, bool pressed, bool assignGlow)
+{
+    EnsureUITextures();
+
+    const float scale = pressed ? 0.94f : 1.0f;
+    const float radius = uiRadius * scale;
+
+    if (assignGlow)
+    {
+        DrawVirtualCircle(uiX, uiY, radius + 4.0f, 0.74f, 0.92f, 1.0f, 0.28f, true);
+    }
+
+    DrawIconButtonUv(
+        uiX - radius, uiY - radius, radius * 2.0f, radius * 2.0f,
+        g_uiTex_skillbox,
+        kSkillBoxU, kSkillBoxV, kSkillBoxUW, kSkillBoxVH,
+        pressed ? 0.85f : 1.0f);
+}
+
+// skillline.png border drawn around a skill button to mark it as the
+// currently-armed slot, replacing the old gold GL glow+double-ring. Drawn
+// bigger than the button itself (same footprint the old glow covered, out to
+// roughly radius+6.5) so the ornate ring reads as a border around the icon
+// rather than covering it. Same no-Begin/End reasoning as
+// DrawVirtualSkillBoxFrame above.
+static void DrawVirtualSkillSelectedBorder(float uiX, float uiY, float uiRadius, float alpha = 1.0f)
+{
+    EnsureUITextures();
+
+    const float borderRadius = uiRadius + 7.0f;
+    DrawIconButtonUv(
+        uiX - borderRadius, uiY - borderRadius, borderRadius * 2.0f, borderRadius * 2.0f,
+        g_uiTex_skillline,
+        kSkillLineU, kSkillLineV, kSkillLineUW, kSkillLineVH,
+        alpha);
+}
+
 static void DrawVirtualTopRightTextButton(const AndroidUiRect& rect, const TCHAR* label, bool active)
 {
     const float fillR = active ? 0.12f : 0.02f;
@@ -11758,7 +14411,11 @@ void UpdateAndroidChatLogSuppression()
     static bool s_suppressed = false;
     static bool s_restoreShowChatLog = false;
 
-    const bool shouldSuppress = IsAndroidGameWindowOpen();
+    // Same treatment for the first-time tutorial as for an open window: the
+    // tour dims the screen and puts captions across it, and the chat log's
+    // lines were reading straight through both. Left visible for the one step
+    // that is actually about chat, and restored when the tour ends.
+    const bool shouldSuppress = IsAndroidGameWindowOpen() || ShouldSuppressAndroidChatForTutorial();
 
     if (shouldSuppress && !s_suppressed)
     {
@@ -11809,8 +14466,12 @@ void RenderAndroidChatTabs()
     // ugly and misleading. The chat log's own message text is suppressed
     // alongside it by UpdateAndroidChatLogSuppression; this call only owns the
     // tab buttons and the backing panel behind them.
+    // The tutorial gets the same treatment for the same reason - it owns the
+    // screen while it runs, and the strip sat under its captions. Its own chat
+    // step lets this through so the thing being described is on screen.
     if (!IsAndroidChatUiAvailable()
         || IsAndroidGameWindowOpen()
+        || ShouldSuppressAndroidChatForTutorial()
         || GetAndroidChatLog() == nullptr)
     {
         return;
@@ -13227,8 +15888,8 @@ void RenderVirtualMirrorHotKeySlots()
     }
 
 
-    // Circular frames matching the attack button and the skill arc, rather than
-    // the legacy square IMAGE_SKILLBOX art. Pure GL, so no asset is involved.
+    // Same skillbox.png frame as the skill wheel now, rather than the legacy
+    // square IMAGE_SKILLBOX art or the plain blue GL circle that replaced it.
     BeginBitmap();
     DisableTexture();
     glDisable(GL_TEXTURE_2D);
@@ -13237,7 +15898,7 @@ void RenderVirtualMirrorHotKeySlots()
     for (int slot = 0; slot < kVirtualMirrorHotKeySlotCount; ++slot)
     {
         const VirtualButtonLayout& layout = kVirtualMirrorHotKeySlots[slot];
-        DrawVirtualCombatButtonFrame(layout.cx, layout.cy, layout.radius, false, false);
+        DrawVirtualSkillBoxFrame(layout.cx, layout.cy, layout.radius, false, false);
     }
     EndBitmap();
 
@@ -13670,6 +16331,16 @@ void RenderVirtualPad()
         return;
     }
 
+    // First frame the pad genuinely exists on screen - the same moment
+    // character-select finishes handing off to the world. Only ever arms
+    // the one-shot tutorial the very first time this happens on a device;
+    // see MaybeStartAndroidTutorial's own comment.
+    MaybeStartAndroidTutorial();
+
+    // Shuts the real window a Travel/Stats step opened once the player leaves
+    // that step, so the tour never walks off and leaves one behind.
+    SyncAndroidTutorialRealWindow();
+
     // Cancel a pending Q/W/E/R bind once the bag closes again. Tracked as a
     // transition rather than "is it shut now", because this runs on the frame
     // the '+' was tapped too - before Show() has taken effect - and a plain
@@ -13687,12 +16358,14 @@ void RenderVirtualPad()
         s_inventoryWasVisible = inventoryVisible;
     }
 
-    // The stick is always on screen at its one home, half visible when idle and
-    // full while held, so there is something to aim at before the thumb lands.
-    // It used to be invisible until touched and then recentred on the finger,
-    // which left nothing to push against and no way to see which way you were
-    // pushing. Sizes come from the geometry helper, which works in device pixels
-    // - specified in UI units the ring draws as a wide ellipse.
+    // The stick is invisible until touched, then appears right where the
+    // finger landed (ActiveVirtualJoystick::originX/Y, set in
+    // StartVirtualJoystick) and disappears again on release - a floating
+    // pad, not a fixed one. It renders the same frame the finger goes down
+    // (this runs after input handling in the main loop), so there is
+    // something to aim at immediately rather than only once the thumb has
+    // moved. Sizes come from the geometry helper, which works in device
+    // pixels - specified in UI units the ring draws as a wide ellipse.
     //
     // Deliberately drawn ahead of the IsAndroidGameWindowOpen() check below,
     // under its own narrower condition - see HandleVirtualFingerDown's
@@ -13703,20 +16376,20 @@ void RenderVirtualPad()
     // overlay. Still behind IsVirtualPadAvailable() above, deliberately - a
     // focused text input (chat, or an NPC dialogue's own input) is meant to
     // take the joystick away too, the player standing still while typing.
-    if (IsAndroidMovementAllowedWithOpenWindows())
+    const bool joystickActive = g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1);
+    if (joystickActive && IsAndroidMovementAllowedWithOpenWindows())
     {
         BeginBitmap();
         EnableAlphaBlend();
         DisableTexture();
         EnsureUITextures();
 
-        const bool joystickActive = g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1);
         const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
         const float joystickCenterX = std::round(geometry.centerX);
         const float joystickCenterY = std::round(geometry.centerY);
         const float joystickThumbX = std::round(joystickCenterX + g_virtualJoystick.thumbOffsetX);
         const float joystickThumbY = std::round(joystickCenterY + g_virtualJoystick.thumbOffsetY);
-        const float joystickAlpha = joystickActive ? 1.0f : 0.5f;
+        const float joystickAlpha = 1.0f;
 
         DrawIconButtonUv(
             joystickCenterX - geometry.ringDiameterUiX * 0.5f,
@@ -13752,6 +16425,13 @@ void RenderVirtualPad()
     {
         RenderAndroidTradePicker();
         RenderAndroidTargetPicker();
+
+        // The tutorial keeps drawing over an open window for the same reason
+        // the two pickers do - it is a surface in its own right, not one of
+        // the overlay controls. It also has to: the Travel and Stats steps
+        // deliberately open a real window, and returning here would have made
+        // the tour vanish the instant it did.
+        RenderAndroidTutorial();
         return;
     }
 
@@ -13826,12 +16506,12 @@ void RenderVirtualPad()
                 && g_pSkillList != nullptr
                 && g_pSkillList->IsSkillPickerOpen();
 
-            // Same circular frame as the attack button (DrawVirtualCombatButtonFrame
-            // is pure GL, no art needed) instead of the old desktop square skill-box
-            // art, so the skill row and the attack button read as one family of
-            // controls. assignGlow is the same "available to assign" ring the frame
-            // already supports, just never used here before.
-            DrawVirtualCombatButtonFrame(
+            // skillbox.png background instead of the attack button's plain blue
+            // GL frame - only the skill row and the Q/W/E/R potion slots switch
+            // to the textured frame (DrawVirtualSkillBoxFrame), the attack button
+            // keeps DrawVirtualCombatButtonFrame's original look. assignGlow is
+            // the same "available to assign" ring the frame already supports.
+            DrawVirtualSkillBoxFrame(
                 button.cx,
                 button.cy,
                 button.radius,
@@ -13847,16 +16527,9 @@ void RenderVirtualPad()
             // "this one's active" language across the touch UI.
             if (selected || selectorOpen)
             {
-                // A thin 2.6px ring alone read as barely-there mid-combat - a
-                // filled glow behind the icon plus a thicker double ring make
-                // the armed slot readable at a glance instead of something you
-                // have to look for.
-                DrawVirtualCircle(button.cx, button.cy, button.radius + 5.0f, 1.0f, 0.82f, 0.10f, 0.30f, true);
-                glLineWidth(4.2f);
-                DrawVirtualCircle(button.cx, button.cy, button.radius + 3.0f, 1.0f, 0.86f, 0.20f, 1.0f, false);
-                glLineWidth(1.6f);
-                DrawVirtualCircle(button.cx, button.cy, button.radius + 6.5f, 1.0f, 0.82f, 0.10f, 0.55f, false);
-                glLineWidth(1.0f);
+                // skillline.png ornate ring border instead of the old gold GL
+                // glow+double-ring, marking the armed slot / open picker.
+                DrawVirtualSkillSelectedBorder(button.cx, button.cy, button.radius);
             }
 
             if (!isSelector && g_pSkillList != nullptr && hotKeySkillIndex >= 0)
@@ -13942,6 +16615,11 @@ void RenderVirtualPad()
     RenderAndroidTargetPicker();
     RenderAndroidSkillPickerList();
     RenderComboSettingsPanel();
+
+    // Last of all, so it sits over every other control including the
+    // pickers above - the tutorial is the one surface allowed to outrank
+    // literally everything while it's active.
+    RenderAndroidTutorial();
 
 #if 0
     // Disabled: custom Android HUD. We keep this code commented for now so it

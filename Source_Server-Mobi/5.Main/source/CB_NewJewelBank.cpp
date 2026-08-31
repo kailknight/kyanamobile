@@ -9,6 +9,7 @@
 #include "NewUIBase.h"
 #include "Other.h"
 #include "ZzzInterface.h"
+#include "ZzzInventory.h"
 
 CB_NewJewelBank* gCB_NewJewelBank;
 
@@ -275,6 +276,15 @@ void CB_NewJewelBank::DrawWindow()
 	TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + 138 + 40, StartYItem + 15, 0xFFFFFFFF, 0x9C15D6A9, 40, 0, 3, "Auto Pick");
 	float KhoangCach = 25;
 
+	// Was RenderItem3DFree() per row below - each call redid a full
+	// projection/depth-buffer setup on its own; the viewport/alpha/depth-
+	// clear part is batched once for the whole page instead (see
+	// BeginItem3DFreeBatch's comment, NewUISystem.cpp) while the 3D
+	// projection/camera stays scoped per row via RenderItem3DInBatch, since
+	// TextDraw/buttons run in between. FixY=false matches the original call
+	// (this window uses its own FixYItemBMD() offset instead, already baked
+	// into the sy passed below).
+	g_pNewUISystem->BeginItem3DFreeBatch();
 	for (int n = 0, r = (PageBank * MaxPerPageBank); n < MaxPerPageBank && r < gCB_NewJewelBank->mCListItemBank.size(); r++)
 	{
 		int ItemIndex = gCB_NewJewelBank->mCListItemBank[r].ItemIndex;
@@ -293,7 +303,7 @@ void CB_NewJewelBank::DrawWindow()
 		{
 			gInterface.DrawBarForm(StartXItem, (StartYItem + (n * KhoangCach)) + 25, CuaSoW - 20, 20, 0.0, 0.0, 0.0, 0.6);//bg
 		}
-		g_pNewUISystem->RenderItem3DFree(StartXItem, (StartYItem + (n * KhoangCach) + addY), 45, 45, ItemIndex, SET_ITEMOPT_LEVEL(ItemLevel), 0, 0, 0, itemScale, false);//bmd
+		g_pNewUISystem->RenderItem3DInBatch(StartXItem, (StartYItem + (n * KhoangCach) + addY), 45, 45, ItemIndex, SET_ITEMOPT_LEVEL(ItemLevel), 0, 0, 0, 1.0f, false);//bmd
 		TextDraw((HFONT)g_hFont, StartXItem + 36, (StartYItem + (n * KhoangCach)) + 28, 0xFFFFFFA9, 0x0, 100, 0, 3, BGetItemName(ItemIndex, SET_ITEMOPT_LEVEL(ItemLevel))); //Name
 		TextDraw((HFONT)g_hFont, StartXItem + 36 + 100, (StartYItem + (n * KhoangCach)) + 28, 0xFFDD00A9, 0x0, 60, 0, 3, "x%d", gCB_NewJewelBank->mCListItemBank[r].ItemCount); //so luong
 		//==ButtonRut 1
@@ -311,6 +321,10 @@ void CB_NewJewelBank::DrawWindow()
 				{
 					gInterface.Data[eWindowJewelBankRut].OnShow = 0;
 
+					// Exits mid-loop, so this has to close out the batch
+					// BeginItem3DFreeBatch opened above, or the GL matrix
+					// stack this push()ed is left unbalanced.
+					g_pNewUISystem->EndItem3DFreeBatch();
 					return;
 				}
 				gInterface.Data[eWindowJewelBankRut].OnShow ^= 1;
@@ -355,6 +369,7 @@ void CB_NewJewelBank::DrawWindow()
 		}
 		n++;
 	}
+	g_pNewUISystem->EndItem3DFreeBatch();
 
 	//Next Page
 	RenderBitmap(CNewUIInGameShop::IMAGE_IGS_STORAGE_PAGE, CenterX - (60 / 2), MaxY - 40, 60.f, 22.f, 0, 0, 80.f / 128.f, 30.f / 34.f, 1, 1, 0.0);

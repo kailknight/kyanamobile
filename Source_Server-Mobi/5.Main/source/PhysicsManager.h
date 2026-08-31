@@ -174,6 +174,10 @@ protected:
 	CPhysicsVertex *m_pVertices;
 	int m_iNumLink;
 	St_PhysicsLink *m_pLink;
+	// Persistent scratch buffer for Render()'s position snapshot - sized once in
+	// Create() (same lifetime as m_pVertices) instead of new[]/delete[] every
+	// single frame this cloth is drawn (every cape/cloak, every frame).
+	vec3_t *m_pRenderPosScratch;
 
     float   m_fWind;
     BYTE    m_byWindMax;

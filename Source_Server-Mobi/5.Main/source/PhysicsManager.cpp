@@ -323,6 +323,7 @@ void CPhysicsCloth::Clear( void)
 	m_pVertices = NULL;
 	m_iNumLink = 0;
 	m_pLink = NULL;
+	m_pRenderPosScratch = NULL;
 
     m_byWindMax = 1;
     m_byWindMin = 1;
@@ -360,6 +361,12 @@ BOOL CPhysicsCloth::Create( OBJECT *o, int iBone, float fxPos, float fyPos, floa
 	m_iNumVer = iNumVer;
 	m_iNumVertices = m_iNumHor * m_iNumVer;
 	m_pVertices = new CPhysicsVertex [m_iNumVertices];
+
+	if( m_pRenderPosScratch )
+	{
+		delete [] m_pRenderPosScratch;
+	}
+	m_pRenderPosScratch = new vec3_t [m_iNumVertices];
 
 	m_iNumLink = 2 * ( ( m_iNumHor - 1) * m_iNumVer + m_iNumHor * ( m_iNumVer - 1));
 	m_pLink = new St_PhysicsLink [m_iNumLink];
@@ -501,6 +508,7 @@ void CPhysicsCloth::Destroy( void)
 
 	delete [] m_pLink;
 	delete [] m_pVertices;
+	delete [] m_pRenderPosScratch;
 	Clear();
 }
 
@@ -765,7 +773,11 @@ BOOL CPhysicsCloth::PreventFromStretching( void)
 
 void CPhysicsCloth::Render( vec3_t *pvColor, int iLevel)
 {
-	vec3_t *pvRenderPos = new vec3_t [m_iNumVertices];
+	// Reused across every frame this cloth is drawn - Create() (re)allocates it
+	// to exactly m_iNumVertices whenever the vertex count actually changes, so
+	// this used to be a fresh new[]/delete[] pair every single frame for every
+	// active cape/cloak instead.
+	vec3_t *pvRenderPos = m_pRenderPosScratch;
 
 	for ( int j = 0; j < m_iNumVer; ++j)
 	{
@@ -831,8 +843,6 @@ void CPhysicsCloth::Render( vec3_t *pvColor, int iLevel)
          }
      }
 #endif
-
-	delete [] pvRenderPos;
 }
 
 void CPhysicsCloth::RenderFace( BOOL bFront, int iTexture, vec3_t *pvRenderPos)

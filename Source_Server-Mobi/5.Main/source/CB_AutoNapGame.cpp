@@ -229,6 +229,14 @@ void MainQRCodeProc()
 }
 char* DrawTimeUnix(int timestamp)
 {
+	// Was strdup()-ing the formatted string out - its one caller (below) only
+	// ever reads the result immediately as a TextDraw argument and never
+	// frees it, so every call (up to 9/frame, in a loop, every frame this
+	// window is open) leaked. A static buffer is safe here for the same
+	// reason ctime()'s is: the caller is done with one result before the
+	// next call could overwrite it.
+	static char ztemp[255];
+
 	time_t rawtime = static_cast<time_t>(timestamp);
 	struct tm* timeinfo;
 	timeinfo = localtime(&rawtime);
@@ -237,9 +245,8 @@ char* DrawTimeUnix(int timestamp)
 	int day = timeinfo->tm_mday;
 	int hour = timeinfo->tm_hour;
 	int minute = timeinfo->tm_min;
-	char ztemp[255] = { 0 };
 	sprintf_s(ztemp, "%02d:%02d %02d/%02d/%02d", hour, minute, day, month, year % 100);
-	return strdup(ztemp);
+	return ztemp;
 }
 
 void CBAutoNapGame::OpenWindowBanking()

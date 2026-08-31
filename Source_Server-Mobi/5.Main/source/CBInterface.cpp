@@ -34,6 +34,7 @@
 #endif
 #if(DOIMK)
 #include "CB_DoiMK.h"
+#include "RedeemCodeWindow.h"
 #endif
 #include "APICB.h"
 
@@ -561,6 +562,10 @@ void Interface::Init()
 	gCB_DoiMK = new CB_DoiMK;
 	ANDROID_IF_STAGE("DoiMK ok");
 #endif
+#if(REDEEMCODE)
+	gCB_RedeemCodeWindow = new CB_RedeemCodeWindow;
+	ANDROID_IF_STAGE("RedeemCodeWindow ok");
+#endif
 #if(CB_CUSTOMMIXINFO)
 	gCB_InfoCustomMix = new CB_InfoCustomMix;
 	ANDROID_IF_STAGE("InfoCustomMix ok");
@@ -674,6 +679,9 @@ void Interface::Work()
 #endif
 #if(DOIMK)
 	if (gCB_DoiMK) gCB_DoiMK->DrawWindow();
+#endif
+#if(REDEEMCODE)
+	if (gCB_RedeemCodeWindow) gCB_RedeemCodeWindow->DrawWindow();
 #endif
 #if(CUSTOM_WINDOWLOCKITEM)
 	if(gCB_LockItem) gCB_LockItem->DrawWindow();

@@ -943,27 +943,99 @@ void AutoMove() {
     return;
   }
   if (Hero->Movement) {
+    // Mid-leg: let it finish, then this function issues the next one.
     return;
   }
 
-  if (Hero->Dead == 0 && Hero->Movement == 0) {
-    if (Hero->Appear == 0) {
-      if (PathFinding2(Hero->PositionX, Hero->PositionY,
-                       g_pNewUIMiniMap->ViTriDiChuyen.x,
-                       g_pNewUIMiniMap->ViTriDiChuyen.y, &Hero->Path, 0.0f)) {
-        Hero->MovementType = MOVEMENT_MOVE;
-
-        Hero->Movement = true;
-        SendMove(Hero, &Hero->Object);
-
-      } else {
-        Hero->Movement = false;
-        g_pNewUIMiniMap->Movement = false;
-      }
-    }
-  } else {
+  if (Hero->Dead != 0 || Hero->Appear != 0) {
     Hero->Movement = false;
     g_pNewUIMiniMap->Movement = false;
+    return;
+  }
+
+  const int startX = Hero->PositionX;
+  const int startY = Hero->PositionY;
+  const int targetX = (int)g_pNewUIMiniMap->ViTriDiChuyen.x;
+  const int targetY = (int)g_pNewUIMiniMap->ViTriDiChuyen.y;
+
+  const int dx = targetX - startX;
+  const int dy = targetY - startY;
+  const int distSq = (dx * dx) + (dy * dy);
+
+  // Close enough - stop cleanly instead of thrashing one tile back and forth.
+  if (distSq <= 4) {
+    Hero->Movement = false;
+    g_pNewUIMiniMap->Movement = false;
+    SetPlayerStop(Hero);
+    CGAutoMove(0);
+    return;
+  }
+
+  // PathFinding2 can only ever return MAX_PATH_FIND (15, _define.h) steps,
+  // because that is the hard cap on what a move packet can carry. The old code
+  // asked for a path straight to the clicked tile and gave up permanently the
+  // moment that failed - so any minimap click more than ~15 tiles away (which
+  // is nearly all of them on a 256x256 map) stopped auto-move dead before the
+  // character took a single step. That is the "auto path doesn't work" bug.
+  //
+  // Walk it as a series of legs instead: aim at the furthest point along the
+  // way that pathfinding will actually accept, move there, and re-enter here
+  // when that leg finishes to issue the next one. Fanning out by a few angles
+  // at each length lets it round a wall corner rather than stalling against it;
+  // it is not a full long-range A*, but it gets out of local obstructions,
+  // which is what the straight-line-only version could never do.
+  static const int kLegLengths[] = { 14, 11, 8, 6, 4, 3, 2 };
+  static const float kFanRadians[] = { 0.0f, 0.45f, -0.45f, 0.9f, -0.9f, 1.4f, -1.4f };
+
+  const float dist = sqrtf((float)distSq);
+  const float baseAngle = atan2f((float)dy, (float)dx);
+
+  bool issued = false;
+
+  // Straight to the target first - short hops still resolve in one leg.
+  if (PathFinding2(startX, startY, targetX, targetY, &Hero->Path, 0.0f)) {
+    issued = true;
+  }
+
+  for (int li = 0; li < (int)(sizeof(kLegLengths) / sizeof(kLegLengths[0])) && !issued; ++li) {
+    const float leg = (float)kLegLengths[li];
+
+    if (leg >= dist) {
+      continue; // already covered by the direct attempt above
+    }
+
+    for (int ai = 0; ai < (int)(sizeof(kFanRadians) / sizeof(kFanRadians[0])) && !issued; ++ai) {
+      const float angle = baseAngle + kFanRadians[ai];
+
+      int wx = startX + (int)(cosf(angle) * leg);
+      int wy = startY + (int)(sinf(angle) * leg);
+
+      wx = (wx < 0) ? 0 : ((wx > 255) ? 255 : wx);
+      wy = (wy < 0) ? 0 : ((wy > 255) ? 255 : wy);
+
+      if (wx == startX && wy == startY) {
+        continue;
+      }
+
+      if (PathFinding2(startX, startY, wx, wy, &Hero->Path, 0.0f)) {
+        issued = true;
+      }
+    }
+  }
+
+  if (issued) {
+    Hero->MovementType = MOVEMENT_MOVE;
+    Hero->Movement = true;
+    // Immediately after the successful query and before anything else touches
+    // the path: SendMove transmits PathX[0..] assuming index 0 is where the
+    // character currently stands.
+    SendMove(Hero, &Hero->Object);
+  } else {
+    // Genuinely boxed in on every heading tried - stop rather than spin.
+    Hero->Movement = false;
+    g_pNewUIMiniMap->Movement = false;
+    SetPlayerStop(Hero);
+    CGAutoMove(0);
   }
 }
 

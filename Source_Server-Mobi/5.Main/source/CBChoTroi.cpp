@@ -8,6 +8,7 @@
 #include "Protocol.h"
 #include "NewUIBase.h"
 #include "Other.h"
+#include "ZzzInventory.h"
 #if CUSTOM_BCHOTROI
 
 CBChotroi gCBChotroi;
@@ -554,6 +555,18 @@ void DrawWindowChoTroi()
 	ShowInfoItem = -1;
 	mPageChoTroi = WindowChoTroiScrollBar->GetCurPos();
 	int CountList = 0;
+	// Was RenderItem3DFree() per surviving row below - each call redid a
+	// full projection/depth-buffer setup on its own, and this loop can scan
+	// arbitrarily far into the listing to find MaxPerPageChoTroi matches
+	// (see the filter continues below), so a heavily-filtered market could
+	// pay that setup cost many times over in a single frame. The viewport/
+	// alpha/depth-clear part is batched once for the whole loop instead (see
+	// BeginItem3DFreeBatch's comment, NewUISystem.cpp) - safe across the
+	// filter continues below since they only skip to the next iteration,
+	// never out of the loop; the one break further down still exits through
+	// the loop's normal close. The 3D projection/camera itself stays scoped
+	// per row via RenderItem3DInBatch, since TextDraw/buttons run in between.
+	g_pNewUISystem->BeginItem3DFreeBatch();
 	for (int n = (mPageChoTroi * MaxPerPageChoTroi); n < gCBChotroi.m_DataChoTroi.size(); n++)
 	{
 		float KhungInfoX = ListItemX + ((ListItemWH + ListItemCachX) * countx);
@@ -591,6 +604,7 @@ void DrawWindowChoTroi()
 		//=== Lọc KQ Tìm Kiếm
 		if (it == gCBChotroi.mListItemFind.end() && CacheSizeInputTimKiem != -1)
 		{
+			g_pNewItemMng->DeleteItem(CTItem);
 			continue;
 		}
 		//--Loc Coin
@@ -598,26 +612,32 @@ void DrawWindowChoTroi()
 		{
 			if (!(LocItemTypCoin & 1) && gCBChotroi.m_DataChoTroi[n].PriceType == 1)
 			{
+				g_pNewItemMng->DeleteItem(CTItem);
 				continue;
 			}
 			else if (!(LocItemTypCoin & 2) && gCBChotroi.m_DataChoTroi[n].PriceType == 2)
 			{
+				g_pNewItemMng->DeleteItem(CTItem);
 				continue;
 			}
 			else if (!(LocItemTypCoin & 4) && gCBChotroi.m_DataChoTroi[n].PriceType == 3)
 			{
+				g_pNewItemMng->DeleteItem(CTItem);
 				continue;
 			}
 			if (!(LocItemTypCoin & 8) && gCBChotroi.m_DataChoTroi[n].PriceType == 4)
 			{
+				g_pNewItemMng->DeleteItem(CTItem);
 				continue;
 			}
 			else if (!(LocItemTypCoin & 16) && gCBChotroi.m_DataChoTroi[n].PriceType == 5)
 			{
+				g_pNewItemMng->DeleteItem(CTItem);
 				continue;
 			}
 			else if (!(LocItemTypCoin & 32) && gCBChotroi.m_DataChoTroi[n].PriceType == 6)
 			{
+				g_pNewItemMng->DeleteItem(CTItem);
 				continue;
 			}
 		}
@@ -626,26 +646,30 @@ void DrawWindowChoTroi()
 		//=== Loc Opt Item
 		if (LocItemCoSkill && !m_Skill)
 		{
+			g_pNewItemMng->DeleteItem(CTItem);
 			continue;
 		}
 		if (LocItemCoLuck && !m_Luck)
 		{
+			g_pNewItemMng->DeleteItem(CTItem);
 			continue;
 		}
 		//g_Console.AddMessage(1, "%x", m_Opt);
 		if (LocItemCoOpt && m_Opt < 5)
 		{
+			g_pNewItemMng->DeleteItem(CTItem);
 			continue;
 		}
 		if (LocItemCoExc && !CTItem->Option1)
 		{
+			g_pNewItemMng->DeleteItem(CTItem);
 			continue;
 		}
 		//==========
 
 		gInterface.DrawBarForm(KhungInfoX + ListItemWH + 10, KhungInfoY, (ListItemWH + 50), ListItemWH + 9, 0.0, 0.0, 0.0, 0.8);
 		g_pBCustomMenuInfo->DrawInfoBox(KhungInfoX, KhungInfoY, ListItemWH, ListItemWH, BGList, 0);
-		g_pNewUISystem->RenderItem3DFree(KhungInfoX , KhungInfoY -30, ListItemWH, ListItemWH, CTItem->Type, CTItem->Level, CTItem->Option1, CTItem->ExtOption, 0, 1.4);//BMD MOdel
+		g_pNewUISystem->RenderItem3DInBatch(KhungInfoX, KhungInfoY - 30, ListItemWH, ListItemWH, CTItem->Type, CTItem->Level, CTItem->Option1, CTItem->ExtOption, 0, 1.4f);//BMD MOdel
 		//RenderItemInfo(350, 100, CTItem, 0, 0, false, true);
 		//============
 			//==Draw Time
@@ -722,6 +746,7 @@ void DrawWindowChoTroi()
 			}
 		}
 		//===Break;
+		g_pNewItemMng->DeleteItem(CTItem);
 		CountList++;
 		if (CountList >= MaxPerPageChoTroi) { break; }
 		if (CountList % 1 == 0 && CountList != 0)
@@ -734,6 +759,7 @@ void DrawWindowChoTroi()
 			countx++;
 		}
 	}
+	g_pNewUISystem->EndItem3DFreeBatch();
 	//==Select Form
 	EnableAlphaTest(true);
 	glColor3f(1.0, 1.0, 1.0);

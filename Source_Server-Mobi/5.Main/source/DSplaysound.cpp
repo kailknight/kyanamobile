@@ -127,7 +127,7 @@ HRESULT InitDirectSound( HWND hDlg )
 		
 		// Release the primary buffer, since it is not need anymore
 
-        //  LPDIRECTSOUNDBUFFER �ʱ�ȭ.
+        //  LPDIRECTSOUNDBUFFER �ʱ�ȭ.
         for ( int i=0; i<MAX_BUFFER; ++i )
         {
             g_lpDSBuffer[i][0] = NULL;
@@ -293,9 +293,25 @@ HRESULT FillBuffer(int Buffer, int MaxChannel , bool Enable)
 //-----------------------------------------------------------------------------
 VOID LoadWaveFile(int Buffer, TCHAR* strFileName, int MaxChannel, bool Enable)
 {
-    if(!g_EnableSound) 
+	// Guarded on DirectSound actually existing, NOT on g_EnableSound.
+	//
+	// g_EnableSound is the mute flag - every other use of it in this file
+	// (PlayBuffer, IsSoundPlaying, ReleaseBuffer, RestoreBuffers,
+	// FreeDirectSound) is playback or teardown. This was the one place it
+	// also gated *loading*, which made muting destructive rather than
+	// reversible: OpenSounds() (ZzzOpenData.cpp) populates the whole wave
+	// table exactly once during the loading scene, so launching with sound
+	// off meant no buffer was ever created, and turning sound on afterwards
+	// had nothing to play - permanently silent for that session.
+	//
+	// It also let CreateStaticBuffer below be reached with g_lpDS still
+	// null (an outright crash on the first sound to load) any time
+	// something set g_EnableSound true without DirectSound having been
+	// initialised - which SetEnableSound() does, since it only assigns the
+	// flag and has no way to check readiness.
+	if(g_lpDS == NULL)
 		return;
-	if(Buffer < 0) 
+	if(Buffer < 0)
 		return;
 
 	if(MaxBufferChannel[Buffer] > 0)

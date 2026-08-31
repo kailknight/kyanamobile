@@ -10,6 +10,7 @@
 #include "Other.h"
 #include "MapManager.h"
 #include "ZzzInterface.h"
+#include "ZzzInventory.h"
 
 CNewUIScrollBar* ListMocNap = nullptr;
 CNewUIScrollBar* ListItemNhan = nullptr;
@@ -147,6 +148,13 @@ void MocDonate::DrawXemMocNap()
 		int currentRow = 0;
 		int currentCol = 0;
 
+		// Was RenderItem3DFree() per item below - each call redid a full
+		// projection/depth-buffer setup on its own; the viewport/alpha/
+		// depth-clear part is batched once for the whole page instead (see
+		// BeginItem3DFreeBatch's comment, NewUISystem.cpp). The 3D
+		// projection/camera itself stays scoped per item via
+		// RenderItem3DInBatch, since TextDraw runs in between.
+		g_pNewUISystem->BeginItem3DFreeBatch();
 		for (int n = (ItemListPage * MaxListItemInPage); n < DataListItem; n++)
 		{
 			ITEM* pItem = NULL;
@@ -162,7 +170,7 @@ void MocDonate::DrawXemMocNap()
 				int posy = StartY + (currentRow * KhoangCach) - (hmodel / 2) + 45;
 
 				g_pBCustomMenuInfo->DrawInfoBox(PosXBoxItem, PosYBoxItem, WBox, WBox, 0x00000096, 0, 0);
-				g_pNewUISystem->RenderItem3DFree(posx, posy, wmodel, hmodel, pItem->Type, pItem->Level, pItem->Option1, pItem->ExtOption, 0, 1.0);
+				g_pNewUISystem->RenderItem3DInBatch((float)posx, (float)posy, (float)wmodel, (float)hmodel, pItem->Type, pItem->Level, pItem->Option1, pItem->ExtOption, 0);
 
 				TextDraw((HFONT)g_hFont, PosXBoxItem + 5, PosYBoxItem + 25, 0xE0FF14A5, 0x0, WBox, 0, 4, "x%d", mDataListItemMocNapClient.ListItemMocNap[n].Count);
 				if (SEASON3B::CheckMouseIn(PosXBoxItem, PosYBoxItem, WBox, WBox))
@@ -178,6 +186,14 @@ void MocDonate::DrawXemMocNap()
 					PosYBoxItem += KhoangCach;
 					CountNgang = 0;
 				}
+
+				// CreateItem() above was never matched with a release - up to
+				// MaxListItemInPage of these leaked every single frame this
+				// window stayed open. Freed here, before either exit out of
+				// this block, so the item that triggers the break below is
+				// still covered.
+				g_pNewItemMng->DeleteItem(pItem);
+
 				if (CountDoc >= MaxListItemInPage) break;
 
 				++currentCol;
@@ -188,6 +204,7 @@ void MocDonate::DrawXemMocNap()
 				}
 			}
 		}
+		g_pNewUISystem->EndItem3DFreeBatch();
 
 		//===Coin
 		float PosYCoinNhan = StartY + 185;
@@ -204,6 +221,7 @@ void MocDonate::DrawXemMocNap()
 		{
 			ITEM* CTItem = g_pNewItemMng->CreateItem(mDataListItemMocNapClient.ListItemMocNap[BBShowInfoItem].Item);
 			RenderItemInfo(MouseX + 75, MouseY, CTItem, 0, 0, false, false);
+			g_pNewItemMng->DeleteItem(CTItem);
 		}
 	}
 }

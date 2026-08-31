@@ -90,8 +90,6 @@ namespace SEASON3B
 		void LoadImages();
 		void UnloadImages();
 
-		void SetButtonInfo();
-
 		void RenderFrame();
 		void RenderContents();
 		void RenderCustomFrame();
@@ -101,13 +99,11 @@ namespace SEASON3B
 		CNewUIManager*				m_pNewUIMng;
 		POINT						m_Pos;
 
-		CNewUIButton m_BtnClose;
-		
-		bool m_bAutoAttack;		// ÀÚµ¿ °ø°Ý
-		bool m_bWhisperSound;	// ±Ó¸» ¾Ë¸²À½ 
-		bool m_bSlideHelp;		// ½½¶óÀÌµå µµ¿ò¸»
-		int m_iVolumeLevel;		// º¼·ýÁ¶Àý
-		int m_iRenderLevel;		// È¿°úÁ¦ÇÑ
+		bool m_bAutoAttack;		// ï¿½Úµï¿½ ï¿½ï¿½ï¿½ï¿½
+		bool m_bWhisperSound;	// ï¿½Ó¸ï¿½ ï¿½Ë¸ï¿½ï¿½ï¿½ 
+		bool m_bSlideHelp;		// ï¿½ï¿½ï¿½ï¿½ï¿½Ìµï¿½ ï¿½ï¿½ï¿½ï¿½
+		int m_iVolumeLevel;		// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+		int m_iRenderLevel;		// È¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	};
 	
 }

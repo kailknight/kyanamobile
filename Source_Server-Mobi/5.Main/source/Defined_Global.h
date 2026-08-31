@@ -110,6 +110,7 @@
 #define CB_BXHDMG								1
 #define MaNap								1
 #define CB_NUMBERCHECKSUM						114749 //Mã CheckSum GS<->Client (giá trị là số không chữ) không dùng thì Set 0
+#define REDEEMCODE								1
 
 
 //==Key EncDec Client <--> Server

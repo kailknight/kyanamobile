@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "CB_JewelBank.h"
 #include "NewUISystem.h"
+#include "ZzzInventory.h"
 #include "CBInterface.h"
 #include "CUIController.h"
 #include "CharacterManager.h"
@@ -92,9 +93,15 @@ void CBJewelBank::DrawWindow()
 	float LineX = StartX + 10;
 	float LineY = StartY + 40;
 	float WInfo = 80;
+	// Was RenderItem3DFree() per row - each call redid a full projection/
+	// depth-buffer setup on its own; the viewport/alpha/depth-clear part is
+	// batched once for all 5 rows instead (see BeginItem3DFreeBatch's
+	// comment, NewUISystem.cpp) while the 3D projection/camera stays scoped
+	// per row via RenderItem3DInBatch, since TextDraw/buttons run in between.
+	g_pNewUISystem->BeginItem3DFreeBatch();
 	for (int i = 0; i < 5; i++)
 	{
-		g_pNewUISystem->RenderItem3DFree(LineX, LineY, 15, 15, this->ItemJewelry[i+5 * this->Pagina], 0, 1, 0, 0, 1.0);//BMD MOdel
+		g_pNewUISystem->RenderItem3DInBatch(LineX, LineY, 15, 15, this->ItemJewelry[i+5 * this->Pagina], 0, 1, 0, 0);//BMD MOdel
 		TextDraw((HFONT)g_hFontBold, LineX + 15, LineY + 22, 0xFFDE26FF, 0x3a4b3978, WInfo, 0, 3, BGetItemName(this->ItemJewelry[i+5 * this->Pagina], 0));
 		LineY += 10;
 		TextDraw((HFONT)g_hFont, LineX + 15, LineY + 22, 0xFFDE26FF, 0x0, WInfo, 0, 3, "Currently have: %d (pcs)", this->BankJewelry[i+5 * this->Pagina]);
@@ -118,6 +125,7 @@ void CBJewelBank::DrawWindow()
 		}
 		LineY += 30;
 	}
+	g_pNewUISystem->EndItem3DFreeBatch();
 
 	TextDraw((HFONT)g_hFont, StartX, StartY + (WindowH -35), 0x7DF4FFFF, 0x0, WindowW, 0, 3, gCustomMessage.GetMessage(74));
 

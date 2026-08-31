@@ -230,6 +230,9 @@ enum ObjectID
 #if(DOIMK)
 	eWindowDoiMK,
 #endif
+#if(REDEEMCODE)
+	eWindowRedeemCode,
+#endif
 #if(CB_NEWQUESTFF)
 	eWindowNewQuest,
 	eWindowNewQuestMini,

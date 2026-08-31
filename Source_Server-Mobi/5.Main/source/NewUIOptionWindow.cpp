@@ -9,8 +9,22 @@
 #include "DSPlaySound.h"
 #include "ZzzInterface.h"
 #include "CBInterface.h"
+#include "GameConfig/GameConfig.h"
 
 using namespace SEASON3B;
+
+extern char Mp3FileName[256];
+extern HWND g_hWnd;
+
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+// Not #include <wzAudio.h> - that header defines (not just declares) a
+// global named m_enMixerMode as part of its enum, so including it from a
+// second .cpp (Winmain.cpp already does) is an ODR violation and fails to
+// link (LNK2005). Forward-declaring just what's needed here avoids it.
+#define WZAOPT_STOPBEFOREPLAY 0
+extern "C" int wzAudioCreate(HWND hParentWnd);
+extern "C" void wzAudioOption(int nOption, int nVal);
+#endif
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -58,18 +72,8 @@ bool SEASON3B::CNewUIOptionWindow::Create(CNewUIManager* pNewUIMng, int x, int y
 	m_pNewUIMng->AddUIObj(SEASON3B::INTERFACE_OPTION, this);
 	SetPos(x, y);
 	LoadImages();
-	SetButtonInfo();
 	Show(false);
 	return true;
-}
-
-void SEASON3B::CNewUIOptionWindow::SetButtonInfo()
-{
-	m_BtnClose.ChangeTextBackColor(RGBA(255,255,255,0));
-	m_BtnClose.ChangeButtonImgState( true, IMAGE_OPTION_BTN_CLOSE, true );
-	m_BtnClose.ChangeButtonInfo(m_Pos.x+68, m_Pos.y+209, 54, 30);
-	m_BtnClose.ChangeImgColor(BUTTON_STATE_UP, RGBA(255, 255, 255, 255));
-	m_BtnClose.ChangeImgColor(BUTTON_STATE_DOWN, RGBA(255, 255, 255, 255));
 }
 
 void SEASON3B::CNewUIOptionWindow::Release()
@@ -92,12 +96,6 @@ void SEASON3B::CNewUIOptionWindow::SetPos(int x, int y)
 
 bool SEASON3B::CNewUIOptionWindow::UpdateMouseEvent()
 {
-	if(m_BtnClose.UpdateMouseEvent() == true)
-	{
-		g_pNewUISystem->Hide(SEASON3B::INTERFACE_OPTION);
-		return false;
-	}
-
 	if(SEASON3B::IsPress(VK_LBUTTON) && CheckMouseIn(m_Pos.x+150, m_Pos.y+43, 15, 15))
 	{
 		m_bAutoAttack = !m_bAutoAttack;
@@ -111,46 +109,11 @@ bool SEASON3B::CNewUIOptionWindow::UpdateMouseEvent()
 		m_bSlideHelp = !m_bSlideHelp;
 	}
 	
-	if(CheckMouseIn(m_Pos.x+33-8, m_Pos.y+104, 124+8, 16))
-	{
-		int iOldValue = m_iVolumeLevel;
-		if(MouseWheel > 0)
-		{
-			MouseWheel = 0;
-			m_iVolumeLevel++;
-			if(m_iVolumeLevel > 10)
-			{
-				m_iVolumeLevel = 10;
-			}
-		}
-		else if(MouseWheel < 0)
-		{
-			MouseWheel = 0;
-			m_iVolumeLevel--;
-			if(m_iVolumeLevel < 0)
-			{
-				m_iVolumeLevel = 0;
-			}
-		}
-		if(SEASON3B::IsRepeat(VK_LBUTTON))
-		{
-			int x = MouseX - (m_Pos.x + 33);
-			if(x < 0)
-			{
-				m_iVolumeLevel = 0;
-			}
-			else
-			{
-				float fValue = (10.f * x) / 124.f;
-				m_iVolumeLevel = (int)fValue + 1;
-			}
-		}
+	// Volume's mouse-wheel/drag handling used to live here - removed along
+	// with the slider itself (RenderButtons()); Music ON/Off and Sound
+	// ON/Off are RenderCheckBox()es now, which handle their own clicks
+	// during Render(), so nothing is needed in this function for them.
 
-		if(iOldValue != m_iVolumeLevel)
-		{
-			SetEffectVolumeLevel(m_iVolumeLevel);
-		}
-	}
 	if(CheckMouseIn(m_Pos.x+25, m_Pos.y+168, 141, 29))
 	{
 		if(SEASON3B::IsRepeat(VK_LBUTTON))
@@ -293,7 +256,6 @@ void SEASON3B::CNewUIOptionWindow::RenderFrame()
 	//--
 	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, MainWidth, MainHeight, eMenu_OPTION, "Config System"); //
 	SetPos(StartX, StartY);
-	m_BtnClose.SetPos(m_Pos.x + (MainWidth / 2) - 30, m_Pos.y + (MainHeight-50));
 
 	float x, y;
 	x = m_Pos.x;
@@ -397,6 +359,24 @@ void SEASON3B::CNewUIOptionWindow::RenderCustomFrame()
 	{
 		mShowDanhHieu ^= 1;
 	}
+	y = y + 17;
+	// Ground item names default off and only show via a momentary ALT-hold
+	// (CNewUINameWindow::UpdateKeyEvent) or per-item mouseover - no keyboard
+	// on mobile to hold, so this makes the "hold ALT" state a persistent
+	// on/off choice here instead, same as the other On/Off Custom flags.
+	// CNewUINameWindow isn't built until the main scene loads
+	// (LoadMainSceneInterface, ZzzScene.cpp) - null-checked since this Config
+	// System window itself is created earlier than that, even though in
+	// practice it is only ever opened from inside the already-loaded game.
+	CNewUINameWindow* pNameWindow = g_pNewUISystem->GetUI_NewNameWindow();
+
+	if (pNameWindow != NULL)
+	{
+		if (g_pBCustomMenuInfo->RenderCheckBox(x + 15, y + 15, 0xFFCC00C8, pNameWindow->IsShowItemName(), "Show ItemNames"))
+		{
+			pNameWindow->SetShowItemName(!pNameWindow->IsShowItemName());
+		}
+	}
 }
 void SEASON3B::CNewUIOptionWindow::RenderContents()
 {
@@ -406,19 +386,20 @@ void SEASON3B::CNewUIOptionWindow::RenderContents()
 	RenderImage(IMAGE_OPTION_POINT, x, y, 10.f, 10.f);
 	y += 22.f;
 	RenderImage(IMAGE_OPTION_POINT, x, y, 10.f, 10.f);
+	// The Volume row's own bullet point used to go here (y += 22) - removed
+	// along with the "Volume" label below, since Music ON/Off and Sound
+	// ON/Off are now self-labeling checkboxes (RenderButtons()) like the
+	// On/Off Custom section, not a labeled row of their own.
+	y += 22.f + 40.f;
+	RenderImage(IMAGE_OPTION_POINT, x, y, 10.f, 10.f);
 	y += 22.f;
 	RenderImage(IMAGE_OPTION_POINT, x, y, 10.f, 10.f);
-	y += 40.f;
-	RenderImage(IMAGE_OPTION_POINT, x, y, 10.f, 10.f);
-	y += 22.f;
-	RenderImage(IMAGE_OPTION_POINT, x, y, 10.f, 10.f);
-	
+
 	g_pRenderText->SetFont(g_hFont);
 	g_pRenderText->SetTextColor(255, 255, 255, 255);
 	g_pRenderText->SetBgColor(0);
 	g_pRenderText->RenderText(m_Pos.x+40, m_Pos.y+48, GlobalText[386]);
 	g_pRenderText->RenderText(m_Pos.x+40, m_Pos.y+70, GlobalText[387]);
-	g_pRenderText->RenderText(m_Pos.x+40, m_Pos.y+92, GlobalText[389]);
 	g_pRenderText->RenderText(m_Pos.x+40, m_Pos.y+132, GlobalText[919]);
 	g_pRenderText->RenderText(m_Pos.x+40, m_Pos.y+154, GlobalText[1840]);
 
@@ -427,8 +408,6 @@ void SEASON3B::CNewUIOptionWindow::RenderContents()
 
 void SEASON3B::CNewUIOptionWindow::RenderButtons()
 {
-	m_BtnClose.Render();
-
 	if(m_bAutoAttack)
 	{
 		RenderImage(IMAGE_OPTION_BTN_CHECK, m_Pos.x+150, m_Pos.y+43, 15, 15, 0, 0);
@@ -456,10 +435,123 @@ void SEASON3B::CNewUIOptionWindow::RenderButtons()
 		RenderImage(IMAGE_OPTION_BTN_CHECK, m_Pos.x+150, m_Pos.y+127, 15, 15, 0, 15.f);
 	}
 
-	RenderImage(IMAGE_OPTION_VOLUME_BACK, m_Pos.x+33, m_Pos.y+104, 124.f, 16.f);
-	if(m_iVolumeLevel > 0)
+	// Was a draggable Volume level bar (0-10, m_iVolumeLevel/SetEffectVolumeLevel)
+	// here - replaced with two on/off checkboxes per request. m_iVolumeLevel
+	// itself is left alone: other code (android_main.cpp) still reads it via
+	// GetVolumeLevel() to size actual playback volume once audio is on: this
+	// only removes the slider that used to adjust it from this screen.
+	//
+	// Y positions: this whole row sits in the 40px gap RenderFrame() leaves
+	// between its 2nd and 3rd divider lines (m_Pos.y+82 to m_Pos.y+122) -
+	// the old Volume bar's own slot. +88/+105 (17px apart, each box 15px
+	// tall) keeps both checkboxes inside that band with margin on both ends,
+	// instead of running past the lower divider into the Slide Help row.
+	if (g_pBCustomMenuInfo->RenderCheckBox(m_Pos.x + 15, m_Pos.y + 88, 0xFFCC00C8, m_MusicOnOff != 0, "Music ON/Off"))
 	{
-		RenderImage(IMAGE_OPTION_VOLUME_COLOR, m_Pos.x+33, m_Pos.y+104, 124.f * 0.1f * 	(m_iVolumeLevel), 16.f);
+		m_MusicOnOff ^= 1;
+
+		// SaveConfigDword (Winmain.h/.cpp) only exists on PC - Winmain.cpp is
+		// excluded from the Android build entirely (CMakeLists.txt), so
+		// calling it unconditionally here is an Android link failure, not
+		// just a no-op. Android already has its own persisted audio settings
+		// (GameConfig, read at startup - android_main.cpp) and simply had no
+		// path back into it from this checkbox before now.
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+		SaveConfigDword("MusicOnOff", m_MusicOnOff);
+#else
+		GameConfig::GetInstance().SetMusicEnabled(m_MusicOnOff != 0);
+		GameConfig::GetInstance().Save();
+#endif
+
+		if (m_MusicOnOff == 0)
+		{
+			StopMp3(Mp3FileName, TRUE);
+		}
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+		else if (g_bWzAudioCreated == false)
+		{
+			// wzAudioCreate is only ever called at startup, gated on
+			// m_MusicOnOff already being true then (Winmain.cpp) - which it
+			// never is, because nothing in this codebase writes the
+			// "MusicOnOff" registry value that startup read checks, so that
+			// read always takes its missing-key branch and defaults to
+			// false. wzAudio was therefore never actually created before
+			// this checkbox existed, and calling wzAudioPlay (via PlayMp3,
+			// from ordinary per-map music triggers) into an instance that
+			// was never set up crashed inside the wzAudio DLL. Create it
+			// here instead, once, the first time this checkbox turns music
+			// on - Android doesn't use wzAudio at all so this is PC/iOS only.
+			if (wzAudioCreate(g_hWnd) == 0)
+			{
+				g_bWzAudioCreated = true;
+				wzAudioOption(WZAOPT_STOPBEFOREPLAY, 1);
+			}
+		}
+#endif
+	}
+	if (g_pBCustomMenuInfo->RenderCheckBox(m_Pos.x + 15, m_Pos.y + 105, 0xFFCC00C8, m_SoundOnOff != 0, "Sound ON/Off"))
+	{
+		m_SoundOnOff ^= 1;
+
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+		SaveConfigDword("SoundOnOff", m_SoundOnOff);
+#else
+		GameConfig::GetInstance().SetSoundEnabled(m_SoundOnOff != 0);
+		GameConfig::GetInstance().Save();
+#endif
+
+		// Order matters below: SetMasterVolume() (DSplaysound.cpp, reached via
+		// SetEffectVolumeLevel) early-returns while g_EnableSound is false, so
+		// the mute has to be lifted *before* the volume is applied or the
+		// volume call silently does nothing.
+
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+		// Same gap as Music, different subsystem: InitDirectSound (Winmain.cpp)
+		// now runs unconditionally at startup, so this is only a fallback for
+		// a device that failed to initialise then - without it, turning sound
+		// on would set g_EnableSound true with g_lpDS still null.
+		if (m_SoundOnOff != 0 && g_bDirectSoundCreated == false)
+		{
+			if (SUCCEEDED(InitDirectSound(g_hWnd)))
+			{
+				g_bDirectSoundCreated = true;
+			}
+		}
+
+		SetEnableSound(g_bDirectSoundCreated && m_SoundOnOff != 0);
+#else
+		// Unlike m_MusicOnOff (checked live by PlayMp3/StopMp3 on every call),
+		// m_SoundOnOff on its own is only consulted once, at startup. The
+		// actual per-effect gate is g_androidSoundEnabled, and SetEnableSound()
+		// is what updates it - mirrors what android_main.cpp's own
+		// audio-settings-apply code does after setting this same flag.
+		SetEnableSound(m_SoundOnOff != 0);
+#endif
+
+		// The effect volume is what actually makes sound audible, and a stale
+		// VolumeLevel=0 in the registry silences every effect while music keeps
+		// playing (wzAudio has its own, separate volume) - which is exactly how
+		// this reported as "music works, skill effects don't". With the volume
+		// bar gone this checkbox owns the level too, so turning sound on
+		// restores a real one instead of leaving whatever silenced it.
+		// SetMasterVolume re-applies to every already-loaded buffer, so this
+		// takes effect immediately rather than only for sounds loaded later.
+		if (m_SoundOnOff != 0)
+		{
+			if (m_iVolumeLevel < 1)
+			{
+				m_iVolumeLevel = SOUND_VOLUME_FULL;
+
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+				SaveConfigDword("VolumeLevel", m_iVolumeLevel);
+#else
+				GameConfig::GetInstance().SetVolumeLevel(m_iVolumeLevel);
+				GameConfig::GetInstance().Save();
+#endif
+			}
+
+			SetEffectVolumeLevel(m_iVolumeLevel);
+		}
 	}
 
 	RenderImage(IMAGE_OPTION_EFFECT_BACK, m_Pos.x+25, m_Pos.y+168, 141.f, 29.f);

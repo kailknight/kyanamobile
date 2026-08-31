@@ -60,10 +60,21 @@ void ItemAddOptioninfo::GetItemAddOtioninfoText( std::vector<std::string>& outte
 	int optiontype = 0;
 	int optionvalue = 0;
 
+	// An item type with no 380 entry at all reads m_byOption1/2 == 0, which
+	// matches none of the cases below - TempText was then left uninitialized
+	// and pushed anyway, so the tooltip printed raw stack garbage as its two
+	// "380 option" lines. Bounds-check the lookup for the same reason: type is
+	// an item index straight from an ITEM and nothing above guarantees it is
+	// inside this table.
+	if( type < 0 || type >= MAX_ITEM )
+	{
+		return;
+	}
+
 	for( int i = 0; i < 2; ++i )
 	{
 		std::string text;
-		char TempText[100];
+		char TempText[100] = { 0, };
 
 		if( i == 0 )
 		{
@@ -94,6 +105,12 @@ void ItemAddOptioninfo::GetItemAddOtioninfoText( std::vector<std::string>& outte
 			break;
 		case 8: wsprintf( TempText, GlobalText[2191], optionvalue );
 			break;
+		default:
+			// No 380 option in this slot (0) or an option id this build doesn't
+			// know - emit nothing rather than an empty/garbage tooltip line.
+			// Callers already handle a short (or empty) list: MixMgr.cpp:605
+			// explicitly tests optionTextlist.empty().
+			continue;
 		}
 
 		text = TempText;

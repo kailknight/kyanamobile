@@ -3188,15 +3188,22 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 		{
 			g_pItemAddOptioninfo->GetItemAddOtioninfoText(Text380, ip->Type);
 
-			sprintf(TextList[TextNum], "\n"); TextNum++; SkipNum++;
-
-			for (int i = 0; i < (int)Text380.size(); ++i)
+			// Empty for any item type with no 380 entry - without this the two
+			// blank separator lines were still emitted, leaving a stray gap in
+			// the tooltip of an item flagged 380 that has no 380 data.
+			if (Text380.empty() == false)
 			{
-				strncpy(TextList[TextNum], Text380[i].c_str(), 100);
-				TextListColor[TextNum] = TEXT_COLOR_REDPURPLE; TextBold[TextNum] = true; TextNum++;
-			}
+				sprintf(TextList[TextNum], "\n"); TextNum++; SkipNum++;
 
-			sprintf(TextList[TextNum], "\n"); TextNum++; SkipNum++;
+				for (int i = 0; i < (int)Text380.size() && TextNum < 58; ++i)
+				{
+					strncpy(TextList[TextNum], Text380[i].c_str(), sizeof(TextList[TextNum]) - 1);
+					TextList[TextNum][sizeof(TextList[TextNum]) - 1] = '\0';
+					TextListColor[TextNum] = TEXT_COLOR_REDPURPLE; TextBold[TextNum] = true; TextNum++;
+				}
+
+				sprintf(TextList[TextNum], "\n"); TextNum++; SkipNum++;
+			}
 		}
 	}
 
@@ -10379,7 +10386,7 @@ bool IsWingItem(ITEM* pItem)
 
 OBJECT ObjectSelect;
 //==CustomPosition
-void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t Target,int Select,bool PickUp)
+void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t Target,int Select,bool PickUp,float ScaleMul)
 {	
 
 
@@ -12526,6 +12533,17 @@ void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t 
 	{
 		Scale *= FixScaleItem; //DAT FIX ItemScale Dở
 	}
+
+	// Caller-supplied shrink/grow factor, applied last so it composes with every
+	// per-type scale above. Defaults to 1.0f, so every existing caller renders
+	// byte-identically to before. Exists because Scale is otherwise a local
+	// hardcoded per-item-type value with no way for a caller to fit an item
+	// into a small fixed icon box (a sword renders at its full 1x4 inventory
+	// footprint, ~112px tall, which is far too big for a compact list row).
+	if (ScaleMul > 0.0f && ScaleMul != 1.0f)
+	{
+		Scale *= ScaleMul;
+	}
 	if (ItemTRSData.GetItemTRSData(Type - MODEL_ITEM))
 	{
 		Position[0] = ItemTRSData.GetItemTRSDataTransLationX(Type - MODEL_ITEM);
@@ -12559,7 +12577,7 @@ void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t 
     RenderPartObject(o,Type,NULL,Light,alpha,ItemLevel,Option1,ExtOption,true,true,true);
 }
 
-void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,int Option1,int ExtOption,bool PickUp)
+void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,int Option1,int ExtOption,bool PickUp,float ScaleMul)
 {
 	bool Success = false;
 	if((g_pPickedItem == NULL || PickUp) 
@@ -12933,35 +12951,35 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 	//RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,Position,Success,PickUp);
 	if ( Type==ITEM_POTION+11 && ( Level>>3) == 1)	// ¼ºÅºÀÇº°
 	{
-		RenderObjectScreen(MODEL_EVENT+4,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+4,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+11 && ( Level>>3) == 2)
 	{
-		RenderObjectScreen(MODEL_EVENT+5,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+5,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+11 && ( Level>>3) == 3)
 	{
-		RenderObjectScreen(MODEL_EVENT+6,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+6,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+11 && ( Level>>3) == 5)
 	{
-		RenderObjectScreen(MODEL_EVENT+8,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+8,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+11 && ( Level>>3) == 6)
 	{
-		RenderObjectScreen(MODEL_EVENT+9,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+9,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+11 && 8 <= ( Level>>3) && ( Level>>3) <= 12)
 	{
-		RenderObjectScreen(MODEL_EVENT+10,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+10,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+11 && ( Level>>3) == 13)
 	{
-		RenderObjectScreen(MODEL_EVENT+6,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+6,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+11 && ( (Level>>3)==14 || (Level>>3)==15 ) )
 	{
-		RenderObjectScreen(MODEL_EVENT+5,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+5,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_HELPER+14 && ( Level>>3) == 1)
 	{
@@ -12969,51 +12987,51 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 	}
 	else if ( Type==ITEM_POTION+9 && ( Level>>3) == 1)
 	{
-		RenderObjectScreen(MODEL_EVENT+7,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_EVENT+7,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type==ITEM_POTION+21 )
 	{
 		switch ( (Level>>3) )
 		{
 		case 1:
-			RenderObjectScreen(MODEL_EVENT+11,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+11,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 2:
-			RenderObjectScreen(MODEL_EVENT+11,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+11,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 3:
-			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		default:
-			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
 	else if ( Type ==ITEM_POTION+45)
 	{
-		RenderObjectScreen(MODEL_POTION+45,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_POTION+45,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type >=ITEM_POTION+46 && Type <=ITEM_POTION+48)
 	{
-		RenderObjectScreen(MODEL_POTION+46,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_POTION+46,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type ==ITEM_POTION+49)
 	{
-		RenderObjectScreen(MODEL_POTION+49,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_POTION+49,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type ==ITEM_POTION+50)
 	{
-		RenderObjectScreen(MODEL_POTION+50,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_POTION+50,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if ( Type ==ITEM_POTION+32)
 	{
 		switch ( (Level>>3) )
 		{
 		case 0:
-			RenderObjectScreen(MODEL_POTION+32,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_POTION+32,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 1:
-			RenderObjectScreen(MODEL_EVENT+21,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+21,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
@@ -13022,10 +13040,10 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 		switch ( (Level>>3) )
 		{
 		case 0:
-			RenderObjectScreen(MODEL_POTION+33,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_POTION+33,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 1:
-			RenderObjectScreen(MODEL_EVENT+22,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+22,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
@@ -13034,10 +13052,10 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 		switch ( (Level>>3) )
 		{
 		case 0:
-			RenderObjectScreen(MODEL_POTION+34,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_POTION+34,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 1:
-			RenderObjectScreen(MODEL_EVENT+23,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+23,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
@@ -13046,13 +13064,13 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 		switch ( (Level>>3) )
 		{
 		case 0:
-			RenderObjectScreen(MODEL_STAFF+10,-1,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_STAFF+10,-1,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 1:
-			RenderObjectScreen(MODEL_SWORD+19,-1,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_SWORD+19,-1,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 2:
-			RenderObjectScreen(MODEL_BOW+18,-1,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_BOW+18,-1,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
@@ -13061,10 +13079,10 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 		switch( (Level>>3) )
 		{
 		case 0:
-			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 1:
-			RenderObjectScreen(MODEL_EVENT+12,-1,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+12,-1,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
@@ -13073,10 +13091,10 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 		switch( (Level>>3) )
 		{
 		case 0:
-			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 1:
-			RenderObjectScreen(MODEL_EVENT+13,-1,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+13,-1,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
@@ -13085,12 +13103,12 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 		switch( (Level>>3) )
 		{
 		case 0:
-			RenderObjectScreen(MODEL_EVENT+15,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+15,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		case 1:
 		case 2:
 		case 3:
-			RenderObjectScreen(MODEL_EVENT+14,Level,Option1,ExtOption,Position,Success,PickUp);
+			RenderObjectScreen(MODEL_EVENT+14,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 			break;
 		}
 	}
@@ -13115,20 +13133,20 @@ void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,
 #ifdef PBG_ADD_NEWCHAR_MONK_ITEM
 	else if(Type == ITEM_ARMOR+59)
 	{
-		RenderObjectScreen(MODEL_ARMORINVEN_60,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_ARMORINVEN_60,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if(Type == ITEM_ARMOR+60)
 	{
-		RenderObjectScreen(MODEL_ARMORINVEN_61,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_ARMORINVEN_61,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 	else if(Type == ITEM_ARMOR+61)
 	{
-		RenderObjectScreen(MODEL_ARMORINVEN_62,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(MODEL_ARMORINVEN_62,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 #endif //PBG_ADD_NEWCHAR_MONK_ITEM
 	else
 	{
-		RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp);
+		RenderObjectScreen(Type+MODEL_ITEM,Level,Option1,ExtOption,Position,Success,PickUp,ScaleMul);
 	}
 }
 

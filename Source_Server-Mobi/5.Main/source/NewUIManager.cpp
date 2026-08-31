@@ -260,6 +260,14 @@ bool SEASON3B::CNewUIManager::Render()
 	// the largest single bucket. Record the three most expensive windows so the
 	// FPS overlay can name them (fopen-based logging never worked on device -
 	// the cwd is not writable, same reason logcat is unavailable).
+	//
+	// Gated on g_ShowPerfOverlay (defaults false, no live way to enable it in a
+	// shipping build - android_main.cpp) rather than just #ifdef __ANDROID__:
+	// this timing/RTTI/snprintf block used to run every frame on every Android
+	// build regardless of whether the overlay was ever shown, with g_ProfUiTopWindows
+	// written but never read by anything except that same gated overlay draw.
+	extern bool g_ShowPerfOverlay;
+	const bool bProfileThisFrame = g_ShowPerfOverlay;
 	double dbgTopMs[3] = { 0.0, 0.0, 0.0 };
 	const char* dbgTopName[3] = { "-", "-", "-" };
 	double dbgTotalMs = 0.0;
@@ -271,24 +279,31 @@ bool SEASON3B::CNewUIManager::Render()
 		if((*vi)->IsVisible())
 		{
 #ifdef __ANDROID__
-			const uint64_t t0 = MU_MobilePerfNow();
-			(*vi)->Render();
-			const double ms = (static_cast<double>(MU_MobilePerfNow() - t0) * 1000.0) / static_cast<double>(MU_MobilePerfFrequency());
-			dbgTotalMs += ms;
-			const char* name = typeid(**vi).name();
-			for (int slot = 0; slot < 3; ++slot)
+			if (bProfileThisFrame)
 			{
-				if (ms > dbgTopMs[slot])
+				const uint64_t t0 = MU_MobilePerfNow();
+				(*vi)->Render();
+				const double ms = (static_cast<double>(MU_MobilePerfNow() - t0) * 1000.0) / static_cast<double>(MU_MobilePerfFrequency());
+				dbgTotalMs += ms;
+				const char* name = typeid(**vi).name();
+				for (int slot = 0; slot < 3; ++slot)
 				{
-					for (int shift = 2; shift > slot; --shift)
+					if (ms > dbgTopMs[slot])
 					{
-						dbgTopMs[shift] = dbgTopMs[shift - 1];
-						dbgTopName[shift] = dbgTopName[shift - 1];
+						for (int shift = 2; shift > slot; --shift)
+						{
+							dbgTopMs[shift] = dbgTopMs[shift - 1];
+							dbgTopName[shift] = dbgTopName[shift - 1];
+						}
+						dbgTopMs[slot] = ms;
+						dbgTopName[slot] = name;
+						break;
 					}
-					dbgTopMs[slot] = ms;
-					dbgTopName[slot] = name;
-					break;
 				}
+			}
+			else
+			{
+				(*vi)->Render();
 			}
 #else
 			(*vi)->Render();
@@ -297,13 +312,16 @@ bool SEASON3B::CNewUIManager::Render()
 	}
 
 #ifdef __ANDROID__
-	char n0[40], n1[40], n2[40];
-	StripUiTypeName(dbgTopName[0], n0, sizeof(n0));
-	StripUiTypeName(dbgTopName[1], n1, sizeof(n1));
-	StripUiTypeName(dbgTopName[2], n2, sizeof(n2));
-	snprintf(g_ProfUiTopWindows, sizeof(g_ProfUiTopWindows),
-		"uiwin %.1f | %s %.1f | %s %.1f | %s %.1f",
-		dbgTotalMs, n0, dbgTopMs[0], n1, dbgTopMs[1], n2, dbgTopMs[2]);
+	if (bProfileThisFrame)
+	{
+		char n0[40], n1[40], n2[40];
+		StripUiTypeName(dbgTopName[0], n0, sizeof(n0));
+		StripUiTypeName(dbgTopName[1], n1, sizeof(n1));
+		StripUiTypeName(dbgTopName[2], n2, sizeof(n2));
+		snprintf(g_ProfUiTopWindows, sizeof(g_ProfUiTopWindows),
+			"uiwin %.1f | %s %.1f | %s %.1f | %s %.1f",
+			dbgTotalMs, n0, dbgTopMs[0], n1, dbgTopMs[1], n2, dbgTopMs[2]);
+	}
 #endif
 
 	return true;

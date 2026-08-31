@@ -132,6 +132,25 @@ namespace SEASON3B
 		bool IsImpossibleHideInterface(DWORD dwKey);
 		void RenderItem3DFree(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp = false, float Scale = 1.0f, bool FixY = true);
 
+		// RenderItem3DFree's viewport/alpha-test/depth-clear setup, split out
+		// so a loop drawing several item icons at once (a market listing, a
+		// bank grid, ...) can pay for it once instead of once per icon. See
+		// the comment on BeginItem3DFreeBatch's definition (NewUISystem.cpp)
+		// for how this was found, and why the 3D projection/camera setup is
+		// NOT included here - it has to stay scoped per item (via
+		// RenderItem3DInBatch below), since these loops interleave 2D draws
+		// (TextDraw/buttons/bars) between icons that must not run through an
+		// item's 3D perspective.
+		void BeginItem3DFreeBatch();
+		void EndItem3DFreeBatch();
+		// The per-item positioning RenderItem3DFree applies when FixY is true
+		// (its default) - call this per item between Begin/End above to match.
+		void GetItem3DFixYPosition(int Type, float sx, float sy, float* outX, float* outY);
+		// Call this per item between Begin/End above instead of RenderItem3D()
+		// directly - same draw, plus the per-item 3D projection/camera setup
+		// and depth-test toggling that must stay scoped to just this call.
+		void RenderItem3DInBatch(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp, float Scale = 1.0f, bool FixY = true);
+
 		static CNewUISystem* GetInstance();
 
 	protected:
@@ -274,6 +293,7 @@ namespace SEASON3B
 
 		CNewUIWindowMenu* GetUI_NewWindowMenu() const;
 		CNewUIOptionWindow* GetUI_NewOptionWindow() const;
+		CNewUINameWindow* GetUI_NewNameWindow() const;
 		CNewUIHelpWindow* GetUI_NewHelpWindow() const;
 		CNewUIItemExplanationWindow* GetUI_NewItemExplanationWindow() const;
 		CNewUISetItemExplanation* GetUI_NewSetItemExplanation() const;

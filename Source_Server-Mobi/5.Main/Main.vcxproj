@@ -233,6 +233,7 @@
     <ClCompile Include="source\CB_DangKyInGame.cpp" />
     <ClCompile Include="source\CB_DanhHieu.cpp" />
     <ClCompile Include="source\CB_DoiMK.cpp" />
+    <ClCompile Include="source\RedeemCodeWindow.cpp" />
     <ClCompile Include="source\CB_DrawCustomRank.cpp" />
     <ClCompile Include="source\CB_GetMixRate.cpp" />
     <ClCompile Include="source\CB_HuyDongExc.cpp" />
@@ -673,6 +674,7 @@
     <ClInclude Include="source\CB_DangKyInGame.h" />
     <ClInclude Include="source\CB_DanhHieu.h" />
     <ClInclude Include="source\CB_DoiMK.h" />
+    <ClInclude Include="source\RedeemCodeWindow.h" />
     <ClInclude Include="source\CB_DrawCustomRank.h" />
     <ClInclude Include="source\CB_GetMixRate.h" />
     <ClInclude Include="source\CB_HuyDongExc.h" />

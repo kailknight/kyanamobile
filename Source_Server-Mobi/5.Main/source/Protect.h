@@ -167,6 +167,14 @@ struct MAIN_FILE_INFO
 
 	char DefaultServerName[32];
 	CUSTOM_SERVER_NAME_INFO CustomServerName[MAX_CUSTOM_SERVER_NAME];
+
+	// Per-slot Features-menu button labels, matching Menu[15] above 1:1 by
+	// index (GetMainInfo.cpp/MenuName.h on the writer side, loaded from
+	// CommonManager\MenuName.txt). Read directly as gProtect.m_MainInfo.
+	// MenuName[i], same access pattern as Menu[i] itself (MenuCustom.cpp) -
+	// an empty slot means "not migrated yet", so MenuCustom.cpp falls back
+	// to the old Text_Button value for that one slot.
+	char MenuName[15][120];
 };
 
 class CProtect
