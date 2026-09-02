@@ -1604,6 +1604,125 @@ void EnsureSkinRestPoseCache(Mesh_t& mesh)
 // 0 shadow  1 chrome/metal/oil  2 bright  3 plain texture  4 other
 int g_ProfMeshPass[5] = { 0, 0, 0, 0, 0 };
 
+// Pending "excellent item" glow, set by RenderPartObjectEffect (ZzzObject.cpp)
+// right before it draws an item's base pass and consumed here in RenderMesh
+// whenever a mesh resolves to plain RENDER_TEXTURE - the only Render value the
+// old, separate RENDER_TEXTURE|RENDER_BRIGHT glow pass ever used. Folding it
+// into the SAME draw (GPU: one shader invocation via GLSkinDrawState::glowColor;
+// CPU/direct-batch: a same-call recursive follow-up, see g_InGlowFollowup)
+// removes what used to be a full second pass over every mesh in the model.
+// g_PendingGlowConsumedCount tells the caller whether fusion actually handled
+// it (>0), so it knows whether to still run its own old, separate draw as a
+// guaranteed-safe fallback for anything this didn't reach (chrome/color/etc.
+// meshes, or GPU-ineligible ones that already reproduce the old 2-draw
+// behaviour internally via g_InGlowFollowup either way).
+bool g_PendingGlowActive = false;
+vec3_t g_PendingGlowColor = { 0.f, 0.f, 0.f };
+int g_PendingGlowConsumedCount = 0;
+// Reentrancy guard for the CPU-path follow-up call below - without it, the
+// follow-up's own RenderMesh(RenderFlag|RENDER_BRIGHT,...) call would see
+// g_PendingGlowActive still true and try to fuse a second glow onto itself.
+static bool g_InGlowFollowup = false;
+
+// Resolves which BITMAP_* index a chrome/metal mesh should sample from -
+// shared by the CPU BindTexture(...) chain below (RenderMesh's chrome/metal
+// branch) and the GPU skinning call site further down. Before this existed,
+// GL_DrawSkinnedMesh always bound pBitmap->TextureNumber (the mesh's own
+// base/diffuse texture) for every chrome/metal variant, since nothing on
+// that path ever consulted this resolution - only the CPU BindTexture calls
+// did, and the GPU path's own glBindTexture silently overwrote them. Returns
+// Texture unchanged whenever RenderFlag has no chrome/metal bit set (or
+// MeshTexture overrides it), so passing this through unconditionally is
+// behavior-preserving for every other Render mode too.
+static int ResolveChromeMetalTextureIndex(int RenderFlag, int MeshTexture, int Texture)
+{
+	if (MeshTexture == -1)
+	{
+		if ((RenderFlag&RENDER_CHROME2) == RENDER_CHROME2) return BITMAP_CHROME2;
+		if ((RenderFlag&RENDER_CHROME3) == RENDER_CHROME3) return BITMAP_CHROME2;
+		if ((RenderFlag&RENDER_CHROME4) == RENDER_CHROME4) return BITMAP_CHROME2;
+		if ((RenderFlag&RENDER_CHROME6) == RENDER_CHROME6) return BITMAP_CHROME6;
+		if ((RenderFlag&RENDER_CHROME) == RENDER_CHROME)   return BITMAP_CHROME;
+		if ((RenderFlag&RENDER_METAL) == RENDER_METAL)     return BITMAP_SHINY;
+	}
+	return Texture;
+}
+
+// CPU/direct-batch-mobile paths can't fold a glow term into their own draw
+// the way the GPU shader can, so this reproduces the old, separate
+// RENDER_TEXTURE|RENDER_BRIGHT pass exactly - just triggered from inside the
+// base pass's own RenderMesh call instead of by a second call from the
+// caller. g_InGlowFollowup stops this recursive call from trying to fuse a
+// second glow onto itself.
+static void ApplyPendingGlowFollowup(BMD* b, int i, int RenderFlag, float Alpha, int BlendMesh, float BlendMeshLight, float BlendMeshTexCoordU, float BlendMeshTexCoordV, int MeshTexture)
+{
+	g_InGlowFollowup = true;
+	vec3_t savedBodyLight;
+	VectorCopy(b->BodyLight, savedBodyLight);
+	VectorCopy(g_PendingGlowColor, b->BodyLight);
+	b->RenderMesh(i, RenderFlag | RENDER_BRIGHT, Alpha, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+	VectorCopy(savedBodyLight, b->BodyLight);
+	g_InGlowFollowup = false;
+	++g_PendingGlowConsumedCount;
+}
+
+// Pending chrome/metal overlay (mesh-pass collapse, Phase B) - same shape as
+// g_PendingGlowActive above, set by RenderPartObjectEffect's System 1 (item
+// upgrade-level glow) right before its base-pass call, for the one CHROME
+// overlay in that tier's sequence that resolves to plain RENDER_CHROME (the
+// only chrome variant the GPU path recognises, ResolveChromeMetalTextureIndex
+// notwithstanding - CHROME2/CHROME4/METAL overlays are left as separate,
+// unmodified calls; only ever one overlay is fused per mesh in v1).
+// RenderFlag/Alpha here are the OVERLAY's own (RENDER_CHROME|RENDER_BRIGHT[|
+// RENDER_EXTRA], and whatever Alpha that tier's overlay call used) - not the
+// base pass's - since RenderMesh needs them to reproduce the CPU fallback
+// exactly (ApplyPendingChromeFollowup) and to resolve the right texture.
+bool g_PendingChromeActive = false;
+int g_PendingChromeRenderFlag = 0;
+float g_PendingChromeAlpha = 1.f;
+vec3_t g_PendingChromeColor = { 0.f, 0.f, 0.f };
+int g_PendingChromeConsumedCount = 0;
+static bool g_InChromeFollowup = false;
+
+// Second stacked overlay slot - the METAL pass every +9-and-up tier adds on
+// top of its CHROME one. Same contract as the slot above in every respect;
+// kept as an explicit parallel slot rather than folding both into an array
+// because the call sites in ZzzObject.cpp queue them individually and this
+// code has already proven easy to get subtly wrong. A THIRD overlay (the
+// CHROME2/CHROME4 pass on +11 and up) is deliberately not fused - it stays a
+// separate, unmodified call, which on mobile is unreachable anyway since the
+// RenderLevel-2 default clamps every high tier into the 2-overlay branch.
+bool g_PendingOverlay2Active = false;
+int g_PendingOverlay2RenderFlag = 0;
+float g_PendingOverlay2Alpha = 1.f;
+vec3_t g_PendingOverlay2Color = { 0.f, 0.f, 0.f };
+int g_PendingOverlay2ConsumedCount = 0;
+static bool g_InOverlay2Followup = false;
+
+static void ApplyPendingChromeFollowup(BMD* b, int i, int BlendMesh, float BlendMeshLight, float BlendMeshTexCoordU, float BlendMeshTexCoordV, int MeshTexture)
+{
+	g_InChromeFollowup = true;
+	vec3_t savedBodyLight;
+	VectorCopy(b->BodyLight, savedBodyLight);
+	VectorCopy(g_PendingChromeColor, b->BodyLight);
+	b->RenderMesh(i, g_PendingChromeRenderFlag, g_PendingChromeAlpha, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+	VectorCopy(savedBodyLight, b->BodyLight);
+	g_InChromeFollowup = false;
+	++g_PendingChromeConsumedCount;
+}
+
+static void ApplyPendingOverlay2Followup(BMD* b, int i, int BlendMesh, float BlendMeshLight, float BlendMeshTexCoordU, float BlendMeshTexCoordV, int MeshTexture)
+{
+	g_InOverlay2Followup = true;
+	vec3_t savedBodyLight;
+	VectorCopy(b->BodyLight, savedBodyLight);
+	VectorCopy(g_PendingOverlay2Color, b->BodyLight);
+	b->RenderMesh(i, g_PendingOverlay2RenderFlag, g_PendingOverlay2Alpha, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+	VectorCopy(savedBodyLight, b->BodyLight);
+	g_InOverlay2Followup = false;
+	++g_PendingOverlay2ConsumedCount;
+}
+
 void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendMeshLight,float BlendMeshTexCoordU,float BlendMeshTexCoordV,int MeshTexture)
 {
     if ( i>=NumMeshs || i<0 ) return;
@@ -1854,29 +1973,8 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
             DisableDepthTest ();				
         }
 
-        if((RenderFlag&RENDER_CHROME2)==RENDER_CHROME2 && MeshTexture==-1)
-        {
-			BindTexture(BITMAP_CHROME2);
-        }
-        else if((RenderFlag&RENDER_CHROME3)==RENDER_CHROME3 && MeshTexture==-1)
-        {
-			BindTexture(BITMAP_CHROME2);
-        }
-        else if((RenderFlag&RENDER_CHROME4)==RENDER_CHROME4 && MeshTexture==-1)
-        {
-			BindTexture(BITMAP_CHROME2);
-        }
-        else if((RenderFlag&RENDER_CHROME6)==RENDER_CHROME6 && MeshTexture==-1)
-        {
-			BindTexture(BITMAP_CHROME6);
-        }
-        else if((RenderFlag&RENDER_CHROME)==RENDER_CHROME && MeshTexture==-1)
-			BindTexture(BITMAP_CHROME);
-		else if((RenderFlag&RENDER_METAL)==RENDER_METAL && MeshTexture==-1)
-			BindTexture(BITMAP_SHINY);
-		else
-			BindTexture(Texture);
-	}	
+        BindTexture(ResolveChromeMetalTextureIndex(RenderFlag, MeshTexture, Texture));
+	}
 	else if(BlendMesh<=-2 || m->Texture == BlendMesh)
 	{
     	Render = RENDER_TEXTURE;
@@ -2059,6 +2157,63 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 			// path would have used (BlendMesh/StreamMesh adjustments included).
 			const float* skinColor = EnableLight ? BodyLight : mobileConstantColor;
 
+			// Chrome/metal must sample BITMAP_CHROME/CHROME2/CHROME6/SHINY,
+			// not the mesh's own diffuse texture - see ResolveChromeMetalTextureIndex.
+			// Resolves to Texture (== pBitmap's own index) unchanged for every
+			// other Render mode, so this is safe to compute unconditionally.
+			const int skinTextureNumber =
+				Bitmaps[ResolveChromeMetalTextureIndex(RenderFlag, MeshTexture, Texture)].TextureNumber;
+
+			// Fold a pending excellent-item glow into this same draw instead of
+			// the caller issuing a separate RENDER_TEXTURE|RENDER_BRIGHT pass -
+			// see g_PendingGlowActive's declaration. Only valid for the same
+			// Render/suppression rule the old separate bright pass used.
+			if (g_PendingGlowActive && !g_InGlowFollowup && Render == RENDER_TEXTURE &&
+				pBitmap->Components != 4 && m->Texture != BlendMesh)
+			{
+				skinState.glowColor[0] = g_PendingGlowColor[0];
+				skinState.glowColor[1] = g_PendingGlowColor[1];
+				skinState.glowColor[2] = g_PendingGlowColor[2];
+				++g_PendingGlowConsumedCount;
+			}
+
+			// Fold a pending chrome/metal overlay into this same draw instead
+			// of the caller issuing a separate RENDER_CHROME|RENDER_BRIGHT pass
+			// afterward - see g_PendingChromeActive's declaration. No
+			// Components==4/BlendMesh suppression here: unlike the plain-bright
+			// pass, the CPU chrome+bright overlay call has no such early-return
+			// of its own to mirror (it resolves straight to RENDER_CHROME before
+			// any bright-only branch is reached).
+			//
+			// (This block was briefly disabled to bisect a reported texture
+			// flicker; that turned out to be a pre-existing negative-caching
+			// bug in CGlobalBitmap::GetTexture, unrelated to this path - the
+			// same flicker reproduced on a build predating all of this work.)
+			if (g_PendingChromeActive && !g_InChromeFollowup && !g_InOverlay2Followup && Render == RENDER_TEXTURE)
+			{
+				skinState.hasChromeOverlay = true;
+				skinState.chromeTextureId = static_cast<GLuint>(
+					Bitmaps[ResolveChromeMetalTextureIndex(g_PendingChromeRenderFlag, MeshTexture, Texture)].TextureNumber);
+				skinState.chromeBodyLight[0] = g_PendingChromeColor[0];
+				skinState.chromeBodyLight[1] = g_PendingChromeColor[1];
+				skinState.chromeBodyLight[2] = g_PendingChromeColor[2];
+				++g_PendingChromeConsumedCount;
+			}
+
+			// ...and the second stacked overlay (METAL on +9 and up) into the
+			// same draw as well, so a tier that used to cost base + chrome +
+			// metal = 3 full mesh passes now costs exactly one.
+			if (g_PendingOverlay2Active && !g_InOverlay2Followup && !g_InChromeFollowup && Render == RENDER_TEXTURE)
+			{
+				skinState.hasOverlay2 = true;
+				skinState.overlay2TextureId = static_cast<GLuint>(
+					Bitmaps[ResolveChromeMetalTextureIndex(g_PendingOverlay2RenderFlag, MeshTexture, Texture)].TextureNumber);
+				skinState.overlay2BodyLight[0] = g_PendingOverlay2Color[0];
+				skinState.overlay2BodyLight[1] = g_PendingOverlay2Color[1];
+				skinState.overlay2BodyLight[2] = g_PendingOverlay2Color[2];
+				++g_PendingOverlay2ConsumedCount;
+			}
+
 			GL_DrawSkinnedMesh(
 				m->GpuSkinVertexCache.data(),
 				static_cast<int>(m->GpuSkinVertexCache.size() / 9),
@@ -2070,7 +2225,7 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 				g_SkinLightDirCache,
 				skinColor,
 				Alpha,
-				pBitmap->TextureNumber,
+				skinTextureNumber,
 				skinState);
 
 			meshTookGpuPath = true;
@@ -2091,6 +2246,27 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 		BlendMeshTexCoordV,
 		mobileConstantColor))
 	{
+		// Both guards on both checks: without this, an item that's both a
+		// pending-glow AND a pending-chrome candidate at once would have its
+		// glow follow-up's own recursive RenderMesh(...|RENDER_BRIGHT,...)
+		// call (which ALSO resolves to Render==RENDER_TEXTURE) re-trigger the
+		// chrome follow-up a second time for the same mesh - a real,
+		// confirmed double-draw (doubled chrome brightness, visible as a
+		// flash/flicker) since g_PendingChromeActive is still true and
+		// g_InChromeFollowup is still false inside that nested call.
+		if (g_PendingGlowActive && !g_InGlowFollowup && !g_InChromeFollowup && !g_InOverlay2Followup && Render == RENDER_TEXTURE &&
+			pBitmap->Components != 4 && m->Texture != BlendMesh)
+		{
+			ApplyPendingGlowFollowup(this, i, RenderFlag, Alpha, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+		}
+		if (g_PendingChromeActive && !g_InChromeFollowup && !g_InGlowFollowup && !g_InOverlay2Followup && Render == RENDER_TEXTURE)
+		{
+			ApplyPendingChromeFollowup(this, i, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+		}
+		if (g_PendingOverlay2Active && !g_InOverlay2Followup && !g_InChromeFollowup && !g_InGlowFollowup && Render == RENDER_TEXTURE)
+		{
+			ApplyPendingOverlay2Followup(this, i, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+		}
 #if defined(__ANDROID__) || defined(MU_IOS)
 		NotifyAdaptiveObjectRenderPassRendered(RenderFlag, Alpha);
 #endif
@@ -2207,6 +2383,24 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 		}
 	}
 	glEnd();
+
+	// See the matching comment at the TryRenderMeshDirectBatchMobile fallback
+	// above - both guards on both checks prevent the glow follow-up's own
+	// recursive RenderMesh(...|RENDER_BRIGHT,...) call from re-triggering a
+	// second, redundant chrome follow-up for the same mesh.
+	if (g_PendingGlowActive && !g_InGlowFollowup && !g_InChromeFollowup && !g_InOverlay2Followup && Render == RENDER_TEXTURE &&
+		pBitmap->Components != 4 && m->Texture != BlendMesh)
+	{
+		ApplyPendingGlowFollowup(this, i, RenderFlag, Alpha, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+	}
+	if (g_PendingChromeActive && !g_InChromeFollowup && !g_InGlowFollowup && !g_InOverlay2Followup && Render == RENDER_TEXTURE)
+	{
+		ApplyPendingChromeFollowup(this, i, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+	}
+	if (g_PendingOverlay2Active && !g_InOverlay2Followup && !g_InChromeFollowup && !g_InGlowFollowup && Render == RENDER_TEXTURE)
+	{
+		ApplyPendingOverlay2Followup(this, i, BlendMesh, BlendMeshLight, BlendMeshTexCoordU, BlendMeshTexCoordV, MeshTexture);
+	}
 
 #if defined(__ANDROID__) || defined(MU_IOS)
 	NotifyAdaptiveObjectRenderPassRendered(RenderFlag, Alpha);

@@ -197,9 +197,30 @@ void OBJECT::Initialize()
 	Next = NULL;
 	m_bAdaptivePoseReady = false;
 	m_iAdaptivePoseAction = -1;
+
+	m_pTransformCacheVertices = NULL;
+	m_pTransformCacheNormals = NULL;
+	m_pTransformCacheIntensity = NULL;
+	m_iTransformCacheVertexCapacity = 0;
+	m_iTransformCacheNormalCapacity = 0;
+	m_bTransformCacheReady = false;
+	// Reset unconditionally here - including for a Boids[]/pet slot being
+	// re-Initialize()'d in place for an unrelated new spawn. Only CreateObject()
+	// (the map-decoration factory) ever sets this true again afterward.
+	m_bTransformCacheProvenanceOk = false;
 }
 
 void OBJECT::Destroy()
 {
 	//m_BuffMap.ClearBuff();
+
+	delete [] m_pTransformCacheVertices;
+	delete [] m_pTransformCacheNormals;
+	delete [] m_pTransformCacheIntensity;
+	m_pTransformCacheVertices = NULL;
+	m_pTransformCacheNormals = NULL;
+	m_pTransformCacheIntensity = NULL;
+	m_iTransformCacheVertexCapacity = 0;
+	m_iTransformCacheNormalCapacity = 0;
+	m_bTransformCacheReady = false;
 }

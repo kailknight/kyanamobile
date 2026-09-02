@@ -20029,10 +20029,25 @@ static void RunAndroidGameFrame()
                 if ((nowSec - g_DriftLastLogSec) >= 10.0)
                 {
                     const double windowSec = nowSec - g_DriftLastLogSec;
+                    // Declared here, not inside a namespaced class member function -
+                    // RunAndroidGameFrame is a plain free function, so this is safe
+                    // (see NewUIManager.cpp's g_ShowPerfOverlay comment for the
+                    // landmine this avoids). Defined in ZzzObject.cpp.
+                    extern int g_ProfTransformCacheHits;
+                    extern int g_ProfTransformCacheMisses;
                     if (FILE* f = fopen("mu_drift_log.txt", "a"))
                     {
                         fprintf(f,
                             "t=%.0fs fps=%.1f scnAvg=%.1f worst=%.0f hitch=%d/%d obj=%.1f chr=%.1f ui=%.1f objN=%d draws=%d text=%.1f(ext%.1f out%.1f up%.1f)/%d overlay=%d"
+                            // Snapshot of the single most recent frame, not a
+                            // windowed average - Present() time is normally
+                            // stable frame to frame (near-zero if the GPU is
+                            // genuinely idle waiting on the CPU, or
+                            // consistently non-zero if it isn't), so one live
+                            // sample answers "is the GPU idle right now"
+                            // without needing a new accumulator.
+                            " pres%.2f pad%.2f"
+                            " tc[hit%d miss%d]"
                             " txt[hit%d miss%d coll%d]"
                             " path[im%d vaConv%d vaDir%d qIdx%d qExp%d]"
                             " site[bIM%d cli%d qi%d lva%d bIdx%d bTri%d skin%d]"
@@ -20055,6 +20070,9 @@ static void RunAndroidGameFrame()
                             g_DriftTextUpMs / (g_DriftFrames > 0 ? g_DriftFrames : 1),
                             (g_DriftFrames > 0) ? (g_DriftTextCalls / g_DriftFrames) : 0,
                             g_ShowPerfOverlay ? 1 : 0,
+                            static_cast<double>(g_ProfPresentTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfPadTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            g_ProfTransformCacheHits, g_ProfTransformCacheMisses,
                             // Last frame of the window rather than a sum: these
                             // are per-frame counts and a 10s total would just
                             // scale with frame count.
@@ -20095,6 +20113,8 @@ static void RunAndroidGameFrame()
                     g_DriftTextCalls = 0;
                     g_DriftTextHits = 0;
                     g_DriftTextMisses = 0;
+                    g_ProfTransformCacheHits = 0;
+                    g_ProfTransformCacheMisses = 0;
                 }
             }
 

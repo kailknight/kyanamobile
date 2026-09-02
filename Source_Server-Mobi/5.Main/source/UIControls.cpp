@@ -3250,6 +3250,26 @@ void CUIRenderTextOriginal::UploadText(int sx,int sy,int Width,int Height)
 	if (Width > 0 && Height > 0 && sx + Width > 0 && sy + Height > 0)
 	{
 		glBindTexture(GL_TEXTURE_2D, b->TextureNumber);
+		// This raw bind is exactly the class of bug UploadSection's own
+		// CachTexture assignment (further up this file) documents and fixes
+		// for the newer text-section-cache path - "the virtual pad's own PNG
+		// draws do it every frame... BindTexture can wrongly conclude the atlas
+		// is already bound and skip the bind". This OLD path (still the one
+		// that actually runs on every cache MISS - a new string never composed
+		// before) left CachTexture stale the same way, corrupting whatever
+		// draws next and happens to already match CachTexture's stale value -
+		// e.g. terrain re-binding its own tile texture, which then silently
+		// skips and samples the font atlas instead (flat white/wrong-colored
+		// tiles, self-correcting the next time the state realigns). BITMAP_FONT
+		// (not b->TextureNumber) because that's the Bitmaps[] index BindTexture
+		// itself would have recorded had this gone through the wrapper.
+		// #ifdef, not just relying on CachTexture existing on every platform
+		// (it does, ZzzOpenglUtil.cpp) - this file's own extern declaration of
+		// it is Android-only (see the includes above), matching the fact this
+		// class of bug is specific to gl_compat's mobile shadow-tracking path.
+#ifdef __ANDROID__
+		CachTexture = BITMAP_FONT;
+#endif
 		UploadFontBitmapRegion(b, sourceWidth, sourceHeight);
 		float TextureUWidth = (Width + 0.01f) / b->Width;
 		float TextureVHeight = (Height + 0.01f) / b->Height;

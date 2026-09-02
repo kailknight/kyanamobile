@@ -53,6 +53,14 @@
 #endif //PBG_ADD_NEWCHAR_MONK
 #include <algorithm>
 
+// TEMP profiling - remove before release, same convention as ZzzBMD.cpp's
+// g_ProfTransformCalls/Ticks. Counts BMD::Transform()-output cache hits/misses
+// for static decorations - see IsTransformCacheEligible below. A hit means
+// BMD::Transform() (and its per-vertex matrix/rotate/light-dot math) was
+// skipped entirely for that object this frame.
+int g_ProfTransformCacheHits = 0;
+int g_ProfTransformCacheMisses = 0;
+
 static bool ReadWholeFileBytes(FILE* fp, unsigned char*& outData, int& outSize)
 {
 	outData = NULL;
@@ -685,6 +693,185 @@ namespace
         default:
             return false;
         }
+    }
+
+    // v1 eligibility for BMD::Transform()-output caching. Deliberately
+    // conservative: single fixed pose, no bone matrix, no cloth, created only
+    // through the map-decoration factory (CreateObject). See the plan doc /
+    // commit message for the full reasoning - summarized inline below.
+    //
+    // NumAnimationKeys <= 1 (not Velocity == 0) is the real "pose never
+    // changes" signal: CreateObject defaults Velocity to 0.16f on nearly
+    // everything, so a literal Velocity==0 check would exclude almost the
+    // whole target population. BMD::PlayAnimation itself bails out - leaving
+    // AnimationFrame pinned - exactly when NumAnimationKeys <= 1
+    // (ZzzBMD.cpp), which is the actual mechanism this optimization needs.
+    inline bool IsTransformCacheEligible(const OBJECT* o)
+    {
+#if defined(__ANDROID__) || defined(MU_IOS)
+        if (o == nullptr || !o->m_bTransformCacheProvenanceOk)
+        {
+            return false; // excludes Boids[]/pet slots recycled in place
+        }
+
+        if (o->EnableBoneMatrix || o->BoneTransform != nullptr || o->m_pCloth != nullptr)
+        {
+            return false; // different transform path / mid-frame cloth overwrite
+        }
+
+        if (o->Kind == KIND_MONSTER || o->Kind == KIND_NPC || o->Kind == KIND_OPERATE ||
+            o->Kind == KIND_TRAP || o->Kind == KIND_PLAYER)
+        {
+            return false; // mirrors IsAdaptiveStaticSceneObject's Kind filter
+        }
+
+        if (IsLightEmittingObjectType(o->Type))
+        {
+            return false; // torches/candles/bonfires must keep animating every frame
+        }
+
+        if (o->Type < 0 || Models == nullptr)
+        {
+            return false;
+        }
+
+        const BMD* b = &Models[o->Type];
+        if (b->NumMeshs <= 0 || b->NumActions <= 0)
+        {
+            return false;
+        }
+        if (o->CurrentAction >= (unsigned short)b->NumActions)
+        {
+            return false;
+        }
+        if (b->Actions[o->CurrentAction].NumAnimationKeys > 1)
+        {
+            return false; // genuinely still animating - the real "static" signal
+        }
+
+        return true;
+#else
+        (void)o;
+        return false;
+#endif
+    }
+
+    inline void SnapshotTransformCacheKey(const OBJECT* o, bool translate, int select,
+                                           OBJECT_TRANSFORM_CACHE_KEY& outKey)
+    {
+        outKey.Type = o->Type;
+        VectorCopy(o->Position, outKey.Position);
+        VectorCopy(o->Angle, outKey.Angle);
+        VectorCopy(o->HeadAngle, outKey.HeadAngle);
+        outKey.Scale = o->Scale;
+        outKey.CurrentAction = o->CurrentAction;
+        outKey.AnimationFrame = o->AnimationFrame;
+        outKey.Translate = translate;
+        outKey.Select = select;
+        outKey.LightEnable = o->LightEnable;
+        outKey.ContrastEnable = o->ContrastEnable;
+    }
+
+    inline bool TransformCacheKeyMatches(const OBJECT* o, bool translate, int select)
+    {
+        const OBJECT_TRANSFORM_CACHE_KEY& k = o->m_TransformCacheKey;
+        return k.Type == o->Type &&
+            k.Position[0] == o->Position[0] && k.Position[1] == o->Position[1] && k.Position[2] == o->Position[2] &&
+            k.Angle[0] == o->Angle[0] && k.Angle[1] == o->Angle[1] && k.Angle[2] == o->Angle[2] &&
+            k.HeadAngle[0] == o->HeadAngle[0] && k.HeadAngle[1] == o->HeadAngle[1] && k.HeadAngle[2] == o->HeadAngle[2] &&
+            k.Scale == o->Scale &&
+            k.CurrentAction == o->CurrentAction &&
+            k.AnimationFrame == o->AnimationFrame &&
+            k.Translate == translate &&
+            k.Select == select &&
+            k.LightEnable == o->LightEnable &&
+            k.ContrastEnable == o->ContrastEnable;
+    }
+
+    // (Re)allocates the three flat cache arrays only if this object's model's
+    // real vertex/normal totals changed since last time - a no-op on every
+    // call after the first for a given Type. Sized to the sum of each mesh's
+    // real NumVertices/NumNormals (matching BMD::Transform's own loop bounds),
+    // never the wasteful MAX_VERTICES=15000 the shared scratch buffers use.
+    inline void EnsureTransformCacheCapacity(OBJECT* o, const BMD* b)
+    {
+        int totalV = 0, totalN = 0;
+        for (int i = 0; i < b->NumMeshs; ++i)
+        {
+            totalV += b->Meshs[i].NumVertices;
+            totalN += b->Meshs[i].NumNormals;
+        }
+
+        if (totalV != o->m_iTransformCacheVertexCapacity)
+        {
+            delete[] o->m_pTransformCacheVertices;
+            o->m_pTransformCacheVertices = (totalV > 0) ? new vec3_t[totalV] : nullptr;
+            o->m_iTransformCacheVertexCapacity = totalV;
+        }
+        if (totalN != o->m_iTransformCacheNormalCapacity)
+        {
+            delete[] o->m_pTransformCacheNormals;
+            delete[] o->m_pTransformCacheIntensity;
+            o->m_pTransformCacheNormals = (totalN > 0) ? new vec3_t[totalN] : nullptr;
+            o->m_pTransformCacheIntensity = (totalN > 0) ? new float[totalN] : nullptr;
+            o->m_iTransformCacheNormalCapacity = totalN;
+        }
+    }
+
+    // Called right after b->Transform() has just (re)computed the shared
+    // buffers for this object - copies that fresh output into the object's
+    // own private cache so a later matching frame can restore it cheaply.
+    inline void BuildTransformCache(OBJECT* o, const BMD* b, bool translate, int select)
+    {
+        EnsureTransformCacheCapacity(o, b);
+
+        int vOff = 0, nOff = 0;
+        for (int i = 0; i < b->NumMeshs; ++i)
+        {
+            const Mesh_t& m = b->Meshs[i];
+            if (m.NumVertices > 0)
+            {
+                memcpy(&o->m_pTransformCacheVertices[vOff], VertexTransform[i], sizeof(vec3_t) * m.NumVertices);
+            }
+            if (m.NumNormals > 0)
+            {
+                memcpy(&o->m_pTransformCacheNormals[nOff], NormalTransform[i], sizeof(vec3_t) * m.NumNormals);
+                memcpy(&o->m_pTransformCacheIntensity[nOff], IntensityTransform[i], sizeof(float) * m.NumNormals);
+            }
+            vOff += m.NumVertices;
+            nOff += m.NumNormals;
+        }
+
+        o->m_TransformCacheOBB = o->OBB;
+        SnapshotTransformCacheKey(o, translate, select, o->m_TransformCacheKey);
+        o->m_bTransformCacheReady = true;
+    }
+
+    // Called INSTEAD of b->Transform() on a cache hit - copies this object's
+    // own previously-cached output back into the shared buffers, so every
+    // existing same-frame reader (RenderMesh, RenderBodyShadow,
+    // RenderMeshTranslate, RenderMeshAlternative, CSideHair, ...) still sees
+    // freshly-populated data for this object, just cheaper to produce than
+    // re-running BMD::Transform's per-vertex matrix/rotate/light-dot math.
+    inline void RestoreTransformCache(OBJECT* o, const BMD* b)
+    {
+        int vOff = 0, nOff = 0;
+        for (int i = 0; i < b->NumMeshs; ++i)
+        {
+            const Mesh_t& m = b->Meshs[i];
+            if (m.NumVertices > 0)
+            {
+                memcpy(VertexTransform[i], &o->m_pTransformCacheVertices[vOff], sizeof(vec3_t) * m.NumVertices);
+            }
+            if (m.NumNormals > 0)
+            {
+                memcpy(NormalTransform[i], &o->m_pTransformCacheNormals[nOff], sizeof(vec3_t) * m.NumNormals);
+                memcpy(IntensityTransform[i], &o->m_pTransformCacheIntensity[nOff], sizeof(float) * m.NumNormals);
+            }
+            vOff += m.NumVertices;
+            nOff += m.NumNormals;
+        }
+        o->OBB = o->m_TransformCacheOBB;
     }
 
     // The same latch for the crowd-pressure thresholds. These were bare
@@ -1413,7 +1600,30 @@ bool Calc_RenderObject(OBJECT *o,bool Translate,int Select, int ExtraMon)
 	}
 	else
 	{
-		b->Transform(BoneTransform,o->BoundingBoxMin,o->BoundingBoxMax,&o->OBB,Translate);
+		// Cache-and-restore for pose-stable static decorations - see
+		// IsTransformCacheEligible. Never skips writing the shared
+		// VertexTransform/NormalTransform/IntensityTransform buffers (that is
+		// what caused the black-polygon regression from the prior, uncommitted
+		// attempt, guarded against at ZzzBMD.cpp:416) - on a cache hit this
+		// just copies this object's own last-computed output back into those
+		// buffers instead of re-running BMD::Transform's per-vertex math.
+		const bool cacheEligible = IsTransformCacheEligible(o);
+		bool cacheHit = false;
+		if(cacheEligible && o->m_bTransformCacheReady && TransformCacheKeyMatches(o, Translate, Select))
+		{
+			RestoreTransformCache(o, b);
+			cacheHit = true;
+			++g_ProfTransformCacheHits;
+		}
+		if(!cacheHit)
+		{
+			b->Transform(BoneTransform,o->BoundingBoxMin,o->BoundingBoxMax,&o->OBB,Translate);
+			if(cacheEligible)
+			{
+				BuildTransformCache(o, b, Translate, Select);
+				++g_ProfTransformCacheMisses;
+			}
+		}
 	}
 
 	return true;
@@ -6318,6 +6528,12 @@ OBJECT *CreateObject(int Type,vec3_t Position,vec3_t Angle,float Scale)
 	OBJECT       *o  = new OBJECT;
 
 	o->Initialize();
+	// This factory is the only place that ever sets this true - see
+	// IsTransformCacheEligible/OBJECT_TRANSFORM_CACHE_KEY. It marks "this
+	// OBJECT* has new/delete lifetime, never recycled in place for an
+	// unrelated spawn" (unlike Boids[]/pets, which re-Initialize() a fixed
+	// slot and therefore never reach here).
+	o->m_bTransformCacheProvenanceOk = true;
 
 	if(ob->Head == NULL)
 	{
@@ -11285,6 +11501,75 @@ void NextGradeObjectRender(CHARACTER* c)
 }
 extern float g_Luminosity;
 
+// Pending-glow fusion state (mesh-pass collapse, Phase A) - defined in
+// ZzzBMD.cpp, consumed by BMD::RenderMesh. See that file's declaration
+// comment; set/cleared here in RenderPartObjectEffect only.
+extern bool g_PendingGlowActive;
+extern vec3_t g_PendingGlowColor;
+extern int g_PendingGlowConsumedCount;
+
+// Pending chrome/metal overlay fusion state (mesh-pass collapse, Phase B) -
+// same shape as the glow state above, defined in ZzzBMD.cpp; set/cleared
+// here, in System 1's tier branches below only.
+extern bool g_PendingChromeActive;
+extern int g_PendingChromeRenderFlag;
+extern float g_PendingChromeAlpha;
+extern vec3_t g_PendingChromeColor;
+extern int g_PendingChromeConsumedCount;
+
+// Second stacked overlay slot (the METAL pass on +9 and up), same contract.
+extern bool g_PendingOverlay2Active;
+extern int g_PendingOverlay2RenderFlag;
+extern float g_PendingOverlay2Alpha;
+extern vec3_t g_PendingOverlay2Color;
+extern int g_PendingOverlay2ConsumedCount;
+void PartObjectColor(int Type,float Alpha,float Bright,vec3_t Light,bool ExtraMon);
+
+// Mesh-pass collapse Phase B: which equipped items are safe to fuse a chrome
+// overlay into the base pass for. Deliberately restricted to ordinary
+// armor-set pieces (helm/armor/pants/gloves/boots) - weapons, wings,
+// potions, and helper items each have dozens of hand-tuned per-Type render
+// sequences in RenderPartObjectBody and/or RenderPartObjectBodyColor that
+// don't take either function's generic default path, so fusing those would
+// mean reproducing that special-casing here too. The indices excluded below
+// are exactly the ones where either function diverges from its generic
+// default REGARDLESS of b->HideSkin (full audit: mesh-pass-collapse plan
+// doc). Every other ordinary HELM/ARMOR/PANTS/GLOVES/BOOTS index has special
+// cases in at most one function, and only when b->HideSkin==true - which
+// live characters never are (RenderPartObject's only HideSkin=true callers
+// are ground-dropped items, inventory icons, and skill-effect previews,
+// never a rendered character) - checked again at the call site via
+// b->HideSkin as a defensive runtime guard, not just an assumption.
+inline bool IsChromeFuseEligibleArmorType(int Type)
+{
+	if (Type >= MODEL_HELM && Type < MODEL_ARMOR)
+	{
+		const int idx = Type - MODEL_HELM;
+		return idx!=49 && idx!=50 && idx!=53 && idx!=59 && idx!=60 && idx!=61 && idx!=73;
+	}
+	if (Type >= MODEL_ARMOR && Type < MODEL_PANTS)
+	{
+		const int idx = Type - MODEL_ARMOR;
+		return idx!=15 && idx!=20 && idx!=23 && idx!=59 && idx!=60 && idx!=61 && idx!=73;
+	}
+	if (Type >= MODEL_PANTS && Type < MODEL_GLOVES)
+	{
+		const int idx = Type - MODEL_PANTS;
+		return idx!=15 && idx!=20 && idx!=23;
+	}
+	if (Type >= MODEL_GLOVES && Type < MODEL_BOOTS)
+	{
+		const int idx = Type - MODEL_GLOVES;
+		return idx!=15 && idx!=20 && idx!=23;
+	}
+	if (Type >= MODEL_BOOTS && Type < MODEL_WING)
+	{
+		const int idx = Type - MODEL_BOOTS;
+		return idx!=15 && idx!=20 && idx!=23 && idx!=73;
+	}
+	return false; // weapon/wing/potion/helper/etc. - never fused in v1
+}
+
 void RenderPartObjectEffect(OBJECT *o,int Type,vec3_t Light,float Alpha,int ItemLevel,int Option1,int ExtOption,int Select,int RenderType)
 {	
 	
@@ -12064,6 +12349,48 @@ void RenderPartObjectEffect(OBJECT *o,int Type,vec3_t Light,float Alpha,int Item
 		}
 	}
 	
+	// Pending-glow fusion (mesh-pass collapse, Phase A): compute the same
+	// "excellent item" glow eligibility/colour the code below (at the
+	// original g_pOption->GetRenderLevel()==0 check and after) already
+	// computes, but BEFORE the base pass below draws, so BMD::RenderMesh can
+	// fold it into the base draw instead of this function issuing a separate
+	// full second RenderBody(RENDER_TEXTURE|RENDER_BRIGHT,...) pass over
+	// every mesh afterward. Safe to evaluate this early specifically here -
+	// not any earlier in this function - because everything between here and
+	// the original check below (the Luminosity/Level/debuff dispatch just
+	// below, ending at the "if(g_pOption->GetRenderLevel()==0) return" a
+	// couple hundred lines down) has no early `return` of its own, so
+	// reaching this point already guarantees reaching that check. The many
+	// Type-specific branches earlier in this function (MODEL_SPEAR+9,
+	// MODEL_POTION+27/63/52, etc.) are NOT covered - some of those `return`
+	// before ever reaching the original check, so hoisting any earlier would
+	// wrongly add glow to items that never receive it today; those keep
+	// their current, unmodified (unfused) behaviour.
+	bool bExcellentGlowEligible = false;
+	vec3_t excellentGlowColor = { 0.f, 0.f, 0.f };
+	if ( g_pOption->GetRenderLevel() != 0
+	  && !g_isCharacterBuff(o, eDeBuff_Harden) && !g_isCharacterBuff(o, eBuff_Cloaking)
+	  && !g_isCharacterBuff(o, eDeBuff_CursedTempleRestraint)
+	  && !(!g_pNewUISystem->GetUI_NewOptionWindow()->OnOffGrap[g_pNewUISystem->GetUI_NewOptionWindow()->eExcellentEffect] && SceneFlag == MAIN_SCENE)
+	  && (Option1&63)>0 && ( o->Type<MODEL_WING || o->Type>MODEL_WING+6 ) && o->Type!=MODEL_HELPER+30
+		&& (o->Type<MODEL_WING+36 || o->Type>MODEL_WING+43)
+		&& !gCustomWing.CheckCustomWingByItem(o->Type - MODEL_ITEM)
+		&& ( o->Type < MODEL_WING+130 || MODEL_WING+134 < o->Type )
+#ifdef PBG_ADD_NEWCHAR_MONK_ITEM
+		&& !(o->Type>=MODEL_WING+49 && o->Type<=MODEL_WING+50)
+		&& (o->Type!=MODEL_WING+135)
+#endif //PBG_ADD_NEWCHAR_MONK_ITEM
+		)
+	{
+		float lum = sinf(WorldTime*0.002f)*0.5f+0.5f;
+		Vector(lum, lum*0.3f, 1.f-lum, excellentGlowColor);
+		bExcellentGlowEligible = true;
+
+		g_PendingGlowActive = true;
+		VectorCopy(excellentGlowColor, g_PendingGlowColor);
+		g_PendingGlowConsumedCount = 0;
+	}
+
 	if(!o->EnableShadow)
 	{
 		float Luminosity = 1.f;
@@ -12178,73 +12505,172 @@ void RenderPartObjectEffect(OBJECT *o,int Type,vec3_t Light,float Alpha,int Item
 		}
 		else if(g_pOption->GetRenderLevel())
         {
+			// Mesh-pass collapse Phase B: every tier below has exactly one
+			// overlay call carrying RENDER_CHROME|RENDER_BRIGHT (position
+			// varies - first at +7-10, last at +11-15) - fold that ONE call
+			// into the base pass's own GPU draw when eligible, and skip the
+			// separate call afterward. METAL/CHROME2/CHROME4 overlays (+9
+			// and up) are left as separate, unmodified calls in v1 - only
+			// ever one overlay is fused per mesh. See
+			// IsChromeFuseEligibleArmorType for why this is scoped to
+			// ordinary armor-set pieces only.
+			const bool bChromeFuseEligible = IsChromeFuseEligibleArmorType(Type) && !b->HideSkin;
+			auto SetupChromeFuse = [&](int chromeRenderFlag)
+			{
+				if (!bChromeFuseEligible) return;
+				g_PendingChromeActive = true;
+				g_PendingChromeRenderFlag = chromeRenderFlag;
+				g_PendingChromeAlpha = Alpha;
+				PartObjectColor(Type, Alpha, 1.f, g_PendingChromeColor, (chromeRenderFlag&RENDER_EXTRA)?true:false);
+				g_PendingChromeConsumedCount = 0;
+			};
+			// Second slot, for the METAL overlay every +9-and-up tier stacks on
+			// top of its CHROME one - so those tiers collapse from three full
+			// mesh passes (base + chrome + metal) down to one.
+			auto SetupOverlay2Fuse = [&](int overlayRenderFlag)
+			{
+				if (!bChromeFuseEligible) return;
+				g_PendingOverlay2Active = true;
+				g_PendingOverlay2RenderFlag = overlayRenderFlag;
+				g_PendingOverlay2Alpha = Alpha;
+				PartObjectColor(Type, Alpha, 1.f, g_PendingOverlay2Color, (overlayRenderFlag&RENDER_EXTRA)?true:false);
+				g_PendingOverlay2ConsumedCount = 0;
+			};
+
 		    if(Level < 8 && g_pOption->GetRenderLevel() >= 1)  //  +7
 		    {
 			    Vector(Light[0]*0.8f,Light[1]*0.8f,Light[2]*0.8f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT);
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
-			    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT,1.f);
+			    if(g_PendingChromeConsumedCount==0) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT,1.f);
+				g_PendingChromeActive = false;
 		    }
 		    else if(Level < 9 && g_pOption->GetRenderLevel() >= 1)  //  +8
 		    {
 			    Vector(Light[0]*0.8f,Light[1]*0.8f,Light[2]*0.8f,b->BodyLight);
-                RenderPartObjectBody(b,o,Type,Alpha,RenderType);	
-			    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT,1.f);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT);
+                RenderPartObjectBody(b,o,Type,Alpha,RenderType);
+			    if(g_PendingChromeConsumedCount==0) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT,1.f);
+				g_PendingChromeActive = false;
 		    }
             else if(Level < 10 && g_pOption->GetRenderLevel() >= 2) //  +9
             {
                 Vector(Light[0]*0.9f,Light[1]*0.9f,Light[2]*0.9f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
+				SetupOverlay2Fuse(RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
-	    	    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-			    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				// Snapshot and clear before the fallbacks, so no pending state
+				// is live during them (they resolve to RENDER_CHROME and so
+				// cannot re-trigger fusion, but this keeps that independent of
+				// mode-resolution details). Original draw order is preserved:
+				// whatever wasn't fused still draws chrome-then-metal on top.
+				{
+					const bool bChromeDone = (g_PendingChromeConsumedCount > 0);
+					const bool bOverlay2Done = (g_PendingOverlay2ConsumedCount > 0);
+					g_PendingChromeActive = false;
+					g_PendingOverlay2Active = false;
+					if(!bChromeDone) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bOverlay2Done) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				}
             }
 		    else if(Level < 11 && g_pOption->GetRenderLevel() >= 2) //  +10
 		    {
 			    Vector(Light[0]*0.9f,Light[1]*0.9f,Light[2]*0.9f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
+				SetupOverlay2Fuse(RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
-	    	    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-			    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				{
+					const bool bChromeDone = (g_PendingChromeConsumedCount > 0);
+					const bool bOverlay2Done = (g_PendingOverlay2ConsumedCount > 0);
+					g_PendingChromeActive = false;
+					g_PendingOverlay2Active = false;
+					if(!bChromeDone) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bOverlay2Done) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				}
 		    }
             else if(Level < 12 && g_pOption->GetRenderLevel() >= 3) //  +11
             {
 			    Vector(Light[0]*0.9f,Light[1]*0.9f,Light[2]*0.9f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
+				SetupOverlay2Fuse(RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
-	    	    RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME2|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-			    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-	    	    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				{
+					const bool bChromeDone = (g_PendingChromeConsumedCount > 0);
+					const bool bOverlay2Done = (g_PendingOverlay2ConsumedCount > 0);
+					g_PendingChromeActive = false;
+					g_PendingOverlay2Active = false;
+					// CHROME2 is never fused - it stays a separate call. Every
+					// overlay in this tier is additive with depth-write off, so
+					// folding chrome/metal into the base draw and leaving this
+					// one to draw after them is order-independent for the final
+					// colour.
+					RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME2|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bOverlay2Done) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bChromeDone) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				}
             }
             else if(Level < 13 && g_pOption->GetRenderLevel() >= 3) //  +12
             {
 			    Vector(Light[0]*0.9f,Light[1]*0.9f,Light[2]*0.9f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
+				SetupOverlay2Fuse(RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
-	    	    RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME2|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-			    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-	    	    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				{
+					const bool bChromeDone = (g_PendingChromeConsumedCount > 0);
+					const bool bOverlay2Done = (g_PendingOverlay2ConsumedCount > 0);
+					g_PendingChromeActive = false;
+					g_PendingOverlay2Active = false;
+					// CHROME2 is never fused - it stays a separate call. Every
+					// overlay in this tier is additive with depth-write off, so
+					// folding chrome/metal into the base draw and leaving this
+					// one to draw after them is order-independent for the final
+					// colour.
+					RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME2|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bOverlay2Done) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bChromeDone) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				}
             }
             else if(Level < 14 && g_pOption->GetRenderLevel() >= 4) //  +13
             {
 			    Vector(Light[0]*0.9f,Light[1]*0.9f,Light[2]*0.9f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
+				SetupOverlay2Fuse(RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
-                RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME4|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-			    RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-				RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				{
+					const bool bChromeDone = (g_PendingChromeConsumedCount > 0);
+					const bool bOverlay2Done = (g_PendingOverlay2ConsumedCount > 0);
+					g_PendingChromeActive = false;
+					g_PendingOverlay2Active = false;
+					// CHROME4 is never fused - it resolves to its own
+					// Render==RENDER_CHROME4, which the GPU skin path excludes
+					// outright - so it stays a separate call. All additive with
+					// depth-write off, so the reorder is colour-equivalent.
+					RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME4|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bOverlay2Done) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+					if(!bChromeDone) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				}
             }
             else if(Level < 15 && g_pOption->GetRenderLevel() >= 4) //  +14
             {
 
 				Vector(Light[0]*0.9f,Light[1]*0.9f,Light[2]*0.9f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
                 RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME4|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
 				RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-				RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				if(g_PendingChromeConsumedCount==0) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				g_PendingChromeActive = false;
             }
             else if(Level < 16 && g_pOption->GetRenderLevel() >= 4) //  +15
             {
-				
+
 				Vector(Light[0]*0.9f,Light[1]*0.9f,Light[2]*0.9f,b->BodyLight);
+				SetupChromeFuse(RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA));
                 RenderPartObjectBody(b,o,Type,Alpha,RenderType);
                 RenderPartObjectBodyColor2(b,o,Type,1.f,RENDER_CHROME4|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
 				RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_METAL|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
-				RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				if(g_PendingChromeConsumedCount==0) RenderPartObjectBodyColor(b,o,Type,Alpha,RENDER_CHROME|RENDER_BRIGHT|(RenderType&RENDER_EXTRA),1.f);
+				g_PendingChromeActive = false;
             }
             else
             {
@@ -12259,58 +12685,59 @@ void RenderPartObjectEffect(OBJECT *o,int Type,vec3_t Light,float Alpha,int Item
         }
 
 
-		if(g_pOption->GetRenderLevel() == 0) 
+		if(g_pOption->GetRenderLevel() == 0)
 		{
+			g_PendingGlowActive = false;
 			return;
 		}
-        
-        if ( !g_isCharacterBuff(o, eDeBuff_Harden) && !g_isCharacterBuff(o, eBuff_Cloaking) 
+
+        if ( !g_isCharacterBuff(o, eDeBuff_Harden) && !g_isCharacterBuff(o, eBuff_Cloaking)
 		  && !g_isCharacterBuff(o, eDeBuff_CursedTempleRestraint))
         {
-			if (!g_pNewUISystem->GetUI_NewOptionWindow()->OnOffGrap[g_pNewUISystem->GetUI_NewOptionWindow()->eExcellentEffect] && SceneFlag == MAIN_SCENE) return;
-		    if ( (Option1&63)>0 && ( o->Type<MODEL_WING || o->Type>MODEL_WING+6 ) && o->Type!=MODEL_HELPER+30
-				&& (o->Type<MODEL_WING+36 || o->Type>MODEL_WING+43)
-				&& !gCustomWing.CheckCustomWingByItem(o->Type - MODEL_ITEM)
-				&& ( o->Type < MODEL_WING+130 || MODEL_WING+134 < o->Type )
-#ifdef PBG_ADD_NEWCHAR_MONK_ITEM
-				&& !(o->Type>=MODEL_WING+49 && o->Type<=MODEL_WING+50)
-				&& (o->Type!=MODEL_WING+135)
-#endif //PBG_ADD_NEWCHAR_MONK_ITEM
-				)
+			if (!g_pNewUISystem->GetUI_NewOptionWindow()->OnOffGrap[g_pNewUISystem->GetUI_NewOptionWindow()->eExcellentEffect] && SceneFlag == MAIN_SCENE) { g_PendingGlowActive = false; return; }
+		    if ( bExcellentGlowEligible )
 		    {
-				Luminosity = sinf(WorldTime*0.002f)*0.5f+0.5f;
-				Vector(Luminosity,Luminosity*0.3f,1.f-Luminosity,b->BodyLight);
-				Alpha = 1.f;
-				if (b->HideSkin && MODEL_HELM+39 <= o->Type && MODEL_HELM+44 >= o->Type)
+				// Mesh-pass collapse Phase A: if BMD::RenderMesh already fused
+				// this glow into the base pass above (g_PendingGlowConsumedCount
+				// > 0), skip this separate second pass entirely - it would just
+				// double the glow. Falls back to drawing it here, exactly as
+				// before, for anything fusion didn't reach (e.g. every mesh
+				// resolved to chrome/colour rather than plain texture).
+				if (g_PendingGlowConsumedCount == 0)
 				{
-					int anMesh[6] = { 2, 1, 0, 2, 1, 2 };
-					b->RenderMesh(anMesh[o->Type-(MODEL_HELM+39)], RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
-				}
+					VectorCopy(excellentGlowColor, b->BodyLight);
+					Alpha = 1.f;
+					if (b->HideSkin && MODEL_HELM+39 <= o->Type && MODEL_HELM+44 >= o->Type)
+					{
+						int anMesh[6] = { 2, 1, 0, 2, 1, 2 };
+						b->RenderMesh(anMesh[o->Type-(MODEL_HELM+39)], RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
+					}
 #ifdef PBG_ADD_NEWCHAR_MONK_ITEM
-				else if(Type == MODEL_HELM+59 || Type == MODEL_HELM+60)
-				{
-					b->RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
-				}
-				else if(Type == MODEL_HELM+61)
-				{
-					b->RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
-				}
-				else if(Type == MODEL_ARMOR+59)
-				{
-					b->RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
-				}
-				else if(Type == MODEL_ARMOR+60)
-				{
-					b->RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
-				}
-				else if(Type == MODEL_ARMOR+61)
-				{
-					b->RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
-				}
+					else if(Type == MODEL_HELM+59 || Type == MODEL_HELM+60)
+					{
+						b->RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
+					}
+					else if(Type == MODEL_HELM+61)
+					{
+						b->RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
+					}
+					else if(Type == MODEL_ARMOR+59)
+					{
+						b->RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
+					}
+					else if(Type == MODEL_ARMOR+60)
+					{
+						b->RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
+					}
+					else if(Type == MODEL_ARMOR+61)
+					{
+						b->RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
+					}
 #endif //PBG_ADD_NEWCHAR_MONK_ITEM
-				else
-				{
-					b->RenderBody(RENDER_TEXTURE|RENDER_BRIGHT,Alpha,o->BlendMesh,o->BlendMeshLight,o->BlendMeshTexCoordU,o->BlendMeshTexCoordV);
+					else
+					{
+						b->RenderBody(RENDER_TEXTURE|RENDER_BRIGHT,Alpha,o->BlendMesh,o->BlendMeshLight,o->BlendMeshTexCoordU,o->BlendMeshTexCoordV);
+					}
 				}
 		    }
             else if ( ((ExtOption%0x04)==EXT_A_SET_OPTION || (ExtOption%0x04)==EXT_B_SET_OPTION ))
@@ -12323,6 +12750,7 @@ void RenderPartObjectEffect(OBJECT *o,int Type,vec3_t Light,float Alpha,int Item
     	    	RenderPartObjectBodyColor2(b,o,Type,Alpha,RENDER_CHROME3|RENDER_BRIGHT,1.f);
             }
         }
+		g_PendingGlowActive = false;
 	}
 #ifndef CAMERA_TEST
 	else

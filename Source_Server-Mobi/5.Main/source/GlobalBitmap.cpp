@@ -488,7 +488,23 @@ BITMAP_t* CGlobalBitmap::GetTexture(GLuint uiBitmapIndex)
 		type_bitmap_map::iterator mi = m_mapBitmap.find(uiBitmapIndex);
 		if(mi != m_mapBitmap.end())
 			pBitmap = (*mi).second;
-		m_BitmapCache.Add(uiBitmapIndex, pBitmap);
+		// Only cache POSITIVE lookups - matching FindTexture() below, which
+		// already guards this the same way.
+		//
+		// Caching the miss poisoned this index permanently: Add(index, NULL)
+		// stores the m_pNullBitmap sentinel in the quick-cache slot, and
+		// CBitmapCache::Find then reports that slot as FOUND (returns true
+		// with *ppBitmap = NULL). On every later call this branch is skipped
+		// entirely, so m_mapBitmap is never re-checked even once the texture
+		// has finished loading - the lookup falls through to the s_Error
+		// fallback below, whose TextureNumber is 0, and binding texture 0
+		// draws untextured (white). That is the "grass goes white while
+		// walking, then recovers" bug: terrain/grass indices get queried
+		// around the moment their map's textures are still loading (there is
+		// a dedicated QUICK_CACHE_MAPGRASS bucket), get negatively cached,
+		// and only recover when something clears the slot.
+		if(pBitmap != NULL)
+			m_BitmapCache.Add(uiBitmapIndex, pBitmap);
 	}
 	if(NULL == pBitmap)
 	{

@@ -17,6 +17,15 @@ using namespace SEASON3B;
 // the FPS overlay in ZzzScene.cpp.
 char g_ProfUiTopWindows[176] = "uiwin -";
 
+// Declared here at file scope, not inside CNewUIManager::Render()'s body -
+// android_main.cpp's g_ShowPerfOverlay is a plain global, but CNewUIManager
+// is a member of namespace SEASON3B, and an unqualified extern declared
+// inside one of its member function bodies resolves into that enclosing
+// namespace on this toolchain (linked as SEASON3B::g_ShowPerfOverlay, which
+// does not exist) rather than the real global - this was a real link failure
+// on the Android build, not just a style choice.
+extern bool g_ShowPerfOverlay;
+
 namespace
 {
 	// typeid().name() gives the Itanium mangled name, e.g.
@@ -266,7 +275,8 @@ bool SEASON3B::CNewUIManager::Render()
 	// this timing/RTTI/snprintf block used to run every frame on every Android
 	// build regardless of whether the overlay was ever shown, with g_ProfUiTopWindows
 	// written but never read by anything except that same gated overlay draw.
-	extern bool g_ShowPerfOverlay;
+	// (g_ShowPerfOverlay is declared extern at file scope above, not here -
+	// see that declaration's comment for why it has to be there.)
 	const bool bProfileThisFrame = g_ShowPerfOverlay;
 	double dbgTopMs[3] = { 0.0, 0.0, 0.0 };
 	const char* dbgTopName[3] = { "-", "-", "-" };

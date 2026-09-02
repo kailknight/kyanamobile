@@ -40,7 +40,17 @@ SEASON3B::CNewUIOptionWindow::CNewUIOptionWindow()
 	m_bWhisperSound = false;
 	m_bSlideHelp = true;
 	m_iVolumeLevel = 0;
+#ifdef __ANDROID__
+	// Mobile default is lower than PC's max (4): ZzzObject.cpp's Level clamp
+	// (GetRenderLevel()<4 => Level=min(Level,GetRenderLevel()*2+5)) means this
+	// caps every +11-15 item's glow at the +9/10 tier's 2-overlay treatment
+	// instead of the full 3-overlay one, on a CPU-bound client where each
+	// overlay is a full extra mesh pass. Items keep glowing - this doesn't
+	// disable glow entirely - it just trims the most expensive tier.
+	m_iRenderLevel = 2;
+#else
 	m_iRenderLevel = 4;
+#endif
 	for (int i = 0; i < eEndOnOffGrap; i++) this->OnOffGrap[i] = true;
 
 	//==Graphics

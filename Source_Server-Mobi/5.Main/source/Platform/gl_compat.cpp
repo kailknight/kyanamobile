@@ -2460,6 +2460,7 @@ layout(std140, binding = 0) uniform BoneBlock {
 };
 
 out mediump vec2 v_uv;
+out mediump vec2 v_chromeUv;
 out mediump float v_light;
 
 void main() {
@@ -2489,6 +2490,13 @@ void main() {
         v_uv = a_uv + u_texOffset;
     }
 
+    // Always computed (a couple of extra dot products - the GPU sits idle
+    // per this codebase's own diagnosis) so a fused chrome overlay (Phase B)
+    // has its env-map UV ready regardless of u_chromeMode, which stays
+    // exactly as it was for the existing standalone chrome/metal draws this
+    // shader already served before Phase B existed.
+    v_chromeUv = normalize(skinnedNormal).xy * 0.5 + 0.5 + u_texOffset;
+
     if (u_useVertexLight == 1) {
         // Matches BMD::Transform's per-vertex luminosity EXACTLY, including NOT
         // normalizing either vector: dot(rotatedNormal, LightPosition)*0.8+0.4,
@@ -2510,15 +2518,47 @@ layout(location = 8)  uniform sampler2D u_sampler;
 layout(location = 9)  uniform vec3 u_bodyLight;
 layout(location = 10) uniform float u_alpha;
 layout(location = 11) uniform int u_useTexture;   // 0 = untextured colour pass
+layout(location = 12) uniform vec3 u_glowColor;   // additive glow tint (0,0,0 = none)
+layout(location = 13) uniform sampler2D u_chromeSampler;
+layout(location = 14) uniform vec3 u_chromeBodyLight;
+layout(location = 15) uniform int u_hasChrome;    // 1 = fold a chrome/metal overlay into this draw
+layout(location = 16) uniform sampler2D u_overlay2Sampler;
+layout(location = 17) uniform vec3 u_overlay2BodyLight;
+layout(location = 18) uniform int u_hasOverlay2;  // 1 = fold a SECOND overlay (typically METAL) in too
 
 in vec2 v_uv;
+in vec2 v_chromeUv;
 in float v_light;
 out vec4 outFragColor;
 
 void main() {
     if (u_useTexture == 1) {
         vec4 texColor = texture(u_sampler, v_uv);
-        outFragColor = vec4(texColor.rgb * u_bodyLight * v_light, texColor.a * u_alpha);
+        // Equivalent to drawing the plain lit pass then a second additive
+        // RENDER_TEXTURE|RENDER_BRIGHT pass on top (glBlendFunc(GL_ONE,GL_ONE),
+        // depth write off) in one draw: both passes share the same v_light
+        // factor (RenderPartObjectEffect never changes LightEnable between
+        // them), so texColor*bodyLight*light + texColor*glow*light factors to
+        // texColor*(bodyLight+glow)*light - see BMD::RenderMesh's pending-glow
+        // comment for the depth-write equivalence argument.
+        vec3 rgb = texColor.rgb * (u_bodyLight * v_light + u_glowColor);
+        if (u_hasChrome == 1) {
+            // Mirrors a separate RENDER_CHROME|RENDER_BRIGHT pass drawn on top
+            // (same additive glBlendFunc(GL_ONE,GL_ONE), depth write off, per
+            // BMD::RenderMesh's chrome+bright branch) - see g_PendingChromeActive
+            // in ZzzBMD.cpp for the CPU-side equivalence argument.
+            vec4 chromeColor = texture(u_chromeSampler, v_chromeUv);
+            rgb += chromeColor.rgb * u_chromeBodyLight * v_light;
+        }
+        if (u_hasOverlay2 == 1) {
+            // Second stacked overlay (the METAL pass on +9 and up). Additive
+            // exactly like the first, and sampled at the same env-mapped UV -
+            // both variants resolve to Render==RENDER_CHROME and already share
+            // this one approximated formula on the GPU path.
+            vec4 overlay2Color = texture(u_overlay2Sampler, v_chromeUv);
+            rgb += overlay2Color.rgb * u_overlay2BodyLight * v_light;
+        }
+        outFragColor = vec4(rgb, texColor.a * u_alpha);
     } else {
         outFragColor = vec4(u_bodyLight * v_light, u_alpha);
     }
@@ -2662,6 +2702,21 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     glUniform3fv(9, 1, bodyLight);
     glUniform1f(10, alpha);
     glUniform1i(11, state.useTexture ? 1 : 0);
+    glUniform3fv(12, 1, state.glowColor);
+    glUniform1i(15, state.hasChromeOverlay ? 1 : 0);
+    if (state.hasChromeOverlay) {
+        glUniform3fv(14, 1, state.chromeBodyLight);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, state.chromeTextureId);
+        glUniform1i(13, 1);
+    }
+    glUniform1i(18, state.hasOverlay2 ? 1 : 0);
+    if (state.hasOverlay2) {
+        glUniform3fv(17, 1, state.overlay2BodyLight);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, state.overlay2TextureId);
+        glUniform1i(16, 2);
+    }
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureId);

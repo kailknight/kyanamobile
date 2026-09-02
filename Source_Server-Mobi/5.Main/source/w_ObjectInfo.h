@@ -112,6 +112,29 @@ typedef struct
 	vec3_t ZAxis;
 } OBB_t;
 
+// Snapshot of everything Calc_RenderObject feeds into BMD::Transform for one
+// call - see IsTransformCacheEligible/BuildTransformCache/RestoreTransformCache
+// in ZzzObject.cpp. If every field here still matches, the object's pose (and
+// therefore Transform's vertex/normal/intensity output) is guaranteed
+// identical to last time, so the cached output can be memcpy'd back in
+// instead of recomputed. Select/Translate/LightEnable/ContrastEnable are
+// included because Calc_RenderObject threads them into the same Transform()
+// call (Select in particular changes the global BoneScale Transform() reads).
+typedef struct
+{
+	int            Type;
+	vec3_t         Position;
+	vec3_t         Angle;
+	vec3_t         HeadAngle;
+	float          Scale;
+	unsigned short CurrentAction;
+	float          AnimationFrame;
+	bool           Translate;
+	int            Select;
+	bool           LightEnable;
+	bool           ContrastEnable;
+} OBJECT_TRANSFORM_CACHE_KEY;
+
 
 
 
@@ -250,6 +273,28 @@ public:
 	BOOL		m_bpcroom;
 	bool		m_bAdaptivePoseReady;
 	int			m_iAdaptivePoseAction;
+
+	// BMD::Transform() output cache - see IsTransformCacheEligible in
+	// ZzzObject.cpp. v1 scope: map-decoration objects only (see
+	// m_bTransformCacheProvenanceOk below). One flat allocation per array,
+	// sized to the sum of this object's model's Meshs[i].NumVertices/
+	// NumNormals (not MAX_VERTICES, which the shared VertexTransform/
+	// NormalTransform/IntensityTransform buffers waste per mesh slot).
+	vec3_t*		m_pTransformCacheVertices;
+	vec3_t*		m_pTransformCacheNormals;
+	float*		m_pTransformCacheIntensity;
+	int			m_iTransformCacheVertexCapacity;
+	int			m_iTransformCacheNormalCapacity;
+	OBB_t		m_TransformCacheOBB;
+	OBJECT_TRANSFORM_CACHE_KEY m_TransformCacheKey;
+	bool		m_bTransformCacheReady;
+	// Set true ONLY inside CreateObject() (the map-decoration factory).
+	// Reset false on every Initialize() call, including the in-place
+	// re-Initialize() that recycles Boids[]/pet slots for an unrelated new
+	// spawn - this is what excludes those populations structurally, rather
+	// than by an enumerable list, since a recycled slot's stale cache would
+	// otherwise show the PREVIOUS occupant's geometry.
+	bool		m_bTransformCacheProvenanceOk;
 	vec3_t		m_v3PrePos1;
 	vec3_t		m_v3PrePos2;
 #if(CB_ATTACK_HIDEN_PET)

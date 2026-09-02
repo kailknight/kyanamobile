@@ -218,6 +218,31 @@ struct GLSkinDrawState {
     bool  chromeMode = false;     // true  -> env-map uv from the skinned normal
     float texOffsetU = 0.0f;      // wave/scroll offset
     float texOffsetV = 0.0f;
+    // Additive "excellent item" glow tint, folded into the same draw instead
+    // of a separate second RENDER_TEXTURE|RENDER_BRIGHT pass over the same
+    // mesh (see RenderPartObjectEffect's pending-glow mechanism, ZzzBMD.cpp).
+    // (0,0,0) = no glow, matching every existing caller's default.
+    float glowColor[3] = {0.0f, 0.0f, 0.0f};
+    // Additive chrome/metal overlay, folded into the same draw instead of a
+    // separate second RENDER_CHROME|RENDER_BRIGHT pass (mesh-pass collapse,
+    // Phase B - see g_PendingChromeActive in ZzzBMD.cpp). hasChromeOverlay
+    // false (the default) costs nothing extra - the fragment shader skips
+    // the second texture fetch entirely.
+    bool  hasChromeOverlay = false;
+    GLuint chromeTextureId = 0;
+    float chromeBodyLight[3] = {0.0f, 0.0f, 0.0f};
+    // Second additive overlay slot, same idea. The tiers that stack overlays
+    // pair CHROME with METAL (+9 and up), and at the mobile RenderLevel
+    // default of 2 every high-tier item clamps into exactly that 2-overlay
+    // branch - so two slots collapse the whole sequence into one draw there.
+    // Both slots sample at the same env-mapped UV (v_chromeUv): CHROME and
+    // METAL both resolve to Render==RENDER_CHROME, and the GPU path already
+    // approximates all chrome variants with one generic env-map formula.
+    // A third overlay, or a GPU-ineligible variant (CHROME4/OIL), falls back
+    // to a separate follow-up draw instead of occupying a slot.
+    bool  hasOverlay2 = false;
+    GLuint overlay2TextureId = 0;
+    float overlay2BodyLight[3] = {0.0f, 0.0f, 0.0f};
 };
 
 void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
