@@ -10,6 +10,7 @@
 
 #include <GLES3/gl32.h>
 #include <stdint.h>
+#include <vector>
 
 // ── Must call once after GL context is created ─────────────────────────────
 void GL_Compat_Init();
@@ -83,6 +84,29 @@ void GL_Normal3fv(const float* v);
 void GL_DrawQuadsBulk(const float* vertexData, int quadCount);
 // Same but for triangles (3 verts per tri, no index buffer)
 void GL_DrawTrisBulk(const float* vertexData, int triCount);
+
+// Object-mesh material queue support. Object rendering measured ~37ms/frame in
+// a decoration-heavy scene, almost all of it draw-call + buffer-upload overhead
+// from ~530 draws: a mesh's texture differs from the previous mesh's, cutting
+// the pending batch, so nearly every mesh became its own draw. Those cuts are
+// WITHIN each object (its meshes use different textures), so the draws have to
+// be regrouped by material. The buckets and GL state live in ZzzBMD.cpp - the
+// same split ZzzLodTerrain.cpp's TerrainBatch uses - and these two entry points
+// supply the parts that need gl_compat internals (the modelview stack, and a
+// draw that does not re-apply it).
+int  GL_AppendMeshVertsBaked(std::vector<float>& out,
+                             const float* positions3,
+                             const float* lights3,
+                             const float* texcoords2,
+                             const short* vertexIndexBase,
+                             const short* normalIndexBase,
+                             const short* texCoordIndexBase,
+                             int triangleStrideBytes,
+                             int triangleCount,
+                             float alpha,
+                             float texOffsetU,
+                             float texOffsetV);
+void GL_DrawTrisBulkBaked(const float* vertexData, int triCount);
 
 // ── Debug stats ───────────────────────────────────────────────────────────
 void GL_GetDrawStats(int* drawCalls, int* vertices);  // returns counts since last reset

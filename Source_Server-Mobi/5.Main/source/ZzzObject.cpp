@@ -5172,6 +5172,8 @@ void RenderObjects()
 #if defined(__ANDROID__) || defined(MU_IOS)
     std::vector<std::pair<OBJECT*, float>> staticCandidates;
     staticCandidates.reserve(512);
+    // Start collecting opaque object meshes by material - see ObjMeshQueue_Begin.
+    ObjMeshQueue_Begin();
 #endif
     float   range = GetObjectInstanceFrustumRange(0.f);
     if( gMapManager.WorldActive==WD_10HEAVEN )
@@ -5442,6 +5444,10 @@ void RenderObjects()
     {
         DrawDecidedStaticObject(decision);
     }
+    // Issue the material queue's buckets - one draw per texture instead of one
+    // per mesh. Must happen before this function returns, while the projection
+    // and GL state this loop set up are still current.
+    ObjMeshQueue_Flush();
 #endif
     g_objectPerfSnapshot.renderTicks += static_cast<unsigned long long>(MU_MobilePerfNow() - renderTicksStart);
 }

@@ -199,6 +199,21 @@ typedef struct _Mesh_t
 
 } Mesh_t;
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+// Object-mesh material queue. Regroups object mesh draws by texture so they
+// issue one draw per material instead of one per mesh - object rendering
+// measured ~37ms/frame, almost entirely draw-call + upload overhead from ~530
+// draws cut apart by per-mesh texture changes. Opaque/alpha-tested lit meshes
+// only; blended and additive passes stay on the immediate path in submission
+// order. Bracket the object render loop with Begin/Flush.
+void ObjMeshQueue_Begin();
+bool ObjMeshQueue_Active();
+void ObjMeshQueue_Flush();
+bool ObjMeshQueue_Append(int textureIndex, bool alphaTest, int meshIndex,
+                         const Mesh_t& mesh, float alpha,
+                         float texOffsetU, float texOffsetV);
+#endif
+
 class BMD
 {
 public:

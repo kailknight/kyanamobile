@@ -18430,6 +18430,18 @@ unsigned long long g_ProfSceneTicks = 0;
 unsigned long long g_ProfPadTicks = 0;
 // TEMP profiling: RenderVirtualPad's share of g_ProfPadTicks (the rest is
 // RenderAndroidChatTabs). Remove once the pad cost is understood.
+extern unsigned long long g_ProfBatchAppendTicks;
+extern unsigned long long g_ProfBatchAppendVerts;
+// TEMP profiling: split of the object-render bucket, from counters
+// ObjectPerfSnapshot already collects but never reported.
+unsigned long long g_ProfObjBaseTicks = 0;
+unsigned long long g_ProfObjVisualTicks = 0;
+unsigned long long g_ProfObjAfterTicks = 0;
+int g_ProfObjRenderCandidates = 0;
+int g_ProfObjRenderRendered = 0;
+int g_ProfObjDistanceCulled = 0;
+int g_ProfObjBaseCalls = 0;
+int g_ProfObjVisualCalls = 0;
 unsigned long long g_ProfPadOnlyTicks = 0;
 unsigned long long g_ProfPresentTicks = 0;
 
@@ -19974,6 +19986,18 @@ static void RunAndroidGameFrame()
         // FPS overlay can read (see g_Prof* declarations above).
         g_ProfObjMoveTicks = static_cast<unsigned long long>(objectPerf.moveTicks);
         g_ProfObjRenderTicks = static_cast<unsigned long long>(objectPerf.renderTicks);
+        // TEMP profiling: obj measured ~36ms/frame (70% of the frame) while the
+        // per-vertex batch append inside it was only ~0.36ms, so the cost is
+        // elsewhere. These sub-timers are already collected - just never
+        // reported - and split it into base mesh / visual / after-character.
+        g_ProfObjBaseTicks = static_cast<unsigned long long>(objectPerf.renderBaseTicks);
+        g_ProfObjVisualTicks = static_cast<unsigned long long>(objectPerf.renderVisualTicks);
+        g_ProfObjAfterTicks = static_cast<unsigned long long>(objectPerf.renderAfterTicks);
+        g_ProfObjRenderCandidates = objectPerf.renderCandidates;
+        g_ProfObjRenderRendered = objectPerf.renderRendered;
+        g_ProfObjDistanceCulled = objectPerf.renderDistanceCulled;
+        g_ProfObjBaseCalls = objectPerf.renderBaseCalls;
+        g_ProfObjVisualCalls = objectPerf.visualCalls;
         g_ProfCharMoveTicks = static_cast<unsigned long long>(characterPerf.moveTicks);
         g_ProfCharRenderTicks = static_cast<unsigned long long>(characterPerf.renderTicks);
         g_ProfTerrainTicks =
@@ -20143,6 +20167,9 @@ static void RunAndroidGameFrame()
                             // without needing a new accumulator.
                             " pres%.2f pad%.2f padOnly%.2f padP[%.2f %.2f %.2f %.2f]"
                             " tbP[%.2f %.2f %.2f]"
+                            " batchApp[%.2f v%llu]"
+                            " objS[b%.1f v%.1f a%.1f]"
+                            " objC[cand%d rend%d cull%d bc%d vc%d]"
                             " tc[hit%d miss%d]"
                             " txt[hit%d miss%d coll%d]"
                             " path[im%d vaConv%d vaDir%d qIdx%d qExp%d]"
@@ -20176,6 +20203,13 @@ static void RunAndroidGameFrame()
                             static_cast<double>(g_ProfTopBarPartTicks[0]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
                             static_cast<double>(g_ProfTopBarPartTicks[1]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
                             static_cast<double>(g_ProfTopBarPartTicks[2]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfBatchAppendTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            g_ProfBatchAppendVerts,
+                            static_cast<double>(g_ProfObjBaseTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfObjVisualTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfObjAfterTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            g_ProfObjRenderCandidates, g_ProfObjRenderRendered, g_ProfObjDistanceCulled,
+                            g_ProfObjBaseCalls, g_ProfObjVisualCalls,
                             g_ProfTransformCacheHits, g_ProfTransformCacheMisses,
                             // Last frame of the window rather than a sum: these
                             // are per-frame counts and a 10s total would just
@@ -20219,6 +20253,10 @@ static void RunAndroidGameFrame()
                     g_DriftTextMisses = 0;
                     g_ProfTransformCacheHits = 0;
                     g_ProfTransformCacheMisses = 0;
+
+                    g_ProfBatchAppendTicks = 0;
+
+                    g_ProfBatchAppendVerts = 0;
                 }
             }
 

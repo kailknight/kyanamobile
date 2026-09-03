@@ -983,6 +983,11 @@ void GL_Compat_Shutdown() {
 // enclosing namespace and links to nothing).
 extern int CachTexture;
 
+// TEMP profiling: cost and vertex volume of the per-vertex CPU transform in
+// GL_BatchAppendIndexedTrianglesLitTex. Reset each drift-log window.
+unsigned long long g_ProfBatchAppendTicks = 0;
+unsigned long long g_ProfBatchAppendVerts = 0;
+
 void GL_InvalidateCachedGLState() {
     // Call this after any code OUTSIDE gl_compat.cpp makes raw GL calls that
     // change program/texture/buffer bindings or cap (enable/disable) state -
@@ -2327,7 +2332,13 @@ void GL_BatchAppendIndexedTrianglesLitTex(const float* positions3,
         return;
     }
 
+    // TEMP profiling: how much of the object-render bucket is this per-vertex
+    // CPU transform loop? Sets the ceiling for moving static meshes to a
+    // persistent VBO drawn with a GPU-side MVP, which removes this work.
+    const uint64_t profT0 = MU_MobilePerfNow();
+
     const int numVerts = triangleCount * 3;
+    g_ProfBatchAppendVerts += numVerts;
     if (s_hasBatch && s_batchPrimMode != GL_TRIANGLES) {
         FlushPendingImmediateBatch();
     }
@@ -2373,6 +2384,112 @@ void GL_BatchAppendIndexedTrianglesLitTex(const float* positions3,
     s_hasBatch = true;
     s_batchPrimMode = GL_TRIANGLES;
     ++s_vaConvertedDrawCalls;
+    g_ProfBatchAppendTicks += (MU_MobilePerfNow() - profT0);
+}
+
+// =============================================================================
+// Object-mesh material queue
+//
+// Object rendering measured ~37ms/frame in a decoration-heavy scene, of which
+// the per-vertex CPU transform was only ~0.36ms. The cost was ~530 GL draw
+// calls, each with its own vertex-buffer upload: a mesh's texture differs from
+// the previous mesh's, which cuts the pending immediate batch, so nearly every
+// mesh became its own draw (cut[tex] ~420/frame). Those cuts are WITHIN each
+// object - an object's meshes use different textures - so ordering objects by
+// model type does not help; the draws have to be regrouped by material.
+//
+// This collects eligible object mesh draws into per-texture buckets and issues
+// one draw per bucket, which is the same thing TerrainBatch_* already does for
+// terrain faces. Opaque draws are safe to reorder because they depth-test and
+// depth-write; they are flushed before the transparent list, which preserves
+// its original submission order (alpha blending is order-dependent).
+// =============================================================================
+// Appends the same per-vertex work GL_BatchAppendIndexedTrianglesLitTex does -
+// including baking the modelview, so meshes from different objects can share
+// one buffer - but into a caller-owned float array instead of the single
+// pending batch. The caller (ZzzBMD.cpp) keeps the per-texture buckets and
+// owns the GL state, exactly as ZzzLodTerrain.cpp's TerrainBatch does; this
+// side only supplies the vertex work, which needs the modelview stack.
+// Returns the number of vertices appended.
+int GL_AppendMeshVertsBaked(std::vector<float>& out,
+                            const float* positions3,
+                            const float* lights3,
+                            const float* texcoords2,
+                            const short* vertexIndexBase,
+                            const short* normalIndexBase,
+                            const short* texCoordIndexBase,
+                            int triangleStrideBytes,
+                            int triangleCount,
+                            float alpha,
+                            float texOffsetU,
+                            float texOffsetV)
+{
+    if (!positions3 || !lights3 || !texcoords2 ||
+        !vertexIndexBase || !normalIndexBase || !texCoordIndexBase ||
+        triangleStrideBytes <= 0 || triangleCount <= 0) {
+        return 0;
+    }
+
+    const int numVerts = triangleCount * 3;
+    const size_t oldFloats = out.size();
+    out.resize(oldFloats + static_cast<size_t>(numVerts) * 9);
+    IMVertex* dst = reinterpret_cast<IMVertex*>(out.data() + oldFloats);
+
+    const Mat4& mv = s_mvStack[s_mvDepth];
+    const float m00=mv[0], m10=mv[4], m20=mv[8],  m30=mv[12];
+    const float m01=mv[1], m11=mv[5], m21=mv[9],  m31=mv[13];
+    const float m02=mv[2], m12=mv[6], m22=mv[10], m32=mv[14];
+    const float vertexAlpha = (alpha >= 0.99f) ? 1.0f : alpha;
+
+    int outIdx = 0;
+    const uint8_t* vertexBytes = reinterpret_cast<const uint8_t*>(vertexIndexBase);
+    const uint8_t* normalBytes = reinterpret_cast<const uint8_t*>(normalIndexBase);
+    const uint8_t* texBytes = reinterpret_cast<const uint8_t*>(texCoordIndexBase);
+    for (int tri = 0; tri < triangleCount; ++tri) {
+        const short* vi = reinterpret_cast<const short*>(vertexBytes + static_cast<size_t>(tri) * triangleStrideBytes);
+        const short* ni = reinterpret_cast<const short*>(normalBytes + static_cast<size_t>(tri) * triangleStrideBytes);
+        const short* ti = reinterpret_cast<const short*>(texBytes + static_cast<size_t>(tri) * triangleStrideBytes);
+        for (int corner = 0; corner < 3; ++corner) {
+            const float* p = positions3 + static_cast<int>(vi[corner]) * 3;
+            const float* l = lights3 + static_cast<int>(ni[corner]) * 3;
+            const float* t = texcoords2 + static_cast<int>(ti[corner]) * 2;
+            IMVertex& v = dst[outIdx++];
+            v.x = m00*p[0] + m10*p[1] + m20*p[2] + m30;
+            v.y = m01*p[0] + m11*p[1] + m21*p[2] + m31;
+            v.z = m02*p[0] + m12*p[1] + m22*p[2] + m32;
+            v.r = l[0];
+            v.g = l[1];
+            v.b = l[2];
+            v.a = vertexAlpha;
+            v.u = t[0] + texOffsetU;
+            v.v = t[1] + texOffsetV;
+        }
+    }
+    return numVerts;
+}
+
+// Draws a caller-owned vertex array that ALREADY has the modelview baked in
+// (GL_AppendMeshVertsBaked above). GL_DrawTrisBulk cannot be used for this: it
+// applies the full MVP, which would transform the vertices a second time.
+void GL_DrawTrisBulkBaked(const float* vertexData, int triCount) {
+    if (!vertexData || triCount <= 0 || !s_prog || !s_vbo) return;
+
+    FlushPendingImmediateBatch(kFlushCauseFrame);
+
+    const GLsizei vertCount = triCount * 3;
+    const GLsizeiptr dataBytes = (GLsizeiptr)(vertCount * sizeof(IMVertex));
+
+    BindArrayBufferCached(s_vbo);
+    StreamVertexData(vertexData, dataBytes);
+
+    ApplyShaderStateCommon(true);   // modelview already baked into the verts
+
+    BindImmediateVertexAttribLayout();
+
+    BindElementArrayBufferCached(0);
+    glDrawArrays(GL_TRIANGLES, 0, vertCount);
+    ++s_drawCallCount; ++s_drawSite[5];
+    s_totalVertices += vertCount;
 }
 
 void GL_BatchAppendIndexedTrianglesConstColor(const float* positions3,

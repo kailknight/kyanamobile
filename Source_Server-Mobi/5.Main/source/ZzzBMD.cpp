@@ -1280,6 +1280,132 @@ void AppendMobileBatchColor(std::vector<float>& colors, float red, float green, 
 	colors.push_back(alpha);
 }
 
+}   // close the enclosing unnamed namespace opened well above: its functions
+    // are written at column 0, so it extends past this point, and definitions
+    // placed inside it get internal linkage that does not match the
+    // declarations in ZzzBMD.h. Reopened immediately after this block.
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+// Object-mesh material queue - see GL_AppendMeshVertsBaked in gl_compat.h for
+// why. Collects eligible opaque/alpha-tested object mesh draws into per-texture
+// buckets and issues one draw per bucket, instead of one draw per mesh.
+// Deliberately opaque-only: those depth-test and depth-write, so regrouping
+// them is safe, and drawing all of them before anything blended is the correct
+// order anyway. Blended/additive passes (chrome, bright) are left on the
+// existing immediate path, untouched and still in submission order.
+namespace
+{
+    struct ObjMeshBucket
+    {
+        int   textureIndex = -1;
+        bool  alphaTest = false;
+        std::vector<float> verts;   // 9 floats per vertex, modelview baked
+        int   vertCount = 0;
+    };
+
+    std::vector<ObjMeshBucket> g_objMeshBuckets;
+    bool g_objMeshQueueActive = false;
+}
+
+void ObjMeshQueue_Begin()
+{
+    for (ObjMeshBucket& b : g_objMeshBuckets)
+    {
+        b.verts.clear();
+        b.vertCount = 0;
+    }
+    g_objMeshQueueActive = true;
+}
+
+bool ObjMeshQueue_Active()
+{
+    return g_objMeshQueueActive;
+}
+
+void ObjMeshQueue_Flush()
+{
+    if (!g_objMeshQueueActive)
+    {
+        return;
+    }
+    g_objMeshQueueActive = false;
+
+    for (ObjMeshBucket& b : g_objMeshBuckets)
+    {
+        if (b.vertCount <= 0)
+        {
+            continue;
+        }
+        if (b.alphaTest)
+        {
+            EnableAlphaTest();
+        }
+        else
+        {
+            DisableAlphaBlend();
+        }
+        BindTexture(b.textureIndex);
+        GL_DrawTrisBulkBaked(b.verts.data(), b.vertCount / 3);
+        b.verts.clear();
+        b.vertCount = 0;
+    }
+}
+
+static ObjMeshBucket& ObjMeshQueue_GetBucket(int textureIndex, bool alphaTest)
+{
+    for (ObjMeshBucket& b : g_objMeshBuckets)
+    {
+        if (b.textureIndex == textureIndex && b.alphaTest == alphaTest)
+        {
+            return b;
+        }
+    }
+    ObjMeshBucket nb;
+    nb.textureIndex = textureIndex;
+    nb.alphaTest = alphaTest;
+    nb.verts.reserve(4096 * 9);
+    g_objMeshBuckets.push_back(std::move(nb));
+    return g_objMeshBuckets.back();
+}
+
+bool ObjMeshQueue_Append(int textureIndex, bool alphaTest, int meshIndex,
+                         const Mesh_t& mesh, float alpha,
+                         float texOffsetU, float texOffsetV)
+{
+    if (mesh.Triangles == nullptr || mesh.NumTriangles <= 0 ||
+        mesh.TexCoords == nullptr || mesh.NumTexCoords <= 0)
+    {
+        return false;
+    }
+
+    const Triangle_t& firstTriangle = mesh.Triangles[0];
+    ObjMeshBucket& bucket = ObjMeshQueue_GetBucket(textureIndex, alphaTest);
+    const int appended = GL_AppendMeshVertsBaked(
+        bucket.verts,
+        &VertexTransform[meshIndex][0][0],
+        &LightTransform[meshIndex][0][0],
+        &mesh.TexCoords[0].TexCoordU,
+        firstTriangle.VertexIndex,
+        firstTriangle.NormalIndex,
+        firstTriangle.TexCoordIndex,
+        static_cast<int>(sizeof(Triangle_t)),
+        mesh.NumTriangles,
+        alpha,
+        texOffsetU,
+        texOffsetV);
+    if (appended <= 0)
+    {
+        return false;
+    }
+    bucket.vertCount += appended;
+    return true;
+}
+#endif
+
+namespace
+{   // reopen the unnamed namespace closed before this block, so everything
+    // after it keeps exactly the linkage it had.
+
 bool TryRenderMeshDirectBatchMobile(int meshIndex,
 	const Mesh_t& mesh,
 	int renderMode,
@@ -2248,6 +2374,32 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 				skinState);
 
 			meshTookGpuPath = true;
+			NotifyAdaptiveObjectRenderPassRendered(RenderFlag, Alpha);
+			return;
+		}
+	}
+
+	// Route plain lit/textured opaque meshes into the per-texture material
+	// queue when it is collecting (see ObjMeshQueue_Begin). Restricted to the
+	// case whose GL state is exactly "opaque or alpha-tested, depth-write on":
+	// anything blended or additive (BRIGHT/DARK/LIGHTMAP) is order-dependent
+	// and stays on the immediate path.
+	const bool queueEligible =
+		ObjMeshQueue_Active() &&
+		Render == RENDER_TEXTURE &&
+		EnableLight &&
+		MeshTexture == -1 &&
+		(RenderFlag & (RENDER_BRIGHT | RENDER_DARK | RENDER_LIGHTMAP | RENDER_NODEPTH)) == 0 &&
+		m->TexCoords != nullptr && m->NumTexCoords > 0 &&
+		CanUseMobileDirectMeshBatch(*m, Render, RenderFlag);
+
+	if(queueEligible)
+	{
+		const bool wantAlphaTest = (Alpha < 0.99f) || (pBitmap->Components == 4);
+		if(ObjMeshQueue_Append(Texture, wantAlphaTest, i, *m, Alpha,
+			EnableWave ? BlendMeshTexCoordU : 0.0f,
+			EnableWave ? BlendMeshTexCoordV : 0.0f))
+		{
 			NotifyAdaptiveObjectRenderPassRendered(RenderFlag, Alpha);
 			return;
 		}
