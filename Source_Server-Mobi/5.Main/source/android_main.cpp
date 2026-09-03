@@ -13767,6 +13767,14 @@ void DrawVirtualRectOutline(float uiX, float uiY, float uiW, float uiH, float re
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Horizontal status bar (fill from left to right) 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
 // uiLeft/uiTop: UI-space top-left.  uiW/uiH: virtual width/height.
 // ratio: 0=empty, 1=full.
+// Borders queued by DrawVirtualBarH, emitted together by
+// DrawVirtualBarHFlushBorders so a run of bars costs one line block instead of
+// one per bar with a primitive-type flush between each.
+struct PendingBarBorder { float x0, y0, x1, y1; };
+static std::vector<PendingBarBorder> s_pendingBarBorders;
+
+void DrawVirtualBarHFlushBorders();
+
 void DrawVirtualBarH(float uiLeft, float uiTop, float uiW, float uiH, float ratio,
                      float fillR, float fillG, float fillB,
                      float bgR, float bgG, float bgB)
@@ -13799,15 +13807,42 @@ void DrawVirtualBarH(float uiLeft, float uiTop, float uiW, float uiH, float rati
         glEnd();
     }
 
-    // White border. Kept as a line loop - drawing it as thin quads to avoid the
-    // batch cut was measured a net loss; see DrawVirtualRectOutline's comment.
+    // White border - DEFERRED rather than drawn here. Backgrounds and fills are
+    // triangles, the border is lines, so drawing each bar's border immediately
+    // flipped the batch's primitive type twice per bar and forced a flush each
+    // time. Collecting the borders and emitting them as one line block after a
+    // run of bars is the same grouping fix that took the top-bar rect loop from
+    // 3.32ms to 0.09ms. Kept as lines, not thin quads: that was tried and
+    // measured a net loss (per-vertex CPU work dominates here - see
+    // DrawVirtualRectOutline).
+    s_pendingBarBorders.push_back({ sx, syB, sx + sw, syT });
+}
+
+// Emits every border queued by DrawVirtualBarH since the last flush as a
+// single GL_LINES block. Call once after a run of bars.
+void DrawVirtualBarHFlushBorders()
+{
+    if (s_pendingBarBorders.empty())
+    {
+        return;
+    }
+
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-    glBegin(GL_LINE_LOOP);
-    glVertex2f(sx + 0.5f,       syB + 0.5f);
-    glVertex2f(sx + sw - 0.5f,  syB + 0.5f);
-    glVertex2f(sx + sw - 0.5f,  syT - 0.5f);
-    glVertex2f(sx + 0.5f,       syT - 0.5f);
+    glBegin(GL_LINES);
+    for (const PendingBarBorder& b : s_pendingBarBorders)
+    {
+        const float x0 = b.x0 + 0.5f;
+        const float x1 = b.x1 - 0.5f;
+        const float y0 = b.y0 + 0.5f;
+        const float y1 = b.y1 - 0.5f;
+
+        glVertex2f(x0, y0); glVertex2f(x1, y0);   // bottom
+        glVertex2f(x1, y0); glVertex2f(x1, y1);   // right
+        glVertex2f(x1, y1); glVertex2f(x0, y1);   // top
+        glVertex2f(x0, y1); glVertex2f(x0, y0);   // left
+    }
     glEnd();
+    s_pendingBarBorders.clear();
 }
 
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 UI texture loader (called once after GL context is ready) 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
@@ -13815,6 +13850,10 @@ void DrawVirtualBarH(float uiLeft, float uiTop, float uiW, float uiH, float rati
 // files dir before native code runs. fopen("ui/map.png") therefore finds the
 // file on the real filesystem (cwd = /sdcard/.../files).
 // stbi_load_from_memory is used for decoding (STBI_NO_STDIO is set elsewhere).
+// Defined below, next to the top-bar icon accessors it belongs with; declared
+// here because the asset-loading function above calls it.
+static void BuildTopBarIconAtlas();
+
 static UITexture LoadUITextureAsset(const char* assetPath)
 {
     UITexture tex;
@@ -13888,6 +13927,12 @@ static void EnsureUITextures()
         g_uiTex_topBar[slot] = LoadUITextureAsset(kTopBarIconAssets[slot]);
     }
 
+    // One shared texture for those icons so their draws can coalesce into a
+    // single batch - see BuildTopBarIconAtlas. The per-icon textures above are
+    // still loaded: they remain the fallback if packing fails, and other code
+    // reads them through GetTopBarIconTexture.
+    BuildTopBarIconAtlas();
+
     for (int cls = 0; cls < kClassPortraitCount; ++cls)
     {
         g_uiTex_classPortrait[cls] = LoadUITextureAsset(kClassPortraitAssets[cls]);
@@ -13919,6 +13964,113 @@ const UITexture& GetTopBarIconTexture(int slot)
         return kEmpty;
     }
     return g_uiTex_topBar[slot];
+}
+
+// Top-bar icon atlas.
+//
+// Each icon was its own GL texture, so each DrawIconButton bound a different
+// texture and cut the immediate-mode batch - measured 2.64ms/frame for 14
+// icons (~0.19ms each), while the rects drawn beside them cost 0.16ms TOTAL
+// because they merge. Packing the icons into one texture lets those 14 draws
+// coalesce into one, which is the same reasoning as Platform/UIAtlas.h's
+// existing pilots; those operate on Bitmaps/LoadBitmap entries, and these
+// Android HUD icons are raw GL handles from LoadUITextureAsset, so they were
+// never covered.
+//
+// Packed as a single horizontal strip of equal-width cells. stb is set to flip
+// on load, so each decoded image already has (0,0) at bottom-left; blitting
+// row-for-row into the strip preserves that, and the per-slot U range is just
+// the cell.
+static UITexture g_uiTex_topBarAtlas;
+static std::array<float, kTopBarButtonCount> g_topBarAtlasU0{};
+static std::array<float, kTopBarButtonCount> g_topBarAtlasUW{};
+static bool g_topBarAtlasReady = false;
+
+static void BuildTopBarIconAtlas()
+{
+    if (g_topBarAtlasReady)
+    {
+        return;
+    }
+    g_topBarAtlasReady = true;   // one attempt only, success or not
+
+    struct Decoded { stbi_uc* pixels = nullptr; int w = 0, h = 0; };
+    std::array<Decoded, kTopBarButtonCount> decoded{};
+    int cellW = 0, cellH = 0;
+    int decodedCount = 0;
+
+    stbi_set_flip_vertically_on_load(1);
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        std::ifstream file(kTopBarIconAssets[slot], std::ios::binary | std::ios::ate);
+        if (!file) continue;
+        const std::streamsize size = file.tellg();
+        if (size <= 0) continue;
+        std::vector<stbi_uc> buf(static_cast<size_t>(size));
+        file.seekg(0, std::ios::beg);
+        if (!file.read(reinterpret_cast<char*>(buf.data()), size)) continue;
+
+        int w = 0, h = 0, comp = 0;
+        stbi_uc* px = stbi_load_from_memory(buf.data(), static_cast<int>(size), &w, &h, &comp, 4);
+        if (!px) continue;
+
+        decoded[slot].pixels = px;
+        decoded[slot].w = w;
+        decoded[slot].h = h;
+        if (w > cellW) cellW = w;
+        if (h > cellH) cellH = h;
+        ++decodedCount;
+    }
+
+    if (decodedCount == 0 || cellW <= 0 || cellH <= 0)
+    {
+        for (Decoded& d : decoded) if (d.pixels) stbi_image_free(d.pixels);
+        return;
+    }
+
+    const int atlasW = cellW * kTopBarButtonCount;
+    const int atlasH = cellH;
+    std::vector<stbi_uc> atlas(static_cast<size_t>(atlasW) * atlasH * 4, 0);
+
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        const Decoded& d = decoded[slot];
+        const int cellX = slot * cellW;
+        if (d.pixels != nullptr)
+        {
+            for (int y = 0; y < d.h; ++y)
+            {
+                const stbi_uc* src = d.pixels + static_cast<size_t>(y) * d.w * 4;
+                stbi_uc* dst = atlas.data() + (static_cast<size_t>(y) * atlasW + cellX) * 4;
+                memcpy(dst, src, static_cast<size_t>(d.w) * 4);
+            }
+        }
+        // Inset by half a texel so linear filtering cannot bleed in a
+        // neighbouring cell along the shared vertical edges.
+        const float halfTexel = 0.5f / static_cast<float>(atlasW);
+        g_topBarAtlasU0[slot] = static_cast<float>(cellX) / static_cast<float>(atlasW) + halfTexel;
+        g_topBarAtlasUW[slot] = static_cast<float>(d.pixels ? d.w : cellW) / static_cast<float>(atlasW) - 2.0f * halfTexel;
+    }
+
+    for (Decoded& d : decoded) if (d.pixels) stbi_image_free(d.pixels);
+
+    glGenTextures(1, &g_uiTex_topBarAtlas.id);
+    glBindTexture(GL_TEXTURE_2D, g_uiTex_topBarAtlas.id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, atlasW, atlasH, 0, GL_RGBA, GL_UNSIGNED_BYTE, atlas.data());
+    g_uiTex_topBarAtlas.w = atlasW;
+    g_uiTex_topBarAtlas.h = atlasH;
+
+    LOGI("BuildTopBarIconAtlas: %d/%d icons, atlas %dx%d texId=%u",
+         decodedCount, static_cast<int>(kTopBarButtonCount), atlasW, atlasH, g_uiTex_topBarAtlas.id);
+}
+
+bool TopBarIconAtlasReady()
+{
+    return g_uiTex_topBarAtlas.id != 0;
 }
 
 // Draw a PNG icon at the given UI rect 鑺掗埀顑解偓?NO background, NO border.
@@ -15646,8 +15798,22 @@ void RenderVirtualTopBar()
         }
 
         const AndroidUiRect rect = GetTopBarButtonRect(slot);
-        DrawIconButton(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f,
-                       GetTopBarIconTexture(slot), slotAlpha);
+        if (TopBarIconAtlasReady())
+        {
+            // One shared texture for every slot, so these draws coalesce into
+            // a single batch instead of one draw per icon (2.64ms -> ~0.2ms
+            // expected). Same geometry, just a sub-rect of the atlas.
+            DrawIconButtonUv(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f,
+                             g_uiTex_topBarAtlas,
+                             g_topBarAtlasU0[slot], 0.0f,
+                             g_topBarAtlasUW[slot], 1.0f,
+                             slotAlpha);
+        }
+        else
+        {
+            DrawIconButton(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f,
+                           GetTopBarIconTexture(slot), slotAlpha);
+        }
     }
     g_ProfTopBarPartTicks[1] = static_cast<Uint64>(MU_MobilePerfNow()) - tbT0 - g_ProfTopBarPartTicks[0];
 
@@ -16197,6 +16363,9 @@ void RenderVirtualPortraitHud()
     DrawVirtualBarH(kExpBarX, kStatRowY, kExpBarW, kStatRowH,
                     GetAndroidExperienceRatio(),
                     0.55f, 0.92f, 0.45f, 0.10f, 0.20f, 0.10f);
+
+    // All five bars' bodies are down; emit their borders as one line block.
+    DrawVirtualBarHFlushBorders();
 
     // No pet bar here: the game already draws a proper Fenrir/helper gauge in
     // CNewUIItemEnduranceInfo, complete with the pet's name. It is repositioned
@@ -16814,6 +16983,9 @@ void RenderVirtualPad()
         DrawVirtualBarH(kHudBarLeft, yEXP, barW, kHudBarH,
                         expRatio,
                         1.00f, 0.85f, 0.05f,  0.22f, 0.18f, 0.02f);
+
+        // Bodies done; emit this run's borders as one line block.
+        DrawVirtualBarHFlushBorders();
 
         // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Numbers centered ON each bar 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
         // Use the legacy number atlas for sharper, anti-aliased digits like old UI.
