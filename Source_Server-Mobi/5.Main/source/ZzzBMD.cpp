@@ -1242,15 +1242,34 @@ bool CanUseMobileDirectMeshBatch(const Mesh_t& mesh, int renderMode, int renderF
 		return false;
 	}
 
-	for (int triangleIndex = 0; triangleIndex < mesh.NumTriangles; ++triangleIndex)
+	// Fixed property of the geometry, so evaluate it once and cache it on the
+	// mesh instead of rescanning every triangle on every draw call of every
+	// frame. In a decoration-heavy scene this ran ~800+ times per frame across
+	// meshes of hundreds of triangles each, purely to re-derive an answer that
+	// cannot change. const_cast because the scan is a pure memoisation of
+	// read-only geometry - the mesh is logically const to this query.
+	if (mesh.MobileBatchPolyState == 0)
 	{
-		if (mesh.Triangles[triangleIndex].Polygon != 3)
+		unsigned char state = 1;
+		if (mesh.Triangles == nullptr)
 		{
-			return false;
+			state = 2;
 		}
+		else
+		{
+			for (int triangleIndex = 0; triangleIndex < mesh.NumTriangles; ++triangleIndex)
+			{
+				if (mesh.Triangles[triangleIndex].Polygon != 3)
+				{
+					state = 2;
+					break;
+				}
+			}
+		}
+		const_cast<Mesh_t&>(mesh).MobileBatchPolyState = state;
 	}
 
-	return true;
+	return mesh.MobileBatchPolyState == 1;
 }
 
 void AppendMobileBatchColor(std::vector<float>& colors, float red, float green, float blue, float alpha)

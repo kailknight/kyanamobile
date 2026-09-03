@@ -668,6 +668,61 @@ namespace
         return latch->state;
     }
 
+    // The same latch for the crowd-pressure thresholds. These were bare
+    // comparisons - `crowdPressure > 72` - on a count that changes every frame
+    // as objects enter and leave the candidate set, which is exactly the
+    // chatter AdaptiveFpsBelow exists to prevent for the FPS side. An object
+    // sitting near a threshold had allowSupplementalPasses flip on and off on
+    // consecutive frames, so its chrome/metal/bright overlays were drawn some
+    // frames and suppressed on others: a fast flicker on anything whose look
+    // depends on those passes (pet/fairy wing glow, glowing scenery, leaves).
+    // Latching means the decision only changes once the count has crossed the
+    // threshold by `margin` and stays there.
+    inline bool AdaptiveCrowdAbove(int crowdPressure, int threshold, int margin = 12)
+    {
+        struct Latch
+        {
+            int threshold;
+            bool state;
+        };
+        static Latch latches[16] = {};
+        static int latchCount = 0;
+
+        Latch* latch = nullptr;
+        for (int i = 0; i < latchCount; ++i)
+        {
+            if (latches[i].threshold == threshold)
+            {
+                latch = &latches[i];
+                break;
+            }
+        }
+        if (latch == nullptr)
+        {
+            if (latchCount >= static_cast<int>(sizeof(latches) / sizeof(latches[0])))
+            {
+                return crowdPressure > threshold;
+            }
+            latch = &latches[latchCount++];
+            latch->threshold = threshold;
+            latch->state = (crowdPressure > threshold);
+            return latch->state;
+        }
+
+        if (latch->state)
+        {
+            if (crowdPressure < threshold - margin)
+            {
+                latch->state = false;
+            }
+        }
+        else if (crowdPressure > threshold + margin)
+        {
+            latch->state = true;
+        }
+        return latch->state;
+    }
+
     // Objects whose per-frame update is what puts light into the world.
     //
     // Terrain lighting is accumulated from scratch every frame: an object only
@@ -693,6 +748,45 @@ namespace
         default:
             return false;
         }
+    }
+
+    // Types OBSERVED to put light into the world during MoveObject, learned at
+    // runtime rather than hand-listed. MoveObject's type switch calls
+    // AddTerrainLight for far more types than the list above names, and it also
+    // drives the per-frame animated state those objects render with
+    // (BlendMeshLight = sinf(WorldTime...), BlendMeshTexCoordU/V). Both are
+    // recomputed from scratch each frame, so an object the throttle skips
+    // contributes no light and renders with stale animation state THAT frame -
+    // and the throttle only skips far/crowded objects, which is why the
+    // resulting flicker showed up at distance and never up close.
+    inline std::vector<unsigned char>& LearnedLightEmittingTypes()
+    {
+        static std::vector<unsigned char> learned;
+        return learned;
+    }
+
+    inline void MarkLearnedLightEmittingType(int type)
+    {
+        if (type < 0)
+        {
+            return;
+        }
+        std::vector<unsigned char>& learned = LearnedLightEmittingTypes();
+        if (type >= (int)learned.size())
+        {
+            learned.resize(type + 1, 0);
+        }
+        learned[type] = 1;
+    }
+
+    inline bool IsLearnedLightEmittingType(int type)
+    {
+        if (type < 0)
+        {
+            return false;
+        }
+        const std::vector<unsigned char>& learned = LearnedLightEmittingTypes();
+        return (type < (int)learned.size()) && (learned[type] != 0);
     }
 
     // v1 eligibility for BMD::Transform()-output caching. Deliberately
@@ -1224,22 +1318,22 @@ namespace
             // crowding trim the purely cosmetic supplemental passes (glow/
             // chrome/metal shine overlays) on static decoration - the object
             // itself never disappears or LODs down.
-            if (staticSceneObject && severeFrame && crowdPressure > 140)
+            if (staticSceneObject && severeFrame && AdaptiveCrowdAbove(crowdPressure, 140))
             {
                 g_objectRenderLodContext.allowSupplementalPasses = false;
             }
             return;
         }
 
-        if (!staticSceneObject && !(farBucket && stressedFrame && crowdPressure > 72))
+        if (!staticSceneObject && !(farBucket && stressedFrame && AdaptiveCrowdAbove(crowdPressure, 72)))
         {
             return;
         }
 
-        if ((farBucket && recoveryFrame && crowdPressure > 48) ||
-            (midBucket && heavyFrame && crowdPressure > 72) ||
-            (staticSceneObject && stressedFrame && crowdPressure > 56) ||
-            (severeFrame && crowdPressure > 96))
+        if ((farBucket && recoveryFrame && AdaptiveCrowdAbove(crowdPressure, 48)) ||
+            (midBucket && heavyFrame && AdaptiveCrowdAbove(crowdPressure, 72)) ||
+            (staticSceneObject && stressedFrame && AdaptiveCrowdAbove(crowdPressure, 56)) ||
+            (severeFrame && AdaptiveCrowdAbove(crowdPressure, 96)))
         {
             g_objectRenderLodContext.allowSupplementalPasses = false;
         }
@@ -6371,7 +6465,8 @@ void MoveObjects()
 
                             bool deferMove = false;
                             if (IsObjectAdaptiveEnabled() && !fullObjectVisibility &&
-                                !IsLightEmittingObjectType(o->Type))
+                                !IsLightEmittingObjectType(o->Type) &&
+                                !IsLearnedLightEmittingType(o->Type))
                             {
                                 uint32_t updatePeriod = 1u;
                                 if (bucket == AdaptiveDistanceBucket::Far)
@@ -6468,7 +6563,16 @@ void MoveObjects()
                             else
                             {
                                 ++g_objectPerfSnapshot.moveUpdated;
+                                // If this update put light into the world, record
+                                // the type so the throttle above stops deferring it
+                                // from now on - see MarkLearnedLightEmittingType.
+                                // Cheap: one counter compare per updated object.
+                                const unsigned int lightAddsBefore = g_TerrainLightAddCount;
 								MoveObject(o);
+                                if (g_TerrainLightAddCount != lightAddsBefore)
+                                {
+                                    MarkLearnedLightEmittingType(o->Type);
+                                }
                                 MoveObjectOnEffect(o, objectCount, visibleObject);
                             }
                             ActionObject(o);

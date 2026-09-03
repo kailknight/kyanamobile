@@ -51,6 +51,11 @@ void InitTerrainRay(int HeroX,int HeroY);
 void InitTerrainLight();
 void InitTerrainShadow();
 void SetTerrainLight(float xf,float yf,vec3_t Light,int Range,vec3_t *Buffer);
+// Incremented by every AddTerrainLight call. The object update throttle
+// samples it around MoveObject to learn which types emit light and must not be
+// deferred - see MarkLearnedLightEmittingType in ZzzObject.cpp.
+extern unsigned int g_TerrainLightAddCount;
+
 void AddTerrainLight(float xf,float yf,vec3_t Light,int Range,vec3_t *Buffer);
 void AddTerrainLightClip(float xf,float yf,vec3_t Light,int Range,vec3_t *Buffer);
 void RequestTerrainLight(float xf,float yf,vec3_t Light);

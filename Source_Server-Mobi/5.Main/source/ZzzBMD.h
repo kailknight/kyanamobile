@@ -171,6 +171,13 @@ typedef struct _Mesh_t
 	// only the bone matrices do. Released via GL_DeleteSkinnedMeshBuffers.
 	unsigned int GpuSkinVbo;
 	unsigned int GpuSkinEbo;
+	// "Every triangle in this mesh really is a triangle (Polygon == 3)" -
+	// CanUseMobileDirectMeshBatch's gate for the fast batched draw path. It is
+	// a fixed property of the geometry, but was being recomputed by scanning
+	// every triangle on EVERY draw call of EVERY frame. Cached here the same
+	// way GpuSkinCacheEligible is, and evaluated once on first use.
+	// 0 = not evaluated yet, 1 = all triangles, 2 = has a non-triangle.
+	unsigned char MobileBatchPolyState;
 
 	_Mesh_t()
 	{
@@ -181,6 +188,7 @@ typedef struct _Mesh_t
 		m_csTScript= NULL;
 		GpuSkinCacheBuilt = false;
 		GpuSkinCacheEligible = false;
+		MobileBatchPolyState = 0;
 		GpuSkinMaxBoneIndex = -1;
 		GpuSkinVbo = 0;
 		GpuSkinEbo = 0;

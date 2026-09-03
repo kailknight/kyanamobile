@@ -705,7 +705,19 @@ out mediump vec4 v_color;
 out mediump vec2 v_uv;
 void main() {
     gl_Position = u_mvp * a_pos;
-    v_color = a_color;
+    // Clamped to [0,1] to match desktop fixed-function GL, which clamps colour
+    // values on input to glColor*/the colour array. GLES3 varyings do NOT
+    // clamp, so without this the raw value reaches the fragment shader intact.
+    //
+    // It matters because AddTerrainLight (ZzzLodTerrain.cpp) ACCUMULATES light
+    // per source with only a lower clamp (`b[i] += Light[i]*lf`, then
+    // `if (b[i] < 0) b[i] = 0`) - no upper bound. Anywhere several lights
+    // overlap (the Devias wedding hall's candelabras, torch clusters) the
+    // terrain light exceeds 1.0, and objects lit from it then rendered
+    // texture*colour at >1x and saturated to white: pink garlands and flowers
+    // turning white, foliage blowing out, the carpet losing its pattern. PC
+    // never showed it because fixed-function clamped the same values to 1.0.
+    v_color = clamp(a_color, 0.0, 1.0);
     v_uv = a_uv;
 }
 )";
@@ -964,6 +976,13 @@ void GL_Compat_Shutdown() {
     s_quadIndexCapacityQuads = 0;
 }
 
+// ZzzOpenglUtil.cpp's BindTexture() keeps its OWN texture-binding shadow,
+// separate from this file's s_boundTexture. Declared here at true file scope
+// (gl_compat.cpp has no enclosing namespace, but an extern written inside a
+// function body has bitten this codebase before - it resolves into the
+// enclosing namespace and links to nothing).
+extern int CachTexture;
+
 void GL_InvalidateCachedGLState() {
     // Call this after any code OUTSIDE gl_compat.cpp makes raw GL calls that
     // change program/texture/buffer bindings or cap (enable/disable) state -
@@ -975,6 +994,18 @@ void GL_InvalidateCachedGLState() {
     // real GL calls needed to actually restore it.
     s_currentProgram = 0;
     s_boundTexture = 0;
+    // ...and ZzzOpenglUtil.cpp's separate shadow, for exactly the same reason.
+    // GL_DrawSkinnedMesh raw-binds character textures (units 0-2) without
+    // going through BindTexture(), so CachTexture keeps naming whatever index
+    // was bound BEFORE that draw. Terrain/grass then call BindTexture(N) with
+    // N still matching the stale shadow, the "already bound" check short-
+    // circuits, the real glBindTexture never happens, and the tile draws with
+    // the character texture the skinned draw left bound - the intermittent
+    // white/wrong-texture flicker on map tiles and grass while walking, which
+    // varies with draw order and so comes and goes. 0x7FFFFFFF is the same
+    // "impossible index, force a re-bind" value the other fixes for this bug
+    // class already use (UIControls.cpp, android_main.cpp).
+    CachTexture = 0x7FFFFFFF;
     s_boundArrayBuffer = 0;
     s_boundElementArrayBuffer = 0;
     s_capBitsKnown = 0;
@@ -2541,7 +2572,15 @@ void main() {
         // them), so texColor*bodyLight*light + texColor*glow*light factors to
         // texColor*(bodyLight+glow)*light - see BMD::RenderMesh's pending-glow
         // comment for the depth-write equivalence argument.
-        vec3 rgb = texColor.rgb * (u_bodyLight * v_light + u_glowColor);
+        // u_bodyLight is clamped for the same reason the immediate-mode vertex
+        // shader clamps a_color: on the CPU path this value arrives via
+        // glColor3fv and desktop fixed-function clamps it to [0,1], but as a
+        // uniform here nothing does. Terrain light accumulates past 1.0 wherever
+        // lights overlap (AddTerrainLight has no upper clamp), which blew
+        // lit surfaces out to white. The additive overlay terms below are left
+        // unclamped on purpose - they stand in for separate additive passes
+        // that clamped at framebuffer-write time, not at the vertex.
+        vec3 rgb = texColor.rgb * (clamp(u_bodyLight, 0.0, 1.0) * v_light + u_glowColor);
         if (u_hasChrome == 1) {
             // Mirrors a separate RENDER_CHROME|RENDER_BRIGHT pass drawn on top
             // (same additive glBlendFunc(GL_ONE,GL_ONE), depth write off, per

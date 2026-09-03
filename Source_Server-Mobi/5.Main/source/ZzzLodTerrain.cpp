@@ -953,8 +953,17 @@ void SetTerrainLight(float xf,float yf,vec3_t Light,int Range,vec3_t *Buffer)
 	}
 }
 
+// Bumped on every terrain-light contribution so the object update throttle can
+// LEARN which object types put light into the world, instead of relying on a
+// hardcoded type list that has to be kept in sync by hand (see
+// IsLightEmittingObjectType in ZzzObject.cpp - that list was already known to
+// be incomplete). Terrain lighting is rebuilt from scratch each frame, so an
+// object skipped by the throttle drops its contribution outright that frame.
+unsigned int g_TerrainLightAddCount = 0;
+
 void AddTerrainLight(float xf,float yf,vec3_t Light,int Range,vec3_t *Buffer)
 {
+	++g_TerrainLightAddCount;
 	float rf = (float)Range;
 
     xf = (xf/TERRAIN_SCALE);
@@ -1225,6 +1234,11 @@ struct TerrainBatchBucket
     std::vector<float> verts;
 };
 
+// ZzzOpenglUtil.cpp's texture-binding shadow, used by TerrainBatch_Flush to
+// force a real re-bind per bucket. Declared here at true file scope, never
+// inside a function body - see the note at its use site.
+extern int CachTexture;
+
 static std::vector<TerrainBatchBucket> s_terrainBatchBuckets;
 static bool s_terrainBatchActive = false;
 static std::vector<int> s_terrainBatchLookup;
@@ -1404,6 +1418,22 @@ static void TerrainBatch_Flush()
             }
             return a.textureId < b.textureId;
         });
+
+    // Force the first BindTexture of every bucket below to issue a REAL
+    // glBindTexture. BindTexture() short-circuits when its CachTexture shadow
+    // already names the requested index, but that shadow is global and other
+    // subsystems raw-bind textures without going through it (GL_DrawSkinnedMesh
+    // binds character textures directly, for one). When the shadow is stale and
+    // happens to name the index a bucket wants, the real bind is skipped and
+    // the ENTIRE bucket - every grass/tile quad sharing that texture - draws
+    // with whatever was actually bound, i.e. untextured white. That is the
+    // scattered-but-consistent white grass/tile flicker while walking: which
+    // buckets are affected shifts with draw order, so it comes and goes.
+    // One redundant bind per bucket per frame is a rounding error next to
+    // being wrong. (CachTexture is declared at file scope above - an extern
+    // written inside a function body resolves into the enclosing namespace on
+    // this toolchain and has already caused one link failure in this codebase.)
+    CachTexture = 0x7FFFFFFF;
 
     uint16_t curTex = 0xFFFF;
     uint8_t curBlend = 0xFF;

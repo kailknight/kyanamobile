@@ -13709,9 +13709,19 @@ void DrawVirtualRectFilled(float uiX, float uiY, float uiW, float uiH, float red
     const float syB = static_cast<float>(WindowHeight) - UiToScreenY(uiY + uiH);
 
     glColor4f(red, green, blue, alpha);
-    glBegin(GL_TRIANGLE_FAN);
+    // GL_TRIANGLES, not GL_TRIANGLE_FAN: the mobile immediate-mode emulation
+    // coalesces consecutive glBegin/glEnd blocks into one draw call, but only
+    // when the primitive type allows concatenation. Two fans cannot be
+    // appended (the second would re-use the first's pivot vertex), so every
+    // fan forced its own draw call with a buffer upload and full state
+    // re-apply. Measured: ~28 UI rects costing 3.3ms/frame, ~0.12ms each for
+    // four vertices. Emitting the same quad as two triangles makes them merge.
+    glBegin(GL_TRIANGLES);
     glVertex2f(sx, syB);
     glVertex2f(sx + sw, syB);
+    glVertex2f(sx + sw, syT);
+
+    glVertex2f(sx, syB);
     glVertex2f(sx + sw, syT);
     glVertex2f(sx, syT);
     glEnd();
@@ -13726,11 +13736,30 @@ void DrawVirtualRectOutline(float uiX, float uiY, float uiW, float uiH, float re
 
     glLineWidth(lineWidth);
     glColor4f(red, green, blue, alpha);
-    glBegin(GL_LINE_LOOP);
+    // GL_LINES rather than GL_LINE_LOOP: loops cannot be concatenated by the
+    // immediate-mode batcher (the second loop's closing edge would join back to
+    // the first loop's start), so each one cut the batch.
+    //
+    // Deliberately NOT drawn as thin quads to unify the primitive type with the
+    // filled rects. That was tried and measured a net LOSS (19.0 -> 16.5 FPS,
+    // scnAvg 44.9 -> 54.0ms): it did collapse the batch cuts (pm31 -> pm4) and
+    // reduce draw calls, but tripled the vertex count per outline (8 -> 24),
+    // and GL_Vertex2f does a full CPU matrix transform PER VERTEX in this
+    // emulation. Per-vertex CPU work is the scarce resource here, not draw
+    // calls. Keep outlines cheap in vertices even though they cost one extra
+    // batch cut.
+    glBegin(GL_LINES);
     glVertex2f(sx + 0.5f, syB + 0.5f);
     glVertex2f(sx + sw - 0.5f, syB + 0.5f);
+
+    glVertex2f(sx + sw - 0.5f, syB + 0.5f);
+    glVertex2f(sx + sw - 0.5f, syT - 0.5f);
+
     glVertex2f(sx + sw - 0.5f, syT - 0.5f);
     glVertex2f(sx + 0.5f, syT - 0.5f);
+
+    glVertex2f(sx + 0.5f, syT - 0.5f);
+    glVertex2f(sx + 0.5f, syB + 0.5f);
     glEnd();
     glLineWidth(1.0f);
 }
@@ -13770,7 +13799,8 @@ void DrawVirtualBarH(float uiLeft, float uiTop, float uiW, float uiH, float rati
         glEnd();
     }
 
-    // White border
+    // White border. Kept as a line loop - drawing it as thin quads to avoid the
+    // batch cut was measured a net loss; see DrawVirtualRectOutline's comment.
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glBegin(GL_LINE_LOOP);
     glVertex2f(sx + 0.5f,       syB + 0.5f);
@@ -15502,6 +15532,9 @@ void DrawTopBarLocationChevron()
 // Icons are optional: DrawIconButton skips a texture that failed to load, and
 // the box and label are drawn either way, so the row works before any art
 // exists. Once an icon is present it covers the label.
+// TEMP profiling: 0=rect loop 1=icon loop 2=text loop, within RenderVirtualTopBar.
+unsigned long long g_ProfTopBarPartTicks[3] = { 0, 0, 0 };
+
 void RenderVirtualTopBar()
 {
     if (!IsVirtualUtilityButtonsAvailable())
@@ -15531,6 +15564,9 @@ void RenderVirtualTopBar()
     // blue style. Now that the icons carry the meaning, these only need to hold
     // the art clear of the world behind them. Active slots go more opaque, which
     // is the whole state cue left once the labels are gone.
+    // TEMP profiling: this whole function measured ~7ms/frame. Split its three
+    // per-slot loops (rects / icons / text) to find which primitive is costing.
+    const Uint64 tbT0 = static_cast<Uint64>(MU_MobilePerfNow());
     for (int slot = 0; slot < kTopBarButtonCount; ++slot)
     {
         if (kTopBarActions[slot] == kTopBarActionNone)
@@ -15548,9 +15584,30 @@ void RenderVirtualTopBar()
         const bool active = IsTopBarSlotActive(slot);
         DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
                               0.0f, 0.0f, 0.0f, (active ? 0.78f : 0.45f) * slotAlpha);
+    }
+    // Outlines in a SECOND pass rather than interleaved with the fills above.
+    // Fills are triangles and outlines are lines, so alternating them changed
+    // primitive type on every slot and cut the batch each time; grouping them
+    // leaves two runs that each merge into a single draw call.
+    for (int slot = 0; slot < kTopBarButtonCount; ++slot)
+    {
+        if (kTopBarActions[slot] == kTopBarActionNone)
+        {
+            continue;
+        }
+
+        const float slotAlpha = GetTopBarSlotAlpha(slot);
+        if (slotAlpha <= 0.0f)
+        {
+            continue;
+        }
+
+        const AndroidUiRect rect = GetTopBarButtonRect(slot);
+        const bool active = IsTopBarSlotActive(slot);
         DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
                                0.85f, 0.85f, 0.90f, (active ? 0.85f : 0.35f) * slotAlpha, 1.0f);
     }
+    g_ProfTopBarPartTicks[0] = static_cast<Uint64>(MU_MobilePerfNow()) - tbT0;
 
     const AndroidUiRect locRect = GetTopBarLocationChipRect();
     DrawVirtualRectFilled(locRect.x, locRect.y, locRect.w, locRect.h, 0.05f, 0.05f, 0.08f, 0.62f);
@@ -15592,6 +15649,7 @@ void RenderVirtualTopBar()
         DrawIconButton(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f,
                        GetTopBarIconTexture(slot), slotAlpha);
     }
+    g_ProfTopBarPartTicks[1] = static_cast<Uint64>(MU_MobilePerfNow()) - tbT0 - g_ProfTopBarPartTicks[0];
 
     // Labels drawn by the engine rather than baked into the art, onto the empty
     // nameplate at the bottom of each icon. Baked text cannot stay sharp here:
@@ -15628,6 +15686,8 @@ void RenderVirtualTopBar()
                  0, 3,
                  "%s", kTopBarLabels[slot]);
     }
+    g_ProfTopBarPartTicks[2] =
+        static_cast<Uint64>(MU_MobilePerfNow()) - tbT0 - g_ProfTopBarPartTicks[0] - g_ProfTopBarPartTicks[1];
 
     // Both placeholders until real icon art exists for them - see
     // DrawTopBarRowToggleButton/DrawTopBarLocationChevron just below. Must
@@ -16308,6 +16368,14 @@ void RenderVirtualPortraitHud()
     EndBitmap();
 }
 
+// TEMP profiling: per-helper split of RenderVirtualPad, which measured ~11ms a
+// frame with only 8 direct draw calls. Defined here rather than with the other
+// g_Prof globals further down, because those live in an anonymous namespace and
+// RenderVirtualPad sits above them - declaring it extern up here instead made
+// the name ambiguous against that one.
+// 0=portraitHud 1=topBar 2=topRightControls 3=mirrorHotKeys
+unsigned long long g_ProfPadPartTicks[4] = { 0, 0, 0, 0 };
+
 void RenderVirtualPad()
 {
     // Keep only the virtual joystick overlay on mobile.
@@ -16435,14 +16503,28 @@ void RenderVirtualPad()
         return;
     }
 
-    RenderVirtualPortraitHud();
-    RenderVirtualTopBar();
+    // TEMP profiling: RenderVirtualPad measured ~11ms/frame (20% of a
+    // decoration-heavy frame) with only 8 direct draw calls, so the cost is in
+    // these helpers. Split them to find which.
+    {
+        const Uint64 t0 = static_cast<Uint64>(MU_MobilePerfNow());
+        RenderVirtualPortraitHud();
+        const Uint64 t1 = static_cast<Uint64>(MU_MobilePerfNow());
+        RenderVirtualTopBar();
+        const Uint64 t2 = static_cast<Uint64>(MU_MobilePerfNow());
+        g_ProfPadPartTicks[0] = t1 - t0;   // portrait HUD
+        g_ProfPadPartTicks[1] = t2 - t1;   // top bar
+    }
     // NOT called here - RenderVirtualPad as a whole already returned above
     // whenever a text input is focused, which is essentially the entire time
     // chat is open. Called separately, outside that gate, from
     // RunAndroidGameFrame right after this function - see the comment there.
 
-    RenderVirtualTopRightControls();
+    {
+        const Uint64 t0 = static_cast<Uint64>(MU_MobilePerfNow());
+        RenderVirtualTopRightControls();
+        g_ProfPadPartTicks[2] = static_cast<Uint64>(MU_MobilePerfNow()) - t0;
+    }
 
     if (kUseLegacyMainHud && !kEnableVirtualCombatOverlay)
     {
@@ -16602,7 +16684,11 @@ void RenderVirtualPad()
         RenderVirtualRightPanelUtilityMode();
     }
 
-    RenderVirtualMirrorHotKeySlots();
+    {
+        const Uint64 t0 = static_cast<Uint64>(MU_MobilePerfNow());
+        RenderVirtualMirrorHotKeySlots();
+        g_ProfPadPartTicks[3] = static_cast<Uint64>(MU_MobilePerfNow()) - t0;
+    }
     RenderComboToggle();
     RenderPkToggle();
     RenderTargetSelectButton();
@@ -18342,6 +18428,9 @@ static int g_NativePresentHeight = 0;
 // TEMP profiling: last frame's top-level phase split, read by the FPS overlay.
 unsigned long long g_ProfSceneTicks = 0;
 unsigned long long g_ProfPadTicks = 0;
+// TEMP profiling: RenderVirtualPad's share of g_ProfPadTicks (the rest is
+// RenderAndroidChatTabs). Remove once the pad cost is understood.
+unsigned long long g_ProfPadOnlyTicks = 0;
 unsigned long long g_ProfPresentTicks = 0;
 
 // TEMP profiling: Scene() sub-phase breakdown, taken from the engine's own
@@ -19823,6 +19912,12 @@ static void RunAndroidGameFrame()
         Scene(nullptr);
         const Uint64 virtualPadStart = static_cast<Uint64>(MU_MobilePerfNow());
         RenderVirtualPad();
+        // TEMP profiling: split the "pad" bucket, which measured ~13ms (21% of
+        // the frame) in a decoration-heavy scene while the GPU sat idle
+        // (pres ~0.1ms, so this is not driver back-pressure - it is real CPU
+        // work). Splitting says whether it is the pad itself or the chat tabs.
+        const Uint64 padOnlyEnd = static_cast<Uint64>(MU_MobilePerfNow());
+        g_ProfPadOnlyTicks = padOnlyEnd - virtualPadStart;
         // Deliberately outside RenderVirtualPad - that function returns
         // entirely while any text input is focused (IsVirtualPadAvailable()),
         // which is essentially the whole time chat is open, so the tab strip
@@ -20046,7 +20141,8 @@ static void RunAndroidGameFrame()
                             // consistently non-zero if it isn't), so one live
                             // sample answers "is the GPU idle right now"
                             // without needing a new accumulator.
-                            " pres%.2f pad%.2f"
+                            " pres%.2f pad%.2f padOnly%.2f padP[%.2f %.2f %.2f %.2f]"
+                            " tbP[%.2f %.2f %.2f]"
                             " tc[hit%d miss%d]"
                             " txt[hit%d miss%d coll%d]"
                             " path[im%d vaConv%d vaDir%d qIdx%d qExp%d]"
@@ -20072,6 +20168,14 @@ static void RunAndroidGameFrame()
                             g_ShowPerfOverlay ? 1 : 0,
                             static_cast<double>(g_ProfPresentTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
                             static_cast<double>(g_ProfPadTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfPadOnlyTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfPadPartTicks[0]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfPadPartTicks[1]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfPadPartTicks[2]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfPadPartTicks[3]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfTopBarPartTicks[0]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfTopBarPartTicks[1]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfTopBarPartTicks[2]) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
                             g_ProfTransformCacheHits, g_ProfTransformCacheMisses,
                             // Last frame of the window rather than a sum: these
                             // are per-frame counts and a 10s total would just
