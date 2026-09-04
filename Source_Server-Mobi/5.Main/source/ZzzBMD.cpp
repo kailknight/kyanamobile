@@ -1307,6 +1307,13 @@ namespace
     bool g_objMeshQueueActive = false;
 }
 
+// Measured by A/B (queue bypassed for one build): the gray/opaque "fog"
+// objects in Elbeland are NOT caused by this queue - they render identically
+// with it disabled, so that artefact is pre-existing engine behaviour.
+// Bypassing the queue also brings back the white-texture flicker while
+// moving, i.e. the per-bucket BindTexture below is what currently keeps the
+// stale-CachTexture bug (see TerrainBatch_Flush's note) from showing on
+// objects.
 void ObjMeshQueue_Begin()
 {
     for (ObjMeshBucket& b : g_objMeshBuckets)

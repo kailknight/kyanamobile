@@ -418,13 +418,27 @@ bool CGlobalBitmap::LoadImage(GLuint uiBitmapIndex, const std::string& filename,
 	
 	std::string ext;
 	SplitExt(filename, ext, false);
-	
+
+	bool bLoaded = false;
 	if(0 == _stricmp(ext.c_str(), "jpg"))
-		return OpenJpeg(uiBitmapIndex, filename, uiFilter, uiWrapMode);
+		bLoaded = OpenJpeg(uiBitmapIndex, filename, uiFilter, uiWrapMode);
 	else if(0 == _stricmp(ext.c_str(), "tga"))
-		return OpenTga(uiBitmapIndex, filename, uiFilter, uiWrapMode);
-	
-	return false;
+		bLoaded = OpenTga(uiBitmapIndex, filename, uiFilter, uiWrapMode);
+
+	// TEMP diagnostic: most callers pass bCheck=false, which swallows load
+	// failures silently - the slot is simply left empty and anything drawing
+	// with it binds TextureNumber 0 and renders untextured white. Chasing
+	// gray/untextured map objects in Elbeland.
+	if(!bLoaded)
+	{
+		if(FILE* dbg = fopen("mu_texfail.txt", "a"))
+		{
+			fprintf(dbg, "FAIL idx=%u ext=%s file=%s\n",
+				(unsigned)uiBitmapIndex, ext.c_str(), filename.c_str());
+			fclose(dbg);
+		}
+	}
+	return bLoaded;
 }
 void CGlobalBitmap::UnloadImage(GLuint uiBitmapIndex, bool bForce)
 {

@@ -156,6 +156,13 @@ bool OpenJpegBuffer(char *filename,float *BufferFloat)
 	}
 	if(infile == NULL)
 	{
+		// TEMP diagnostic: a silent failure here leaves the caller's buffer
+		// holding whatever the previously loaded map put there.
+		if(FILE* dbg = fopen("mu_lightmap_probe.txt", "a"))
+		{
+			fprintf(dbg, "FOPEN FAILED file=%s\n", FileName);
+			fclose(dbg);
+		}
 		char Text[256];
 		sprintf(Text, "%s - File not exist.", FileName);
 		g_ErrorReport.Write(Text);
@@ -217,10 +224,24 @@ bool OpenJpegBuffer(char *filename,float *BufferFloat)
 
 	if(strstr(FileName, "TerrainLight") != NULL || strstr(FileName, "World74") != NULL)
 	{
-		char szDebugOutput[512];
-		sprintf(szDebugOutput, "OpenJpegBuffer turbo file=%s jpeg=%dx%d firstRGB=%.3f,%.3f,%.3f",
-			FileName, jpegWidth, jpegHeight, BufferFloat[0], BufferFloat[1], BufferFloat[2]);
-		OutputDebugStringA(szDebugOutput);
+		// TEMP diagnostic: OutputDebugStringA goes nowhere on Android (logcat
+		// is dead on these builds), so write to a file instead. Chasing a
+		// terrain lightmap that reads back as pure grayscale in memory even
+		// though the .ozj on disk is a colour JPEG.
+		if(FILE* dbg = fopen("mu_lightmap_probe.txt", "a"))
+		{
+			fprintf(dbg, "file=%s %dx%d subsamp=%d colorspace=%d\n",
+				FileName, jpegWidth, jpegHeight, jpegSubsamp, jpegColorspace);
+			// Spread the samples across the image; consecutive pixels in one
+			// corner could be uniform by chance.
+			for(int s = 0; s < 8; ++s)
+			{
+				const size_t px = (bufferSize / 3u) * (size_t)s / 8u;
+				fprintf(dbg, "  px[%zu] raw=(%d,%d,%d)\n", px,
+					(int)buffer[px * 3 + 0], (int)buffer[px * 3 + 1], (int)buffer[px * 3 + 2]);
+			}
+			fclose(dbg);
+		}
 	}
 	return true;
 #else

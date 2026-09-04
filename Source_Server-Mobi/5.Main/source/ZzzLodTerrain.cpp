@@ -1031,10 +1031,86 @@ void AddTerrainLightClip(float xf,float yf,vec3_t Light,int Range,vec3_t *Buffer
 	}
 }
 
+// TEMP diagnostic: dumps the exact texture/alpha/light values the renderer
+// uses for the tile at a world-space position, to a caller-provided file.
+// Added to chase a PC-vs-mobile color mismatch (Elbeland crater rendering
+// gray on mobile, tan on PC) without more guessing from static code
+// reading - see the wiring in android_main.cpp's drift-log block.
+void DumpTerrainProbeAt(FILE* f, float worldX, float worldY)
+{
+    if (!f) return;
+    const int cx = (int)(worldX / TERRAIN_SCALE);
+    const int cy = (int)(worldY / TERRAIN_SCALE);
+
+    // Sample a spread of tiles, not just the one under the player: the
+    // player's own tile is saturated by their own AddTerrainLight
+    // contribution (which has no upper clamp), so it always reads white and
+    // says nothing about distant terrain.
+    static const int kOffsets[] = { 0, 4, 8, 16 };
+    for (int oi = 0; oi < 4; ++oi)
+    {
+        const int d = kOffsets[oi];
+        for (int dir = 0; dir < (d == 0 ? 1 : 4); ++dir)
+        {
+            int xi = cx, yi = cy;
+            if      (dir == 0) xi += d;
+            else if (dir == 1) xi -= d;
+            else if (dir == 2) yi += d;
+            else               yi -= d;
+
+            const int idx = TERRAIN_INDEX(xi, yi);
+            // back is the static baked lightmap value (TerrainLight *
+            // normal luminosity). Dynamic lights never touch it, so it is
+            // the ground truth for what the tint should be. prim is what
+            // actually reaches the vertex colour after dynamic additions.
+            fprintf(f,
+                "gx=%d gy=%d d=%d layer1=%d layer2=%d alpha=%.3f "
+                "prim=(%.3f,%.3f,%.3f) back=(%.3f,%.3f,%.3f) baked=(%.3f,%.3f,%.3f)\n",
+                xi, yi, d,
+                (int)TerrainMappingLayer1[idx], (int)TerrainMappingLayer2[idx],
+                TerrainMappingAlpha[idx],
+                PrimaryTerrainLight[idx][0], PrimaryTerrainLight[idx][1], PrimaryTerrainLight[idx][2],
+                BackTerrainLight[idx][0], BackTerrainLight[idx][1], BackTerrainLight[idx][2],
+                TerrainLight[idx][0], TerrainLight[idx][1], TerrainLight[idx][2]);
+        }
+    }
+    // Which BITMAP_MAPTILE slots actually hold a texture. MapManager loads
+    // these with bCheck=false, so a missing file fails silently and the
+    // slot is left empty - a terrain face referencing it then draws with
+    // whatever is bound, i.e. untextured white modulated by vertex light.
+    // World52 (Elbeland) ships no ExtTile* files at all, yet slots 14..29
+    // are loaded from them unconditionally.
+    fprintf(f, "tileslots:");
+    for (int t = 0; t < 30; ++t)
+    {
+        BITMAP_t* pb = Bitmaps.FindTexture((GLuint)(BITMAP_MAPTILE + t));
+        if (pb == NULL)      fprintf(f, " %d=MISSING", t);
+        else                 fprintf(f, " %d=%dx%d/tex%u", t, (int)pb->Width, (int)pb->Height,
+                                     (unsigned)pb->TextureNumber);
+    }
+    fprintf(f, "\n");
+
+    // Widen the layer sampling: the handful of tiles sampled above were all
+    // layer1=13, but the gray region is clearly somewhere we have not hit
+    // yet. Scan a band and report any layer index that is not 13/255.
+    fprintf(f, "layers:");
+    for (int dy = -12; dy <= 12; dy += 3)
+    {
+        for (int dx = -12; dx <= 12; dx += 3)
+        {
+            const int idx = TERRAIN_INDEX(cx + dx, cy + dy);
+            fprintf(f, " %d/%d", (int)TerrainMappingLayer1[idx], (int)TerrainMappingLayer2[idx]);
+        }
+    }
+    fprintf(f, "\n");
+
+    fprintf(f, "--- hero wx=%.1f wy=%.1f gx=%d gy=%d ---\n", worldX, worldY, cx, cy);
+}
+
 void RequestTerrainLight(float xf,float yf,vec3_t Light)
 {
-	if(SceneFlag == SERVER_LIST_SCENE 
-		|| SceneFlag == WEBZEN_SCENE 
+	if(SceneFlag == SERVER_LIST_SCENE
+		|| SceneFlag == WEBZEN_SCENE
 		|| SceneFlag == LOADING_SCENE 
 		|| ActiveTerrain == false)
 	{
@@ -1954,7 +2030,17 @@ void RenderTerrainFace(float xf,float yf,int xi,int yi,float lodf)
 		int Texture;
 		bool Alpha;
 		bool Water = false;
-		if(TerrainMappingAlpha[TerrainIndex1]>=1.f && TerrainMappingAlpha[TerrainIndex2]>=1.f && TerrainMappingAlpha[TerrainIndex3]>=1.f && TerrainMappingAlpha[TerrainIndex4]>=1.f)
+		// 255 is the "no second layer" sentinel (InitTerrainMappingLayer sets
+		// it), and the overlay pass below already guards against it. This
+		// base-layer selection did not, so a tile with full alpha coverage
+		// but no layer2 picked texture 255 - an index no map ever loads
+		// (MapManager only fills BITMAP_MAPTILE+0..29). BindTexture then
+		// binds TextureNumber 0 and the face draws untextured white, which
+		// is the flat gray patches in Elbeland's crater: geometry and vertex
+		// lighting intact, no texture. Fall back to layer1, the only real
+		// texture such a tile has.
+		if(TerrainMappingAlpha[TerrainIndex1]>=1.f && TerrainMappingAlpha[TerrainIndex2]>=1.f && TerrainMappingAlpha[TerrainIndex3]>=1.f && TerrainMappingAlpha[TerrainIndex4]>=1.f
+			&& TerrainMappingLayer2[TerrainIndex1] != 255)
 		{
       		Texture = TerrainMappingLayer2[TerrainIndex1];
 			Alpha = false;

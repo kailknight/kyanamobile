@@ -18628,6 +18628,10 @@ unsigned long long g_ProfCharRenderTicks = 0;
 unsigned long long g_ProfTerrainTicks = 0;
 unsigned long long g_ProfEffectsTicks = 0;
 unsigned long long g_ProfParticlesTicks = 0;
+extern unsigned long long g_ProfParticleFlushes;
+extern unsigned long long g_ProfParticleQuads;
+extern unsigned long long g_ProfParticleScanned;
+extern unsigned long long g_ProfParticleRendered;
 unsigned long long g_ProfUiTicks = 0;
 
 // The four buckets above plus objR/chrR/ter only account for ~32ms of a ~51ms
@@ -20342,6 +20346,8 @@ static void RunAndroidGameFrame()
                             " batchApp[%.2f v%llu]"
                             " objS[b%.1f v%.1f a%.1f]"
                             " objC[cand%d rend%d cull%d bc%d vc%d]"
+                            " scn[terr%.1f eff%.1f part%.1f]"
+                            " partN[flush%llu quad%llu rend%llu scan%llu]"
                             " tc[hit%d miss%d]"
                             " txt[hit%d miss%d coll%d]"
                             " path[im%d vaConv%d vaDir%d qIdx%d qExp%d]"
@@ -20382,6 +20388,10 @@ static void RunAndroidGameFrame()
                             static_cast<double>(g_ProfObjAfterTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
                             g_ProfObjRenderCandidates, g_ProfObjRenderRendered, g_ProfObjDistanceCulled,
                             g_ProfObjBaseCalls, g_ProfObjVisualCalls,
+                            static_cast<double>(g_ProfTerrainTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfEffectsTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            static_cast<double>(g_ProfParticlesTicks) * 1000.0 / static_cast<double>(MU_MobilePerfFrequency()),
+                            g_ProfParticleFlushes, g_ProfParticleQuads, g_ProfParticleRendered, g_ProfParticleScanned,
                             g_ProfTransformCacheHits, g_ProfTransformCacheMisses,
                             // Last frame of the window rather than a sum: these
                             // are per-frame counts and a 10s total would just
@@ -20412,6 +20422,19 @@ static void RunAndroidGameFrame()
                             g_ProfFlushCauses[0]);
                         fclose(f);
                     }
+
+                    // TEMP diagnostic: dumps the terrain tile under the
+                    // player's feet every 10s alongside the drift log, to
+                    // chase the PC-vs-mobile crater color mismatch in
+                    // Elbeland (mobile renders it gray, PC renders it tan).
+                    if (Hero != nullptr)
+                    {
+                        if (FILE* pf = fopen("mu_terrain_probe.txt", "a"))
+                        {
+                            DumpTerrainProbeAt(pf, Hero->Object.Position[0], Hero->Object.Position[1]);
+                            fclose(pf);
+                        }
+                    }
                     g_DriftLastLogSec = nowSec;
                     g_DriftFrames = 0;
                     g_DriftSceneMsSum = 0.0;
@@ -20429,6 +20452,18 @@ static void RunAndroidGameFrame()
                     g_ProfBatchAppendTicks = 0;
 
                     g_ProfBatchAppendVerts = 0;
+
+
+                    g_ProfParticleFlushes = 0;
+
+
+                    g_ProfParticleQuads = 0;
+
+
+                    g_ProfParticleScanned = 0;
+
+
+                    g_ProfParticleRendered = 0;
                 }
             }
 

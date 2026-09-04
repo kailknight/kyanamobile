@@ -14,6 +14,7 @@ extern WORD          TerrainWall         [];
 int TERRAIN_INDEX(int x,int y);
 int TERRAIN_INDEX_REPEAT(int x,int y);
 WORD TERRAIN_ATTRIBUTE(float x,float y);
+void DumpTerrainProbeAt(FILE* f, float worldX, float worldY);
 
 bool OpenTerrainHeight(char *name);
 void SaveTerrainHeight(char *name);
