@@ -311,52 +311,116 @@ static void InitializeTakumiProtectState()
     // redirected to AndroidFopen, which fixes separators and retries with a
     // case-insensitive lookup. std::ifstream gets none of that, which is why
     // reading this file used to be skipped here entirely.
-    auto readProtectBlob = [](const char* path, void* dest, size_t size) -> bool
+    // Returns how many bytes were actually read and decoded, 0 on failure.
+    //
+    // A short/long file is no longer rejected outright. The obfuscation is
+    // position-based - byte n decodes from n alone - so a prefix decodes
+    // exactly as it would in a full read, and every scalar setting the client
+    // needs (server address and port, GS port range, ReconnectTime, FpsLimit,
+    // zoom limits, attack-speed caps) lives in the first ~424 bytes. Demanding
+    // that the whole ~1.1MB match sizeof() meant one differing byte count in a
+    // trailing Custom* array threw away the server address and ReconnectTime
+    // too, and the fallback that took over zeroes ReconnectTime - which is
+    // exactly why reconnect stopped working. Read what is there, decode it,
+    // and let the caller decide how much to trust.
+    auto readProtectBlob = [](const char* path, void* dest, size_t size) -> size_t
     {
         FILE* fp = fopen(path, "rb");
 
         if (fp == nullptr)
         {
             LOGE("Open failed for %s", path);
-            return false;
+            return 0;
         }
 
         std::fseek(fp, 0, SEEK_END);
         const long fileSize = std::ftell(fp);
         std::fseek(fp, 0, SEEK_SET);
 
-        if (fileSize != static_cast<long>(size))
+        if (fileSize <= 0)
         {
-            LOGE("Size mismatch for %s: %ld, expected %zu", path, fileSize, size);
+            LOGE("Empty or unreadable %s (%ld)", path, fileSize);
             std::fclose(fp);
-            return false;
+            return 0;
         }
 
-        const size_t got = std::fread(dest, 1, size, fp);
+        if (fileSize != static_cast<long>(size))
+        {
+            LOGW("Size differs for %s: %ld on disk, this build's struct is %zu"
+                 " - reading the overlapping prefix", path, fileSize, size);
+        }
+
+        const size_t want = (static_cast<size_t>(fileSize) < size)
+                                ? static_cast<size_t>(fileSize)
+                                : size;
+        const size_t got = std::fread(dest, 1, want, fp);
         std::fclose(fp);
 
-        if (got != size)
+        if (got == 0)
         {
-            LOGE("Read failed for %s: %zu of %zu", path, got, size);
-            return false;
+            LOGE("Read failed for %s", path);
+            return 0;
         }
 
         // Same two-step obfuscation GetMainInfo applies on the way out.
-        for (size_t n = 0; n < size; ++n)
+        for (size_t n = 0; n < got; ++n)
         {
             reinterpret_cast<BYTE*>(dest)[n] -= static_cast<BYTE>(0x95 ^ HIBYTE(n));
             reinterpret_cast<BYTE*>(dest)[n] ^= static_cast<BYTE>(0xCA ^ LOBYTE(n));
         }
 
-        return true;
+        return got;
     };
 
     static MAIN_FILE_INFO mainInfo {};   // ~1MB; far too big for the stack
 
-    if (!readProtectBlob("Data/Local/CBGetMain.bin", &mainInfo, sizeof(mainInfo)))
+    // TEMP diagnostic: CBGetMain.bin is accepted only when its length equals
+    // this build's sizeof(MAIN_FILE_INFO), and the fallback used when it is
+    // rejected zeroes the whole struct - including ReconnectTime, which is why
+    // reconnect stops working. The struct has no #pragma pack, so a single
+    // pointer/long/bool inside any nested Custom* struct changes its size
+    // between the 32-bit Windows tool that writes the file and this 64-bit
+    // build. Record both numbers (and the offsets of the fields that matter)
+    // so the mismatch is measured rather than guessed at.
+    {
+        long onDisk = -1;
+        if (FILE* fp = fopen("Data/Local/CBGetMain.bin", "rb"))
+        {
+            std::fseek(fp, 0, SEEK_END);
+            onDisk = std::ftell(fp);
+            std::fclose(fp);
+        }
+        if (FILE* dbg = fopen("mu_protect_probe.txt", "a"))
+        {
+            fprintf(dbg,
+                "CBGetMain.bin onDisk=%ld  sizeof(MAIN_FILE_INFO)=%zu  delta=%ld\n"
+                "  sizeof(TEXT_FILE_INFO)=%zu\n"
+                "  offsetof IpAddress=%zu IpAddressPort=%zu ClientSerial=%zu ReconnectTime=%zu\n"
+                "  offsetof EngCustomMessageInfo=%zu CustomJewelInfo=%zu CustomWingInfo=%zu\n",
+                onDisk, sizeof(MAIN_FILE_INFO),
+                (onDisk < 0) ? 0L : (onDisk - (long)sizeof(MAIN_FILE_INFO)),
+                sizeof(TEXT_FILE_INFO),
+                offsetof(MAIN_FILE_INFO, IpAddress),
+                offsetof(MAIN_FILE_INFO, IpAddressPort),
+                offsetof(MAIN_FILE_INFO, ClientSerial),
+                offsetof(MAIN_FILE_INFO, ReconnectTime),
+                offsetof(MAIN_FILE_INFO, EngCustomMessageInfo),
+                offsetof(MAIN_FILE_INFO, CustomJewelInfo),
+                offsetof(MAIN_FILE_INFO, CustomWingInfo));
+            fclose(dbg);
+        }
+    }
+
+    const size_t mainGot = readProtectBlob("Data/Local/CBGetMain.bin", &mainInfo, sizeof(mainInfo));
+
+    // Everything the client actually needs to connect and reconnect sits below
+    // this point; the Custom* arrays that follow are decoration by comparison.
+    const size_t kMinUsefulMainInfo = offsetof(MAIN_FILE_INFO, EngCustomMessageInfo);
+
+    if (mainGot < kMinUsefulMainInfo)
     {
         snprintf(g_protectLoadStatus, sizeof(g_protectLoadStatus) - 1,
-                 "GETMAIN fallback (want %zu)", sizeof(MAIN_FILE_INFO));
+                 "GETMAIN fallback (got %zu want %zu)", mainGot, sizeof(MAIN_FILE_INFO));
         applyFallbackMainInfo();
         return;
     }
@@ -393,10 +457,28 @@ static void InitializeTakumiProtectState()
     // not part of the Android build, so none of that ran here and every lookup
     // came back empty ("Could not find message 0!"). SetTargetFps is left out on
     // purpose: mobile does its own frame pacing.
-    gMainLoad.ApplyProtectData();
+    //
+    // Only fed the trailing Custom* arrays when the file length matched this
+    // build's struct exactly. On a short/long file the prefix is still sound
+    // (position-based obfuscation, and the scalars checked sane above), but
+    // anything past the first differing field would be misaligned - so take
+    // the connection settings and skip publishing decoration built from bytes
+    // we cannot vouch for.
+    const bool fullyTrusted = (mainGot == sizeof(MAIN_FILE_INFO));
+    if (fullyTrusted)
+    {
+        gMainLoad.ApplyProtectData();
+    }
+    else
+    {
+        LOGW("CBGetMain.bin read %zu of %zu bytes: using connection//reconnect"
+             " settings but skipping ApplyProtectData (custom text/items stay empty)",
+             mainGot, sizeof(MAIN_FILE_INFO));
+    }
 
     snprintf(g_protectLoadStatus, sizeof(g_protectLoadStatus) - 1,
-             "GETMAIN ok %s:%u rc=%u",
+             "GETMAIN %s %s:%u rc=%u",
+             fullyTrusted ? "ok" : "partial",
              gProtect.m_MainInfo.IpAddress,
              static_cast<unsigned int>(gProtect.m_MainInfo.IpAddressPort),
              static_cast<unsigned int>(gProtect.m_MainInfo.ReconnectTime));
@@ -405,7 +487,7 @@ static void InitializeTakumiProtectState()
     // are empty, so a missing file should not knock out the server address too.
     static TEXT_FILE_INFO textInfo {};   // like mainInfo: far too big for the stack
 
-    if (readProtectBlob("Data/Local/CBTextInfo.bin", &textInfo, sizeof(textInfo)))
+    if (readProtectBlob("Data/Local/CBTextInfo.bin", &textInfo, sizeof(textInfo)) == sizeof(TEXT_FILE_INFO))
     {
         std::memcpy(&gProtect.m_TextInfo, &textInfo, sizeof(TEXT_FILE_INFO));
     }
