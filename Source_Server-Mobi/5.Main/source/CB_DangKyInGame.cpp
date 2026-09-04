@@ -19,16 +19,9 @@ namespace
 {
 	const DWORD kRegisterTextColor = 0xFFFFFFFF;
 	const float kRegisterWindowWidth = 262.0f;
-	const float kRegisterWindowHeight = 250.0f;
+	const float kRegisterWindowHeight = 210.0f;   // was 250: captcha row removed
 	const float kInputWidth = 110.0f;
 	const float kInputSpacing = 20.0f;
-	const float kCaptchaWidth = 120.0f;
-	const float kCaptchaHeight = 17.0f;
-	const float kCaptchaCodeWidth = 50.0f;
-	const float kCaptchaInputOffsetX = 54.0f;
-	const float kCaptchaInputOffsetY = 6.5f;
-	const float kCaptchaInputWidth = kCaptchaWidth - kCaptchaInputOffsetX - 2.0f;
-	const float kCaptchaInputHeight = 14.0f;
 	const char* kDefaultRegisterPhone = "0000000000";
 
 	bool IsRegisterInputTap()
@@ -145,58 +138,6 @@ namespace
 #endif
 	}
 
-	void FocusRegisterCaptchaInput(CUITextInputBox* input)
-	{
-		if (input == NULL)
-		{
-			return;
-		}
-
-		input->GiveFocus(FALSE);
-
-		HWND inputHandle = input->GetHandle();
-		if (inputHandle == NULL)
-		{
-			return;
-		}
-
-		char currentText[8] = { 0 };
-		input->GetText(currentText, sizeof(currentText));
-		const int caretPos = (int)std::strlen(currentText);
-		SendMessageW(inputHandle, EM_SETSEL, (WPARAM)caretPos, (LPARAM)caretPos);
-	}
-
-	void RenderRegisterCaptcha(float posX, float posY, CUITextInputBox* input, const char* text)
-	{
-		if (input == NULL || text == NULL)
-		{
-			return;
-		}
-
-		gInterface.DrawBarForm(posX, posY + 3.5f, kCaptchaWidth, kCaptchaHeight, 0.0f, 0.0f, 0.0f, 1.0f);
-		gInterface.DrawBarForm(posX + 2.0f, posY + 4.0f, kCaptchaCodeWidth, 15.0f, 1.0f, 0.2167f, 0.0f, 1.0f);
-		TextDraw((HFONT)g_hFontBold, posX + 2.0f, posY + 6.0f, 0xFFFFFFB8, 0x0, (int)kCaptchaCodeWidth, 0, 3, text);
-
-		input->SetPosition(posX + kCaptchaInputOffsetX, posY + kCaptchaInputOffsetY);
-		input->Render();
-		input->DoAction();
-
-#if defined(__ANDROID__) || defined(MU_IOS)
-		const float inputTapX = posX + kCaptchaInputOffsetX - 4.0f;
-		const float inputTapY = posY - 5.0f;
-		const float inputTapWidth = kCaptchaWidth - kCaptchaInputOffsetX + 8.0f;
-		const float inputTapHeight = 30.0f;
-
-		FocusRegisterInputOnTap(inputTapX, inputTapY, inputTapWidth, inputTapHeight, input, "captcha_input");
-
-		if (SEASON3B::CheckMouseIn((int)inputTapX, (int)inputTapY, (int)inputTapWidth, (int)inputTapHeight) == 1
-			&& IsRegisterInputTap())
-		{
-			FocusRegisterCaptchaInput(input);
-			pSetCursorFocus = true;
-		}
-#endif
-	}
 }
 
 CB_DangKyInGame::CB_DangKyInGame()
@@ -206,7 +147,6 @@ CB_DangKyInGame::CB_DangKyInGame()
 		CInputData[i] = NULL;
 	}
 
-	CInputCaptCha = NULL;
 	TimeSendRegTK = GetTickCount();
 	OpenDKTK = false;
 }
@@ -223,7 +163,6 @@ void CB_DangKyInGame::Clear()
 		SAFE_DELETE(CInputData[i]);
 	}
 
-	SAFE_DELETE(CInputCaptCha);
 
 	TimeSendRegTK = GetTickCount();
 	OpenDKTK = false;
@@ -247,7 +186,6 @@ void CB_DangKyInGame::OpenOnOff()
 
 	gInterface.Data[eWindow_DangKyInGame].Open();
 	OpenDKTK = true;
-	gInterface.vCaptcha = gInterface.generateCaptcha(4);
 }
 
 bool CB_DangKyInGame::RenderWindow(int X, int Y)
@@ -313,23 +251,9 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 
 	inputPosX = startX + 120.0f;
 
+	// Captcha removed from in-game registration: submit straight away.
 	auto submitRegister = [&]()
 	{
-		if (CInputCaptCha == NULL)
-		{
-			return;
-		}
-
-		char captchaText[8] = { 0 };
-		CInputCaptCha->GetText(captchaText, sizeof(captchaText));
-		std::string captchaInput(captchaText);
-
-		if (!gInterface.check_Captcha(gInterface.vCaptcha, captchaInput))
-		{
-			gInterface.OpenMessageBox("Error", "Invalid Captcha");
-			return;
-		}
-
 		RequsetDKTK();
 	};
 
@@ -356,32 +280,10 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		startY += kInputSpacing;
 	}
 
-	startY += 10.0f;
-	startY += 10.0f;
-
-	const float captchaX = startX + 105.0f;
-	const float captchaY = startY + 45.0f;
-	RenderRegisterText(
-		(HFONT)g_hFontBold,
-		startX + 18.0f,
-		startY + 48.0f,
-		96.0f,
-		16.0f,
-		1,
-		ResolveRegisterLabel(gOther.TextVN_NAPGAME[13], "Captcha :"));
-
-	if (CInputCaptCha == NULL)
-	{
-		CInputCaptCha = new CUITextInputBox;
-		CInputCaptCha->Init(g_hWnd, (int)kCaptchaInputWidth, (int)kCaptchaInputHeight, 4);
-		CInputCaptCha->SetBackColor(0, 0, 0, 0);
-		CInputCaptCha->SetTextColor(255, 255, 255, 255);
-		CInputCaptCha->SetFont((HFONT)g_hFont);
-		CInputCaptCha->SetState(UISTATE_NORMAL);
-		CInputCaptCha->SetOption(UIOPTION_NUMBERONLY);
-		CInputCaptCha->SetText("");
-	}
-
+	// The captcha row used to sit here (label, generated code and its input),
+	// preceded by two 10px spacers. Both the row and the spacers are gone, and
+	// kRegisterWindowHeight was reduced to match so the window does not keep a
+	// blank gap above the submit button.
 	if (CInputData[Account] != NULL && CInputData[Pass] != NULL)
 	{
 		CInputData[Account]->SetTabTarget(CInputData[Pass]);
@@ -396,18 +298,6 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 	{
 		CInputData[Snonumber]->SetTabTarget(CInputData[Phone]);
 	}
-
-	if (CInputData[Snonumber] != NULL && CInputCaptCha != NULL)
-	{
-		CInputData[Snonumber]->SetTabTarget(CInputCaptCha);
-	}
-
-	if (CInputCaptCha != NULL)
-	{
-		CInputCaptCha->SetTabTarget(NULL);
-	}
-
-	RenderRegisterCaptcha(captchaX, captchaY, CInputCaptCha, gInterface.vCaptcha.c_str());
 
 	for (int i = Account; i <= Snonumber; ++i)
 	{
@@ -428,7 +318,10 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		submitRegister();
 	}
 #if defined(__ANDROID__) || defined(MU_IOS)
-	else if (CInputCaptCha != NULL && CInputCaptCha->HaveFocus() && SEASON3B::IsPress(VK_RETURN))
+	// Enter used to submit from the captcha box, which was the last field.
+	// With the captcha gone, submit from the last remaining input instead so
+	// the on-screen keyboard's done key still finishes registration.
+	else if (CInputData[Snonumber] != NULL && CInputData[Snonumber]->HaveFocus() && SEASON3B::IsPress(VK_RETURN))
 	{
 		submitRegister();
 	}
@@ -503,7 +396,6 @@ bool CB_DangKyInGame::RequsetDKTK()
 
 	DataSend((LPBYTE)&pMsg, pMsg.header.size);
 
-	gInterface.vCaptcha = gInterface.generateCaptcha(4);
 	TimeSendRegTK = GetTickCount() + 5000;
 
 	return true;

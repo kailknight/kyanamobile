@@ -41,7 +41,6 @@ public:
 	
 protected:
 	CUITextInputBox* CInputData[TYPE_INPUT_DKTK::eMaxINPUT];
-	CUITextInputBox* CInputCaptCha;
 	DWORD TimeSendRegTK;
 	bool OpenDKTK;
 };
