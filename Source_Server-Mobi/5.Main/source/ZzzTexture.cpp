@@ -158,11 +158,13 @@ bool OpenJpegBuffer(char *filename,float *BufferFloat)
 	{
 		// TEMP diagnostic: a silent failure here leaves the caller's buffer
 		// holding whatever the previously loaded map put there.
+#if MU_DEV_DIAGNOSTICS
 		if(FILE* dbg = fopen("mu_lightmap_probe.txt", "a"))
 		{
 			fprintf(dbg, "FOPEN FAILED file=%s\n", FileName);
 			fclose(dbg);
 		}
+#endif
 		char Text[256];
 		sprintf(Text, "%s - File not exist.", FileName);
 		g_ErrorReport.Write(Text);
@@ -228,6 +230,7 @@ bool OpenJpegBuffer(char *filename,float *BufferFloat)
 		// is dead on these builds), so write to a file instead. Chasing a
 		// terrain lightmap that reads back as pure grayscale in memory even
 		// though the .ozj on disk is a colour JPEG.
+#if MU_DEV_DIAGNOSTICS
 		if(FILE* dbg = fopen("mu_lightmap_probe.txt", "a"))
 		{
 			fprintf(dbg, "file=%s %dx%d subsamp=%d colorspace=%d\n",
@@ -242,6 +245,7 @@ bool OpenJpegBuffer(char *filename,float *BufferFloat)
 			}
 			fclose(dbg);
 		}
+#endif
 	}
 	return true;
 #else

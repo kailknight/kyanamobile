@@ -7,6 +7,21 @@
 
 #if defined(__ANDROID__) || defined(MU_IOS)
 
+// Developer diagnostics (drift log, terrain/object/texture/protect probes and
+// the profiling counters that feed them). These write files into the app's
+// external files dir - the drift log and terrain probe every 10 seconds - so
+// they must never be on in a shipped build. Gradle's release variant builds
+// native code with CMAKE_BUILD_TYPE=Release, which defines NDEBUG, so this is
+// off for release and on for debug automatically. Override with
+// -DMU_DEV_DIAGNOSTICS=1 to measure a release build deliberately.
+#ifndef MU_DEV_DIAGNOSTICS
+#  ifdef NDEBUG
+#    define MU_DEV_DIAGNOSTICS 0
+#  else
+#    define MU_DEV_DIAGNOSTICS 1
+#  endif
+#endif
+
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>

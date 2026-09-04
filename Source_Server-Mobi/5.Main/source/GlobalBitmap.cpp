@@ -462,6 +462,7 @@ bool CGlobalBitmap::LoadImage(GLuint uiBitmapIndex, const std::string& filename,
 	// failures silently - the slot is simply left empty and anything drawing
 	// with it binds TextureNumber 0 and renders untextured white. Chasing
 	// gray/untextured map objects in Elbeland.
+#if MU_DEV_DIAGNOSTICS
 	if(!bLoaded)
 	{
 		if(FILE* dbg = fopen("mu_texfail.txt", "a"))
@@ -471,6 +472,7 @@ bool CGlobalBitmap::LoadImage(GLuint uiBitmapIndex, const std::string& filename,
 			fclose(dbg);
 		}
 	}
+#endif
 	return bLoaded;
 }
 void CGlobalBitmap::UnloadImage(GLuint uiBitmapIndex, bool bForce)

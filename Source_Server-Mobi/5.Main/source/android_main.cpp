@@ -169,11 +169,13 @@ static void PerfLogInfo(const char* fmt, ...)
 
     // Logcat is unavailable on some devices/ROMs (observed on RedMagic Game Space) -
     // mirror to a plain file so perf data can be pulled via `adb pull` regardless.
+#if MU_DEV_DIAGNOSTICS
     if (FILE* f = fopen("mu_perf_log.txt", "a"))
     {
         fprintf(f, "%s\n", buffer);
         fclose(f);
     }
+#endif
 }
 #define PERF_LOGI(...) PerfLogInfo(__VA_ARGS__)
 #else
@@ -390,6 +392,7 @@ static void InitializeTakumiProtectState()
             onDisk = std::ftell(fp);
             std::fclose(fp);
         }
+#if MU_DEV_DIAGNOSTICS
         if (FILE* dbg = fopen("mu_protect_probe.txt", "a"))
         {
             fprintf(dbg,
@@ -409,6 +412,7 @@ static void InitializeTakumiProtectState()
                 offsetof(MAIN_FILE_INFO, CustomWingInfo));
             fclose(dbg);
         }
+#endif
     }
 
     const size_t mainGot = readProtectBlob("Data/Local/CBGetMain.bin", &mainInfo, sizeof(mainInfo));
@@ -3988,7 +3992,10 @@ float GetVirtualJoystickRenderCenterY()
 // the external files dir the process chdir's to at startup, because adb logcat
 // comes back empty on these phones. Remove with MU_JOYSTICK_TRACE once the tap
 // question is settled.
+// Joystick tracing writes mu_joystick_debug.txt on every path issue - dev only.
+#if MU_DEV_DIAGNOSTICS
 #define MU_JOYSTICK_TRACE 1
+#endif
 
 #if defined(MU_JOYSTICK_TRACE)
 void JoystickTrace(const char* what)
@@ -20437,6 +20444,7 @@ static void RunAndroidGameFrame()
                     // landmine this avoids). Defined in ZzzObject.cpp.
                     extern int g_ProfTransformCacheHits;
                     extern int g_ProfTransformCacheMisses;
+#if MU_DEV_DIAGNOSTICS
                     if (FILE* f = fopen("mu_drift_log.txt", "a"))
                     {
                         fprintf(f,
@@ -20529,7 +20537,10 @@ static void RunAndroidGameFrame()
                             g_ProfFlushCauses[0]);
                         fclose(f);
                     }
+#endif
 
+
+#if MU_DEV_DIAGNOSTICS
                     // TEMP diagnostic: dumps the terrain tile under the
                     // player's feet every 10s alongside the drift log, to
                     // chase the PC-vs-mobile crater color mismatch in
@@ -20548,6 +20559,8 @@ static void RunAndroidGameFrame()
                             fclose(pf);
                         }
                     }
+#endif
+
                     g_DriftLastLogSec = nowSec;
                     g_DriftFrames = 0;
                     g_DriftSceneMsSum = 0.0;
