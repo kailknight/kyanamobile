@@ -13896,6 +13896,9 @@ static UITexture LoadUITextureAsset(const char* assetPath)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    // Creating a texture leaves it bound; resync the engine shadow so the
+    // next BindTexture() cannot wrongly conclude its index is already bound.
+    CachTexture = 0x7FFFFFFF;
     stbi_image_free(pixels);
 
     tex.w = w; tex.h = h;
@@ -14061,6 +14064,7 @@ static void BuildTopBarIconAtlas()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, atlasW, atlasH, 0, GL_RGBA, GL_UNSIGNED_BYTE, atlas.data());
+    CachTexture = 0x7FFFFFFF;
     g_uiTex_topBarAtlas.w = atlasW;
     g_uiTex_topBarAtlas.h = atlasH;
 
@@ -14095,6 +14099,12 @@ static void DrawIconButton(float uiX, float uiY, float uiW, float uiH,
     // Draw PNG texture directly 鑺掗埀顑解偓?no background, no border
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex.id);
+    // Raw bind: record it in the engine shadow using BindTexture's existing
+    // negative-value = raw GL handle convention. Without this the shadow keeps
+    // naming whatever the scene bound last, and the next BindTexture(N) that
+    // matches it skips the real bind - so scene geometry samples this pad
+    // texture (or nothing) instead. Same fix as UIControls.cpp's font draw.
+    CachTexture = -static_cast<int>(tex.id);
     glColor4f(1.0f, 1.0f, 1.0f, alpha);
     glBegin(GL_TRIANGLE_FAN);
     glTexCoord2f(0.0f, 0.0f); glVertex2f(sx,      syB);
@@ -14136,6 +14146,12 @@ static void DrawIconButtonUv(float uiX, float uiY, float uiW, float uiH,
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex.id);
+    // Raw bind: record it in the engine shadow using BindTexture's existing
+    // negative-value = raw GL handle convention. Without this the shadow keeps
+    // naming whatever the scene bound last, and the next BindTexture(N) that
+    // matches it skips the real bind - so scene geometry samples this pad
+    // texture (or nothing) instead. Same fix as UIControls.cpp's font draw.
+    CachTexture = -static_cast<int>(tex.id);
     glColor4f(1.0f, 1.0f, 1.0f, alpha);
     glBegin(GL_TRIANGLE_FAN);
     glTexCoord2f(u0,      v0);      glVertex2f(sx,      syB);
@@ -20432,6 +20448,12 @@ static void RunAndroidGameFrame()
                         if (FILE* pf = fopen("mu_terrain_probe.txt", "a"))
                         {
                             DumpTerrainProbeAt(pf, Hero->Object.Position[0], Hero->Object.Position[1]);
+                            DumpNearbyObjects(pf, Hero->Object.Position[0], Hero->Object.Position[1]);
+                            {
+                                char alphaState[512] = {0};
+                                GL_DebugReportAlphaState(alphaState, (int)sizeof(alphaState));
+                                fprintf(pf, "%s\n", alphaState);
+                            }
                             fclose(pf);
                         }
                     }

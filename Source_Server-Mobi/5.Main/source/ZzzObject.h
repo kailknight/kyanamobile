@@ -135,4 +135,6 @@ bool isPartyMemberBuff( int partyindex );
 void RenderBoundingBox(OBJECT* pObj);
 #endif // CSK_DEBUG_RENDER_BOUNDINGBOX
 
+void DumpNearbyObjects(FILE* f, float heroX, float heroY);
+
 #endif //ZZZ_OBJECT_H

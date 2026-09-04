@@ -2939,6 +2939,11 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
         // pass count ever needs re-measuring.
     }
 
+    // Measured, do not "fix" the winding here: flipping the front face for
+    // skinned draws turns characters dark (their back faces show) and does
+    // NOT restore the Totem Golem's missing stone-body mesh. So skinned
+    // geometry reaches the rasteriser wound correctly, and whatever drops that
+    // body mesh is on a different path - it is not this one.
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
@@ -2959,3 +2964,27 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
 }
 
 #endif // __ANDROID__
+
+// TEMP diagnostic: reports gl_compat's own blend/alpha-test state alongside
+// ZzzOpenglUtil.cpp's separate shadow flags. Those two must agree: the engine
+// guards its glEnable(GL_ALPHA_TEST)/glEnable(GL_BLEND) calls behind its own
+// shadows, so if a shadow says "already enabled" while gl_compat's state says
+// otherwise, the real glEnable is never re-issued, s_alphaTestEnabled stays
+// false, ApplyShaderStateCommon picks the no-discard program, and alpha-cutout
+// foliage renders as opaque quads (the "tree leaves are rectangles" symptom).
+void GL_DebugReportAlphaState(char* out, int outSize)
+{
+    extern bool TextureEnable;
+    extern bool AlphaTestEnable;
+    extern int  AlphaBlendType;
+    snprintf(out, (size_t)outSize,
+        "glc[alphaTest=%d blend=%d tex=%d] engine[AlphaTestEnable=%d AlphaBlendType=%d TextureEnable=%d] "
+        "earlyZ[opaque=%d discard=%d]",
+        s_alphaTestEnabled ? 1 : 0,
+        (s_capBits & CAP_BLEND) != 0 ? 1 : 0,
+        s_texture2DEnabled ? 1 : 0,
+        AlphaTestEnable ? 1 : 0, AlphaBlendType, TextureEnable ? 1 : 0,
+        g_ProfEarlyZOpaqueDraws, g_ProfEarlyZDiscardDraws);
+    g_ProfEarlyZOpaqueDraws = 0;
+    g_ProfEarlyZDiscardDraws = 0;
+}

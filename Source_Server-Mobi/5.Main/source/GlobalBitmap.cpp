@@ -11,6 +11,39 @@
 #if defined(__ANDROID__) || defined(MU_IOS)
 #include <vector>
 #include "turbojpeg.h"
+#include "Platform/gl_compat.h"
+#endif
+
+// ZzzOpenglUtil.cpp's BindTexture() shadow. Declared at true file scope: an
+// extern written inside a function body resolves into the enclosing namespace
+// on this toolchain and has already cost this codebase a link failure.
+extern int CachTexture;
+
+// Creating a texture leaves it bound. Every glGenTextures/glBindTexture/
+// glTexImage2D sequence below therefore changes what GL actually has bound,
+// while BindTexture()'s CachTexture shadow (and, on mobile, gl_compat's own
+// s_boundTexture) still name whatever the engine bound last. The next
+// BindTexture(N) whose N happens to equal that stale shadow then short-
+// circuits, the real glBindTexture never happens, and the draw samples the
+// texture that was just uploaded instead of N.
+//
+// Textures are loaded lazily as the camera moves, so this fires exactly when
+// new scenery streams in - which is why map tiles, tree canopies and the
+// Elbeland fog boxes render white/wrong *while moving* and settle afterwards.
+// A white sample also defeats alpha-cutout foliage: alpha comes back 1.0
+// everywhere, nothing is discarded, and leaves draw as solid rectangles.
+//
+// Same bug class, and same remedy, as the CachTexture resets already present
+// in TerrainBatch_Flush, UIControls.cpp and GL_InvalidateCachedGLState.
+static inline void InvalidateTextureBindShadows()
+{
+    CachTexture = 0x7FFFFFFF;
+#if defined(__ANDROID__) || defined(MU_IOS)
+    GL_InvalidateCachedGLState();
+#endif
+}
+
+#if defined(__ANDROID__) || defined(MU_IOS)
 
 static GLuint NormalizeTextureWrapMode(GLuint mode)
 {
@@ -714,6 +747,7 @@ bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, uiFilter);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, uiWrapMode);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, uiWrapMode);
+	InvalidateTextureBindShadows();
 
 	if(filename.find("World74") != std::string::npos || filename.find("MU-logo_g") != std::string::npos)
 	{
@@ -800,6 +834,7 @@ bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, 
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, uiWrapMode);
 
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, uiWrapMode);
+		InvalidateTextureBindShadows();
 	}
 	(void) jpeg_finish_decompress(&cinfo);
 	jpeg_destroy_decompress(&cinfo);
@@ -943,11 +978,12 @@ bool CGlobalBitmap::OpenTga(GLuint uiBitmapIndex, const std::string& filename, G
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, uiWrapMode);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, uiWrapMode);
+	InvalidateTextureBindShadows();
 
 	return true;
 }
 
-void CGlobalBitmap::SplitFileName(IN const std::string& filepath, OUT std::string& filename, bool bIncludeExt) 
+void CGlobalBitmap::SplitFileName(IN const std::string& filepath, OUT std::string& filename, bool bIncludeExt)
 {
 	char __fname[_MAX_FNAME] = {0, };
 	char __ext[_MAX_EXT] = {0, };

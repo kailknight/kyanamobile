@@ -107,6 +107,7 @@ int  GL_AppendMeshVertsBaked(std::vector<float>& out,
                              float texOffsetU,
                              float texOffsetV);
 void GL_DrawTrisBulkBaked(const float* vertexData, int triCount);
+void GL_DebugReportAlphaState(char* out, int outSize);
 
 // ── Debug stats ───────────────────────────────────────────────────────────
 void GL_GetDrawStats(int* drawCalls, int* vertices);  // returns counts since last reset

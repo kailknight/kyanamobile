@@ -4225,6 +4225,13 @@ void CUITextInputBox::UploadText(int sx,int sy,int Width,int Height)
 	if(Width > 0 && Height > 0 && sx+Width > 0 && sy+Height > 0)
 	{
 		glBindTexture(GL_TEXTURE_2D,b->TextureNumber);
+		// Same raw-bind hazard the two paths above already guard against: this
+		// leaves the font texture bound while CachTexture still names whatever
+		// the scene bound last, so the next BindTexture(N) matching that stale
+		// value skips its real bind and draws with the font atlas instead.
+		// b is BITMAP_FONT's bitmap, so name it accurately rather than
+		// invalidating - RenderBitmap(BITMAP_FONT, ...) follows immediately.
+		CachTexture = BITMAP_FONT;
 		UploadFontBitmapRegion(b, sourceWidth, sourceHeight);
 		float TextureUWidth = (Width+0.01f)/b->Width;
 		float TextureVHeight = (Height+0.01f)/b->Height;

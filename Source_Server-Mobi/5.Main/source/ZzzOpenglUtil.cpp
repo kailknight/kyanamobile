@@ -388,6 +388,37 @@ int  AlphaBlendType;
 
 void BindTexture(int tex)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// No CachTexture short-circuit on mobile, deliberately.
+	//
+	// This shadow only tracks binds that go through THIS function, but plenty
+	// of code binds textures directly - texture creation in GlobalBitmap.cpp
+	// leaves the new texture bound, the virtual pad draws its PNGs every
+	// frame, fonts upload glyphs, GL_DrawSkinnedMesh binds character textures.
+	// The shadow then names something GL no longer has bound, and the next
+	// BindTexture(N) whose N happens to equal that stale value skipped the
+	// real bind entirely - so the draw sampled whatever was actually bound.
+	// White where nothing was bound (which also defeats alpha-cutout foliage:
+	// alpha reads 1.0 everywhere, nothing is discarded, and leaves render as
+	// solid rectangles), or a valid-but-wrong texture, e.g. Elbeland's yellow
+	// flower sheet in place of its green tree leaves.
+	//
+	// Skipping the check costs nothing here: PlatformGL.h maps glBindTexture
+	// to GL_TrackBindTexture, which dedupes against gl_compat's own
+	// s_boundTexture - and THAT one is accurate, because every glBindTexture
+	// in the build is routed through it. So the redundant-bind filtering still
+	// happens, one level down, against state that is actually correct.
+	CachTexture = tex;
+	if (tex >= 0)
+	{
+		BITMAP_t *b = &Bitmaps[tex];
+		glBindTexture(GL_TEXTURE_2D, b->TextureNumber);
+	}
+	else
+	{
+		glBindTexture(GL_TEXTURE_2D, -1 * tex);
+	}
+#else
 	if(CachTexture != tex)
 	{
       	CachTexture = tex;
@@ -401,6 +432,7 @@ void BindTexture(int tex)
 			glBindTexture(GL_TEXTURE_2D, -1 * tex);
 		}
 	}
+#endif
 }
 
 #if defined(__ANDROID__) || defined(MU_IOS)
@@ -492,7 +524,7 @@ void DisableDepthMask()
 
 void EnableCullFace()
 {
-    if(!CullFaceEnable) 
+    if(!CullFaceEnable)
 	{
 		CullFaceEnable = true;
         glEnable(GL_CULL_FACE);

@@ -10,6 +10,9 @@
 #include <GLES3/gl32.h>
 #include <vector>
 
+// ZzzOpenglUtil.cpp's BindTexture() shadow - see the note in GlobalBitmap.cpp.
+extern int CachTexture;
+
 namespace
 {
 	// Padding between packed images and around the sheet edge, so bilinear
@@ -173,6 +176,9 @@ namespace
 			b->AtlasVHeight = static_cast<float>(p.h) / static_cast<float>(sheetH);
 		}
 
+		// The atlas build bound textures raw; resync BindTexture's shadow so it
+		// cannot skip a later real bind (see GlobalBitmap.cpp for the full note).
+		CachTexture = 0x7FFFFFFF;
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
 }

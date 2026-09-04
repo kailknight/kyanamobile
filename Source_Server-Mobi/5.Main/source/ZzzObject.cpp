@@ -13340,3 +13340,94 @@ void RenderBoundingBox(OBJECT* pObj)
 	glPopMatrix();
 }
 #endif // CSK_DEBUG_RENDER_BOUNDINGBOX
+
+// TEMP diagnostic: dumps the map objects nearest the player, so the
+// gray/opaque "fog" geometry in Elbeland can be identified by Type. It is an
+// object (turning objects off in settings removes it) and it is not the
+// object material queue (proven by A/B) nor a missing texture (the load
+// failure log is clean for World52's cloud texture).
+void DumpNearbyObjects(FILE* f, float heroX, float heroY)
+{
+    if (!f) return;
+
+    struct Hit { OBJECT* o; float d2; };
+    Hit best[12];
+    int found = 0;
+
+    for (int b = 0; b < 256; ++b)
+    {
+        OBJECT* o = ObjectBlock[b].Head;
+        while (o != NULL)
+        {
+            if (o->Live)
+            {
+                const float dx = o->Position[0] - heroX;
+                const float dy = o->Position[1] - heroY;
+                const float d2 = dx * dx + dy * dy;
+                if (found < 12)
+                {
+                    best[found].o = o;
+                    best[found].d2 = d2;
+                    ++found;
+                }
+                else
+                {
+                    int worst = 0;
+                    for (int k = 1; k < 12; ++k)
+                        if (best[k].d2 > best[worst].d2) worst = k;
+                    if (d2 < best[worst].d2)
+                    {
+                        best[worst].o = o;
+                        best[worst].d2 = d2;
+                    }
+                }
+            }
+            if (o->Next == NULL) break;
+            o = o->Next;
+        }
+    }
+
+    {
+        extern int g_GolemMeshCalls[4], g_GolemMeshExitAdapt[4], g_GolemMeshExitNoTri[4],
+                   g_GolemMeshExitHide[4], g_GolemMeshReachedDraw[4];
+        fprintf(f, "golem(Monster134) per-mesh:");
+        for (int mi = 0; mi < 2; ++mi)
+        {
+            fprintf(f, " [m%d call=%d adapt=%d notri=%d hide=%d drew=%d]", mi,
+                g_GolemMeshCalls[mi], g_GolemMeshExitAdapt[mi], g_GolemMeshExitNoTri[mi],
+                g_GolemMeshExitHide[mi], g_GolemMeshReachedDraw[mi]);
+            g_GolemMeshCalls[mi] = 0; g_GolemMeshExitAdapt[mi] = 0;
+            g_GolemMeshExitNoTri[mi] = 0; g_GolemMeshExitHide[mi] = 0;
+            g_GolemMeshReachedDraw[mi] = 0;
+        }
+        fprintf(f, "\n");
+    }
+
+    fprintf(f, "objects near hero (%.0f,%.0f):\n", heroX, heroY);
+    for (int k = 0; k < found; ++k)
+    {
+        OBJECT* o = best[k].o;
+        fprintf(f, "  Type=%d (Object%d.bmd) sub=%d dist=%.0f scale=%.2f alpha=%.3f alphaEn=%d "
+                   "vis=%d renderType=%d blendMesh=%d blendLight=%.2f pos=(%.0f,%.0f,%.0f)\n",
+            o->Type, o->Type + 1, o->SubType, sqrtf(best[k].d2), o->Scale, o->Alpha,
+            o->AlphaEnable ? 1 : 0, o->Visible ? 1 : 0, (int)o->RenderType,
+            o->BlendMesh, o->BlendMeshLight,
+            o->Position[0], o->Position[1], o->Position[2]);
+
+        // Does each mesh of this model actually resolve to a loaded texture?
+        // An unresolved one binds TextureNumber 0 and draws untextured white.
+        if (o->Type >= 0 && o->Type < MAX_MODELS)
+        {
+            BMD* bm = &Models[o->Type];
+            fprintf(f, "      meshes=%d tex:", bm->NumMeshs);
+            for (int mi = 0; mi < bm->NumMeshs && mi < 8; ++mi)
+            {
+                const int ti = bm->IndexTexture[mi];
+                BITMAP_t* pb = Bitmaps.FindTexture((GLuint)ti);
+                fprintf(f, " [%d]=idx%d%s", mi, ti,
+                    (pb == NULL) ? "/MISSING" : (pb->TextureNumber == 0 ? "/TEXNUM0" : "/ok"));
+            }
+            fprintf(f, "\n");
+        }
+    }
+}

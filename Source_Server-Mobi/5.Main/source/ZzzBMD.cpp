@@ -69,6 +69,12 @@ static bool ReadWholeFileBytes(FILE* fp, unsigned char*& outData, int& outSize)
 BMD *Models;
 BMD *ModelsDump;
 
+// ZzzOpenglUtil.cpp's BindTexture() shadow. At true file scope on purpose:
+// this file opens an unnamed namespace further down whose functions sit at
+// column 0, so it extends much further than it looks, and an extern declared
+// inside it would get internal linkage and fail to link.
+extern int CachTexture;
+
 vec4_t BoneQuaternion[MAX_BONES];
 short  BoundingVertices[MAX_BONES];
 vec3_t BoundingMin[MAX_BONES];
@@ -1104,6 +1110,10 @@ void BMD::BindLightMaps()
 			glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
 			glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,lmp->Width,lmp->Height,0,GL_RGB,GL_UNSIGNED_BYTE,lmp->Buffer);
+			// Raw bind above leaves this lightmap bound while BindTexture's
+			// shadow still names something else - resync it (see the note in
+			// GlobalBitmap.cpp).
+			CachTexture = 0x7FFFFFFF;
 		}
 	}
 	LightMapEnable = true;
@@ -1875,9 +1885,29 @@ static void ApplyPendingOverlay2Followup(BMD* b, int i, int BlendMesh, float Ble
 	++g_PendingOverlay2ConsumedCount;
 }
 
+// TEMP diagnostic: the Totem Golem (Monster134, monster index 133) renders its
+// alpha-tested leaf mesh but not its opaque stone-body mesh. Disabling culling
+// brings the body back, but flipping the front face for skinned draws does not
+// (and darkens characters), so the body is not lost to winding on the skinned
+// path. Count, per mesh, how often RenderMesh is entered and which exit it
+// takes, so the branch that actually drops it is identified rather than
+// guessed at. Dumped in the 10s probe; strip with the other TEMP counters.
+int g_GolemMeshCalls[4]   = {0,0,0,0};
+int g_GolemMeshExitAdapt[4] = {0,0,0,0};
+int g_GolemMeshExitNoTri[4] = {0,0,0,0};
+int g_GolemMeshExitHide[4]  = {0,0,0,0};
+int g_GolemMeshReachedDraw[4] = {0,0,0,0};
+
 void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendMeshLight,float BlendMeshTexCoordU,float BlendMeshTexCoordV,int MeshTexture)
 {
     if ( i>=NumMeshs || i<0 ) return;
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+    const bool dbgGolem = (Models != NULL) && (this == &Models[MODEL_MONSTER01 + 133]) && (i >= 0 && i < 4);
+    if (dbgGolem) ++g_GolemMeshCalls[i];
+#else
+    const bool dbgGolem = false;
+#endif
 
 #if defined(__ANDROID__) || defined(MU_IOS)
     {
@@ -1914,18 +1944,19 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 
     if (ShouldSkipAdaptiveObjectRenderPass(RenderFlag, Alpha))
     {
+        if (dbgGolem) ++g_GolemMeshExitAdapt[i];
         return;
     }
 #endif
 
     Mesh_t *m = &Meshs[i];
-	if(m->NumTriangles == 0) return;
+	if(m->NumTriangles == 0) { if (dbgGolem) ++g_GolemMeshExitNoTri[i]; return; }
 
 	float Wave = (int)WorldTime%10000 * 0.0001f;
 
 	int Texture = IndexTexture[m->Texture];
     if(Texture == BITMAP_HIDE)
-		return;
+		{ if (dbgGolem) ++g_GolemMeshExitHide[i]; return; }
     else if(Texture == BITMAP_SKIN)
 	{
 		if(HideSkin) return;
@@ -2391,6 +2422,7 @@ void BMD::RenderMesh(int i,int RenderFlag,float Alpha,int BlendMesh,float BlendM
 	// case whose GL state is exactly "opaque or alpha-tested, depth-write on":
 	// anything blended or additive (BRIGHT/DARK/LIGHTMAP) is order-dependent
 	// and stays on the immediate path.
+	if (dbgGolem) ++g_GolemMeshReachedDraw[i];
 	const bool queueEligible =
 		ObjMeshQueue_Active() &&
 		Render == RENDER_TEXTURE &&
