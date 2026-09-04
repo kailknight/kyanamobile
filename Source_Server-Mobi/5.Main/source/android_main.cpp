@@ -16829,11 +16829,19 @@ void RenderVirtualPad()
     {
         BeginBitmap();
         EnsureUITextures();
-        const float skillIconScale = std::min(
-            kVirtualSkillFrameW / kVirtualSkillBaseFrameW,
-            kVirtualSkillFrameH / kVirtualSkillBaseFrameH);
-        const float renderSkillIconW = kVirtualSkillSourceIconW * skillIconScale;
-        const float renderSkillIconH = kVirtualSkillSourceIconH * skillIconScale;
+        // Size the icon off the circular frame, not the 32x38 rectangle the
+        // slot used to be. That old ratio (min(22/32, 28/38) = 0.6875) left a
+        // 20x28 source icon drawn at 13.75x19.25 inside a 38px circle - barely
+        // half its width - so the art sat lost in the middle of the ring.
+        //
+        // Drawn as a disc (see RenderSkillIcon's bRoundMask), so it can take
+        // the frame's full inner circle without square corners overhanging the
+        // border art - which is why a quad could never actually fill the ring.
+        // The disc centre-crops the taller 20x28 cell, keeping the art's own
+        // proportions.
+        constexpr float kVirtualSkillIconCover = 0.94f;   // of the frame radius, inside its border
+        const float renderSkillIconW = kVirtualSkillButtonRadius * 2.0f * kVirtualSkillIconCover;
+        const float renderSkillIconH = renderSkillIconW;
         const bool assignModeActive = IsVirtualAssignModeActive()
             || IsVirtualOverlayHotKeySkillIndex(g_virtualAssignPickerSkillIndex);
         for (int visualSlot = 0; visualSlot < kVirtualVisibleSkillButtonCount; ++visualSlot)
@@ -16891,7 +16899,8 @@ void RenderVirtualPad()
                     renderSkillIconW,
                     renderSkillIconH,
                     0,
-                    false);
+                    false,
+                    true);   // round mask: fill the circular frame
             }
         }
 

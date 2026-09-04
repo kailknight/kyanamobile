@@ -1795,7 +1795,7 @@ void GetDrawCircle(int ID, float X, float Y, float W, float CurrenX, float Curre
 	VertexCoord[1] = v33;
 	VertexCoord[2] = 0.0;
 	VertexCoord[3] = 1.0;
-	glVertex4fv(VertexCoord);
+	glVertex2f(VertexCoord[0], VertexCoord[1]);
 
 	for (int i = 0; i < vertexcount; i++)
 	{
@@ -1806,7 +1806,7 @@ void GetDrawCircle(int ID, float X, float Y, float W, float CurrenX, float Curre
 		VertexCoord[1] = (std::sin(angle * i) * -W) + v33;
 		VertexCoord[2] = 0.0;
 		VertexCoord[3] = 1.0;
-		glVertex4fv(VertexCoord);
+		glVertex2f(VertexCoord[0], VertexCoord[1]);
 	}
 	//--
 	texturecoord[0] = (1.0 * SetScale) + CurrenX;
@@ -1817,7 +1817,7 @@ void GetDrawCircle(int ID, float X, float Y, float W, float CurrenX, float Curre
 	VertexCoord[1] = (0.0 * -W) + v33;
 	VertexCoord[2] = 0.0;
 	VertexCoord[3] = 1.0;
-	glVertex4fv(VertexCoord);
+	glVertex2f(VertexCoord[0], VertexCoord[1]);
 	//--
 	if (Alpha > 0.0)
 		glColor4f(1.0, 1.0, 1.0, 1.0);
@@ -1827,8 +1827,16 @@ void GetDrawCircle(int ID, float X, float Y, float W, float CurrenX, float Curre
 
 void RenderBitmapCircle(int Texture, float x, float y, float Radius, float u, float v, float uWidth, float vHeight, bool Scale, bool StartScale, float Alpha)
 {
+	// Vertices here (and in GetDrawCircle above) used to be emitted with
+	// glVertex4fv, which PlatformDefs.h stubs out as an empty inline on
+	// Android/iOS - the vertex never reached gl_compat's immediate-mode
+	// batcher, so both functions drew literally nothing on mobile. glVertex2f
+	// is the mapped one (PlatformGL.h), and z/w were always 0/1 anyway.
 	GLuint vertexcount; // ST1C_4@5
-	float var_radius2; // ST1C_4@5
+	// Only ever assigned under StartScale below, but read unconditionally by
+	// the vertex loop - every StartScale=false caller was reading an
+	// uninitialised vertical radius. Default it to the radius it was given.
+	float var_radius2 = Radius;
 	GLfloat var_angle; // ST1C_4@5
 	GLfloat TextureCoord[2]; // [sp+2Ch] [bp-40h]@5
 	GLfloat VertexCoord[4]; // [sp+4Ch] [bp-20h]@5
@@ -1867,7 +1875,7 @@ void RenderBitmapCircle(int Texture, float x, float y, float Radius, float u, fl
 	VertexCoord[1] = y;
 	VertexCoord[2] = 0.0;
 	VertexCoord[3] = 1.0;
-	glVertex4fv(VertexCoord);
+	glVertex2f(VertexCoord[0], VertexCoord[1]);
 
 	for (int i = 0; i < vertexcount; i++)
 	{
@@ -1878,7 +1886,7 @@ void RenderBitmapCircle(int Texture, float x, float y, float Radius, float u, fl
 		VertexCoord[1] = (std::sin(var_angle * i) * -var_radius2) + y;
 		VertexCoord[2] = 0.0;
 		VertexCoord[3] = 1.0;
-		glVertex4fv(VertexCoord);
+		glVertex2f(VertexCoord[0], VertexCoord[1]);
 	}
 	//--
 	TextureCoord[0] = uWidth + u;
@@ -1889,7 +1897,7 @@ void RenderBitmapCircle(int Texture, float x, float y, float Radius, float u, fl
 	VertexCoord[1] = y;
 	VertexCoord[2] = 0.0;
 	VertexCoord[3] = 1.0;
-	glVertex4fv(VertexCoord);
+	glVertex2f(VertexCoord[0], VertexCoord[1]);
 
 	if (Alpha > 0.0)
 		glColor4f(1.0, 1.0, 1.0, 1.0);

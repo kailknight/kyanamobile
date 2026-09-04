@@ -154,7 +154,7 @@ namespace SEASON3B
 		bool IsSkillListUp();
 
 		static void UI2DEffectCallback(LPVOID pClass, DWORD dwParamA, DWORD dwParamB);
-		void RenderSkillIcon(int iIndex, float x, float y, float width, float height, int TypeMuHelper = 0, bool drawHotKeyNumber = true);
+		void RenderSkillIcon(int iIndex, float x, float y, float width, float height, int TypeMuHelper = 0, bool drawHotKeyNumber = true, bool bRoundMask = false);
 	private:
 		void LoadImages();
 		void UnloadImages();

@@ -3632,7 +3632,7 @@ void SEASON3B::CNewUISkillList::RenderPetSkill()
 	}
 }
 
-void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, float width, float height, int TypeMuHelper, bool drawHotKeyNumber)
+void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, float width, float height, int TypeMuHelper, bool drawHotKeyNumber, bool bRoundMask)
 {
 
 	WORD bySkillType = CharacterAttribute->Skill[iIndex];
@@ -4104,7 +4104,26 @@ void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, fl
 
 		else
 		{
-			RenderBitmap(iSkillIndex, x, y, width, height, fU, fV, iconStepU, iconStepV);
+			if (bRoundMask)
+			{
+				// Round slots (the mobile skill ring) draw the icon as a disc
+				// instead of a quad, so it fills the frame's circle with no
+				// corners hanging over the border art. RenderBitmapCircle
+				// takes the UV *centre* and UV *radii*, not a corner and a
+				// size: using the same radius on both axes keeps the art's
+				// proportions (the atlas is square, so equal UV = equal
+				// texels) and centre-crops the taller 20x28 cell to the round
+				// region, which is what "zoom to fill the ring" needs.
+				const float uvRadius = ((iconStepU < iconStepV) ? iconStepU : iconStepV) * 0.5f;
+				RenderBitmapCircle(iSkillIndex, x, y, width * 0.5f,
+					fU + iconStepU * 0.5f, fV + iconStepV * 0.5f,
+					uvRadius, uvRadius,
+					true, true, 0.f);
+			}
+			else
+			{
+				RenderBitmap(iSkillIndex, x, y, width, height, fU, fV, iconStepU, iconStepV);
+			}
 		}
 	}
 
