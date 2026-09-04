@@ -25,6 +25,18 @@
 #include <cstdint>
 #endif
 
+// TEMP profiling: particles measured 24ms/frame in Elbeland with only two
+// characters on screen (67% of scene time) and 12ms in crowded Lorencia.
+// flushes = actual draw calls, quads = particles queued, scanned =
+// Particles[] slots walked, rendered = live particles that produced a quad.
+// Quads-per-flush near 1 means the batch is cut per particle. Defined at file
+// scope deliberately: the unnamed namespace just below would give these
+// internal linkage, and android_main.cpp reads them for the drift log.
+unsigned long long g_ProfParticleFlushes = 0;
+unsigned long long g_ProfParticleQuads = 0;
+unsigned long long g_ProfParticleScanned = 0;
+unsigned long long g_ProfParticleRendered = 0;
+
 namespace
 {
 #if defined(__ANDROID__) || defined(MU_IOS)
@@ -63,6 +75,16 @@ void FlushParticleSpriteQuadBatch(ParticleSpriteQuadBatch& batch)
 		batch.blendMode = ParticleSpriteBlendMode::Unknown;
 		return;
 	}
+
+	// TEMP profiling: particles measured 24ms/frame in Elbeland with only two
+	// characters on screen (67% of scene time) and 12ms in crowded Lorencia.
+	// The batch only merges while consecutive particles share texture, blend
+	// mode AND depth mode, and the render loop walks Particles[] in slot order
+	// rather than grouped by material - so this counts how many draws it
+	// actually takes versus how many quads were queued. Quads-per-flush near 1
+	// means the batch is being cut per particle and the fix is to group them.
+	++g_ProfParticleFlushes;
+	g_ProfParticleQuads += static_cast<unsigned long long>(batch.quadCount);
 
 	BindTexture(batch.texture);
 	GL_DrawQuadsBulk(batch.vertices.data(), batch.quadCount);
@@ -317,6 +339,87 @@ void QueueParticleSpriteQuadBatch(ParticleSpriteQuadBatch& batch,
 	++batch.quadCount;
 }
 
+// Additive-particle material buckets.
+//
+// Particles measured 24ms/frame in Elbeland (67% of scene time) with only two
+// characters on screen. The batch below only merges while consecutive
+// particles share texture, blend mode AND depth mode, and RenderParticles
+// walks Particles[] in slot order, so it was cut almost every particle:
+// measured 223 draw calls for 466 particles, i.e. 2.09 quads per draw.
+//
+// Only AlphaBlend is grouped here. That maps to EnableAlphaBlend() ->
+// glBlendFunc(GL_ONE, GL_ONE), which is genuine addition and therefore
+// order-independent among itself, so regrouping those draws cannot change the
+// result. Every other mode (AlphaTest, AlphaBlendMinus, AlphaBlend3) is
+// order-dependent and is left exactly as it was - and when one appears, the
+// pending additive buckets are flushed FIRST, so relative ordering between
+// additive and non-additive particles is preserved.
+std::vector<ParticleSpriteQuadBatch> s_particleAddBuckets;
+
+ParticleSpriteQuadBatch& GetParticleAddBucket(int texture, bool depthEnabled)
+{
+	for (ParticleSpriteQuadBatch& b : s_particleAddBuckets)
+	{
+		if (b.texture == texture && b.depthEnabled == depthEnabled)
+		{
+			return b;
+		}
+	}
+	// Hard cap. Distinct (texture, depth) combinations per frame is a small
+	// number in practice; if that assumption is ever wrong this must degrade
+	// rather than grow without bound. Falling back to the first bucket keeps
+	// rendering correct (additive is order-independent, and the texture is
+	// re-bound per flush) at the cost of extra flushes.
+	if (s_particleAddBuckets.size() >= 64)
+	{
+		return s_particleAddBuckets[0];
+	}
+
+	ParticleSpriteQuadBatch nb;
+	nb.texture = texture;
+	nb.depthEnabled = depthEnabled;
+	nb.blendMode = ParticleSpriteBlendMode::AlphaBlend;
+	nb.vertices.reserve(64 * 4 * 9);
+	s_particleAddBuckets.push_back(std::move(nb));
+	return s_particleAddBuckets.back();
+}
+
+void FlushParticleAddBuckets(ParticleSpriteBlendMode& currentBlendMode, bool& currentDepthEnabled)
+{
+	for (ParticleSpriteQuadBatch& b : s_particleAddBuckets)
+	{
+		if (b.quadCount <= 0)
+		{
+			continue;
+		}
+		if (currentBlendMode != ParticleSpriteBlendMode::AlphaBlend)
+		{
+			ApplyParticleBlendMode(ParticleSpriteBlendMode::AlphaBlend);
+			currentBlendMode = ParticleSpriteBlendMode::AlphaBlend;
+		}
+		if (currentDepthEnabled != b.depthEnabled)
+		{
+			if (b.depthEnabled) { EnableDepthTest(); } else { DisableDepthTest(); }
+			currentDepthEnabled = b.depthEnabled;
+		}
+
+		// FlushParticleSpriteQuadBatch resets texture to -1 and blendMode to
+		// Unknown - correct for the single shared batch it was written for,
+		// which is rebuilt from scratch each time, but these buckets are
+		// long-lived and identified BY those fields. Without restoring them
+		// every lookup missed after the first flush, so a new bucket was
+		// appended every frame; each reserves tens of KB, and the process ran
+		// out of memory in about 30 seconds (SIGABRT, Scudo "internal map
+		// failure", tombstone_17).
+		const int keepTexture = b.texture;
+		const bool keepDepth = b.depthEnabled;
+		FlushParticleSpriteQuadBatch(b);
+		b.texture = keepTexture;
+		b.depthEnabled = keepDepth;
+		b.blendMode = ParticleSpriteBlendMode::AlphaBlend;
+	}
+}
+
 void RenderParticleSpriteBatched(ParticleSpriteQuadBatch& batch,
 	ParticleSpriteBlendMode desiredBlendMode,
 	ParticleDepthMode desiredDepthMode,
@@ -333,6 +436,21 @@ void RenderParticleSpriteBatched(ParticleSpriteQuadBatch& batch,
 	float uWidth = 1.f,
 	float vHeight = 1.f)
 {
+	if (desiredBlendMode == ParticleSpriteBlendMode::AlphaBlend)
+	{
+		bool depthEnabled = currentDepthEnabled;
+		if (desiredDepthMode == ParticleDepthMode::Enable)      { depthEnabled = true;  }
+		else if (desiredDepthMode == ParticleDepthMode::Disable) { depthEnabled = false; }
+
+		ParticleSpriteQuadBatch& bucket = GetParticleAddBucket(texture, depthEnabled);
+		QueueParticleSpriteQuadBatch(bucket, texture, position, width, height, light, rotation, u, v, uWidth, vHeight);
+		return;
+	}
+
+	// Order-dependent mode: everything additive queued so far has to land
+	// before it.
+	FlushParticleAddBuckets(currentBlendMode, currentDepthEnabled);
+
 	PrepareParticleSpriteBatch(batch, texture, desiredBlendMode, desiredDepthMode, currentBlendMode, currentDepthEnabled);
 	QueueParticleSpriteQuadBatch(batch, texture, position, width, height, light, rotation, u, v, uWidth, vHeight);
 }
@@ -9388,6 +9506,7 @@ void RenderParticles(BYTE byRenderOneMore)
 #define PARTICLE_ENABLE_ALPHA_BLEND3() EnableAlphaBlend3()
 #endif
 
+	g_ProfParticleScanned += MAX_PARTICLES;
 	for (int i = 0; i < MAX_PARTICLES; i++)
 	{
 		PARTICLE* o = &Particles[i];
@@ -9402,6 +9521,7 @@ void RenderParticles(BYTE byRenderOneMore)
 				if (o->Position[2] <= 300.f) continue;
 			}
 
+			++g_ProfParticleRendered;
 			BITMAP_t* pBitmap = Bitmaps.GetTexture(o->TexType);
 			float Width = pBitmap->Width * o->Scale;
 			float Height = pBitmap->Height * o->Scale;
@@ -9761,6 +9881,9 @@ void RenderParticles(BYTE byRenderOneMore)
 	}
 #if defined(__ANDROID__) || defined(MU_IOS)
 	FlushParticleSpriteQuadBatch(spriteBatch);
+	// Anything additive still queued - one draw per (texture, depth) instead of
+	// one per particle. See GetParticleAddBucket.
+	FlushParticleAddBuckets(currentBlendMode, currentDepthEnabled);
 	DisableAlphaBlend();
 	if (restoreDepthTest)
 	{
