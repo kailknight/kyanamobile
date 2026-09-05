@@ -114,6 +114,21 @@ bool SEASON3B::CNewUIChatInputBox::Create(CNewUIManager* pNewUIMng, CNewUIChatLo
 	m_pChatInputBox->SetTabTarget(m_pWhsprIDInputBox);
 	m_pWhsprIDInputBox->SetTabTarget(m_pChatInputBox);
 
+	// The tab targets above have always been wired up, but pressing Tab did
+	// nothing: CUITextInputBox's VK_TAB handler also requires
+	// UIOPTION_ENTERASTAB, and that was never set on either box. LoginWin sets
+	// it on its ID box, which is why Tab moves ID -> password there but not
+	// chat -> whisper target here.
+	//
+	// PC only, deliberately. The same option additionally makes Enter jump to
+	// the tab target instead of submitting, and that path is compiled in for
+	// Android and iOS - setting it there would stop Enter sending chat
+	// messages. There is no Tab key on a touch keyboard anyway.
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	m_pChatInputBox->SetOption(UIOPTION_ENTERASTAB);
+	m_pWhsprIDInputBox->SetOption(UIOPTION_ENTERASTAB);
+#endif
+
 	LoadImages();
 
 	SetInputMsgType(INPUT_CHAT_MESSAGE);
