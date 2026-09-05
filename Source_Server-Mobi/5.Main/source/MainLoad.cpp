@@ -9,10 +9,17 @@
 #include "Reconnect.h"
 #include "ZzzInfomation.h"
 
-// Linked in from MHPClient.lib (the MHP anti-cheat, built as a static library
-// instead of MHPClient.dll). Declared by hand rather than by including its
-// headers: it has its own CMHPProtect/MAIN_FILE_INFO that would collide with the
-// identically named types in Protect.h.
+// Linked in from MUGuardClient.lib (the MUGUARD V2.2 anti-cheat, built as a
+// static library instead of a loose DLL). Declared by hand rather than by
+// including its headers: it has its own CMHPProtect/MAIN_FILE_INFO that would
+// collide with the identically named types in Protect.h.
+//
+// Windows only. MUGuardClient.lib is a Win32 static library and is not linked
+// into the Android/iOS builds at all, and the block that uses it below is built on
+// Win32 API (GetFileAttributes, GetModuleHandle) plus casts of pointers to
+// DWORD, which is a narrowing cast on 64-bit ARM. This file is compiled for
+// mobile too, so all of it has to sit behind the guard.
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 extern "C" void EntryProc();
 extern HINSTANCE hins;
 bool LIBRARY_LOAD_ATTACH();
@@ -21,6 +28,7 @@ extern DWORD gUserAccount;
 extern DWORD gUserStruct;
 extern DWORD gWindowHwnd;
 extern HWND g_hWnd;
+#endif
 
 MainLoad gMainLoad;
 
@@ -83,10 +91,11 @@ bool MainLoad::Load()
 	Version[3] = (BYTE)gProtect.m_MainInfo.ClientVersion[5] + 4;
 	Version[4] = (BYTE)gProtect.m_MainInfo.ClientVersion[6] + 5;
 
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	if (gProtect.m_MainInfo.LoadAntihack)
 	{
-		// MHP used to ship as MHPClient.dll and get loaded a few lines up by
-		// gProtect.CheckPluginFile(), which LoadLibrary'd it and called its
+		// The anti-cheat used to ship as a loose DLL and get loaded a few lines
+		// up by gProtect.CheckPluginFile(), which LoadLibrary'd it and called its
 		// EntryProc. It is now linked into this exe instead, so no DLL ships and
 		// there is nothing loose for a player to swap out or delete.
 		//
@@ -133,7 +142,8 @@ bool MainLoad::Load()
 			EntryProc();
 		}
 	}
-	
+#endif
+
 	ApplyProtectData();
 
 #if (CB_ANTIHACKGGNEW)
