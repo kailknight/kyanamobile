@@ -36,6 +36,12 @@ public:
 	bool RenderWindow(int X, int Y);
 	void OpenOnOff();
 	bool RequsetDKTK();
+
+	// Same rate limit, validation, messages and packet as RequsetDKTK, but fed
+	// text directly instead of reading the three CUITextInputBox controls - the
+	// Android registration overlay keeps its own buffers. See the definition.
+	bool SubmitRegistration(const char* accountText, const char* passText, const char* snoText);
+
 	void RecvKQRegInGame(XULY_CGPACKET* lpMsg);
 	void Clear();
 	

@@ -1,5 +1,14 @@
 #include "StdAfx.h"
 #include "CB_DangKyInGame.h"
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+// Defined in android_main.cpp. Declared here rather than in a header because
+// that file exports nothing else and is not part of the PC build.
+void SetAndroidRegisterOverlayVisible(bool visible);
+void RenderAndroidRegisterOverlay();
+const char* AndroidRegisterOverlayAccountText();
+const char* AndroidRegisterOverlayPasswordText();
+#endif
 #include "NewUISystem.h"
 #include "CBInterface.h"
 #include "CUIController.h"
@@ -19,9 +28,15 @@ namespace
 {
 	const DWORD kRegisterTextColor = 0xFFFFFFFF;
 	const float kRegisterWindowWidth = 262.0f;
-	const float kRegisterWindowHeight = 210.0f;   // was 250: captcha row removed
+	const float kRegisterWindowHeight = 226.0f;   // was 250 (captcha row removed), then 210
 	const float kInputWidth = 110.0f;
-	const float kInputSpacing = 20.0f;
+
+	// 26, not 20. DoMouseAction() - which is what actually focuses a box on tap -
+	// hit-tests a rect padded 4px above and 8px taller than the box, so a 14px
+	// box tests as 22px. At 20px spacing those padded rects overlapped, and the
+	// row above would swallow a tap meant for the row below. 26 leaves a 4px gap
+	// between them so each tap lands on exactly one field.
+	const float kInputSpacing = 26.0f;
 	const char* kDefaultRegisterPhone = "0000000000";
 
 	bool IsRegisterInputTap()
@@ -90,12 +105,26 @@ namespace
 
 		input->SetPosition(static_cast<int>(posX), static_cast<int>(posY));
 		input->Render();
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+
+		// DoAction() is what actually drives the box - it drains the message
+		// queue, which is where the caret and the typed characters come from.
+		// Skipping it entirely on mobile left the fields drawn and focusable but
+		// unable to take a single keystroke.
+		//
+		// The full call, on every platform. DoMouseAction() inside it is what
+		// reliably focuses a box on tap - CLoginWin depends on the same thing on
+		// Android and its fields have always focused first time, while this
+		// window's own FocusRegisterInputOnTap was the only path here and needed
+		// two or three taps to catch. Restricting this to bMessageOnly on mobile
+		// let typing work but took that second path away again.
+		//
+		// The reason it was restricted - DoMouseAction's padded hit rect
+		// overlapping the neighbouring row - is fixed at the source instead, by
+		// spacing the rows past the padding (see kInputSpacing).
 		input->DoAction();
-#endif
 	}
 
-	void FocusRegisterInputOnTap(float posX, float posY, float width, float height, CUITextInputBox* input, const char* debugName = NULL)
+	void FocusRegisterInputOnTap(float posX, float posY, float width, float height, CUITextInputBox* input)
 	{
 #if defined(__ANDROID__) || defined(MU_IOS)
 		if (input == NULL)
@@ -107,23 +136,6 @@ namespace
 		{
 			if (IsRegisterInputTap())
 			{
-				if (debugName != NULL)
-				{
-					char debugText[256];
-					std::snprintf(
-						debugText,
-						sizeof(debugText),
-						"REGISTER_FOCUS hit=%s mouse=%d,%d rect=%.1f,%.1f,%.1f,%.1f",
-						debugName,
-						MouseX,
-						MouseY,
-						posX,
-						posY,
-						width,
-						height);
-					OutputDebugStringA(debugText);
-				}
-
 				input->GiveFocus(TRUE);
 				pSetCursorFocus = true;
 				PlayBuffer(25, 0, 0);
@@ -200,10 +212,25 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 			Clear();
 		}
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+		SetAndroidRegisterOverlayVisible(false);
+#endif
 		return false;
 	}
 
 	OpenDKTK = true;
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Mobile gets its own overlay instead of the CUITextInputBox form below.
+	// Those controls are fake HWND edit controls under touch, with a caret
+	// drawn from font metrics and hit rects padded for a mouse - none of which
+	// behaved, and the caret never appeared at all. The overlay keeps its own
+	// text buffers and draws its own caret; everything around it (this window's
+	// show flag, RecvKQRegInGame, and SubmitRegistration) is shared unchanged.
+	SetAndroidRegisterOverlayVisible(true);
+	RenderAndroidRegisterOverlay();
+	return true;
+#else
 
 	const char* labels[TYPE_INPUT_DKTK::eMaxINPUT] =
 	{
@@ -213,10 +240,20 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		"PHONE NUMBER :"
 	};
 
+	// ENTERASTAB on the first two rows so the soft keyboard's Enter walks
+	// Account -> Pass -> 7 digit number. Without it the only way to reach a
+	// field was to tap it, and the number row is the lowest of the three - on a
+	// phone the keyboard is usually sitting on top of it, so players could not
+	// reach it at all. The tab targets below were already wired up; only the
+	// option that makes VK_RETURN follow them was missing (see UIControls.cpp,
+	// where that branch is compiled in for Android and iOS).
+	//
+	// Deliberately not set on the number row: its Enter already submits the
+	// form further down, and its tab target is the hidden Phone box.
 	const int inputOptions[TYPE_INPUT_DKTK::eMaxINPUT] =
 	{
-		UIOPTION_NOLOCALIZEDCHARACTERS,
-		UIOPTION_NOLOCALIZEDCHARACTERS,
+		UIOPTION_NOLOCALIZEDCHARACTERS | UIOPTION_ENTERASTAB,
+		UIOPTION_NOLOCALIZEDCHARACTERS | UIOPTION_ENTERASTAB,
 		UIOPTION_NUMBERONLY,
 		UIOPTION_NUMBERONLY
 	};
@@ -301,7 +338,9 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 
 	for (int i = Account; i <= Snonumber; ++i)
 	{
-		FocusRegisterInputOnTap(inputPosX - 3.0f, inputPosY[i] - 3.0f, kInputWidth + 6.0f, 20.0f, CInputData[i]);
+		// 24 tall against 26 spacing - a 2px gap, so this path cannot claim a tap
+		// meant for the neighbouring row either.
+		FocusRegisterInputOnTap(inputPosX - 3.0f, inputPosY[i] - 3.0f, kInputWidth + 6.0f, 24.0f, CInputData[i]);
 	}
 
 	startY += 30.0f;
@@ -329,6 +368,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 
 	gInterface.DrawMessageBox();
 	return true;
+#endif   // PC form; mobile returned above via the register overlay
 }
 
 bool CB_DangKyInGame::RequsetDKTK()
@@ -343,11 +383,39 @@ bool CB_DangKyInGame::RequsetDKTK()
 	char szID[MAX_ID_SIZE + 1] = { 0 };
 	char szPass[MAX_PASSWORD_SIZE + 1] = { 0 };
 	char szSno[7 + 1] = { 0 };
-	char szSDT[11 + 1] = { 0 };
 
 	CInputData[Account]->GetText(szID, MAX_ID_SIZE + 1);
 	CInputData[Pass]->GetText(szPass, MAX_PASSWORD_SIZE + 1);
 	CInputData[Snonumber]->GetText(szSno, sizeof(szSno));
+
+	return SubmitRegistration(szID, szPass, szSno);
+}
+
+// Split out of RequsetDKTK so the account can be submitted from somewhere other
+// than the three CUITextInputBox controls. The PC window still gathers from
+// those and calls straight through; the Android registration overlay keeps its
+// own text buffers (the PC edit-control path never worked properly under touch)
+// and calls this with them, so both share one copy of the rate limit, the
+// validation, the messages and the packet.
+bool CB_DangKyInGame::SubmitRegistration(const char* accountText, const char* passText, const char* snoText)
+{
+	char szID[MAX_ID_SIZE + 1] = { 0 };
+	char szPass[MAX_PASSWORD_SIZE + 1] = { 0 };
+	char szSno[7 + 1] = { 0 };
+	char szSDT[11 + 1] = { 0 };
+
+	if (accountText != NULL)
+	{
+		std::memcpy(szID, accountText, min(sizeof(szID) - 1, std::strlen(accountText)));
+	}
+	if (passText != NULL)
+	{
+		std::memcpy(szPass, passText, min(sizeof(szPass) - 1, std::strlen(passText)));
+	}
+	if (snoText != NULL)
+	{
+		std::memcpy(szSno, snoText, min(sizeof(szSno) - 1, std::strlen(snoText)));
+	}
 	std::memcpy(szSDT, kDefaultRegisterPhone, min(sizeof(szSDT) - 1, std::strlen(kDefaultRegisterPhone)));
 
 	if (TimeSendRegTK > GetTickCount())
@@ -411,6 +479,23 @@ void CB_DangKyInGame::RecvKQRegInGame(XULY_CGPACKET* lpMsg)
 	char szID[MAX_ID_SIZE + 1] = { 0 };
 	char szPass[MAX_PASSWORD_SIZE + 1] = { 0 };
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Mobile registers through the overlay, which keeps its own text - the edit
+	// controls below are never filled there, so reading them would confirm an
+	// empty account and copy nothing into the login boxes.
+	{
+		const char* overlayAccount = AndroidRegisterOverlayAccountText();
+		const char* overlayPassword = AndroidRegisterOverlayPasswordText();
+		if (overlayAccount != NULL)
+		{
+			strncpy(szID, overlayAccount, sizeof(szID) - 1);
+		}
+		if (overlayPassword != NULL)
+		{
+			strncpy(szPass, overlayPassword, sizeof(szPass) - 1);
+		}
+	}
+#else
 	if (CInputData[Account] != NULL)
 	{
 		CInputData[Account]->GetText(szID, sizeof(szID));
@@ -420,12 +505,13 @@ void CB_DangKyInGame::RecvKQRegInGame(XULY_CGPACKET* lpMsg)
 	{
 		CInputData[Pass]->GetText(szPass, sizeof(szPass));
 	}
+#endif
 
 	switch (lpMsg->ThaoTac)
 	{
 	case CB_DangKyInGame::eDangKyThanhCong:
 		{
-			gInterface.OpenMessageBox("Ket Qua", "Dang ky thanh cong\nID : %s", szID);
+			gInterface.OpenMessageBox("Register Completed", "Registration completed.\nAccount : %s\n\nYou can now log in.", szID);
 			CUIMng& rUIMng = CUIMng::Instance();
 			rUIMng.m_LoginWin.GetIDInputBox()->SetText(szID);
 			rUIMng.m_LoginWin.GetPassInputBox()->SetText(szPass);

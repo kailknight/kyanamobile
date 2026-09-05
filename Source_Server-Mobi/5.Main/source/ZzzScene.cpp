@@ -2781,6 +2781,11 @@ bool RenderMainScene()
 	{
 		extern void AndroidRenderItemMenu();
 		AndroidRenderItemMenu();
+
+		// Nearby-NPC list, drawn in the same pass and for the same reason: it is
+		// touch UI that has to sit on top of the world.
+		extern void AndroidRenderNpcPicker();
+		AndroidRenderNpcPicker();
 	}
 #endif
 

@@ -4380,9 +4380,14 @@ void CUITextInputBox::Render()
             caretHeight = (m_iHeight > 2) ? (m_iHeight - 2) : 12;
         }
 
+        // Alpha passed explicitly: RenderColor's default is 0.f, and at 0 it
+        // never sets a colour of its own - it just inherits whatever glColor
+        // state happened to be current. Two UI units wide rather than one, so
+        // the bar is a couple of device pixels on a phone instead of sitting
+        // right on the edge of visibility.
         EnableAlphaTest();
         glColor4f(1.f, 1.f, 1.f, 1.f);
-        RenderColor((float)caretX, (float)caretY, 1.0f, (float)caretHeight);
+        RenderColor((float)caretX, (float)caretY, 2.0f, (float)caretHeight, 1.0f, 0);
         EndRenderColor();
     }
 

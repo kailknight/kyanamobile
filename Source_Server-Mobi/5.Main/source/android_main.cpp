@@ -15,6 +15,7 @@
 #ifdef __ANDROID__
 
 #include "stdafx.h"
+#include "CB_DangKyInGame.h"
 #ifdef min
 #undef min
 #endif
@@ -825,11 +826,23 @@ constexpr float kVirtualAutoAcquireMaxDistance = 10.0f;
 constexpr float kVirtualJoystickDefaultCenterX = 94.0f;
 constexpr float kVirtualJoystickDefaultCenterY = 356.0f;
 
-// Left-side spawn zone for a fresh grab, in UI units (640 wide) - tap down
-// anywhere at or left of this and the stick appears right there. Half the
-// play area; the attack/skill buttons live well past x=570 on the right
-// (see kVirtualAttackButtonCx), so there's no overlap to worry about.
-constexpr float kVirtualJoystickSpawnZoneMaxX = 320.0f;
+// Spawn zone for a fresh grab, in UI units (640x480) - tap down inside this
+// box and the stick appears right there. Still a floating stick; this only
+// bounds where a grab may START.
+//
+// Was x <= 320 with no vertical bound at all, which is the whole left half of
+// the screen from the very top to the pad limit. That covers the portrait and
+// stat bars, the boss-info banner and the chat log, so a tap meant for any of
+// those spawned the ring and walked the character. Now boxed around the
+// resting home at (94, 356) instead, matching the area the player actually
+// reaches for. The attack/skill buttons live past x=570 (see
+// kVirtualAttackButtonCx) and the Q/W/E/R row sits below this box, so neither
+// overlaps.
+// MaxY stops 6 units short of the Q/W/E/R row (cy 447, radius 19, so its top
+// edge is 428) - the same gap the tutorial highlight always used.
+constexpr float kVirtualJoystickSpawnZoneMaxX = 200.0f;
+constexpr float kVirtualJoystickSpawnZoneMinY = 230.0f;
+constexpr float kVirtualJoystickSpawnZoneMaxY = 422.0f;
 
 // Sized and hit-tested in device pixels, not UI units. UI space is a 640x480
 // stretch of whatever the panel is (see TouchToVirtualUi), so on the 2480x1116
@@ -4106,7 +4119,9 @@ bool IsInsideVirtualJoystickDynamicArea(float uiX, float uiY)
 
     if (g_virtualJoystick.fingerId == static_cast<SDL_FingerID>(-1))
     {
-        return uiX <= kVirtualJoystickSpawnZoneMaxX;
+        return uiX <= kVirtualJoystickSpawnZoneMaxX
+            && uiY >= kVirtualJoystickSpawnZoneMinY
+            && uiY <= kVirtualJoystickSpawnZoneMaxY;
     }
 
     const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
@@ -6388,6 +6403,18 @@ int   g_itemMenuItemKey = -1;
 float g_itemMenuX = 0.0f;
 float g_itemMenuY = 0.0f;
 
+// Collapsed to a single bar. The menu opens on its own whenever a drop is in
+// range, so a player who is not looting wants a way to get it out of the way
+// without it coming straight back on the next drop - this sticks for the rest
+// of the session rather than resetting per item, and the bar stays tappable to
+// bring the full menu back.
+bool g_itemMenuMinimized = false;
+
+// Side of the square "-" / "+" toggle. Sits in the top-right corner of the box,
+// clear of the icon: the icon is centred, so it ends at x+68 of an 88 wide box
+// and this starts at x+70.
+constexpr float kItemMenuToggleSize = 14.0f;
+
 // Off by default - picture and Pick Up only, which is the whole point of this
 // redesign (the old menu always rendered the full item tooltip underneath,
 // which is what made it feel oversized). One tap on the icon reveals it.
@@ -6406,8 +6433,16 @@ int g_itemMenuPage  = 0;
 // How close a drop has to be, in tiles, before its menu appears.
 constexpr int kItemMenuRangeTiles = 5;
 
+// Where the menu starts before the player drags it anywhere. Clears the minimap
+// and the top bar, both of which the old spot (640-width-90, 60) sat under.
+// Named rather than inlined in UpdateItemMenuNearCharacter because the
+// nearby-NPC picker parks itself immediately left of this box and has to follow
+// it if it ever moves.
+constexpr float kItemMenuDefaultX = 640.0f - kItemMenuWidth - 20.0f;
+constexpr float kItemMenuDefaultY = 180.0f;
+
 // User-draggable (see AndroidItemMenuDragState below) - this is only where it
-// starts the first time. -1,-1 means "never dragged yet, use the default spot
+// starts the first time. -1,-1 means "never dragged yet, use kItemMenuDefault*
 // in UpdateItemMenuNearCharacter".
 float g_itemMenuDraggedX = -1.0f;
 float g_itemMenuDraggedY = -1.0f;
@@ -6487,6 +6522,29 @@ float ItemMenuHeightFor(bool hasNav)
     return h;
 }
 
+// Collapsed: one row plus padding, the whole of which is the button that
+// expands it again.
+float ItemMenuCollapsedHeight()
+{
+    return kItemMenuPad + kItemMenuRowH + kItemMenuPad;
+}
+
+// Expanded only. Top-right corner, beside the icon rather than over it.
+AndroidUiRect GetItemMenuToggleRectAt(float menuX, float menuY)
+{
+    return {
+        menuX + kItemMenuWidth - kItemMenuPad - kItemMenuToggleSize,
+        menuY + kItemMenuPad,
+        kItemMenuToggleSize,
+        kItemMenuToggleSize
+    };
+}
+
+AndroidUiRect GetItemMenuToggleRect()
+{
+    return GetItemMenuToggleRectAt(g_itemMenuX, g_itemMenuY);
+}
+
 AndroidUiRect GetItemMenuIconRect()
 {
     return GetItemMenuIconRectAt(g_itemMenuX, g_itemMenuY);
@@ -6506,6 +6564,10 @@ AndroidUiRect GetItemMenuPickRect()
 
 float ItemMenuHeight()
 {
+    if (g_itemMenuMinimized)
+    {
+        return ItemMenuCollapsedHeight();
+    }
     return ItemMenuHeightFor(g_itemMenuCount > 1);
 }
 
@@ -6674,6 +6736,22 @@ bool HandleItemMenuTap(float uiX, float uiY)
         return false;
     }
 
+    // Collapsed: the whole bar is one button that expands it again. Checked
+    // before anything else, since none of the controls below exist while
+    // collapsed and their rects would otherwise still hit-test.
+    if (g_itemMenuMinimized)
+    {
+        g_itemMenuMinimized = false;
+        return true;
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetItemMenuToggleRect()))
+    {
+        g_itemMenuMinimized = true;
+        g_itemMenuShowTooltip = false;
+        return true;
+    }
+
     if (HitTestAndroidUiRect(uiX, uiY, GetItemMenuIconRect()))
     {
         // Single tap reveals the tooltip instead of it always being on -
@@ -6833,12 +6911,11 @@ void UpdateItemMenuNearCharacter()
     // Fixed spot rather than following the item around, so it does not jump
     // around as the player moves - unless the player has dragged it
     // somewhere else, in which case that spot sticks for the rest of the
-    // session (see AndroidItemMenuDragState). Default clears the minimap and
-    // top bar, both of which the old spot (640-width-90, 60) sat under.
+    // session (see AndroidItemMenuDragState).
     g_itemMenuOpen = true;
     g_itemMenuItemKey = g_itemMenuList[g_itemMenuPage];
-    g_itemMenuX = (g_itemMenuDraggedX >= 0.0f) ? g_itemMenuDraggedX : (640.0f - kItemMenuWidth - 20.0f);
-    g_itemMenuY = (g_itemMenuDraggedY >= 0.0f) ? g_itemMenuDraggedY : 180.0f;
+    g_itemMenuX = (g_itemMenuDraggedX >= 0.0f) ? g_itemMenuDraggedX : kItemMenuDefaultX;
+    g_itemMenuY = (g_itemMenuDraggedY >= 0.0f) ? g_itemMenuDraggedY : kItemMenuDefaultY;
 
     // A tooltip left open for whatever drop used to be here would be showing
     // the wrong item's info the moment this one replaces it.
@@ -6899,6 +6976,26 @@ void DrawItemMenuBox(ITEM item, float menuX, float menuY, int page, int count, b
     DrawVirtualRectFilled(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
     DrawVirtualRectOutline(boxX, boxY, boxW, boxH, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
     DrawVirtualRectOutline(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
+
+    // Collapse toggle, drawn here rather than after the rows below. Every other
+    // primitive in this function is drawn before its TextDraw - the button
+    // boxes are filled first and labelled second - and this was the only one
+    // that came after one, which is why it never appeared: TextDraw leaves
+    // texturing enabled, so the untextured rects drew nothing. Kept as a plain
+    // minus bar rather than a glyph so it does not depend on the font having
+    // one at this size. Sits clear of the centred icon, which ends at x+68 of
+    // an 88 wide box.
+    {
+        const AndroidUiRect toggleRect = GetItemMenuToggleRectAt(menuX, menuY);
+        DrawVirtualRectFilled(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
+                              0.16f, 0.06f, 0.07f, 0.92f);
+        DrawVirtualRectOutline(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
+                               0.98f, 0.82f, 0.34f, 0.98f, 1.6f);
+        DrawVirtualRectFilled(toggleRect.x + 3.0f,
+                              toggleRect.y + (toggleRect.h * 0.5f) - 1.5f,
+                              toggleRect.w - 6.0f, 3.0f,
+                              1.0f, 0.94f, 0.72f, 1.0f);
+    }
 
     HFONT rowFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
     char szLine[16];
@@ -6992,6 +7089,890 @@ void DrawItemMenuBox(ITEM item, float menuX, float menuY, int page, int count, b
     EndBitmap();
 }
 
+// ---------------------------------------------------------------------------
+// Registration overlay (Android).
+//
+// The PC registration window (CB_DangKyInGame) draws three CUITextInputBox
+// controls, which on mobile means fake HWND edit controls, DoMouseAction's
+// padded hit rects, an IsWindowVisible gate and a caret drawn through
+// g_pRenderText off EM_GETSEL and font metrics. Every one of those is a place
+// touch input behaves differently from a mouse, and the caret never showed.
+//
+// This owns its own text instead, the same way the character-name entry
+// already does (g_charNameInputActive / g_charNameBuf): plain buffers fed from
+// SDL_TEXTINPUT, a caret that is just a rectangle, and hit rects sized for a
+// thumb. It reuses the PC window for everything that was never the problem -
+// OpenOnOff() still opens it, Win.cpp still drives the render, RecvKQRegInGame
+// still handles the reply, and Submit calls CB_DangKyInGame::SubmitRegistration
+// so the rate limit, validation, messages and packet stay in one place.
+// ---------------------------------------------------------------------------
+namespace
+{
+constexpr float kRegPanelW      = 300.0f;
+constexpr float kRegPanelH      = 158.0f;
+constexpr float kRegPanelX      = (640.0f - kRegPanelW) * 0.5f;
+
+// Two resting places. The soft keyboard eats roughly the bottom two thirds of
+// the screen - measured on the test device it starts around y=168 of the 480
+// unit UI space - so a panel sitting at the middle is almost entirely behind
+// it. While a field is focused the panel pins to the top, where it fits in the
+// strip the keyboard leaves; with no field focused it sits lower, which reads
+// better as a dialog.
+constexpr float kRegPanelYTyping = 6.0f;
+constexpr float kRegPanelYIdle   = 140.0f;
+
+constexpr float kRegLabelX      = kRegPanelX + 12.0f;
+constexpr float kRegFieldX      = kRegPanelX + 122.0f;   // wider label column for "7 Digit Pin Code"
+constexpr float kRegFieldW      = 162.0f;
+constexpr float kRegFieldH      = 26.0f;   // thumb-sized, not the 14 the mouse UI used
+constexpr float kRegRowOffset   = 30.0f;   // from the panel top
+constexpr float kRegRowSpacing  = 32.0f;   // 6 clear between boxes, so no rect can overlap
+constexpr float kRegButtonOffset = 124.0f; // from the panel top
+constexpr float kRegButtonW     = 124.0f;
+constexpr float kRegButtonH     = 26.0f;
+
+enum
+{
+    kRegFieldAccount = 0,
+    kRegFieldPass    = 1,
+    kRegFieldNumber  = 2,
+    kRegFieldCount   = 3
+};
+
+struct AndroidRegisterOverlayState
+{
+    bool visible     = false;
+    int  activeField = -1;
+    int  caretBlink  = 0;
+    char account[MAX_ID_SIZE + 1]       = {};
+    char pass[MAX_PASSWORD_SIZE + 1]    = {};
+    char number[7 + 1]                  = {};
+};
+
+AndroidRegisterOverlayState g_androidRegister{};
+
+char* AndroidRegisterFieldBuffer(int field, int& outMaxLen)
+{
+    switch (field)
+    {
+    case kRegFieldAccount: outMaxLen = MAX_ID_SIZE;       return g_androidRegister.account;
+    case kRegFieldPass:    outMaxLen = MAX_PASSWORD_SIZE; return g_androidRegister.pass;
+    case kRegFieldNumber:  outMaxLen = 7;                 return g_androidRegister.number;
+    default:               outMaxLen = 0;                 return nullptr;
+    }
+}
+
+// Everything below is positioned relative to this, so the panel can move
+// between its two resting places without any rect going stale - the hit tests
+// and the drawing both read it.
+float AndroidRegisterPanelY()
+{
+    return (g_androidRegister.activeField >= 0) ? kRegPanelYTyping : kRegPanelYIdle;
+}
+
+AndroidUiRect GetAndroidRegisterFieldRect(int field)
+{
+    return { kRegFieldX,
+             AndroidRegisterPanelY() + kRegRowOffset + (kRegRowSpacing * static_cast<float>(field)),
+             kRegFieldW, kRegFieldH };
+}
+
+AndroidUiRect GetAndroidRegisterSubmitRect()
+{
+    return { kRegPanelX + 16.0f, AndroidRegisterPanelY() + kRegButtonOffset, kRegButtonW, kRegButtonH };
+}
+
+AndroidUiRect GetAndroidRegisterCancelRect()
+{
+    return { kRegPanelX + kRegPanelW - kRegButtonW - 16.0f,
+             AndroidRegisterPanelY() + kRegButtonOffset, kRegButtonW, kRegButtonH };
+}
+
+// The number row takes digits only, matching the PC field's UIOPTION_NUMBERONLY.
+// The other two take printable ASCII, matching UIOPTION_NOLOCALIZEDCHARACTERS -
+// the server rejects anything else anyway.
+bool AndroidRegisterAcceptsChar(int field, wchar_t ch)
+{
+    if (field == kRegFieldNumber)
+    {
+        return (ch >= L'0' && ch <= L'9');
+    }
+    return (ch >= 33 && ch <= 126);
+}
+}   // namespace
+
+bool AndroidRegisterOverlayVisible()
+{
+    return g_androidRegister.visible;
+}
+
+// True while a field is focused, so the frame loop's IME check opens the
+// keyboard for it exactly as it does for the character-name buffer.
+bool AndroidRegisterOverlayHasFocusedField()
+{
+    return g_androidRegister.visible && g_androidRegister.activeField >= 0;
+}
+
+void AndroidRegisterOverlaySetVisible(bool visible)
+{
+    if (g_androidRegister.visible == visible)
+    {
+        return;
+    }
+
+    // Cleared on every open and close - a half-typed account left over from a
+    // previous attempt is never what the player wants to see.
+    g_androidRegister = AndroidRegisterOverlayState{};
+    g_androidRegister.visible = visible;
+}
+
+void AndroidRegisterOverlayAppendUtf8(const char* textUtf8)
+{
+    if (!AndroidRegisterOverlayHasFocusedField() || textUtf8 == nullptr)
+    {
+        return;
+    }
+
+    int maxLen = 0;
+    char* buffer = AndroidRegisterFieldBuffer(g_androidRegister.activeField, maxLen);
+    if (buffer == nullptr)
+    {
+        return;
+    }
+
+    int length = static_cast<int>(strlen(buffer));
+
+    // Same UTF-8 walk the character-name buffer uses. Anything above ASCII is
+    // decoded and then rejected by AndroidRegisterAcceptsChar rather than being
+    // stored as raw bytes.
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(textUtf8);
+    while (*p != 0 && length < maxLen)
+    {
+        wchar_t ch = 0;
+        if ((*p & 0x80u) == 0)
+        {
+            ch = static_cast<wchar_t>(*p++);
+        }
+        else if ((*p & 0xE0u) == 0xC0u && p[1])
+        {
+            ch = static_cast<wchar_t>(((*p & 0x1Fu) << 6) | (p[1] & 0x3Fu));
+            p += 2;
+        }
+        else if ((*p & 0xF0u) == 0xE0u && p[1] && p[2])
+        {
+            ch = static_cast<wchar_t>(((*p & 0x0Fu) << 12) | ((p[1] & 0x3Fu) << 6) | (p[2] & 0x3Fu));
+            p += 3;
+        }
+        else
+        {
+            ++p;
+            continue;
+        }
+
+        if (!AndroidRegisterAcceptsChar(g_androidRegister.activeField, ch))
+        {
+            continue;
+        }
+
+        buffer[length++] = static_cast<char>(ch);
+        buffer[length] = '\0';
+    }
+
+    g_androidRegister.caretBlink = 0;
+}
+
+void AndroidRegisterOverlayBackspace()
+{
+    if (!AndroidRegisterOverlayHasFocusedField())
+    {
+        return;
+    }
+
+    int maxLen = 0;
+    char* buffer = AndroidRegisterFieldBuffer(g_androidRegister.activeField, maxLen);
+    if (buffer == nullptr)
+    {
+        return;
+    }
+
+    const int length = static_cast<int>(strlen(buffer));
+    if (length > 0)
+    {
+        buffer[length - 1] = '\0';
+    }
+
+    g_androidRegister.caretBlink = 0;
+}
+
+void AndroidRegisterOverlaySubmit();
+
+// Enter moves to the next field and submits from the last, so the form can be
+// filled without ever reaching around the keyboard.
+void AndroidRegisterOverlayAdvanceField()
+{
+    if (!g_androidRegister.visible)
+    {
+        return;
+    }
+
+    if (g_androidRegister.activeField >= 0 && g_androidRegister.activeField < (kRegFieldCount - 1))
+    {
+        ++g_androidRegister.activeField;
+        g_androidRegister.caretBlink = 0;
+        return;
+    }
+
+    AndroidRegisterOverlaySubmit();
+}
+
+void AndroidRegisterOverlaySubmit()
+{
+    if (!g_androidRegister.visible || gCB_DangKyInGame == nullptr)
+    {
+        return;
+    }
+
+    // Every check and message lives in SubmitRegistration, shared with the PC
+    // window - this only hands it the text.
+    if (gCB_DangKyInGame->SubmitRegistration(g_androidRegister.account,
+                                             g_androidRegister.pass,
+                                             g_androidRegister.number))
+    {
+        g_androidRegister.activeField = -1;
+    }
+}
+
+bool HandleAndroidRegisterOverlayFingerDown(float uiX, float uiY)
+{
+    if (!g_androidRegister.visible)
+    {
+        return false;
+    }
+
+    for (int field = 0; field < kRegFieldCount; ++field)
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, GetAndroidRegisterFieldRect(field)))
+        {
+            g_androidRegister.activeField = field;
+            g_androidRegister.caretBlink = 0;
+            return true;
+        }
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidRegisterSubmitRect()))
+    {
+        AndroidRegisterOverlaySubmit();
+        return true;
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidRegisterCancelRect()))
+    {
+        if (gCB_DangKyInGame != nullptr)
+        {
+            gCB_DangKyInGame->OpenOnOff();
+        }
+        AndroidRegisterOverlaySetVisible(false);
+        return true;
+    }
+
+    // Anywhere else on the panel drops focus (and so closes the keyboard) but
+    // stays claimed, so the tap never reaches the world behind it.
+    if (uiX >= kRegPanelX && uiX <= (kRegPanelX + kRegPanelW)
+        && uiY >= AndroidRegisterPanelY() && uiY <= (AndroidRegisterPanelY() + kRegPanelH))
+    {
+        g_androidRegister.activeField = -1;
+        return true;
+    }
+
+    return false;
+}
+
+void AndroidRegisterOverlayRender()
+{
+    if (!g_androidRegister.visible)
+    {
+        return;
+    }
+
+    const float panelY = AndroidRegisterPanelY();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // Same layered shadow/fill/border treatment as the item menu and pickers.
+    DrawVirtualRectFilled(kRegPanelX - 4.0f, panelY - 4.0f, kRegPanelW + 8.0f, kRegPanelH + 8.0f,
+                          0.0f, 0.0f, 0.0f, 0.55f);
+    DrawVirtualRectFilled(kRegPanelX, panelY, kRegPanelW, kRegPanelH, 0.10f, 0.04f, 0.05f, 0.92f);
+    DrawVirtualRectFilled(kRegPanelX + 2.0f, panelY + 2.0f, kRegPanelW - 4.0f, kRegPanelH - 4.0f,
+                          0.22f, 0.09f, 0.10f, 0.80f);
+    DrawVirtualRectOutline(kRegPanelX, panelY, kRegPanelW, kRegPanelH, 0.86f, 0.34f, 0.34f, 0.96f, 2.0f);
+
+    // Field boxes and the caret first, while texturing is still off - TextDraw
+    // leaves it enabled, and an untextured rect drawn after one renders nothing
+    // (the same trap the item menu's collapse toggle hit).
+    for (int field = 0; field < kRegFieldCount; ++field)
+    {
+        const AndroidUiRect rect = GetAndroidRegisterFieldRect(field);
+        const bool active = (g_androidRegister.activeField == field);
+
+        DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.02f, 0.02f, 0.03f, 0.94f);
+        DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                               active ? 0.98f : 0.42f,
+                               active ? 0.82f : 0.20f,
+                               active ? 0.34f : 0.22f,
+                               0.96f, active ? 2.0f : 1.2f);
+    }
+
+    const AndroidUiRect submitRect = GetAndroidRegisterSubmitRect();
+    const AndroidUiRect cancelRect = GetAndroidRegisterCancelRect();
+    DrawVirtualRightPanelButtonBox(submitRect, true);
+    DrawVirtualRightPanelButtonBox(cancelRect, false);
+
+    HFONT titleFont = (g_hFontBold != nullptr) ? g_hFontBold : g_hFont;
+    HFONT rowFont   = (g_hFont != nullptr) ? g_hFont : titleFont;
+
+    // Caret: still just a rectangle blinking on a frame count, with none of the
+    // EM_GETSEL business the PC one used - but the X is measured off the text
+    // rather than assumed. A flat 6 units per character was wider than the font
+    // actually draws, so the caret sat about three characters past the end of
+    // what had been typed.
+    //
+    // Measured the way the rest of this file does it (see
+    // DrawAndroidTutorialWrappedText): set the font on g_pRenderText first,
+    // because _GetTextExtentPoint32 measures against whatever is currently
+    // selected. It answers in screen pixels, so divide by the screen rate to
+    // get back to the 640x480 space these rects live in.
+    if (AndroidRegisterOverlayHasFocusedField() && ((g_androidRegister.caretBlink % 40) < 24))
+    {
+        int maxLen = 0;
+        const char* buffer = AndroidRegisterFieldBuffer(g_androidRegister.activeField, maxLen);
+        const int length = (buffer != nullptr) ? static_cast<int>(strlen(buffer)) : 0;
+
+        // The password row draws asterisks, so the caret has to follow their
+        // width, not the width of the hidden text.
+        char measured[MAX_PASSWORD_SIZE + 1] = {};
+        if (buffer != nullptr)
+        {
+            if (g_androidRegister.activeField == kRegFieldPass)
+            {
+                for (int n = 0; n < length && n < MAX_PASSWORD_SIZE; ++n)
+                {
+                    measured[n] = '*';
+                }
+            }
+            else
+            {
+                strncpy(measured, buffer, sizeof(measured) - 1);
+            }
+        }
+
+        float textWidth = 0.0f;
+        if (length > 0 && g_pRenderText != nullptr && g_pMultiLanguage != nullptr)
+        {
+            g_pRenderText->SetFont(rowFont);
+
+            SIZE textSize = { 0, 0 };
+            g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(),
+                                                    measured,
+                                                    static_cast<int>(strlen(measured)),
+                                                    &textSize);
+
+            const float invRateX = (g_fScreenRate_x > 0.f) ? (1.f / g_fScreenRate_x) : 1.f;
+            textWidth = static_cast<float>(textSize.cx) * invRateX;
+        }
+
+        const AndroidUiRect rect = GetAndroidRegisterFieldRect(g_androidRegister.activeField);
+        float caretX = rect.x + 6.0f + textWidth;
+        const float caretMaxX = rect.x + rect.w - 6.0f;
+        if (caretX > caretMaxX)
+        {
+            caretX = caretMaxX;
+        }
+
+        DrawVirtualRectFilled(caretX, rect.y + 5.0f, 2.0f, rect.h - 10.0f, 1.0f, 0.96f, 0.80f, 1.0f);
+    }
+
+    TextDraw(titleFont, static_cast<int>(kRegPanelX), static_cast<int>(panelY + 14.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(kRegPanelW), 0, 3, "%s", "Create Account");
+
+    static const char* const kRegLabels[kRegFieldCount] = { "Account", "Password", "7 Digit Pin Code" };
+
+    for (int field = 0; field < kRegFieldCount; ++field)
+    {
+        const AndroidUiRect rect = GetAndroidRegisterFieldRect(field);
+
+        TextDraw(rowFont, static_cast<int>(kRegLabelX), static_cast<int>(rect.y + 8.0f),
+                 0xFFE8D8A0, 0x0, 106, 0, 1, "%s", kRegLabels[field]);
+
+        int maxLen = 0;
+        const char* buffer = AndroidRegisterFieldBuffer(field, maxLen);
+        if (buffer == nullptr)
+        {
+            continue;
+        }
+
+        char shown[MAX_PASSWORD_SIZE + 1] = {};
+        if (field == kRegFieldPass)
+        {
+            const int length = static_cast<int>(strlen(buffer));
+            for (int n = 0; n < length && n < MAX_PASSWORD_SIZE; ++n)
+            {
+                shown[n] = '*';
+            }
+        }
+        else
+        {
+            strncpy(shown, buffer, sizeof(shown) - 1);
+        }
+
+        TextDraw(rowFont, static_cast<int>(rect.x + 6.0f), static_cast<int>(rect.y + 8.0f),
+                 0xFFFFFFFF, 0x0, static_cast<int>(rect.w - 12.0f), 0, 1, "%s", shown);
+    }
+
+    TextDraw(titleFont, static_cast<int>(submitRect.x), static_cast<int>(submitRect.y + 9.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(submitRect.w), 0, 3, "%s", "Register");
+    TextDraw(titleFont, static_cast<int>(cancelRect.x), static_cast<int>(cancelRect.y + 9.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(cancelRect.w), 0, 3, "%s", "Cancel");
+
+    EndBitmap();
+
+    ++g_androidRegister.caretBlink;
+}
+
+// ---------------------------------------------------------------------------
+// Nearby NPC picker (Android).
+//
+// Touching a specific NPC in a crowd is fiddly, so this lists the ones within
+// reach and lets the player pick by name. Appears on its own whenever an NPC is
+// close and can be collapsed to a single bar, the same way the dropped-item
+// menu can.
+//
+// Range is deliberately short - the hero is already standing next to the NPC by
+// the time this shows - so picking one talks to it immediately rather than
+// walking there first. That is why this needs none of the auto-move machinery
+// the trade picker carries.
+// ---------------------------------------------------------------------------
+// Defined further down in this same anonymous namespace. Declared here so the
+// picker can hide itself whenever a MU window owns the screen (bag, NPC
+// dialogue, shop, ...), exactly as the top bar and the rest of the touch
+// overlay do in RenderVirtualPad.
+bool IsAndroidGameWindowOpen();
+
+namespace
+{
+constexpr int   kNpcPickerRangeTiles = 3;
+constexpr int   kNpcPickerMaxEntries = 4;
+
+// Wide enough for the whole of CHARACTER::ID, which is char[32] - Setting_Monster
+// copies the full script name ("Pasi the Mage", "Baz The Vault Keeper") into it.
+// MAX_ID_SIZE is 10 and describes the account-name field, not this one; sizing
+// the row off that is what chopped names to "Pasi the M".
+constexpr int   kNpcPickerNameMaxChars = 31;
+
+constexpr float kNpcPickerW        = 104.0f;
+constexpr float kNpcPickerHeaderH  = 18.0f;
+constexpr float kNpcPickerRowH     = 22.0f;
+constexpr float kNpcPickerPad      = 4.0f;
+constexpr float kNpcPickerToggle   = 14.0f;
+constexpr uint32_t kNpcPickerRefreshMs = 250;
+constexpr float kNpcPickerDragMoveThresholdUi = 10.0f;
+
+// Where it starts before the player drags it anywhere: immediately beside the
+// dropped-item menu's own default spot and level with its top edge, so the two
+// read as one strip. Derived from kItemMenuDefault* rather than hard-coded, so
+// moving that menu's default moves this with it. It goes on the item menu's
+// left because there is no room on its right - that menu already ends 20 units
+// short of the 640-wide edge.
+constexpr float kNpcPickerGapToItemMenu = 10.0f;
+constexpr float kNpcPickerDefaultX = kItemMenuDefaultX - kNpcPickerW - kNpcPickerGapToItemMenu;
+constexpr float kNpcPickerDefaultY = kItemMenuDefaultY;
+
+struct AndroidNpcPickerEntry
+{
+    int  characterIndex = -1;
+    SHORT key = 0;
+    int  distance2 = 0;
+    char name[kNpcPickerNameMaxChars + 1] = {};
+};
+
+// Tap-vs-drag on the panel, decided the way the dropped-item menu already does
+// it (see AndroidItemMenuDragState): FingerDown records the press, FingerMotion
+// promotes it to a drag past a threshold and moves the panel, and FingerUp only
+// runs the tap action - collapse toggle, or talk to a row - if it never moved.
+struct AndroidNpcPickerDragState
+{
+    SDL_FingerID fingerId = static_cast<SDL_FingerID>(-1);
+    float downX = 0.0f;
+    float downY = 0.0f;
+    float boxStartX = 0.0f;
+    float boxStartY = 0.0f;
+    bool moved = false;
+};
+
+struct AndroidNpcPickerState
+{
+    bool minimized = false;
+    int  entryCount = 0;
+    uint32_t lastRefreshMs = 0;
+
+    // -1 means "never dragged, use kNpcPickerDefault*". A dragged spot sticks
+    // for the rest of the session.
+    float draggedX = -1.0f;
+    float draggedY = -1.0f;
+
+    AndroidNpcPickerDragState drag{};
+    std::array<AndroidNpcPickerEntry, kNpcPickerMaxEntries> entries{};
+};
+
+AndroidNpcPickerState g_androidNpcPicker{};
+
+float AndroidNpcPickerX()
+{
+    return (g_androidNpcPicker.draggedX >= 0.0f) ? g_androidNpcPicker.draggedX : kNpcPickerDefaultX;
+}
+
+float AndroidNpcPickerY()
+{
+    return (g_androidNpcPicker.draggedY >= 0.0f) ? g_androidNpcPicker.draggedY : kNpcPickerDefaultY;
+}
+
+bool IsAndroidNpcPickerCandidate(int characterIndex)
+{
+    if (CharactersClient == nullptr || Hero == nullptr
+        || characterIndex < 0 || characterIndex >= MAX_CHARACTERS_CLIENT)
+    {
+        return false;
+    }
+
+    const CHARACTER* c = &CharactersClient[characterIndex];
+    const OBJECT* o = &c->Object;
+
+    // Anything non-player that is alive and actually on screen. KIND_NPC covers
+    // shops, warps, quest givers and the rest; monsters are deliberately left
+    // out - this is for talking, not fighting.
+    if (!o->Live || o->Kind != KIND_NPC || c->Dead > 0 || o->Alpha <= 0.05f)
+    {
+        return false;
+    }
+
+    if (c->ID[0] == '\0')
+    {
+        return false;
+    }
+
+    const int dx = c->PositionX - Hero->PositionX;
+    const int dy = c->PositionY - Hero->PositionY;
+    return ((dx * dx) + (dy * dy)) <= (kNpcPickerRangeTiles * kNpcPickerRangeTiles);
+}
+
+void RefreshAndroidNpcPickerEntries()
+{
+    const uint32_t nowMs = MU_MobileGetTicks();
+    if ((nowMs - g_androidNpcPicker.lastRefreshMs) < kNpcPickerRefreshMs)
+    {
+        return;
+    }
+    g_androidNpcPicker.lastRefreshMs = nowMs;
+    g_androidNpcPicker.entryCount = 0;
+
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return;
+    }
+
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        if (!IsAndroidNpcPickerCandidate(i))
+        {
+            continue;
+        }
+
+        const CHARACTER* c = &CharactersClient[i];
+        const int dx = c->PositionX - Hero->PositionX;
+        const int dy = c->PositionY - Hero->PositionY;
+
+        AndroidNpcPickerEntry entry;
+        entry.characterIndex = i;
+        entry.key = c->Key;
+        entry.distance2 = (dx * dx) + (dy * dy);
+
+        // Copied whole; the row's TextDraw width is what clips a name too long
+        // for the panel, so nothing is lost that would have fitted.
+        strncpy(entry.name, c->ID, kNpcPickerNameMaxChars);
+        entry.name[kNpcPickerNameMaxChars] = '\0';
+
+        // Nearest first, so the one the player is standing on is always the top
+        // row. Insertion sort over at most four entries.
+        int pos = g_androidNpcPicker.entryCount;
+        while (pos > 0 && g_androidNpcPicker.entries[pos - 1].distance2 > entry.distance2)
+        {
+            if (pos < kNpcPickerMaxEntries)
+            {
+                g_androidNpcPicker.entries[pos] = g_androidNpcPicker.entries[pos - 1];
+            }
+            --pos;
+        }
+
+        if (pos < kNpcPickerMaxEntries)
+        {
+            g_androidNpcPicker.entries[pos] = entry;
+            if (g_androidNpcPicker.entryCount < kNpcPickerMaxEntries)
+            {
+                ++g_androidNpcPicker.entryCount;
+            }
+        }
+    }
+}
+
+float AndroidNpcPickerHeight()
+{
+    if (g_androidNpcPicker.minimized)
+    {
+        return kNpcPickerHeaderH + (kNpcPickerPad * 2.0f);
+    }
+    return kNpcPickerHeaderH + (kNpcPickerPad * 2.0f)
+         + (kNpcPickerRowH * static_cast<float>(g_androidNpcPicker.entryCount));
+}
+
+// True when the panel should be on screen at all. The window check is what
+// makes it behave like the top bar: a bag, a shop or an NPC dialogue owns the
+// screen and the picker goes away with the rest of the touch overlay - not
+// least because a picker row is what opened that dialogue in the first place.
+bool IsAndroidNpcPickerActive()
+{
+    return g_androidNpcPicker.entryCount > 0 && !IsAndroidGameWindowOpen();
+}
+
+AndroidUiRect GetAndroidNpcPickerToggleRect()
+{
+    return { AndroidNpcPickerX() + kNpcPickerW - kNpcPickerPad - kNpcPickerToggle,
+             AndroidNpcPickerY() + kNpcPickerPad, kNpcPickerToggle, kNpcPickerToggle };
+}
+
+AndroidUiRect GetAndroidNpcPickerRowRect(int row)
+{
+    return { AndroidNpcPickerX() + kNpcPickerPad,
+             AndroidNpcPickerY() + kNpcPickerPad + kNpcPickerHeaderH + (kNpcPickerRowH * static_cast<float>(row)),
+             kNpcPickerW - (kNpcPickerPad * 2.0f), kNpcPickerRowH - 2.0f };
+}
+
+bool IsInsideAndroidNpcPicker(float uiX, float uiY)
+{
+    const float x = AndroidNpcPickerX();
+    const float y = AndroidNpcPickerY();
+    return uiX >= x && uiX <= (x + kNpcPickerW)
+        && uiY >= y && uiY <= (y + AndroidNpcPickerHeight());
+}
+
+// Talks to the NPC the same way arriving beside one does on PC: SelectedNpc and
+// TargetNpc are what the shop, warp and quest windows read once the reply comes
+// back, so they are set exactly as MoveHero would have set them.
+void TalkToAndroidNpcEntry(int row)
+{
+    if (row < 0 || row >= g_androidNpcPicker.entryCount)
+    {
+        return;
+    }
+
+    const AndroidNpcPickerEntry& entry = g_androidNpcPicker.entries[row];
+    if (!IsAndroidNpcPickerCandidate(entry.characterIndex))
+    {
+        return;
+    }
+
+    SelectedNpc = entry.characterIndex;
+    TargetNpc = entry.characterIndex;
+    SendRequestTalk(entry.key);
+}
+
+// Runs on release, and only for a press that never became a drag.
+void HandleAndroidNpcPickerTap(float uiX, float uiY)
+{
+    if (!IsAndroidNpcPickerActive())
+    {
+        return;
+    }
+
+    if (HitTestAndroidUiRect(uiX, uiY, GetAndroidNpcPickerToggleRect()))
+    {
+        g_androidNpcPicker.minimized = !g_androidNpcPicker.minimized;
+        return;
+    }
+
+    if (g_androidNpcPicker.minimized)
+    {
+        // Collapsed: the bar is one button that opens it again.
+        if (IsInsideAndroidNpcPicker(uiX, uiY))
+        {
+            g_androidNpcPicker.minimized = false;
+        }
+        return;
+    }
+
+    for (int row = 0; row < g_androidNpcPicker.entryCount; ++row)
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, GetAndroidNpcPickerRowRect(row)))
+        {
+            TalkToAndroidNpcEntry(row);
+            return;
+        }
+    }
+}
+}   // namespace
+
+// Claims the press without acting on it - see AndroidNpcPickerDragState. A tap
+// anywhere outside the panel still reaches the world; a tap inside never walks
+// the hero, whether it lands on a control or on the panel's background.
+bool HandleAndroidNpcPickerFingerDown(float uiX, float uiY, SDL_FingerID fingerId)
+{
+    if (!IsAndroidNpcPickerActive() || !IsInsideAndroidNpcPicker(uiX, uiY))
+    {
+        return false;
+    }
+
+    g_androidNpcPicker.drag.fingerId = fingerId;
+    g_androidNpcPicker.drag.downX = uiX;
+    g_androidNpcPicker.drag.downY = uiY;
+    g_androidNpcPicker.drag.boxStartX = AndroidNpcPickerX();
+    g_androidNpcPicker.drag.boxStartY = AndroidNpcPickerY();
+    g_androidNpcPicker.drag.moved = false;
+    return true;
+}
+
+bool HandleAndroidNpcPickerFingerMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (g_androidNpcPicker.drag.fingerId != touch.fingerId)
+    {
+        return false;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+
+    const float dx = uiX - g_androidNpcPicker.drag.downX;
+    const float dy = uiY - g_androidNpcPicker.drag.downY;
+
+    if (!g_androidNpcPicker.drag.moved
+        && ((dx * dx) + (dy * dy)) > (kNpcPickerDragMoveThresholdUi * kNpcPickerDragMoveThresholdUi))
+    {
+        g_androidNpcPicker.drag.moved = true;
+    }
+
+    if (g_androidNpcPicker.drag.moved)
+    {
+        g_androidNpcPicker.draggedX =
+            std::clamp(g_androidNpcPicker.drag.boxStartX + dx, 0.0f, 640.0f - kNpcPickerW);
+        g_androidNpcPicker.draggedY =
+            std::clamp(g_androidNpcPicker.drag.boxStartY + dy, 0.0f, 480.0f - AndroidNpcPickerHeight());
+    }
+
+    return true;
+}
+
+bool HandleAndroidNpcPickerFingerUp(const SDL_TouchFingerEvent& touch)
+{
+    if (g_androidNpcPicker.drag.fingerId != touch.fingerId)
+    {
+        return false;
+    }
+
+    const bool wasDrag = g_androidNpcPicker.drag.moved;
+    g_androidNpcPicker.drag = AndroidNpcPickerDragState{};
+
+    if (wasDrag)
+    {
+        return true;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+    HandleAndroidNpcPickerTap(uiX, uiY);
+    return true;
+}
+
+void AndroidRenderNpcPickerImpl()
+{
+    RefreshAndroidNpcPickerEntries();
+
+    if (!IsAndroidNpcPickerActive())
+    {
+        // Nothing in range, or a window owns the screen. The collapse state and
+        // the dragged spot are kept, so it comes back the way it was left.
+        return;
+    }
+
+    const float panelX = AndroidNpcPickerX();
+    const float panelY = AndroidNpcPickerY();
+    const float panelH = AndroidNpcPickerHeight();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRectFilled(panelX - 3.0f, panelY - 3.0f, kNpcPickerW + 6.0f, panelH + 6.0f,
+                          0.0f, 0.0f, 0.0f, 0.42f);
+    DrawVirtualRectFilled(panelX, panelY, kNpcPickerW, panelH, 0.10f, 0.04f, 0.05f, 0.80f);
+    DrawVirtualRectOutline(panelX, panelY, kNpcPickerW, panelH, 0.86f, 0.34f, 0.34f, 0.94f, 1.6f);
+
+    if (!g_androidNpcPicker.minimized)
+    {
+        for (int row = 0; row < g_androidNpcPicker.entryCount; ++row)
+        {
+            DrawVirtualRightPanelButtonBox(GetAndroidNpcPickerRowRect(row), true);
+        }
+    }
+
+    // Toggle drawn while texturing is still off, before any TextDraw - an
+    // untextured rect drawn after one renders nothing.
+    {
+        const AndroidUiRect toggleRect = GetAndroidNpcPickerToggleRect();
+        DrawVirtualRectFilled(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
+                              0.16f, 0.06f, 0.07f, 0.92f);
+        DrawVirtualRectOutline(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
+                               0.98f, 0.82f, 0.34f, 0.98f, 1.4f);
+        DrawVirtualRectFilled(toggleRect.x + 3.0f, toggleRect.y + (toggleRect.h * 0.5f) - 1.5f,
+                              toggleRect.w - 6.0f, 3.0f, 1.0f, 0.94f, 0.72f, 1.0f);
+
+        // A vertical stroke turns the minus into a plus while collapsed.
+        if (g_androidNpcPicker.minimized)
+        {
+            DrawVirtualRectFilled(toggleRect.x + (toggleRect.w * 0.5f) - 1.5f, toggleRect.y + 3.0f,
+                                  3.0f, toggleRect.h - 6.0f, 1.0f, 0.94f, 0.72f, 1.0f);
+        }
+    }
+
+    HFONT headerFont = (g_hFontBold != nullptr) ? g_hFontBold : g_hFont;
+    HFONT rowFont    = (g_hFontMini != nullptr) ? g_hFontMini : g_hFont;
+
+    char header[24];
+    snprintf(header, sizeof(header) - 1, "NPC (%d)", g_androidNpcPicker.entryCount);
+    header[sizeof(header) - 1] = '\0';
+    TextDraw(headerFont, static_cast<int>(panelX + kNpcPickerPad + 2.0f),
+             static_cast<int>(panelY + kNpcPickerPad + 2.0f),
+             0xFFFFFFFF, 0x0, static_cast<int>(kNpcPickerW - (kNpcPickerPad * 2.0f) - kNpcPickerToggle), 0, 1,
+             "%s", header);
+
+    if (!g_androidNpcPicker.minimized)
+    {
+        for (int row = 0; row < g_androidNpcPicker.entryCount; ++row)
+        {
+            const AndroidUiRect rect = GetAndroidNpcPickerRowRect(row);
+            TextDraw(rowFont, static_cast<int>(rect.x + 4.0f), static_cast<int>(rect.y + 5.0f),
+                     0xFFE8D8A0, 0x0, static_cast<int>(rect.w - 8.0f), 0, 1,
+                     "%s", g_androidNpcPicker.entries[row].name);
+        }
+    }
+
+    EndBitmap();
+}
+
 void RenderItemMenu()
 {
     UpdateItemMenuNearCharacter();
@@ -7006,6 +7987,38 @@ void RenderItemMenu()
     // damage and the requirements are all derived, and inventory items get them
     // by way of ItemConvert. Doing the same on a copy leaves the world item
     // untouched while giving the tooltip everything it needs.
+    // Collapsed: one bar saying how many drops are in range, and tapping it
+    // anywhere brings the full menu back (HandleItemMenuTap). Drawn here rather
+    // than inside DrawItemMenuBox so the tutorial's example menu, which shares
+    // that function, always shows the expanded form it is describing.
+    if (g_itemMenuMinimized)
+    {
+        const float barH = ItemMenuCollapsedHeight();
+
+        BeginBitmap();
+        DisableTexture();
+        glDisable(GL_TEXTURE_2D);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        DrawVirtualRectFilled(g_itemMenuX - 3.0f, g_itemMenuY - 3.0f,
+                              kItemMenuWidth + 6.0f, barH + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+        DrawVirtualRectFilled(g_itemMenuX, g_itemMenuY, kItemMenuWidth, barH,
+                              0.10f, 0.04f, 0.05f, 0.78f);
+        DrawVirtualRectOutline(g_itemMenuX, g_itemMenuY, kItemMenuWidth, barH,
+                               0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
+
+        char szBar[24];
+        std::snprintf(szBar, sizeof(szBar), "Items (%d)", g_itemMenuCount);
+        TextDraw(g_hFontBold != nullptr ? g_hFontBold : g_hFont,
+                 static_cast<int>(g_itemMenuX),
+                 static_cast<int>(g_itemMenuY + kItemMenuPad + 1.0f),
+                 0xFFFFFFFF, 0x0, static_cast<int>(kItemMenuWidth), 0, 3, "%s", szBar);
+
+        EndBitmap();
+        return;
+    }
+
     ITEM item = Items[g_itemMenuItemKey].Item;
 
     if (item.Type != ITEM_POTION + 15)      // not money, whose Level is an amount
@@ -10307,16 +11320,17 @@ bool GetAndroidTutorialStepRect(int step, AndroidUiRect& outRect)
     switch (step)
     {
     case kTutStepMove: // Movement zone. The stick floats to wherever the finger lands
-            // inside it (kVirtualJoystickSpawnZoneMaxX), so the zone IS the
-            // control - a circle around the old fixed home would be pointing
-            // at a pad that no longer exists. Stops short of the Q/W/E/R row
-            // at the bottom, which outranks the joystick in the hit test and
-            // gets its own step.
+            // inside it, so the zone IS the control - a circle around the
+            // resting home would be pointing at a pad that no longer exists.
+            //
+            // Derived from the spawn-zone constants rather than repeating the
+            // numbers, so the box the tour draws cannot drift away from the box
+            // IsInsideVirtualJoystickDynamicArea actually accepts.
         outRect = {
             4.0f,
-            200.0f,
+            kVirtualJoystickSpawnZoneMinY,
             kVirtualJoystickSpawnZoneMaxX - 8.0f,
-            (kVirtualMirrorHotKeySlots[0].cy - kVirtualMirrorHotKeySlots[0].radius - 6.0f) - 200.0f
+            kVirtualJoystickSpawnZoneMaxY - kVirtualJoystickSpawnZoneMinY
         };
         return true;
 
@@ -10705,7 +11719,11 @@ bool HandleAndroidTutorialStepTap(const SDL_TouchFingerEvent& touch, float uiX, 
     {
     case kTutStepMove: // Practice stick - anywhere in the movement zone starts one.
     {
-        if (uiX > kVirtualJoystickSpawnZoneMaxX || uiY >= kVirtualPadInputMaxY)
+        // Same box as the real stick (IsInsideVirtualJoystickDynamicArea), so
+        // the tour teaches the area that actually works.
+        if (uiX > kVirtualJoystickSpawnZoneMaxX
+            || uiY < kVirtualJoystickSpawnZoneMinY
+            || uiY > kVirtualJoystickSpawnZoneMaxY)
         {
             return false;
         }
@@ -12172,6 +13190,22 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // The registration overlay is modal while it is up - it sits on the login
+    // screen, so nothing behind it should see a tap at all.
+    if (AndroidRegisterOverlayVisible() && HandleAndroidRegisterOverlayFingerDown(uiX, uiY))
+    {
+        return true;
+    }
+
+    // Nearby-NPC list. Claims only its own panel, so a tap anywhere else still
+    // reaches the world - but a tap inside it must never also walk the hero.
+    // The press is only recorded here; the row or the collapse toggle fires on
+    // release, once HandleAndroidNpcPickerFingerUp knows it was not a drag.
+    if (HandleAndroidNpcPickerFingerDown(uiX, uiY, touch.fingerId))
+    {
+        return true;
+    }
+
     // Directly after the pinch tracker (which only registers the finger here,
     // it does not claim a lone touch): a modal message box outranks every
     // other surface, the same way it does on PC. See
@@ -12823,6 +13857,11 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    if (HandleAndroidNpcPickerFingerMotion(touch))
+    {
+        return true;
+    }
+
     if (HandleItemMenuFingerMotion(touch))
     {
         return true;
@@ -13007,6 +14046,11 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     }
 
     if (HandleAndroidTargetPickerFingerUp(touch))
+    {
+        return true;
+    }
+
+    if (HandleAndroidNpcPickerFingerUp(touch))
     {
         return true;
     }
@@ -17491,6 +18535,41 @@ bool AndroidTriggerHotKeySkillTap(int hotKeySkillIndex)
 // RenderItemMenu lives in the anonymous namespace above, so it has internal
 // linkage and cannot be called from ZzzScene directly. Same wrapper pattern as
 // the trigger functions above.
+// External entry points for the registration overlay, deliberately down here.
+// Everything from line ~727 to the close of the anonymous namespace above has
+// internal linkage, so the implementation up there cannot be named from
+// CB_DangKyInGame.cpp - these thin wrappers are what it links against.
+void SetAndroidRegisterOverlayVisible(bool visible)
+{
+    AndroidRegisterOverlaySetVisible(visible);
+}
+
+void RenderAndroidRegisterOverlay()
+{
+    AndroidRegisterOverlayRender();
+}
+
+// The reply handler reports the account it just created and copies the
+// credentials into the login boxes. It read those from the PC edit controls,
+// which the overlay never fills - so on mobile it has to read them from here
+// instead, or the confirmation shows an empty ID and login stays blank.
+const char* AndroidRegisterOverlayAccountText()
+{
+    return g_androidRegister.account;
+}
+
+const char* AndroidRegisterOverlayPasswordText()
+{
+    return g_androidRegister.pass;
+}
+
+void AndroidRenderNpcPicker()
+{
+    // External wrapper: the implementation sits inside the anonymous namespace
+    // that runs to line ~17866, so it cannot be named from ZzzScene.cpp.
+    AndroidRenderNpcPickerImpl();
+}
+
 void AndroidRenderItemMenu()
 {
     RenderItemMenu();
@@ -19114,6 +20193,13 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
         {
             break;
         }
+        // Checked before the char-name buffer and before the focused-edit-control
+        // path: the registration overlay keeps its own text and must not also
+        // feed whatever CUITextInputBox happens to hold focus underneath it.
+        if (AndroidRegisterOverlayHasFocusedField()) {
+            AndroidRegisterOverlayAppendUtf8(ev.text.text);
+            break;
+        }
         if (g_charNameInputActive) {
             // Route directly into the custom char-name buffer
             const unsigned char* p = reinterpret_cast<const unsigned char*>(ev.text.text);
@@ -19178,7 +20264,9 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
             // close-on-ESC handling and the exit confirmation.
             break;
         case SDLK_BACKSPACE:
-            if (g_charNameInputActive) {
+            if (AndroidRegisterOverlayHasFocusedField()) {
+                AndroidRegisterOverlayBackspace();
+            } else if (g_charNameInputActive) {
                 if (g_charNameLen > 0) g_charNameBuf[--g_charNameLen] = L'\0';
             } else if (AndroidHasFocusedTextInput()) {
                 AndroidInjectCharToFocusedTextInput(VK_BACK);
@@ -19186,7 +20274,10 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
             break;
         case SDLK_RETURN:
         case SDLK_KP_ENTER:
-            if (g_charNameInputActive) {
+            if (AndroidRegisterOverlayHasFocusedField()) {
+                // Walks Account -> Password -> 7 Numbers, then submits.
+                AndroidRegisterOverlayAdvanceField();
+            } else if (g_charNameInputActive) {
                 // Let the game loop detect Enter via CInput::IsKeyDown(VK_RETURN)
             } else if (AndroidHasFocusedTextInput()) {
                 const HWND focusedBeforeReturn = GetFocus();
@@ -20125,7 +21216,7 @@ static void RunAndroidGameFrame()
         return;
     }
 
-    const bool hasFocusedTextInput = AndroidHasFocusedTextInput() || g_charNameInputActive;
+    const bool hasFocusedTextInput = AndroidHasFocusedTextInput() || g_charNameInputActive || AndroidRegisterOverlayHasFocusedField();
 #if !defined(MU_ANDROID_DISABLE_LOG)
     static int s_lastImeState = -1;
     const int imeState = hasFocusedTextInput ? 1 : 0;
@@ -21386,7 +22477,7 @@ int SDL_main(int argc, char* argv[])
         }
         if (Destroy) break;
 
-        const bool hasFocusedTextInput = AndroidHasFocusedTextInput() || g_charNameInputActive;
+        const bool hasFocusedTextInput = AndroidHasFocusedTextInput() || g_charNameInputActive || AndroidRegisterOverlayHasFocusedField();
 #if !defined(MU_ANDROID_DISABLE_LOG)
         static int s_lastImeState = -1;
         const int imeState = hasFocusedTextInput ? 1 : 0;
