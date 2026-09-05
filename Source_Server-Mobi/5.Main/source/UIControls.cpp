@@ -4231,7 +4231,11 @@ void CUITextInputBox::UploadText(int sx,int sy,int Width,int Height)
 		// value skips its real bind and draws with the font atlas instead.
 		// b is BITMAP_FONT's bitmap, so name it accurately rather than
 		// invalidating - RenderBitmap(BITMAP_FONT, ...) follows immediately.
+		// Guarded like the identical assignment further up this file: this
+		// file's extern of CachTexture is Android-only (see the includes).
+#ifdef __ANDROID__
 		CachTexture = BITMAP_FONT;
+#endif
 		UploadFontBitmapRegion(b, sourceWidth, sourceHeight);
 		float TextureUWidth = (Width+0.01f)/b->Width;
 		float TextureVHeight = (Height+0.01f)/b->Height;

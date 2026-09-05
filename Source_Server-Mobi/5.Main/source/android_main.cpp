@@ -20551,6 +20551,7 @@ static void RunAndroidGameFrame()
                         {
                             DumpTerrainProbeAt(pf, Hero->Object.Position[0], Hero->Object.Position[1]);
                             DumpNearbyObjects(pf, Hero->Object.Position[0], Hero->Object.Position[1]);
+                            DumpGhostItems(pf, Hero->Object.Position[0], Hero->Object.Position[1]);
                             {
                                 char alphaState[512] = {0};
                                 GL_DebugReportAlphaState(alphaState, (int)sizeof(alphaState));

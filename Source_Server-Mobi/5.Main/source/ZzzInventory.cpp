@@ -9143,7 +9143,16 @@ int GetScreenWidth()
 
 	int iWidth = 0;
 
+	// Three panels: the Expanded Inventory opens BETWEEN a shop/storage/trade
+	// window and the inventory, so all three are on screen at once and the
+	// strip has to be three panels wide. Without this the cascade fell through
+	// to the two-panel case below and the leftmost window's items were
+	// scissored away by GetUi3DScissorRect - the same "slots highlighted, no
+	// icons" symptom the Expanded Inventory itself had, just moved one window
+	// further left. Must be tested before the two-panel case, since its
+	// condition is a superset of that one.
 	if(g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
+		&& g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_ExpandInventory)
 		&& (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER)
 			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
 			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE)
@@ -9152,6 +9161,32 @@ int GetScreenWidth()
 			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MYSHOP_INVENTORY)
 			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_PURCHASESHOP_INVENTORY)
 			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_LUCKYCOIN_REGISTRATION)
+#ifdef LEM_ADD_LUCKYITEM
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_LUCKYITEMWND)
+#endif // LEM_ADD_LUCKYITEM
+		))
+	{
+		iWidth = 640 - (190 * 3);
+	}
+	else if(g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
+		&& (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER)
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE)
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY)
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_TRADE)
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MYSHOP_INVENTORY)
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_PURCHASESHOP_INVENTORY)
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_LUCKYCOIN_REGISTRATION)
+			// The Expanded Inventory sits to the LEFT of the inventory and is
+			// the same 190 wide (CNewUIInventoryExtension::WIDTH), so it needs
+			// to widen this strip exactly like every other side-by-side window
+			// above. Missing here, this returned the one-panel width, and
+			// GetUi3DScissorRect (NewUI3DRenderMng.cpp) clipped the inventory
+			// camera's 3D pass to the right-hand strip only - so items moved
+			// into the expanded window kept their slots highlighted (2D, not
+			// scissored) while their icons were scissored away entirely: an
+			// item that looks invisible but is really there.
+			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_ExpandInventory)
 #ifdef LEM_ADD_LUCKYITEM
 			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_LUCKYITEMWND)
 #endif // LEM_ADD_LUCKYITEM

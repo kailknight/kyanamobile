@@ -6035,10 +6035,15 @@ void ReceiveCreateItemViewport( BYTE *ReceiveBuffer )
 		int Key      = ((int)(Data2->KeyH )<<8) + Data2->KeyL;
 		int CreateFlag = (Key>>15);
 		Key &= 0x7FFF;
-		if(Key<0 || Key>=MAX_ITEMS)
-			Key = 0;
-		CreateItem(&Items[Key],Data2->Item,Position,CreateFlag);
 		int Type = ConvertItemType(Data2->Item);
+		// Same reasoning as the delete handler: an unaddressable key means
+		// skip this entry, not overwrite the drop sitting in slot 0 with it.
+		if(Key < 0 || Key >= MAX_ITEMS)
+		{
+			Offset += sizeof(PCREATE_ITEM);
+			continue;
+		}
+		CreateItem(&Items[Key],Data2->Item,Position,CreateFlag);
 		if(Type==ITEM_POTION+15)
 		{
 			Offset += sizeof(PCREATE_ITEM);
@@ -6060,10 +6065,30 @@ void ReceiveDeleteItemViewport( BYTE *ReceiveBuffer )
 	{
 		LPPDELETE_CHARACTER Data2 = (LPPDELETE_CHARACTER)(ReceiveBuffer+Offset);
 		int Key = ((int)(Data2->KeyH)<<8) + Data2->KeyL;
-		if(Key<0 || Key>=MAX_ITEMS)
-			Key = 0;
-		Items[Key].Object.Live = false;
 		Offset += sizeof(PDELETE_CHARACTER);
+
+		// Bit 15 is a flag, not part of the key. Every other key handler in
+		// this file strips it - eleven of them - and this one did not. With
+		// the flag set the key would come out >= 32768, fail the range check
+		// below and be clamped to 0, which would both leave the item the
+		// server wanted removed on the ground as an unlootable ghost and kill
+		// an unrelated valid drop in slot 0.
+		//
+		// This is consistency and hardening, not a confirmed fix: the ghost
+		// items actually reported were traced to undefined entries in the Box
+		// of Kundun 5 drop table and fixed server-side, and the server was
+		// never observed setting this bit on this packet. Masking is still
+		// correct - a key that disagrees with every sibling handler is a bug
+		// waiting for the day the server does set it.
+		Key &= 0x7FFF;
+
+		// And never redirect an out-of-range key onto slot 0: a key this
+		// client cannot address is a packet to ignore, not a reason to
+		// destroy someone else's item.
+		if(Key < 0 || Key >= MAX_ITEMS)
+			continue;
+
+		Items[Key].Object.Live = false;
 	}
 }
 

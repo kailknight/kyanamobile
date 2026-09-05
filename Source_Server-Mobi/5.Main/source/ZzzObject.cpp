@@ -13431,3 +13431,50 @@ void DumpNearbyObjects(FILE* f, float heroX, float heroY)
         }
     }
 }
+
+#if MU_DEV_DIAGNOSTICS
+// TEMP diagnostic: dumps every ground item the CLIENT still believes is live.
+//
+// WSclient.cpp's ReceiveDeleteItemViewport is the only thing that ever clears
+// one (Items[Key].Object.Live = false) - there is no client-side expiry - so a
+// single missed delete packet leaves a permanent ghost that keeps spawning its
+// CreateShiny sparkle and can never be looted, because the server no longer has
+// anything at that index. This tells us which it is: if an entry shows up here
+// at the spot where a sparkle is visible, the client kept an item the server
+// removed. modelMeshes distinguishes the other case - an item whose BMD never
+// loaded would render nothing while still being live and sparkling.
+void DumpGhostItems(FILE* f, float heroX, float heroY)
+{
+    if (!f) return;
+
+    int live = 0;
+    fprintf(f, "client ground items (live only):\n");
+    for (int i = 0; i < MAX_ITEMS; ++i)
+    {
+        OBJECT* o = &Items[i].Object;
+        if (!o->Live) continue;
+        ++live;
+
+        const float dx = o->Position[0] - heroX;
+        const float dy = o->Position[1] - heroY;
+        const float dist = sqrtf(dx * dx + dy * dy);
+
+        int meshes = -1;
+        if (o->Type >= 0 && o->Type < MAX_MODELS && Models != NULL)
+        {
+            meshes = Models[o->Type].NumMeshs;
+        }
+
+        // Only the ones near the player are interesting; a full 1000-slot dump
+        // every 10s would bury the useful line.
+        if (dist <= 1200.f)
+        {
+            fprintf(f,
+                "  key=%d type=%d dist=%.0f vis=%d modelMeshes=%d level=%d pos=(%.0f,%.0f,%.0f)\n",
+                i, o->Type, dist, o->Visible ? 1 : 0, meshes,
+                Items[i].Item.Level, o->Position[0], o->Position[1], o->Position[2]);
+        }
+    }
+    fprintf(f, "  total live client items = %d\n", live);
+}
+#endif
