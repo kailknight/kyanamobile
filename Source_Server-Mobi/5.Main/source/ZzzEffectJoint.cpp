@@ -5558,6 +5558,15 @@ void MoveJoint(JOINT * o, int iIndex)
 		}
 		else if (o->SubType == 42)
 		{
+			// Same unguarded dereference as the SubType 7/11/25/45/46/47 branch
+			// below - o->Target->Live with no null check, and CreateJoint can
+			// leave Target NULL.
+			if (o->Target == NULL)
+			{
+				o->Live = false;
+				break;
+			}
+
 			o->Angle[2] += (15.f) * FPS_ANIMATION_FACTOR;
 
 			if (o->Target->Live)
@@ -5672,6 +5681,18 @@ void MoveJoint(JOINT * o, int iIndex)
 		}
 		else if (o->SubType == 7 || o->SubType == 11 || o->SubType == 25 || o->SubType == 45 || o->SubType == 46 || o->SubType == 47)
 		{
+			// Everything below dereferences o->Target - Live just here, then
+			// StartPosition/Position in the k loop, then Position/Angle/Light at
+			// the end - with no null check anywhere, and CreateJoint leaves
+			// Target NULL whenever none was passed. A flare joint of these
+			// subtypes has nothing to orbit without a target, so retire it, the
+			// same way the SubType == 20 branch above already does.
+			if (o->Target == NULL)
+			{
+				o->Live = false;
+				break;
+			}
+
 			if (o->SubType == 11 || o->SubType == 25)
 			{
 				if (o->Target->Live == false)
