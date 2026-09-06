@@ -3378,7 +3378,10 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 		ITEM* pFindItem = pNewInventoryCtrl->FindItemByKey(ip->Key);
 		(pFindItem == NULL) ? bThisisEquippedItem = true : bThisisEquippedItem = false;
 
-		TextNum = g_csItemOption.RenderSetOptionListInItem(ip, TextNum, bThisisEquippedItem);
+		// The set bonuses moved out to their own panel beside the tooltip
+		// (RenderSetInfoPanel below); what belongs here is which parts the set
+		// is made of, which the tooltip never showed at all.
+		TextNum = g_csItemOption.BuildSetPartsList(ip, TextNum);
 
 		TextNum = g_SocketItemMgr.AttachToolTipForSocketItem(ip, TextNum);
 
@@ -3429,6 +3432,13 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 	if (Render3DItem)
 	{
 		g_pNewUISystem->RenderItem3DFree(sx - 13, sy - 65, 20, 20, ip->Type, ip->Level, ip->Option1, ip->ExtOption, false);		// PickUp
+	}
+
+	// Must come after the tooltip is drawn: it hangs itself off g_fLastTip*,
+	// and it overwrites the shared TextList while building its own lines.
+	if (isrendertooltip && !bItemTextListBoxUse)
+	{
+		g_csItemOption.RenderSetInfoPanel(ip);
 	}
 }
 #else

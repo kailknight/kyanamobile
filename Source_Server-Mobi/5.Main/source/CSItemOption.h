@@ -203,6 +203,14 @@ public:
 	}
 
 	int     RenderSetOptionListInItem(const ITEM* ip, int TextNum, bool bIsEquippedItem = false);
+	// --- set item tooltip: parts list + tiered option panel ---
+	int     CollectSetMemberTypes(const ITEM* ip, int* pOutTypes, int iMaxOut);
+	int     CountEquippedSetPieces(const ITEM* ip);
+	bool    IsSetPartEquipped(int iType);
+	int     BuildSetOptionLines(const ITEM* ip, int TNum, bool bWithTitle);
+	int     BuildSetPartsList(const ITEM* ip, int TextNum);
+	void    RenderSetInfoPanel(const ITEM* ip);
+
 
 	void    ClearOptionHelper(void) { m_byRenderOptionList = 0; }
 	void    CheckRenderOptionHelper(const char* FilterName);

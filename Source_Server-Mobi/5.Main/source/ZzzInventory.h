@@ -154,6 +154,16 @@ int  ConvertRepairGold(int Gold,int Durability, int MaxDurability, short Type, c
 void RepairAllGold ( void );
 WORD calcMaxDurability ( const ITEM* ip, ITEM_ATTRIBUTE *p, int Level );
 void RenderTipTextList(const int sx, const int sy, int TextNum, int Tab, int iSort = RT3_SORT_CENTER, int iRenderPoint = STRP_NONE, BOOL bUseBG = TRUE, BOOL Render3DItem = false);
+// Geometry of the last tooltip box RenderTipTextList drew. Anything that needs
+// to position itself against the tooltip - the Android item menu, the set-item
+// option panel - reads these back, since the size is only known once the lines
+// have been measured in there.
+extern float g_fLastTipX;
+extern float g_fLastTipY;
+extern float g_fLastTipW;
+extern float g_fLastTipH;
+extern bool  g_bTipSuppressBG;
+
 
 bool IsCanUseItem();
 bool IsCanTrade();

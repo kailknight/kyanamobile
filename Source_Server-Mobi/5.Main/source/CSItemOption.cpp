@@ -1276,6 +1276,405 @@ bool CSItemOption::isFullseteffect(const ITEM * pselecteditem)
 		return false;
 }
 
+// ---------------------------------------------------------------------------
+// Set item tooltip: which parts make the set up, and which bonus needs how
+// many of them.
+//
+// The piece threshold for a bonus is not stored anywhere - it is implied by the
+// option's index. RenderSetOptionListInItem lights option i when
+// (equippedCount - 1) > i, so option i needs (i + 2) pieces. The headers below
+// are derived from that same rule on purpose: a header can then never disagree
+// with the highlighting beside it, whatever ItemSetOption.bmd happens to hold.
+// byExtOption/byFullOption are not part of that progression - the original loop
+// gates them on the full set instead - so they are labelled as a full-set tier
+// rather than given a piece count.
+// ---------------------------------------------------------------------------
+
+#define SETITEM_MAX_PARTS           32
+#define SETITEM_MAX_TIP_LINE        60      // TextList is [60][512] - see ZzzInventory.h
+#define SETITEM_STANDARD_OPTIONS    6
+#define SETITEM_PIECES_FOR_INDEX(i) ((i) + 2)
+
+// Every item type in the same set as ip. Deliberately not GetSetItmeCount():
+// that one counts a type twice when both of its byOption slots match, and
+// counts the empty 0/255 slots too. Harmless for its own full-set comparison,
+// but it would put phantom rows in a list the player can see.
+int CSItemOption::CollectSetMemberTypes(const ITEM* ip, int* pOutTypes, int iMaxOut)
+{
+	if (ip == NULL || pOutTypes == NULL || iMaxOut <= 0)
+	{
+		return 0;
+	}
+
+	int setItemType = (ip->ExtOption % 0x04);
+
+	if (setItemType <= 0)
+	{
+		return 0;
+	}
+
+	BYTE bySetOption = m_ItemSetType[ip->Type].byOption[setItemType - 1];
+
+	if (bySetOption == 0 || bySetOption == 255)
+	{
+		return 0;
+	}
+
+	int iCount = 0;
+
+	for (int j = 0; j < MAX_ITEM && iCount < iMaxOut; ++j)
+	{
+		ITEM_SET_TYPE& memberType = m_ItemSetType[j];
+
+		for (int i = 0; i < 2; ++i)
+		{
+			if (memberType.byOption[i] != bySetOption)
+			{
+				continue;
+			}
+
+			pOutTypes[iCount++] = j;
+			break;                      // one row per type, even if both slots match
+		}
+	}
+
+	return iCount;
+}
+
+bool CSItemOption::IsSetPartEquipped(int iType)
+{
+	for (int i = 0; i < MAX_EQUIPMENT_INDEX; ++i)
+	{
+		if (CharacterMachine->Equipment[i].Type == iType)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// Distinct equipped pieces of ip's set. Counted off the equipment directly
+// rather than read out of m_arLimitSetItemOptionCount, which is indexed by
+// equipment slot and so is only meaningful for an item that is actually worn -
+// this has to be right when hovering an inventory item too.
+int CSItemOption::CountEquippedSetPieces(const ITEM* ip)
+{
+	int Types[SETITEM_MAX_PARTS];
+
+	int iMemberCount = CollectSetMemberTypes(ip, Types, SETITEM_MAX_PARTS);
+
+	if (iMemberCount <= 0)
+	{
+		return 0;
+	}
+
+	int iSeen[MAX_EQUIPMENT];
+	int iSeenCount = 0;
+	int iEquipped = 0;
+
+	for (int i = 0; i < MAX_EQUIPMENT_INDEX; ++i)
+	{
+		ITEM* p = &CharacterMachine->Equipment[i];
+
+		if (p->Type == -1)
+		{
+			continue;
+		}
+
+		bool bAlreadyCounted = false;
+
+		for (int s = 0; s < iSeenCount; ++s)
+		{
+			if (iSeen[s] == p->Type)
+			{
+				bAlreadyCounted = true;
+				break;
+			}
+		}
+
+		if (bAlreadyCounted)
+		{
+			continue;
+		}
+
+		for (int n = 0; n < iMemberCount; ++n)
+		{
+			if (Types[n] != p->Type)
+			{
+				continue;
+			}
+
+			iSeen[iSeenCount++] = p->Type;
+			iEquipped++;
+			break;
+		}
+	}
+
+	return iEquipped;
+}
+
+// The "<SetName> Set" block appended to the item tooltip itself: the parts the
+// set is made of, with the ones already worn picked out from the ones missing.
+int CSItemOption::BuildSetPartsList(const ITEM* ip, int TextNum)
+{
+	int Types[SETITEM_MAX_PARTS];
+
+	int iMemberCount = CollectSetMemberTypes(ip, Types, SETITEM_MAX_PARTS);
+
+	if (iMemberCount <= 0)
+	{
+		return TextNum;
+	}
+
+	char szSetName[128] = { 0 };
+
+	if (!GetSetItemName(szSetName, ip->Type, ip->ExtOption))
+	{
+		return TextNum;
+	}
+
+	int TNum = TextNum;
+
+	sprintf(TextList[TNum], "\n"); TNum++;
+
+	sprintf(TextList[TNum], "%s%s", szSetName, GlobalText[1089]);   // "<Name> Set"
+	TextListColor[TNum] = TEXT_COLOR_YELLOW;
+	TextBold[TNum] = true;
+	TNum++;
+
+	for (int n = 0; n < iMemberCount; ++n)
+	{
+		if (TNum >= (SETITEM_MAX_TIP_LINE - 2))
+		{
+			break;
+		}
+
+		std::map<int, _ITEM_TOOLTIP>::iterator part = m_ItemToolTipData.find(Types[n]);
+
+		if (part == m_ItemToolTipData.end())
+		{
+			continue;
+		}
+
+		sprintf(TextList[TNum], "%s%s", szSetName, part->second.name);
+
+		TextListColor[TNum] = (IsSetPartEquipped(Types[n]) ? TEXT_COLOR_GREEN : TEXT_COLOR_GRAY);
+		TextBold[TNum] = false;
+		TNum++;
+	}
+
+	return TNum;
+}
+
+
+// Builds the tier-grouped bonus lines into TextList starting at TNum, returning
+// the new line count. Shared by both clients: on PC the side panel starts from
+// an empty buffer, on Android the tooltip appends these straight onto the parts
+// list instead, since a second box has nowhere to go on a phone.
+int CSItemOption::BuildSetOptionLines(const ITEM* ip, int TNum, bool bWithTitle)
+{
+	if (ip == NULL)
+	{
+		return TNum;
+	}
+
+	int setItemType = (ip->ExtOption % 0x04);
+
+	if (setItemType <= 0)
+	{
+		return TNum;
+	}
+
+	BYTE bySetOption = m_ItemSetType[ip->Type].byOption[setItemType - 1];
+
+	if (bySetOption == 0 || bySetOption == 255)
+	{
+		return TNum;
+	}
+
+	ITEM_SET_OPTION& setOption = m_ItemSetOption[bySetOption];
+
+	if (setOption.byOptionCount >= 255)
+	{
+		return TNum;
+	}
+
+	int Types[SETITEM_MAX_PARTS];
+	int iMemberCount = CollectSetMemberTypes(ip, Types, SETITEM_MAX_PARTS);
+	int iEquipped = CountEquippedSetPieces(ip);
+	bool bFullSet = (iMemberCount > 0 && iEquipped >= iMemberCount);
+
+	int TStart = TNum;
+
+	if (bWithTitle)
+	{
+		sprintf(TextList[TNum], "SetItem option info");
+		TextListColor[TNum] = TEXT_COLOR_YELLOW;
+		TextBold[TNum] = true;
+		TNum++;
+
+		sprintf(TextList[TNum], "\n"); TNum++;
+	}
+
+	int iLastTier = -1;
+
+	for (int i = 0; i <= MAX_SETITEM_OPTIONS; ++i)
+	{
+		BYTE option[2] = { 255, 255 };
+		BYTE value[2] = { 255, 255 };
+		bool bActive = false;
+		int  iTier;
+
+		if (i < SETITEM_STANDARD_OPTIONS)
+		{
+			option[0] = setOption.byStandardOption[i][0];
+			option[1] = setOption.byStandardOption[i][1];
+			value[0] = setOption.byStandardOptionValue[i][0];
+			value[1] = setOption.byStandardOptionValue[i][1];
+
+			iTier = SETITEM_PIECES_FOR_INDEX(i);
+			bActive = (iEquipped >= iTier);
+		}
+		else if (i < 8)
+		{
+			option[0] = setOption.byExtOption[i - SETITEM_STANDARD_OPTIONS];
+			value[0] = setOption.byExtOptionValue[i - SETITEM_STANDARD_OPTIONS];
+
+			iTier = 0;                  // full-set tier
+			bActive = bFullSet;
+		}
+		else
+		{
+			option[0] = setOption.byFullOption[i - 8];
+			value[0] = setOption.byFullOptionValue[i - 8];
+
+			iTier = 0;
+			bActive = bFullSet;
+		}
+
+		for (int n = 0; n < 2; ++n)
+		{
+			if (option[n] == 255 || TNum >= (SETITEM_MAX_TIP_LINE - 3))
+			{
+				continue;
+			}
+
+			if (iTier != iLastTier)
+			{
+				sprintf(TextList[TNum], "\n"); TNum++;
+
+				if (iTier > 0)
+				{
+					sprintf(TextList[TNum], "%dSet Effect", iTier);
+				}
+				else
+				{
+					sprintf(TextList[TNum], "Full Set Effect");
+				}
+
+				TextListColor[TNum] = TEXT_COLOR_YELLOW;
+				TextBold[TNum] = true;
+				TNum++;
+
+				iLastTier = iTier;
+			}
+
+			getExplainText(TextList[TNum], option[n], value[n], 0);
+
+			TextListColor[TNum] = (bActive ? TEXT_COLOR_GREEN : TEXT_COLOR_GRAY);
+			TextBold[TNum] = false;
+			TNum++;
+		}
+	}
+
+	if (iLastTier == -1)
+	{
+		return TStart;                  // no options at all - emit nothing
+	}
+
+	sprintf(TextList[TNum], "\n"); TNum++;
+
+	return TNum;
+}
+
+// The "SetItem option info" box drawn beside the item tooltip. Called straight
+// after the tooltip has been rendered, so g_fLastTipX/W/Y still describe that
+// box and this one can be butted against its right edge.
+//
+// RenderTipTextList takes the centre, not the left edge, and clamps itself to
+// the screen; a panel that will not fit on the right is flipped to the left of
+// the tooltip rather than being squashed against the edge.
+void CSItemOption::RenderSetInfoPanel(const ITEM* ip)
+{
+	for (int i = 0; i < SETITEM_MAX_TIP_LINE; ++i)
+	{
+		TextList[i][0] = '\0';
+		TextListColor[i] = TEXT_COLOR_WHITE;
+		TextBold[i] = false;
+	}
+
+	int TNum = BuildSetOptionLines(ip, 0, true);
+
+	if (TNum <= 0)
+	{
+		return;
+	}
+
+	// Measure the panel the same way RenderTipTextList will, so it can be butted
+	// straight against the tooltip's right edge. Estimating from the tooltip's own
+	// width put the fit test badly out - the tooltip is far wider than this panel,
+	// so a tooltip near the right of the screen flipped the panel to the left when
+	// there was plenty of room for it on the right.
+	SIZE TextSize = { 0, 0 };
+	float fPanelWidth = 0.0f;
+
+	for (int i = 0; i < TNum; ++i)
+	{
+		if (TextList[i][0] == '\0')
+		{
+			break;
+		}
+
+		g_pRenderText->SetFont(TextBold[i] ? g_hFontBold : g_hFont);
+
+		g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), TextList[i], lstrlen(TextList[i]), &TextSize);
+
+		if (fPanelWidth < TextSize.cx)
+		{
+			fPanelWidth = (float)TextSize.cx;
+		}
+	}
+
+	fPanelWidth /= g_fScreenRate_x;
+	fPanelWidth += 4.0f;
+
+	float fPanelLeft = (g_fLastTipX + g_fLastTipW);
+
+	// Only fall back to the left of the tooltip when the panel genuinely will not
+	// fit on the right.
+	if ((fPanelLeft + fPanelWidth) > ((float)WindowWidth / g_fScreenRate_x))
+	{
+		fPanelLeft = (g_fLastTipX - fPanelWidth);
+	}
+
+	// RenderTipTextList takes the centre, not the left edge.
+	// Android draws its item-menu container around whatever RenderTipTextList
+	// last measured, reading these back on the following frame - so the panel
+	// must not be what it finds. Put the tooltip geometry back afterwards.
+	const float fSavedTipX = g_fLastTipX;
+	const float fSavedTipY = g_fLastTipY;
+	const float fSavedTipW = g_fLastTipW;
+	const float fSavedTipH = g_fLastTipH;
+
+	RenderTipTextList((int)(fPanelLeft + (fPanelWidth / 2.0f)), (int)g_fLastTipY, TNum, 0, RT3_SORT_CENTER, STRP_NONE, TRUE, false);
+
+	g_fLastTipX = fSavedTipX;
+	g_fLastTipY = fSavedTipY;
+	g_fLastTipW = fSavedTipW;
+	g_fLastTipH = fSavedTipH;
+}
+
 int     CSItemOption::RenderSetOptionListInItem(const ITEM * ip, int TextNum, bool bIsEquippedItem)
 {
 	ITEM_SET_TYPE& itemSType = m_ItemSetType[ip->Type];
