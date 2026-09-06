@@ -44,6 +44,23 @@ public:
 	{
 		fclose(file);
 	}
+	// Writes a line straight into the same log the callstack goes to. Used to
+	// record the exception record, which was previously formatted and dropped.
+	void WriteLine(const char* fmt, ...)
+	{
+		if (file == NULL)
+		{
+			return;
+		}
+
+		char buf[512];
+		va_list ap;
+		va_start(ap, fmt);
+		_vsnprintf_s(buf, sizeof(buf), _TRUNCATE, fmt, ap);
+		va_end(ap);
+		fprintf(file, "%s\n", buf);
+	}
+
 	char* GetStackLogFileName()
 	{
 		return szFile;
@@ -169,6 +186,44 @@ static LONG __stdcall CrashHandlerExceptionFilter(EXCEPTION_POINTERS* pExPtrs)
 #endif
 
 	StackWalkerToConsole sw;  // output to console
+
+	// The exception record used to be formatted into a string and then dropped -
+	// FatalAppExit below is commented out, so nothing ever saw it. Without the
+	// code and the faulting address, an optimised build's line numbers are the
+	// only evidence, and those name the nearest attributable line rather than the
+	// instruction that actually faulted. Log it.
+	{
+		EXCEPTION_RECORD* lpRecord = pExPtrs->ExceptionRecord;
+
+		sw.WriteLine("ExceptionCode: 0x%08X  Flags: 0x%08X  Address: 0x%08X",
+					 lpRecord->ExceptionCode,
+					 lpRecord->ExceptionFlags,
+					 (DWORD)lpRecord->ExceptionAddress);
+
+		if (lpRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && lpRecord->NumberParameters >= 2)
+		{
+			const char* Access = "read";
+
+			if (lpRecord->ExceptionInformation[0] == 1)
+			{
+				Access = "write";
+			}
+			else if (lpRecord->ExceptionInformation[0] == 8)
+			{
+				Access = "execute";
+			}
+
+			sw.WriteLine("AccessViolation: %s of 0x%08X", Access, (DWORD)lpRecord->ExceptionInformation[1]);
+		}
+
+		if (pExPtrs->ContextRecord != NULL)
+		{
+			sw.WriteLine("EIP: 0x%08X  ESP: 0x%08X  EBP: 0x%08X",
+						 pExPtrs->ContextRecord->Eip,
+						 pExPtrs->ContextRecord->Esp,
+						 pExPtrs->ContextRecord->Ebp);
+		}
+	}
 	sw.ShowCallstack(GetCurrentThread(), pExPtrs->ContextRecord);
 	TCHAR lString[500];
 	/*_stprintf_s(lString,
