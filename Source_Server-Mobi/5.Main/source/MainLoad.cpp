@@ -105,8 +105,9 @@ bool MainLoad::Load()
 		// has to be pointed at this module.
 		//
 		// EntryProc calls SafeExitProcess() if it cannot read its own config, so
-		// the file is checked first: without this a client that has never had
-		// kyana.ah deployed would die during startup with no message at all.
+		// the file is checked first - otherwise a client missing kyana.ah just
+		// vanishes during startup with nothing in any log. The else branch below
+		// says so out loud and refuses to run, rather than continuing unprotected.
 		if (GetFileAttributes(".\\Data\\Custom\\Configs\\kyana.ah") != INVALID_FILE_ATTRIBUTES)
 		{
 			hins = GetModuleHandle(NULL);
@@ -140,6 +141,30 @@ bool MainLoad::Load()
 			gWindowHwnd = (DWORD)&g_hWnd;
 
 			EntryProc();
+		}
+		else
+		{
+			/*
+				No config, no client.
+
+				Renaming or deleting kyana.ah was a complete, silent bypass: the
+				block above is the only thing that starts the anti-cheat, so a
+				missing file left the client running entirely unprotected with
+				nothing in any log to say so. It sits in the player's own game
+				folder, so it has to be assumed they will find it.
+
+				Scoped to LoadAntihack being on. With it off the operator has
+				deliberately chosen an unprotected client, and that is the
+				supported way to run without the anti-cheat - including for
+				debugging, now that renaming the file no longer works.
+			*/
+			::MessageBoxA(NULL,
+				"Data\\Custom\\Configs\\kyana.ah is missing or unreadable.\n\n"
+				"This file is required to run the game. Restore it with the patcher "
+				"or reinstall the client.",
+				"Kira MU", MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);
+
+			::ExitProcess(0);
 		}
 	}
 #endif
