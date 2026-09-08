@@ -3326,13 +3326,19 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 	}
 
 	//==HSD ITem
-	tm* ExpireTime;
-	if (ip->bPeriodItem == true && ip->bExpiredPeriod == false)
+	// ExpireTime used to be filled in only for the not-yet-expired branch
+	// (bExpiredPeriod == false), but read unconditionally below whenever
+	// lExpireTime != 0 - including for an already-expired item, which is the
+	// normal end state of any period item. That left ExpireTime pointing at
+	// whatever garbage was on the stack and dereferencing it crashed the
+	// client every time an expired item's tooltip was drawn. Compute it
+	// whenever there is a timestamp to convert, matching where it is actually
+	// used, and guard against localtime() itself returning NULL for a bad
+	// timestamp.
+	tm* ExpireTime = NULL;
+	if (ip->bPeriodItem == true && ip->lExpireTime != 0)
 	{
 		_tzset();
-		//if (ip->lExpireTime == 0)
-		//	return;
-
 		ExpireTime = localtime((time_t*) & (ip->lExpireTime));
 	}
 
@@ -3344,7 +3350,7 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 			sprintf(TextList[TextNum], GlobalText[3266]);
 			TextListColor[TextNum] = TEXT_COLOR_RED;
 		}
-		if (ip->lExpireTime == 0)
+		if (ip->lExpireTime == 0 || ExpireTime == NULL)
 		{
 			sprintf(TextList[TextNum], GlobalText[3265]);
 			TextListColor[TextNum] = TEXT_COLOR_ORANGE;

@@ -3702,7 +3702,10 @@ typedef struct
 	
 	WORD				wItemCode;
 	WORD				wItemSlotIndex;
-	long				lExpireDate;
+	int					lExpireDate;	// was `long`: 4 bytes on the server/PC, 8 on 64-bit
+										// Android, so the field read off the wire past this
+										// point was garbage there. `int` is 4 bytes on every
+										// target this ships to.
 }PMSG_PERIODITEMEX_ITEMLIST, *LPPMSG_PERIODITEMEX_ITEMLIST;
 
 #endif // KJH_ADD_PERIOD_ITEM_SYSTEM
