@@ -43,6 +43,21 @@ typedef struct
 	float	AtlasUWidth;
 	float	AtlasVHeight;
 
+	/*
+		The image's real size, before the loader rounded the texture up to a
+		power of two.
+
+		Width/Height above are the TEXTURE's size, so anything drawn with the
+		full 0..1 UV range also draws the padding. That is fine for art authored
+		at power-of-two sizes and wrong for anything downloaded - a 153x63 banner
+		lives in a 256x64 texture, so 40% of what gets drawn is padding.
+
+		Zero when a loader did not set them; callers fall back to Width/Height,
+		which is the old behaviour.
+	*/
+	float	SourceWidth;
+	float	SourceHeight;
+
 private:
 	friend class CBitmapCache;
 	DWORD	dwCallCount;

@@ -26,6 +26,32 @@ public:
 	WZResult LoadPackage (const char* szFilePath);
 	WZResult LoadProduct (const char* szFilePath);	
 
+	/*
+		The same three lists, filled from the server instead of from disk.
+
+		The catalog the player sees used to exist only as IBSCategory.txt,
+		IBSPackage.txt and IBSProduct.txt, so nothing edited in the admin tool
+		could reach the shelf. These take the identical @-delimited rows off the
+		wire and hand them to the identical parsers - SetCategory, SetPackage,
+		SetProduct - so everything downstream is unchanged.
+
+		BeginServerCatalog clears all three lists, so the caller must be sure the
+		whole catalog arrived before starting: a half-applied catalog is an empty
+		shop. CInGameShopSystem buffers the rows and only calls these once the
+		end-of-catalog marker lands.
+	*/
+	void BeginServerCatalog();
+	bool AddServerCatalogLine(int iRowKind, const std::string& strLine);
+	void EndServerCatalog();
+
+	enum SERVER_CATALOG_ROW
+	{
+		SERVER_CATALOG_CATEGORY = 0,
+		SERVER_CATALOG_PACKAGE  = 1,
+		SERVER_CATALOG_PRODUCT  = 2,
+	};
+
+
 	CShopCategoryList* GetCategoryListPtr() {return m_CategoryListPtr;};	// 카테고리 목록 가져온다.
 	CShopPackageList*  GetPackageListPtr()  {return m_PackageListPtr;};		// 패키지 목록 가져온다.
 	CShopProductList*  GetProductListPtr()  {return m_ProductListPtr;};		// 상품(속성) 목록 가져온다.

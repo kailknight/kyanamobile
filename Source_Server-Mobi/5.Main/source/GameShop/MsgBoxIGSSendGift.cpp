@@ -207,20 +207,57 @@ CALLBACK_RESULT CMsgBoxIGSSendGift::CancelButtonDown(class CNewUIMessageBoxBase*
 
 void CMsgBoxIGSSendGift::SetButtonInfo()
 {
-	m_BtnOk.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnOk.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnOk.MoveTextPos(0, -1);
 	m_BtnOk.SetText(GlobalText[228]);	
 	
-	m_BtnCancel.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnCancel.MoveTextPos(0, -1);
 	m_BtnCancel.SetText(GlobalText[229]);	
 }
 
 void CMsgBoxIGSSendGift::RenderFrame()
 {
-	RenderImage(IMAGE_IGS_FRAME, GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
-	RenderImage(IMAGE_IGS_DECO, GetPos().x+IMAGE_IGS_DECO_POS_X, GetPos().y+IMAGE_IGS_DECO_POS_Y, IMAGE_IGS_DECO_WIDTH, IMAGE_IGS_DECO_HEIGHT);
-	RenderImage(IMAGE_IGS_INPUTTEXT, GetPos().x+IMAGE_IGS_ID_INPUT_BOX_POS_X, GetPos().y+IMAGE_IGS_ID_INPUT_BOX_POS_Y, IMAGE_IGS_ID_INPUT_BOX_WIDTH, IMAGE_IGS_ID_INPUT_BOX_HEIGHT);
+	if( IGSIsModernSkin() )
+	{
+		/*
+			The gift form, flat, at its own 210x267.
+
+			The parchment message pad and the little gift-icon deco are dropped
+			rather than restyled - the deco exists to decorate a scroll that is
+			no longer there, and the pad is replaced by a plain well the same
+			way every other input area in this skin is.
+		*/
+		const int X = GetPos().x;
+		const int Y = GetPos().y;
+		const int W = IMAGE_IGS_FRAME_WIDTH;
+		const int H = IMAGE_IGS_FRAME_HEIGHT;
+
+		IGSFillRect(X, Y, W, H, 0.10f, 0.10f, 0.11f, 1.0f);
+
+		IGSFillRect(X, Y, W, 1, 0.24f, 0.24f, 0.27f, 1.0f);
+		IGSFillRect(X, Y+H-1, W, 1, 0.24f, 0.24f, 0.27f, 1.0f);
+		IGSFillRect(X, Y, 1, H, 0.24f, 0.24f, 0.27f, 1.0f);
+		IGSFillRect(X+W-1, Y, 1, H, 0.24f, 0.24f, 0.27f, 1.0f);
+
+		IGSFillRect(X+1, Y+1, W-2, 22, 0.80f, 0.15f, 0.12f, 1.0f);
+
+		IGSFillRect(X+8, Y+30, W-16, 44, 0.15f, 0.15f, 0.16f, 1.0f);	// item summary
+		IGSFillRect(X+8, Y+124, W-16, 76, 0.13f, 0.13f, 0.14f, 1.0f);	// message pad
+
+		// The recipient field, and a red underline so the one thing the player
+		// has to type into is the one thing that draws the eye.
+		IGSFillRect(X+IMAGE_IGS_ID_INPUT_BOX_POS_X, Y+IMAGE_IGS_ID_INPUT_BOX_POS_Y,
+			IMAGE_IGS_ID_INPUT_BOX_WIDTH, IMAGE_IGS_ID_INPUT_BOX_HEIGHT, 0.06f, 0.06f, 0.07f, 1.0f);
+		IGSFillRect(X+IMAGE_IGS_ID_INPUT_BOX_POS_X, Y+IMAGE_IGS_ID_INPUT_BOX_POS_Y+IMAGE_IGS_ID_INPUT_BOX_HEIGHT-1,
+			IMAGE_IGS_ID_INPUT_BOX_WIDTH, 1, 0.80f, 0.15f, 0.12f, 1.0f);
+	}
+	else
+	{
+		RenderImage(IMAGE_IGS_FRAME, GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
+		RenderImage(IMAGE_IGS_DECO, GetPos().x+IMAGE_IGS_DECO_POS_X, GetPos().y+IMAGE_IGS_DECO_POS_Y, IMAGE_IGS_DECO_WIDTH, IMAGE_IGS_DECO_HEIGHT);
+		RenderImage(IMAGE_IGS_INPUTTEXT, GetPos().x+IMAGE_IGS_ID_INPUT_BOX_POS_X, GetPos().y+IMAGE_IGS_ID_INPUT_BOX_POS_Y, IMAGE_IGS_ID_INPUT_BOX_WIDTH, IMAGE_IGS_ID_INPUT_BOX_HEIGHT);
+	}
 }
 
 void CMsgBoxIGSSendGift::RenderTexts()
@@ -251,6 +288,8 @@ void CMsgBoxIGSSendGift::RenderTexts()
 	}
 	
 #ifdef FOR_WORK
+	if( IGSIsModernSkin() == false )
+	{
 	unicode::t_char szText[256] = { 0, };
 	g_pRenderText->SetTextColor(255, 0, 0, 255);
 	sprintf(szText, "Package Seq : %d", m_iPackageSeq);
@@ -263,6 +302,7 @@ void CMsgBoxIGSSendGift::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+40, szText, 200, 0, RT3_SORT_LEFT);
 	sprintf(szText, "CashType : %d", m_iCashType);
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+50, szText, 200, 0, RT3_SORT_LEFT);
+	}
 #endif // FOR_WORK
 }
 

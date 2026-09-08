@@ -7,6 +7,19 @@
 #include "WSclientinline.h"
 #include "ZzzInventory.h"
 #include "MsgBoxIGSCommon.h"
+
+// The banner fetch worker needs urlmon for the download, Path for the cache
+// directory, and process.h for _beginthreadex - all Windows-only, like the
+// fetch itself.
+#ifndef __ANDROID__
+#include "ShopListManager\interface\PathMethod\Path.h"
+#include <UrlMon.h>
+#include <process.h>
+#pragma comment(lib,"Urlmon.lib")
+#else
+// Android does the fetch in Java instead - see MU_MobileStartBannerDownload.
+#include "Platform/MobilePlatform.h"
+#endif // __ANDROID__
  
 #ifdef CONSOLE_DEBUG
 	#include "./Utilities/Log/muConsoleDebug.h"
@@ -30,6 +43,17 @@ CInGameShopSystem::CInGameShopSystem()
 	m_plistSelectPackage = NULL;
 	m_bFirstScriptDownloaded = false;
 	m_bFirstBannerDownloaded = false;
+
+	m_iLastAppliedBannerId = -2;
+	m_lBannerFetchState = 0;
+	m_iBannerFetchId = -1;
+	m_szBannerFetchUrl[0] = '\0';
+	m_szBannerFetchPath[0] = '\0';
+	m_iCatalogVersion = 0;
+	m_bServerCatalogApplied = false;
+	m_iCatalogStreamVersion = 0;
+	m_strCatalogLine.clear();
+	m_vCatalogRows.clear();
 }
 
 CInGameShopSystem::~CInGameShopSystem()
@@ -92,6 +116,315 @@ void CInGameShopSystem::SetBannerVersion(int iSalesZone, int iYear, int iYearId)
 	m_BannerVerInfo.Zone = iSalesZone;
 	m_BannerVerInfo.year = iYear;
 	m_BannerVerInfo.yearId = iYearId;
+}
+
+#ifndef __ANDROID__
+/*
+	Fetch one banner jpg. Runs on its own thread and touches nothing but the file.
+
+	urlmon wants COM on whatever thread calls it, and a thread this function
+	created is not the one the client initialised.
+*/
+unsigned __stdcall CInGameShopSystem::BannerFetchThread(void* pParam)
+{
+	CInGameShopSystem* pThis = (CInGameShopSystem*)pParam;
+
+	::CoInitialize(NULL);
+
+	HRESULT hr = ::URLDownloadToFileA(0, pThis->m_szBannerFetchUrl, pThis->m_szBannerFetchPath, 0, 0);
+
+	::CoUninitialize();
+
+	::InterlockedExchange(&pThis->m_lBannerFetchState, (hr == S_OK) ? 2 : 3);
+
+	return 0;
+}
+
+bool CInGameShopSystem::StartCustomBannerDownload(int iBannerId, const char* pszUrl, char* szLocalPathOut, int iOutSize)
+{
+	char szLocalPath[MAX_PATH] = {0};
+
+	// Data\InGameShopBanner\Custom\<BannerId>.jpg - a separate subfolder from
+	// the legacy Zone.Year.YearId cache so the two systems never collide.
+	::GetCurrentDirectoryA(MAX_PATH, szLocalPath);
+	sprintf(szLocalPath, "%s\\data\\InGameShopBanner\\Custom\\%d.jpg", szLocalPath, iBannerId);
+
+	Path::CreateDirectorys(szLocalPath, 1);
+
+	// Already cached. Banner ids are unique per upload, so this can never be a
+	// stale copy of a different image - it is the same file or it does not exist.
+	if( ::GetFileAttributesA(szLocalPath) != INVALID_FILE_ATTRIBUTES )
+	{
+		strncpy(szLocalPathOut, szLocalPath, iOutSize-1);
+		szLocalPathOut[iOutSize-1] = '\0';
+		return true;
+	}
+
+	// One fetch at a time. A second shop open while the first is still running
+	// would otherwise overwrite the url the worker is reading.
+	if( m_lBannerFetchState == 1 )
+		return false;
+
+	m_iBannerFetchId = iBannerId;
+	strncpy(m_szBannerFetchUrl, pszUrl, sizeof(m_szBannerFetchUrl)-1);
+	m_szBannerFetchUrl[sizeof(m_szBannerFetchUrl)-1] = '\0';
+	strncpy(m_szBannerFetchPath, szLocalPath, sizeof(m_szBannerFetchPath)-1);
+	m_szBannerFetchPath[sizeof(m_szBannerFetchPath)-1] = '\0';
+
+	::InterlockedExchange(&m_lBannerFetchState, 1);
+
+	unsigned int uiThreadId = 0;
+	HANDLE hThread = (HANDLE)_beginthreadex(0, 0, CInGameShopSystem::BannerFetchThread, this, 0, &uiThreadId);
+
+	if( hThread == 0 )
+	{
+		::InterlockedExchange(&m_lBannerFetchState, 0);
+		return false;
+	}
+
+	::CloseHandle(hThread);
+	return false;
+}
+
+bool CInGameShopSystem::PollCustomBannerDownload(char* szLocalPathOut, int iOutSize, int& iBannerIdOut)
+{
+	LONG lState = m_lBannerFetchState;
+
+	if( lState != 2 && lState != 3 )
+		return false;
+
+	::InterlockedExchange(&m_lBannerFetchState, 0);
+
+	if( lState == 3 )
+		return false;
+
+	strncpy(szLocalPathOut, m_szBannerFetchPath, iOutSize-1);
+	szLocalPathOut[iOutSize-1] = '\0';
+	iBannerIdOut = m_iBannerFetchId;
+
+	return true;
+}
+#else // __ANDROID__
+
+/*
+	Android has neither urlmon nor the bundled curl (that is a Windows .lib),
+	so the fetch itself lives in Java and this side only remembers where the
+	file is meant to land. The state machine is deliberately the same shape as
+	the Windows one above, so NewUIInGameShop::Update polls identically on both.
+*/
+bool CInGameShopSystem::StartCustomBannerDownload(int iBannerId, const char* pszUrl, char* szLocalPathOut, int iOutSize)
+{
+	char szDir[MAX_PATH] = {0};
+	char szLocalPath[MAX_PATH] = {0};
+
+	/*
+		Absolute, not relative - and this is the whole reason the Android path
+		is not two lines shorter.
+
+		The process chdir's into its private writable directory at startup, so
+		a relative path resolves correctly on this side. But the download runs
+		in Java, and the JVM resolves new File("data/...") against user.dir,
+		which on Android is "/" and is not writable. The two would disagree
+		about where the jpg lives, the fetch would fail, and the cache check
+		here would keep saying "not downloaded yet" forever.
+
+		getcwd() is exactly what GetCurrentDirectoryA does on the PC side of
+		this same function, so both platforms hand out an absolute path and
+		LoadBitmap gets the same kind of string it already gets on PC.
+	*/
+	if( getcwd(szDir, sizeof(szDir)) == NULL )
+		return false;
+
+	/*
+		Capital "Data", unlike the PC string just above.
+
+		Windows does not care, so on PC this cache lands in the real Data\
+		folder whatever case the literal used. Here it decides whether the jpg
+		joins the deployed asset tree or creates a second, stray lowercase
+		directory beside it - and worse, AndroidFopen retries reads
+		case-insensitively while the GetFileAttributesA check below does a
+		plain stat, so the two can resolve to different directories and the
+		shop would keep re-fetching a banner it already has.
+	*/
+	sprintf(szLocalPath, "%s/Data", szDir);
+	CreateDirectoryA(szLocalPath, NULL);
+	sprintf(szLocalPath, "%s/Data/InGameShopBanner", szDir);
+	CreateDirectoryA(szLocalPath, NULL);
+	sprintf(szLocalPath, "%s/Data/InGameShopBanner/Custom", szDir);
+	CreateDirectoryA(szLocalPath, NULL);
+
+	sprintf(szLocalPath, "%s/Data/InGameShopBanner/Custom/%d.jpg", szDir, iBannerId);
+
+	// Already cached. Banner ids are unique per upload, so this can never be a
+	// stale copy of a different image - it is the same file or it does not exist.
+	if( ::GetFileAttributesA(szLocalPath) != INVALID_FILE_ATTRIBUTES )
+	{
+		strncpy(szLocalPathOut, szLocalPath, iOutSize-1);
+		szLocalPathOut[iOutSize-1] = '\0';
+		return true;
+	}
+
+	// One fetch at a time, same as PC - a second shop open while the first is
+	// still running would otherwise lose track of which id is arriving.
+	if( m_lBannerFetchState == 1 )
+		return false;
+
+	m_iBannerFetchId = iBannerId;
+	strncpy(m_szBannerFetchPath, szLocalPath, sizeof(m_szBannerFetchPath)-1);
+	m_szBannerFetchPath[sizeof(m_szBannerFetchPath)-1] = '\0';
+
+	if( !MU_MobileStartBannerDownload(pszUrl, szLocalPath) )
+		return false;
+
+	m_lBannerFetchState = 1;
+	return false;
+}
+
+bool CInGameShopSystem::PollCustomBannerDownload(char* szLocalPathOut, int iOutSize, int& iBannerIdOut)
+{
+	if( m_lBannerFetchState != 1 )
+		return false;
+
+	// 0 still running, 1 done, -1 failed. The Java side clears itself once it
+	// has reported, so this must only be asked while a fetch is outstanding.
+	const int iResult = MU_MobilePollBannerDownload();
+
+	if( iResult == 0 )
+		return false;
+
+	m_lBannerFetchState = 0;
+
+	if( iResult < 0 )
+		return false;
+
+	strncpy(szLocalPathOut, m_szBannerFetchPath, iOutSize-1);
+	szLocalPathOut[iOutSize-1] = '\0';
+	iBannerIdOut = m_iBannerFetchId;
+
+	return true;
+}
+
+#endif // __ANDROID__
+
+/*
+	Drop whatever half-arrived catalog was in flight.
+
+	Called when a stream is superseded or abandoned. The applied catalog and its
+	version are deliberately left alone: a failed push must leave the shop
+	exactly as it was, not empty.
+*/
+void CInGameShopSystem::ResetCatalogStream()
+{
+	m_strCatalogLine.clear();
+	m_vCatalogRows.clear();
+	m_iCatalogStreamVersion = 0;
+}
+
+/*
+	One fragment of one catalog row.
+
+	Fragments accumulate into a line; whole lines accumulate into a buffer; the
+	buffer is only committed when the end marker arrives. See the header for why
+	nothing is applied as it lands.
+
+	The replay order is categories, then products, then packages - packages last
+	because CShopList::AddServerCatalogLine attaches each one to its category as
+	it parses, and a package whose category does not exist yet is dropped without
+	a word.
+*/
+void CInGameShopSystem::OnCatalogFragment(int iRowKind, int iFlags, int iVersion, const char* pszFragment)
+{
+	if( iRowKind == IGS_CATALOG_ROW_UPTODATE )
+	{
+		// Either the version matched or the server has no catalog at all. Both
+		// mean "keep what you have", which for a client that has never received
+		// one is its own script files.
+		ResetCatalogStream();
+		return;
+	}
+
+	if( iRowKind == IGS_CATALOG_ROW_END )
+	{
+		if( m_vCatalogRows.empty() )
+		{
+			ResetCatalogStream();
+			return;
+		}
+
+		CShopList* pShopList = m_ShopManager.GetListPtr();
+
+		if( pShopList == NULL )
+		{
+			ResetCatalogStream();
+			return;
+		}
+
+		pShopList->BeginServerCatalog();
+
+		int iApplied = 0;
+
+		for( int iKind = 0 ; iKind < 3 ; iKind++ )
+		{
+			// 0 categories, 2 products, 1 packages - in that order, not numeric.
+			int iThisKind = (iKind == 1) ? IGS_CATALOG_ROW_PRODUCT : ((iKind == 2) ? IGS_CATALOG_ROW_PACKAGE : IGS_CATALOG_ROW_CATEGORY);
+
+			for( size_t i = 0 ; i < m_vCatalogRows.size() ; i++ )
+			{
+				if( m_vCatalogRows[i].first != iThisKind )
+					continue;
+
+				if( pShopList->AddServerCatalogLine(iThisKind, m_vCatalogRows[i].second) )
+					iApplied++;
+			}
+		}
+
+		pShopList->EndServerCatalog();
+
+		m_pCategoryList = pShopList->GetCategoryListPtr();
+		m_pPackageList = pShopList->GetPackageListPtr();
+		m_pProductList = pShopList->GetProductListPtr();
+
+		m_iCatalogVersion = m_iCatalogStreamVersion;
+		m_bServerCatalogApplied = (iApplied > 0);
+
+		ResetCatalogStream();
+
+		// The zone and category buttons were built from the old catalog, and the
+		// shelf is showing packages that may no longer exist.
+		if( m_bServerCatalogApplied && g_pInGameShop != NULL )
+		{
+			g_pInGameShop->InitZoneBtn();
+			g_pInGameShop->InitCategoryBtn();
+		}
+
+		return;
+	}
+
+	if( iRowKind != IGS_CATALOG_ROW_CATEGORY
+		&& iRowKind != IGS_CATALOG_ROW_PACKAGE
+		&& iRowKind != IGS_CATALOG_ROW_PRODUCT )
+	{
+		return;
+	}
+
+	m_iCatalogStreamVersion = iVersion;
+
+	if( pszFragment != NULL )
+	{
+		m_strCatalogLine.append(pszFragment);
+	}
+
+	if( (iFlags & IGS_CATALOG_FLAG_LINE_END) == 0 )
+	{
+		return;		// more of this row is still coming
+	}
+
+	if( m_strCatalogLine.empty() == false )
+	{
+		m_vCatalogRows.push_back(std::make_pair(iRowKind, m_strCatalogLine));
+	}
+
+	m_strCatalogLine.clear();
 }
 
 bool CInGameShopSystem::ScriptDownload()
@@ -244,6 +577,25 @@ bool CInGameShopSystem::BannerDownload()
 #ifdef KJH_MOD_SHOP_SCRIPT_DOWNLOAD
 bool CInGameShopSystem::IsScriptDownload()
 {
+	/*
+		A catalog from the database outranks the script files.
+
+		Without this, a server that announces a new script version - which the
+		0xD2:0x12 handler does - would send the client back to IBSPackage.txt and
+		silently overwrite the lists the database just filled. The script files
+		are the fallback now, for a client that has never been sent a catalog or
+		whose server has the catalog tables missing; they are no longer the
+		source of truth, and they must not be able to reclaim the job.
+
+		Not reachable today, because ScriptDownload runs once before any catalog
+		can have arrived - but it is one packet away from being reachable, and
+		the failure would look like the admin tool's edits randomly reverting.
+	*/
+	if( m_bServerCatalogApplied == true )
+	{
+		return false;
+	}
+
 	//g_ConsoleDebug->Write(MCD_NORMAL,"InGameShopStatue.Txt CallStack - CInGameShopSystem::IsScriptDownload()");
 	//g_ConsoleDebug->Write(MCD_NORMAL,"InGameShopStatue.Txt - Script Ver %d.%d.%d", m_ScriptVerInfo.Zone, m_ScriptVerInfo.year, m_ScriptVerInfo.yearId);
 	//g_ConsoleDebug->Write(MCD_NORMAL,"InGameShopStatue.Txt - Current Ver %d.%d.%d", m_CurrentScriptVerInfo.Zone, m_CurrentScriptVerInfo.year, m_CurrentScriptVerInfo.yearId);
@@ -556,7 +908,21 @@ bool CInGameShopSystem::GetPackageInfo(int iPackageSeq, int iPackageAttrType, OU
 		case IGS_PACKAGE_ATT_TYPE_PRICE:
 			{
 				unicode::t_char szText[MAX_TEXT_LENGTH] = {'\0', };
-				iValue = Package.Price;
+				// Server price where there is one, so the confirm box quotes the same
+				// number the purchase will actually take. IBSPackage.txt knows nothing
+				// about sales, so it can only ever offer the list price.
+				IGS_SERVER_PRICE ServerPrice;
+
+				if( gProtect.m_MainInfo.CustomCashShop != 0
+					&& GetServerPrice(IGS_PRICE_KIND_PACKAGE, iPackageSeq, ServerPrice) == true )
+				{
+					iValue = ServerPrice.iEffectivePrice;
+				}
+				else
+				{
+					iValue = Package.Price;
+				}
+
 				ConvertGold(iValue, szText);
 				sprintf(pszText, "%s %s", szText, Package.PricUnitName);
 				return true;
@@ -709,8 +1075,22 @@ bool CInGameShopSystem::GetProductInfo(CShopProduct* pProduct, int iAttrType, OU
 		}break;
 	case IGS_PRODUCT_ATT_TYPE_PRICE:
 		{
-			iValue = pProduct->Price;
-			ConvertGold(pProduct->Price, pszUnitName);
+			// Server price where there is one, so the item-select and confirm boxes
+			// quote the same number the purchase will actually take. IBSProduct.txt
+			// knows nothing about sales, so it can only ever offer the list price.
+			IGS_SERVER_PRICE ServerPrice;
+
+			if( gProtect.m_MainInfo.CustomCashShop != 0
+				&& GetServerPrice(IGS_PRICE_KIND_PRODUCT, pProduct->ProductSeq, ServerPrice) == true )
+			{
+				iValue = ServerPrice.iEffectivePrice;
+			}
+			else
+			{
+				iValue = pProduct->Price;
+			}
+
+			ConvertGold(iValue, pszUnitName);
 			return true;
 		}break;
 	case IGS_PRODUCT_ATT_TYPE_ITEMCODE:
@@ -836,6 +1216,30 @@ int CInGameShopSystem::GetZoneSeqIndexByIndex(int iIndex)
 	return (int)iterZoneSeqIndex->second;
 }
 
+int CInGameShopSystem::GetCategoryButtonIndexOfPackage(int iPackageSeq)
+{
+	if( m_pPackageList == NULL || iPackageSeq <= 0 )
+		return -1;
+
+	CShopPackage Package;
+
+	if( m_pPackageList->GetValueByKey(iPackageSeq, Package) == 0 )
+		return -1;
+
+	// Field 1 of the script row is the category the card is drawn on, but the
+	// buttons are addressed by position, so it has to be walked back.
+	int iCategorySeq = Package.ProductDisplaySeq;
+	int iSize = GetSizeCategoriesAsSelectedZone();
+
+	for(int i = 0 ; i < iSize ; i++)
+	{
+		if( GetCategorySeqIndexByIndex(i) == iCategorySeq )
+			return i;
+	}
+
+	return -1;
+}
+
 int CInGameShopSystem::GetCategorySeqIndexByIndex(int iIndex)
 {
 	int iCategorySeqIndex = 0;
@@ -902,4 +1306,93 @@ CListVersionInfo CInGameShopSystem::GetCurrentBannerVer()
 	return m_CurrentBannerVerInfo;
 }
 #endif // KJH_MOD_SHOP_SCRIPT_DOWNLOAD
+
+//////////////////////////////////////////////////////////////////////
+// Server-side shelf prices - see the comment on IGS_SERVER_PRICE.
+//////////////////////////////////////////////////////////////////////
+
+void CInGameShopSystem::ClearServerPrices()
+{
+	m_mapServerPackagePrice.clear();
+	m_mapServerProductPrice.clear();
+}
+
+void CInGameShopSystem::SetServerPrice(int iKind, int iSeq, int iListPrice, int iEffectivePrice, int iDiscountPercent)
+{
+	// A zero or negative effective price is not a free item, it is a row the
+	// server could not resolve. Dropping it leaves the script price showing.
+	if( iEffectivePrice <= 0 )
+	{
+		return;
+	}
+
+	IGS_SERVER_PRICE Price;
+
+	Price.iListPrice		= ((iListPrice > 0) ? iListPrice : iEffectivePrice);
+	Price.iEffectivePrice	= iEffectivePrice;
+	Price.iDiscountPercent	= iDiscountPercent;
+
+	// A percent with no actual saving is not a sale worth drawing a badge for.
+	if( Price.iEffectivePrice >= Price.iListPrice )
+	{
+		Price.iDiscountPercent = 0;
+	}
+
+	if( iKind == IGS_PRICE_KIND_PRODUCT )
+	{
+		m_mapServerProductPrice[iSeq] = Price;
+	}
+	else
+	{
+		m_mapServerPackagePrice[iSeq] = Price;
+	}
+}
+
+bool CInGameShopSystem::GetServerPrice(int iKind, int iSeq, OUT IGS_SERVER_PRICE& Price)
+{
+	std::map<int, IGS_SERVER_PRICE>& mapPrice =
+		((iKind == IGS_PRICE_KIND_PRODUCT) ? m_mapServerProductPrice : m_mapServerPackagePrice);
+
+	std::map<int, IGS_SERVER_PRICE>::iterator it = mapPrice.find(iSeq);
+
+	if( it == mapPrice.end() )
+	{
+		return false;
+	}
+
+	Price = it->second;
+
+	return true;
+}
+
+void CInGameShopSystem::ClearServerPackageNames()
+{
+	m_mapServerPackageName.clear();
+}
+
+void CInGameShopSystem::SetServerPackageName(int iSeq, const char* pszName)
+{
+	if( pszName == NULL || pszName[0] == '\0' )
+	{
+		return;
+	}
+
+	m_mapServerPackageName[iSeq] = pszName;
+}
+
+bool CInGameShopSystem::GetServerPackageName(int iSeq, OUT char* pszOutName, int cbOutName)
+{
+	std::map<int, std::string>::iterator it = m_mapServerPackageName.find(iSeq);
+
+	if( it == m_mapServerPackageName.end() )
+	{
+		return false;
+	}
+
+	strncpy(pszOutName, it->second.c_str(), cbOutName - 1);
+	pszOutName[cbOutName - 1] = '\0';
+
+	return true;
+}
+
 #endif // KJH_ADD_INGAMESHOP_UI_SYSTEM

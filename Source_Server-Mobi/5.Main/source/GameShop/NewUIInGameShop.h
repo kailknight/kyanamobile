@@ -50,6 +50,42 @@ namespace SEASON3B
 			IMAGE_IGS_STORAGE_PAGE,				// IGS_Storage_Page.tga (80, 30)
 			IMAGE_IGS_STORAGE_PAGE_LEFT,		// IGS_Storage_Page_Left.tga (20, 22) - 3BtState
 			IMAGE_IGS_STORAGE_PAGE_RIGHT,		// IGS_Storage_Page_Right.tga (20, 22) - 3BtState
+
+			// Modern flat-dark skin (CustomCashShop != 0 only - see LoadImages()).
+			// Only loaded in custom mode, so legacy-mode players pay zero extra
+			// load/VRAM cost. Full window backdrop is a plain RenderColor fill,
+			// not a texture - the mockup's background has no visual detail to
+			// justify one.
+			IMAGE_IGS_MODERN_CATEGORY_BTN,		// Modern_Sidebar.tga (73, 81) - 3BtState
+			IMAGE_IGS_MODERN_VIEWDETAIL_BTN,	// Modern_BuyBtn.tga (52, 78) - 3BtState
+			IMAGE_IGS_MODERN_CARD_PANEL,		// Modern_CardPanel.tga (116, 112)
+			IMAGE_IGS_MODERN_BANNER_BG,			// Modern_BannerBG.tga (159, 69)
+			IMAGE_IGS_MODERN_TAB_LEFT,			// Modern_TabLeft.tga (49, 21) - single frame
+			IMAGE_IGS_MODERN_TAB_RIGHT,			// Modern_TabRight.tga (49, 21) - single frame
+
+			/*
+				The flat replacements for the last of the ornate widget art.
+
+				Frame counts and per-frame sizes match the legacy art each one
+				stands in for, because the button widgets slice a texture by its
+				own height - a 3-state file where the original had 2 would show
+				the wrong third of the image.
+
+				These live in the shop's own list because the shop loads them
+				once at CNewUIInGameShop::Create and holds them until Release,
+				which is the whole session - so the confirm dialogs can draw with
+				them without owning any texture lifetime of their own.
+			*/
+			IMAGE_IGS_MODERN_BTN,				// Modern_Btn.tga (64, 72) - 3BtState
+			IMAGE_IGS_MODERN_BTN_RED,			// Modern_BtnRed.tga (64, 72) - 3BtState
+			IMAGE_IGS_MODERN_ZONE_BTN,			// Modern_ZoneBtn.tga (76, 46) - 2BtState
+			IMAGE_IGS_MODERN_CLOSE_BTN,			// Modern_Close.tga (36, 58) - 2BtState
+			IMAGE_IGS_MODERN_ARROW_LEFT,		// Modern_ArrowL.tga (20, 69) - 3BtState
+			IMAGE_IGS_MODERN_ARROW_RIGHT,		// Modern_ArrowR.tga (20, 69) - 3BtState
+			IMAGE_IGS_MODERN_ICON_GIFT,			// Modern_IconGift.tga (25, 75) - 3BtState
+			IMAGE_IGS_MODERN_ICON_CASH,			// Modern_IconCash.tga (25, 75) - 3BtState
+			IMAGE_IGS_MODERN_ICON_REFRESH,		// Modern_IconRefresh.tga (25, 75) - 3BtState
+
 			IMAGE_IGS_BANNER	= BITMAP_INGAMESHOP_BANNER
 		};
 		
@@ -163,6 +199,134 @@ namespace SEASON3B
 			IGS_STORAGE_TOTAL_ITEM_PER_PAGE	= 9,
 		};
 		
+		/*
+			Modern-skin layout - the mockup's proportions expressed in the shop's
+			own 640x429 virtual space.
+
+			The 3x3 grid is not negotiable. INGAMESHOP_DISPLAY_ITEMLIST_SIZE is the
+			wire length of PMSG_CASHSHOP_EVENTITEM_LIST (WSclient.h:3630), so a page
+			holds exactly 9 packages no matter what the skin does. The mockup's card
+			proportions assume a single visible row; three rows of those plus a
+			header, a heading and a full-width banner do not fit inside 429px, so
+			these cards keep the mockup's internal order and styling at a compressed
+			height rather than its exact pixel ratios.
+		*/
+		enum INGAMESHOP_MODERN_LAYOUT
+		{
+			MODERN_HEADER_HEIGHT	= 36,		// Top bar - shop title + currency strip
+			MODERN_CATEGORY_POS_Y	= 40,		// Sidebar starts below the header, not at the legacy 31
+			MODERN_SIDEBAR_WIDTH	= 90,
+			MODERN_TITLE_POS_X		= 14,
+			MODERN_TITLE_POS_Y		= 9,
+			MODERN_CUR_COL_WIDTH	= 108,		// Three currency columns, right aligned
+			MODERN_CUR_FIRST_POS_X	= 302,		// 640 - 14 - (3 * MODERN_CUR_COL_WIDTH)
+			/*
+				Label over value, 15px apart inside a 36px strip.
+
+				The first cut used a 30px strip with 3/15, and the label's descenders
+				ran into the value - the two rows need a full line box each, and the
+				in-game font is taller than the 12px the arithmetic assumed. Sizing
+				the strip to the content rather than shaving the gap is what fixed it.
+			*/
+			MODERN_CUR_LABEL_POS_Y	= 4,
+			MODERN_CUR_VALUE_POS_Y	= 19,
+
+			MODERN_CONTENT_POS_X	= 98,		// Flush with the first card column
+			MODERN_CONTENT_WIDTH	= 360,		// Exactly 3 cards at MODERN_CARD_DISTANCE_X
+			MODERN_HEADING_POS_Y	= 42,		// Category name, item count, paging
+			MODERN_DIVIDER_POS_Y	= 65,
+
+			/*
+				Paging moves up into the heading row in this skin. The legacy
+				buttons sit at y=397, which is exactly where the third row of
+				mockup-proportioned cards has to reach - and a shelf that ends
+				above its own pager is the reason the cards had no room. The
+				mockup shows no pager at all (three items, one page), so the
+				heading row is the closest honest home for it.
+			*/
+			MODERN_ITEMCOUNT_POS_X	= 260,		// Right aligned, ends at 378
+			MODERN_ITEMCOUNT_WIDTH	= 118,
+			MODERN_PAGE_BTN_POS_Y	= 42,
+			MODERN_PAGE_BTN_WIDTH	= 18,		// Modern_ArrowL/R frame size
+			MODERN_PAGE_BTN_HEIGHT	= 18,
+			MODERN_PAGE_PREV_POS_X	= 384,
+			MODERN_PAGE_NEXT_POS_X	= 432,
+			MODERN_PAGE_TEXT_POS_X	= 406,
+			MODERN_PAGE_TEXT_WIDTH	= 24,
+
+			MODERN_BANNER_POS_X		= 98,		// Full content width, above the shelf
+			MODERN_BANNER_POS_Y		= 70,
+			MODERN_BANNER_WIDTH		= 360,
+			MODERN_BANNER_HEIGHT	= 60,
+
+			MODERN_CARD_POS_X		= 98,
+			MODERN_CARD_POS_Y		= 136,
+			MODERN_CARD_WIDTH		= 116,
+			MODERN_CARD_HEIGHT		= 94,
+			MODERN_CARD_DISTANCE_X	= 122,
+			MODERN_CARD_DISTANCE_Y	= 97,		// Row 3 ends at 424, inside the 429 frame
+
+			MODERN_CARD_IMG_INSET	= 3,		// Icon well inside the card
+			MODERN_CARD_IMG_HEIGHT	= 40,
+			MODERN_CARD_NAME_POS_Y	= 46,		// Name under the icon, per the mockup
+
+			/*
+				One price row, discounted or not.
+
+				The taller banner left the card 10px shorter, and two stacked
+				price lines no longer fit above the Buy bar. A discount now reads
+				as the badge and the struck list price on the icon well, with the
+				charged price alone in the chip - which also means every card has
+				the same shape whether or not it is on sale.
+			*/
+			MODERN_CARD_PILL_POS_Y	= 60,
+			MODERN_CARD_PILL_HEIGHT	= 14,
+			MODERN_CARD_BUY_POS_Y	= 77,
+			MODERN_CARD_BUY_HEIGHT	= 14,
+
+			/*
+				The bottom-right cluster - storage pager, close and Use.
+
+				The legacy sizes were drawn for ornate art with its own carved
+				border; as flat plates at the same dimensions they read as far
+				too heavy against the rest of the skin.
+			*/
+			MODERN_STORAGE_PAGE_POS_X	= 524,
+			MODERN_STORAGE_PAGE_POS_Y	= 372,
+			MODERN_STORAGE_PAGE_WIDTH	= 58,
+			MODERN_STORAGE_PAGE_HEIGHT	= 18,
+			/*
+				Arrows and the close button are drawn at exactly their texture's
+				own frame size.
+
+				Everything else in this skin is a flat plate, and scaling a plate
+				is invisible. These two carry a glyph: drawn smaller than the
+				cell it was painted into, the chevron ends up small and off
+				centre inside its own plate. Modern_ArrowL/R are 18x18 per frame
+				and Modern_Close is 24x20, so these constants must match.
+			*/
+			MODERN_STORAGE_ARROW_WIDTH	= 18,
+			MODERN_STORAGE_ARROW_HEIGHT	= 18,
+			MODERN_STORAGE_PREV_POS_X	= 502,
+			MODERN_STORAGE_NEXT_POS_X	= 586,
+			MODERN_STORAGE_ARROW_POS_Y	= 372,
+			MODERN_CLOSE_POS_X			= 506,
+			MODERN_CLOSE_POS_Y			= 400,
+			MODERN_CLOSE_WIDTH			= 24,		// Modern_Close frame size
+			MODERN_CLOSE_HEIGHT			= 20,
+			MODERN_USE_POS_X			= 578,
+			MODERN_USE_POS_Y			= 401,
+			MODERN_USE_WIDTH			= 44,
+			MODERN_USE_HEIGHT			= 18,
+
+			// Right panel - pushed down clear of the header strip.
+			MODERN_CHAR_LABEL_POS_Y	= 44,
+			MODERN_CHAR_NAME_POS_Y	= 57,
+			MODERN_PANEL_CASH_POS_Y	= 86,
+			MODERN_PANEL_ROW_HEIGHT	= 18,
+			MODERN_ICON_BTN_POS_Y	= 146,
+		};
+		
 	public:
 		CNewUIInGameShop();
 		virtual ~CNewUIInGameShop();
@@ -230,7 +394,37 @@ namespace SEASON3B
 		void RenderListBox();
 		void RenderDisplayItems();
 
+		// One package cell drawn the custom way: the list price struck through, the
+		// price actually charged under it, and a percent badge on the item box.
+		// Only reached when MainInfo CustomCashShop is on AND the server sent a
+		// discount for this package - everything else keeps the original line.
+		void RenderPackageSalePrice(int iCellX, int iNameY, int iPriceY,
+			int iListPrice, int iEffectivePrice, int iDiscountPercent, const char* pszUnitName);
+
 		void RenderBanner();
+		
+		// Modern skin only. Kept apart from RenderFrame/RenderTexts so the legacy
+		// path stays byte-for-byte the code it always was.
+		void RenderModernFrame();
+		void RenderModernTexts();
+		void RenderModernCardText(int iIndex, int iCardX, int iCardY);
+		void RenderModernSaleMarks(int iCardX, int iCardY, int iListPrice, int iDiscountPercent, const char* pszUnitName);
+		void RenderFillRect(int x, int y, int w, int h, float r, float g, float b, float a);
+		bool IsModernSkin();
+
+		// Window dragging. Only the header strip is a grab handle, and only in
+		// the modern skin - the legacy frame has no bar that reads as one.
+		bool UpdateWindowDrag();
+		void ApplyWindowPos();
+		void GetModernBannerRect(int& x, int& y, int& w, int& h);
+
+		// Jump the shelf to whatever the banner advertises.
+		bool JumpToPackage(int iPackageSeq);
+
+	public:
+		void SetBannerTargetPackage(int iPackageSeq) { m_iBannerTargetPackage = iPackageSeq; }
+
+	private:
 		bool UpdateBanner();
 		
 	private:
@@ -252,8 +446,16 @@ namespace SEASON3B
 		CNewUIButton	m_StoragePrevButton;
 		CNewUIButton	m_StorageNextButton;
 		
+		bool m_bDraggingWindow;
+		POINT m_ptDragGrab;		// Cursor offset inside the window when the drag started
+
 		bool m_bLoadBanner;
 		bool m_bBannerLink;
+
+		// The package a banner click jumps to, as a PackageProductSeq. 0 = the
+		// banner is decoration. Translated from PackageId by the DataServer,
+		// which is the only side that can do that lookup.
+		int m_iBannerTargetPackage;
 		unicode::t_char m_szBannerURL[INTERNET_MAX_URL_LENGTH];
 
 		int		m_iStorageTotalItemCnt;

@@ -5,8 +5,46 @@
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 
 #include "MsgBoxIGSCommon.h"
+#include "NewUIInGameShop.h"	// IMAGE_IGS_MODERN_BTN / _BTN_RED
 
 #include "DSPlaySound.h"
+
+void IGSFillRect(int x, int y, int w, int h, float r, float g, float b, float a)
+{
+	EnableAlphaTest(true);
+	glColor4f(r, g, b, a);
+	RenderColor((float)x, (float)y, (float)w, (float)h, 0.0f, 0);
+	EndRenderColor();
+	glColor3f(1.0f, 1.0f, 1.0f);
+	EnableAlphaTest(false);
+}
+
+bool IGSIsModernSkin()
+{
+	return (gProtect.m_MainInfo.CustomCashShop != 0);
+}
+
+int IGSDialogButtonImage(bool bPrimary, int iLegacyImage)
+{
+	if( IGSIsModernSkin() == false )
+		return iLegacyImage;
+
+	return bPrimary
+		? SEASON3B::CNewUIInGameShop::IMAGE_IGS_MODERN_BTN_RED
+		: SEASON3B::CNewUIInGameShop::IMAGE_IGS_MODERN_BTN;
+}
+
+void IGSRenderModernPanel(int x, int y, int w, int h)
+{
+	IGSFillRect(x, y, w, h, 0.10f, 0.10f, 0.11f, 1.0f);
+
+	IGSFillRect(x, y, w, 1, 0.24f, 0.24f, 0.27f, 1.0f);
+	IGSFillRect(x, y+h-1, w, 1, 0.24f, 0.24f, 0.27f, 1.0f);
+	IGSFillRect(x, y, 1, h, 0.24f, 0.24f, 0.27f, 1.0f);
+	IGSFillRect(x+w-1, y, 1, h, 0.24f, 0.24f, 0.27f, 1.0f);
+
+	IGSFillRect(x+1, y+1, w-2, 22, 0.80f, 0.15f, 0.12f, 1.0f);
+}
 
 CMsgBoxIGSCommon::CMsgBoxIGSCommon()
 {
@@ -118,7 +156,7 @@ void CMsgBoxIGSCommon::SetAddCallbackFunc()
 
 void CMsgBoxIGSCommon::SetButtonInfo()
 {
-	m_BtnOk.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+(IMAGE_IGS_FRAME_WIDTH/2)-(IMAGE_IGS_BTN_WIDTH/2), (GetPos().y+m_iMsgBoxHeight)-(IMAGE_IGS_BTN_HEIGHT+IGS_BTN_POS_Y),IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnOk.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+(IMAGE_IGS_FRAME_WIDTH/2)-(IMAGE_IGS_BTN_WIDTH/2), (GetPos().y+m_iMsgBoxHeight)-(IMAGE_IGS_BTN_HEIGHT+IGS_BTN_POS_Y),IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnOk.MoveTextPos(0, -1);
 	m_BtnOk.SetText(GlobalText[228]);	
 	
@@ -126,6 +164,17 @@ void CMsgBoxIGSCommon::SetButtonInfo()
 
 void CMsgBoxIGSCommon::RenderFrame()
 {
+	if( IGSIsModernSkin() )
+	{
+		// The three-slice frame's real height is however many middle rows the
+		// text needed, not the enum's nominal FRAME_HEIGHT - the flat panel has
+		// to match what the slices would have covered or it clips the buttons.
+		int iPanelH = IMAGE_IGS_UP_HEIGHT + (m_iMiddleCount*IMAGE_IGS_LINE_HEIGHT) + IMAGE_IGS_DOWN_HEIGHT;
+
+		IGSRenderModernPanel(GetPos().x, GetPos().y, m_iMsgBoxWidth, iPanelH);
+		return;
+	}
+
 	int iY = GetPos().y;
 
 	RenderImage(IMAGE_IGS_BACK, GetPos().x, GetPos().y, m_iMsgBoxWidth, m_iMsgBoxHeight);

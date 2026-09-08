@@ -5,6 +5,7 @@
 
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "MsgBoxIGSBuySelectItem.h"
+#include "MsgBoxIGSCommon.h"	// IGSIsModernSkin, IGSFillRect, IGSRenderModernPanel
 #include "DSPlaySound.h"
 #include "NewUISystem.h"
 #include "MsgBoxIGSBuyConfirm.h"
@@ -63,7 +64,23 @@ void CMsgBoxIGSBuySelectItem::Initialize(CShopPackage* pPackage)
 	m_iPackageSeq = pPackage->PackageProductSeq;
 	m_iDisplaySeq = pPackage->ProductDisplaySeq;
 	
-	if( pPackage->GiftFlag == 184)
+	/*
+		Gifting.
+
+		IBSPackage.txt field 10 is the gift flag (184 allowed / 185 not), and
+		every row in the shipped script says 185 - which is why the Gift button
+		has always been dead. In custom mode the database is the authority for
+		what the shop sells and the script is only a fallback, and the whole
+		server-side gift path already exists and works
+		(CGCashShopItemGifRecv -> item insert -> in-game mail), so the script's
+		blanket "no" is not a decision anyone made about these packages.
+
+		Enabled for everything in custom mode. There is no per-package control
+		yet: that needs a GiftEnabled column on CustomCashShopPackages and a
+		field on the name/price round trip to carry it, the same shape as the
+		DisplayName override.
+	*/
+	if( pPackage->GiftFlag == 184 || gProtect.m_MainInfo.CustomCashShop != 0 )
 	{
 		m_BtnPresent.SetEnable(true);
 	}
@@ -72,7 +89,19 @@ void CMsgBoxIGSBuySelectItem::Initialize(CShopPackage* pPackage)
 		m_BtnPresent.SetEnable(false);
 	}
 	
-	strncpy(m_szPackageName, pPackage->PackageProductName, MAX_TEXT_LENGTH);
+	// Same admin-edited DisplayName override as the shelf card, so the confirm
+	// dialog agrees with what the player just clicked on.
+	char szOverrideName[32] = {0};
+
+	if( gProtect.m_MainInfo.CustomCashShop != 0
+		&& g_InGameShopSystem->GetServerPackageName(pPackage->PackageProductSeq, szOverrideName, sizeof(szOverrideName)) )
+	{
+		strncpy(m_szPackageName, szOverrideName, MAX_TEXT_LENGTH);
+	}
+	else
+	{
+		strncpy(m_szPackageName, pPackage->PackageProductName, MAX_TEXT_LENGTH);
+	}
 
 	ZeroMemory(m_szDescription, sizeof(unicode::t_char)*UIMAX_TEXT_LINE*MAX_TEXT_LENGTH);
 	
@@ -127,7 +156,38 @@ bool CMsgBoxIGSBuySelectItem::Render()
 
 void CMsgBoxIGSBuySelectItem::RenderFrame()
 {
-	RenderImage(IMAGE_IGS_MGSBOX_BACK, GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
+	if( IGSIsModernSkin() )
+	{
+		/*
+			Same flat treatment as the single-price confirm box, at this
+			dialog's own 215x346: panel, 1px border, red title bar, and wells
+			under the item, the description, the duration list and the price.
+			The duration list keeps its own rows - only the plate behind it
+			changes.
+		*/
+		const int X = GetPos().x;
+		const int Y = GetPos().y;
+		const int W = IMAGE_IGS_FRAME_WIDTH;
+		const int H = IMAGE_IGS_FRAME_HEIGHT;
+
+		IGSFillRect(X, Y, W, H, 0.10f, 0.10f, 0.11f, 1.0f);
+
+		IGSFillRect(X, Y, W, 1, 0.24f, 0.24f, 0.27f, 1.0f);
+		IGSFillRect(X, Y+H-1, W, 1, 0.24f, 0.24f, 0.27f, 1.0f);
+		IGSFillRect(X, Y, 1, H, 0.24f, 0.24f, 0.27f, 1.0f);
+		IGSFillRect(X+W-1, Y, 1, H, 0.24f, 0.24f, 0.27f, 1.0f);
+
+		IGSFillRect(X+1, Y+1, W-2, 22, 0.80f, 0.15f, 0.12f, 1.0f);
+
+		IGSFillRect(X+8, Y+28, W-16, 68, 0.15f, 0.15f, 0.16f, 1.0f);	// item
+		IGSFillRect(X+8, Y+114, W-16, 34, 0.13f, 0.13f, 0.14f, 1.0f);	// attributes
+		IGSFillRect(X+8, Y+154, W-16, 126, 0.13f, 0.13f, 0.14f, 1.0f);	// duration list
+		IGSFillRect(X+8, Y+283, W-16, 22, 0.28f, 0.10f, 0.09f, 1.0f);	// price chip
+	}
+	else
+	{
+		RenderImage(IMAGE_IGS_MGSBOX_BACK, GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
+	}
 }
 
 void CMsgBoxIGSBuySelectItem::RenderTexts()
@@ -149,6 +209,8 @@ void CMsgBoxIGSBuySelectItem::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IGS_TEXT_PRICE_POS_X, GetPos().y+IGS_TEXT_PRICE_POX_Y, m_szPrice, IGS_TEXT_PRICE_WIDTH, 0, RT3_SORT_RIGHT);
 
 #ifdef FOR_WORK
+	if( IGSIsModernSkin() == false )
+	{
 	// debug
 	unicode::t_char szText[256] = {0,};
 	g_pRenderText->SetTextColor(255, 0, 0, 255);
@@ -169,6 +231,7 @@ void CMsgBoxIGSBuySelectItem::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+40, szText, 200, 0, RT3_SORT_LEFT);
 	sprintf(szText, "Cash Type : %d", m_SelectBuyListBox.GetSelectedText()->m_iCashType);
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+50, szText, 200, 0, RT3_SORT_LEFT);
+	}
 #endif // FOR_WORK
 
 }
@@ -267,15 +330,15 @@ CALLBACK_RESULT CMsgBoxIGSBuySelectItem::CancelBtnDown(class CNewUIMessageBoxBas
 
 void CMsgBoxIGSBuySelectItem::SetButtonInfo()
 {
-	m_BtnBuy.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_BUY_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnBuy.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_BUY_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnBuy.MoveTextPos(-1, -1);
 	m_BtnBuy.SetText(GlobalText[2891]);	
 	
-	m_BtnPresent.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_PRESENT_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnPresent.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_PRESENT_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnPresent.MoveTextPos(-1, -1);
 	m_BtnPresent.SetText(GlobalText[2892]);	
 	
-	m_BtnCancel.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnCancel.MoveTextPos(-1, -1);
 	m_BtnCancel.SetText(GlobalText[229]);	
 }

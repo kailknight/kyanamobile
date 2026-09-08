@@ -551,7 +551,11 @@ enum
 	BITMAP_CHARACTERCARD_R_RA,
 #ifdef PBG_ADD_INGAMESHOP_UI_ITEMSHOP
 	BITMAP_INGAMESHOP_FRAME,
-	BITMAP_INGAMESHOP_FRAME_END = BITMAP_INGAMESHOP_FRAME + 20,
+	// Bumped +20 -> +24 for the first 4 modern-skin textures (Modern_Sidebar/
+	// BuyBtn/CardPanel/BannerBG), then +24 -> +40 for the 9 that replace the
+	// last of the ornate widget art (zone tab, close, page arrows, the three
+	// icon buttons and the two generic dialog buttons). 32 of 40 used.
+	BITMAP_INGAMESHOP_FRAME_END = BITMAP_INGAMESHOP_FRAME + 40,
 	BITMAP_INGAMESHOP_BANNER,
 #endif //PBG_ADD_INGAMESHOP_UI_ITEMSHOP
 	BITMAP_NEWCHAOSCARD_GOLD_R,

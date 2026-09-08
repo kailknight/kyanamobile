@@ -54,9 +54,14 @@
 #include "CharacterManager.h"
 #include "SkillManager.h"
 
-#ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM	
+#ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "GameShop\InGameShopSystem.h"
 #include "GameShop\MsgBoxIGSCommon.h"
+#include "GameShop\ShopListManager\interface\PathMethod\Path.h"
+#ifndef __ANDROID__
+#include <UrlMon.h>
+#pragma comment(lib,"Urlmon.lib")
+#endif // __ANDROID__
 #endif // KJH_ADD_INGAMESHOP_UI_SYSTEM
 
 #include "w_MapHeaders.h"
@@ -12777,11 +12782,45 @@ bool ReceiveIGS_CashPoint(BYTE* pReceiveBuffer)
 }
 
 // (0xD2)(0x02)
+/*
+	Ask for the database catalog - but only when this client is set to use one.
+
+	CustomCashShop in MainInfo.ini is the client's own switch between the legacy
+	cash shop and the custom one. It already chose the skin and whether the
+	server's prices and names override the script's; the catalog was the one
+	piece that ignored it, so a client set to 0 still had its shelf replaced from
+	the database while drawing the old ornate frame around it.
+
+	At 0 the client asks for nothing, keeps its IBSPackage.txt catalog, and is
+	the shop it was before any of this work - which is the whole point of having
+	the switch.
+
+	The version rides along, so an unchanged catalog costs one packet. Called
+	both at login and on every shop open: the first so the shelf is already right
+	the first time it is drawn, the second so a change made by the admin tool
+	while someone is playing reaches them without a relog.
+*/
+static void RequestCustomCatalogIfEnabled()
+{
+	if( gProtect.m_MainInfo.CustomCashShop == 0 )
+		return;
+
+	g_InGameShopSystem->ResetCatalogStream();
+
+	SendRequestIGS_CatalogList(g_InGameShopSystem->GetCatalogVersion());
+}
+
 bool ReceiveIGS_ShopOpenResult(BYTE* pReceiveBuffer)
 {
 	LPPMSG_CASHSHOP_SHOPOPEN_ANS Data = (LPPMSG_CASHSHOP_SHOPOPEN_ANS)pReceiveBuffer;
 
 	g_InGameShopSystem->SetIsRequestShopOpenning(false);	
+
+	// Prices arrive in their own batches right behind this ack. Dropping the old
+	// set here means a shop opened while the DataServer is down falls back to the
+	// IBSPackage.txt prices rather than showing yesterday-s sale.
+	g_InGameShopSystem->ClearServerPrices();
+	g_InGameShopSystem->ClearServerPackageNames();
 
 	if( (BYTE)Data->byShopOpenResult == 0 )
 	{
@@ -12792,8 +12831,136 @@ bool ReceiveIGS_ShopOpenResult(BYTE* pReceiveBuffer)
 	char szCode = g_pInGameShop->GetCurrentStorageCode();
 	SendRequestIGS_ItemStorageList(1, &szCode);	
 
+	// Catches a catalog edited while this player was already logged in. The
+	// first fetch happened at login - see RequestCustomCatalogIfEnabled.
+	RequestCustomCatalogIfEnabled();
+
 	g_pNewUISystem->Show(SEASON3B::INTERFACE_INGAMESHOP);			
 	
+	return true;
+}
+
+
+/*
+	(0xD2)(0x24) - one fragment of one display-catalog row.
+
+	Everything interesting happens in CInGameShopSystem::OnCatalogFragment: this
+	only unpacks the packet and makes sure the fragment is terminated before it
+	is treated as a string. szFragment is a fixed 200 bytes and the server pads
+	with zeros, but a full-width fragment leaves no terminator inside the array,
+	so it is copied into a buffer one byte longer rather than read in place.
+*/
+bool ReceiveIGS_CatalogLine(BYTE* pReceiveBuffer)
+{
+	LPPMSG_CASHSHOP_CATALOG_ANS Data = (LPPMSG_CASHSHOP_CATALOG_ANS)pReceiveBuffer;
+
+	char szFragment[sizeof(Data->szFragment)+1] = {0,};
+
+	memcpy(szFragment, Data->szFragment, sizeof(Data->szFragment));
+	szFragment[sizeof(Data->szFragment)] = '\0';
+
+	g_InGameShopSystem->OnCatalogFragment(Data->byRowKind, Data->byFlags, Data->lVersion, szFragment);
+
+	return true;
+}
+
+// (0xD2)(0x20)
+bool ReceiveIGS_PriceList(BYTE* pReceiveBuffer)
+{
+	LPPMSG_CASHSHOP_PRICELIST_ANS Data = (LPPMSG_CASHSHOP_PRICELIST_ANS)pReceiveBuffer;
+
+	int iCount = (int)Data->byCount;
+
+	// The packet is trimmed to byCount rows, so anything past it is somebody
+	// else's memory. A malformed count is dropped rather than clamped: a wrong
+	// count means the rest of the packet cannot be trusted either.
+	if( iCount < 0 || iCount > 12 )
+	{
+		return false;
+	}
+
+	for( int i = 0 ; i < iCount ; ++i )
+	{
+		g_InGameShopSystem->SetServerPrice(
+			(int)Data->Row[i].shRowKind,
+			Data->Row[i].lPackageSeq,
+			Data->Row[i].lListPrice,
+			Data->Row[i].lEffectivePrice,
+			(int)Data->Row[i].shDiscountPercent);
+	}
+
+	return true;
+}
+
+// (0xD2)(0x21)
+//
+// Admin-edited package display-name overrides, same batching contract as the
+// price list above.
+bool ReceiveIGS_NameList(BYTE* pReceiveBuffer)
+{
+	LPPMSG_CASHSHOP_NAMELIST_ANS Data = (LPPMSG_CASHSHOP_NAMELIST_ANS)pReceiveBuffer;
+
+	int iCount = (int)Data->byCount;
+
+	if( iCount < 0 || iCount > 6 )
+	{
+		return false;
+	}
+
+	for( int i = 0 ; i < iCount ; ++i )
+	{
+		g_InGameShopSystem->SetServerPackageName(Data->Row[i].lPackageSeq, Data->Row[i].szDisplayName);
+	}
+
+	return true;
+}
+
+// (0xD2)(0x22)
+//
+// The currently active admin-uploaded banner (CustomCashShopBanners). Bypasses
+// the legacy IBSBanner.txt/FTP manifest system entirely - the server pushes the
+// image URL directly. The download itself is per-platform (urlmon on PC, Java
+// HttpsURLConnection on Android), but both land the jpg on disk and hand it to
+// the existing, already-proven InitBanner() - rendering, the hover frame and
+// click-through need no changes.
+bool ReceiveIGS_CustomBanner(BYTE* pReceiveBuffer)
+{
+	LPPMSG_CASHSHOP_BANNER_ANS Data = (LPPMSG_CASHSHOP_BANNER_ANS)pReceiveBuffer;
+
+	if( Data->lBannerId < 0 )
+	{
+		g_pInGameShop->ReleaseBanner();
+		return true;
+	}
+
+	if( Data->lBannerId == g_InGameShopSystem->GetLastAppliedBannerId() )
+	{
+		return true;
+	}
+
+	unicode::t_char szLocalPath[MAX_PATH] = {0};
+
+	/*
+		Applied here only when the jpg is already cached on disk.
+
+		Otherwise the fetch runs in the background - a worker thread on PC, Java's
+		executor on Android - and CNewUIInGameShop::Update picks it up. This handler
+		is on the packet-processing path, and a synchronous download blocking here is
+		what froze the client on the first shop open of a session.
+
+		The cache lives at Data\InGameShopBanner\Custom\<BannerId>.jpg, a
+		separate subfolder from the legacy Zone.Year.YearId one so the two
+		systems never collide on disk.
+	*/
+	// Set before InitBanner, which is what makes the banner clickable.
+	g_pInGameShop->SetBannerTargetPackage(Data->lTargetPackageId);
+
+	if( g_InGameShopSystem->StartCustomBannerDownload(Data->lBannerId, Data->szImagePath, szLocalPath, sizeof(szLocalPath)) )
+	{
+		g_InGameShopSystem->SetLastAppliedBannerId(Data->lBannerId);
+		g_pInGameShop->InitBanner(szLocalPath, "#");
+	}
+
 	return true;
 }
 
@@ -13187,6 +13354,17 @@ bool ReceiveIGS_UpdateScript(BYTE* pReceiveBuffer)
 #ifdef KJH_MOD_SHOP_SCRIPT_DOWNLOAD
 	g_InGameShopSystem->SetScriptVersion(Data->wSaleZone, Data->wYear, Data->wYearIdentify);
 	g_InGameShopSystem->ShopOpenUnLock();
+
+	/*
+		Pull the catalog now rather than when the shop first opens.
+
+		The shop window is shown in the same breath as the open ack, so a catalog
+		requested there cannot possibly have arrived - the first open drew the
+		script catalog and then swapped to the database one a moment later, which
+		is what "the first time captures the legacy" looked like. This message
+		arrives at login, long before anyone opens the shop.
+	*/
+	RequestCustomCatalogIfEnabled();
 #else // KJH_MOD_SHOP_SCRIPT_DOWNLOAD
 	if( g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == true )
 	{
@@ -14924,6 +15102,18 @@ BOOL TranslateProtocol( int HeadCode, BYTE *ReceiveBuffer, int Size, BOOL bEncry
 					break;
 				case 0x15:
 					ReceiveIGS_UpdateBanner(ReceiveBuffer);
+					break;
+				case 0x20:
+					ReceiveIGS_PriceList(ReceiveBuffer);
+					break;
+				case 0x21:
+					ReceiveIGS_NameList(ReceiveBuffer);
+					break;
+				case 0x22:
+					ReceiveIGS_CustomBanner(ReceiveBuffer);
+					break;
+				case 0x24:
+					ReceiveIGS_CatalogLine(ReceiveBuffer);
 					break;
 #ifdef KJH_ADD_PERIOD_ITEM_SYSTEM
 				case 0x11:

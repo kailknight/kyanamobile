@@ -2486,6 +2486,26 @@ __forceinline bool SendRequestMixExit()
     spe.Send(); \
 }
 
+/*
+	Ask the server for the display catalog, unless it is still version N.
+
+	Sent once per session and again only if the version moved, not on every shop
+	open - price still goes every open because discounts are time-bounded, but a
+	hundred catalog rows on every keypress would be waste. A client that has
+	never asked sends 0, which no real version can be.
+
+	Written tight after the 4-byte header, which is why the GameServer's
+	PMSG_CASH_SHOP_CATALOG_REQ_RECV has no padding before its int.
+*/
+#define SendRequestIGS_CatalogList(iCachedVersion) \
+{ \
+    CStreamPacketEngine spe; \
+    spe.Init( 0xC1, 0xD2); \
+	spe << (BYTE)0x23; \
+	spe << (int)iCachedVersion; \
+    spe.Send(); \
+}
+
 #define SendRequestIGS_ItemStorageList(iPageIndex, szStorageType) \
 { \
     CStreamPacketEngine spe; \

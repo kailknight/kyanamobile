@@ -299,6 +299,12 @@ static void InitializeTakumiProtectState()
         gProtect.m_MainInfo.IpAddressPort = 63000;
         std::strcpy(gProtect.m_MainInfo.ClientVersion, "1.04.05");
         std::strcpy(gProtect.m_MainInfo.ClientSerial, "TbYehR2hFUPBKgZj");
+        // Old shop on the fallback path, explicitly. Reaching here means
+        // CBGetMain.bin could not be read, so nothing is known about what this
+        // server supports - the custom shelf needs a GameServer that answers the
+        // price request, and drawing it against one that does not just shows
+        // script prices in a rearranged layout.
+        gProtect.m_MainInfo.CustomCashShop = 0;
         gProtect.LoadEncDec();
         LOGW(
             "Protect fallback active: gsPorts=%u-%u server=%s:%u serial=%s",
@@ -373,6 +379,68 @@ static void InitializeTakumiProtectState()
         }
 
         return got;
+    };
+
+    /*
+        CustomCashShop is the one setting this build cannot read out of the
+        struct, and it is the one that decides which cash shop gets drawn.
+
+        It is the LAST member of MAIN_FILE_INFO, and MAIN_FILE_INFO is written
+        by a 32-bit tool and read here by a 64-bit build - so the prefix logic
+        above exists precisely because offsets drift once any member's size
+        differs between the two ABIs, and the tail is the worst case of that.
+        Read through the struct it comes back as 0 (short file) or garbage from
+        the middle (long file), which silently pins mobile to the legacy shop no
+        matter what MainInfo.ini says.
+
+        What IS reliable is the file. GetMainInfo writes this DWORD last and
+        adds no trailing padding - the generated CBGetMain.bin decodes to
+        01 00 00 00 in its final four bytes for CustomCashShop = 1 - so the last
+        four bytes are this setting whatever the layout does in between. Decode
+        them at their real file offsets with the same position-based
+        obfuscation, and accept only 0 or 1: any other value means the
+        assumption broke, and legacy is the safe answer.
+    */
+    auto readCustomCashShopFromTail = [](const char* path) -> DWORD
+    {
+        FILE* fp = fopen(path, "rb");
+
+        if (fp == nullptr)
+        {
+            return 0;
+        }
+
+        std::fseek(fp, 0, SEEK_END);
+        const long fileSize = std::ftell(fp);
+
+        if (fileSize < 4)
+        {
+            std::fclose(fp);
+            return 0;
+        }
+
+        std::fseek(fp, fileSize - 4, SEEK_SET);
+        BYTE raw[4] = {0};
+        const size_t got = std::fread(raw, 1, sizeof(raw), fp);
+        std::fclose(fp);
+
+        if (got != sizeof(raw))
+        {
+            return 0;
+        }
+
+        DWORD value = 0;
+
+        for (size_t i = 0; i < sizeof(raw); ++i)
+        {
+            const size_t n = static_cast<size_t>(fileSize - 4) + i;
+            BYTE b = raw[i];
+            b -= static_cast<BYTE>(0x95 ^ HIBYTE(n));
+            b ^= static_cast<BYTE>(0xCA ^ LOBYTE(n));
+            value |= static_cast<DWORD>(b) << (i * 8);
+        }
+
+        return (value <= 1) ? value : 0;
     };
 
     static MAIN_FILE_INFO mainInfo {};   // ~1MB; far too big for the stack
@@ -456,6 +524,12 @@ static void InitializeTakumiProtectState()
     std::memcpy(&gProtect.m_MainInfo, &mainInfo, sizeof(MAIN_FILE_INFO));
     gProtect.LoadEncDec();
 
+    // Overwrite what the struct read produced for this one field: see the
+    // lambda above for why the struct cannot be trusted this far in. Doing it
+    // here rather than inside readProtectBlob keeps the blob reader honest -
+    // it returns the file, this decides what to believe about it.
+    gProtect.m_MainInfo.CustomCashShop = readCustomCashShopFromTail("Data/Local/CBGetMain.bin");
+
     // Reading the file only fills gProtect. On PC, MainLoad::Load then hands
     // that data to the managers that actually read it - custom messages, jewels,
     // wings, pets, monsters, NPC names, VIP packages and so on. Winmain.cpp is
@@ -482,11 +556,12 @@ static void InitializeTakumiProtectState()
     }
 
     snprintf(g_protectLoadStatus, sizeof(g_protectLoadStatus) - 1,
-             "GETMAIN %s %s:%u rc=%u",
+             "GETMAIN %s %s:%u rc=%u shop=%u",
              fullyTrusted ? "ok" : "partial",
              gProtect.m_MainInfo.IpAddress,
              static_cast<unsigned int>(gProtect.m_MainInfo.IpAddressPort),
-             static_cast<unsigned int>(gProtect.m_MainInfo.ReconnectTime));
+             static_cast<unsigned int>(gProtect.m_MainInfo.ReconnectTime),
+             static_cast<unsigned int>(gProtect.m_MainInfo.CustomCashShop));
 
     // Not fatal: the client still runs without it, only the custom text blocks
     // are empty, so a missing file should not knock out the server address too.

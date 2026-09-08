@@ -97,6 +97,48 @@ private:
 public:
 };
 
+/*
+	One flat filled rectangle, shared by every cash shop dialog.
+
+	The modern skin builds its dialog frames out of these instead of the ornate
+	plates, and four separate message boxes needed the same six lines of GL state
+	around a RenderColor call.
+*/
+void IGSFillRect(int x, int y, int w, int h, float r, float g, float b, float a);
+
+/*
+	True when the shop is drawing its modern skin.
+
+	Reads the same client-side CustomCashShop flag the shop itself does, so a
+	dialog never disagrees with the window that opened it.
+*/
+bool IGSIsModernSkin();
+
+/*
+	A whole dialog panel in the modern skin: flat ground, 1px border, red title
+	bar.
+
+	Six message boxes draw the same thing at different sizes, four of them out of
+	a three-slice top/middle/bottom frame whose real height depends on how many
+	middle rows the text needed - so callers pass the height they actually drew
+	rather than the enum's nominal one.
+*/
+void IGSRenderModernPanel(int x, int y, int w, int h);
+
+/*
+	Which texture a dialog button should draw with.
+
+	Returns one of the shop's own modern button textures in the modern skin, and
+	iLegacyImage otherwise. Deliberately NOT a swap of what gets loaded into
+	BITMAP_IGS_MSGBOX_BUTTON: the MU Helper window shares that exact slot
+	(NewUIMuHelper.h:38), loads its own art into it and deletes it on close, so
+	whatever the shop puts there the helper draws too.
+
+	Safe to call any time - CNewUIInGameShop loads these at Create and holds them
+	until Release, which is the whole session.
+*/
+int IGSDialogButtonImage(bool bPrimary, int iLegacyImage);
+
 class CMsgBoxIGSCommonLayout : public TMsgBoxLayout<CMsgBoxIGSCommon>
 {
 public:

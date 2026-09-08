@@ -1097,7 +1097,7 @@ typedef struct {
 	BYTE         GuildKeyL;
 } PRECEIVE_GUILD_PLAYER, * LPPRECEIVE_GUILD_PLAYER;
 
-// ±æµå¿ø ¸ñ·Ï
+// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½
 typedef struct {
 	BYTE         ID[MAX_ID_SIZE];
 	BYTE         Number;
@@ -1105,7 +1105,7 @@ typedef struct {
 	BYTE		 GuildStatus;
 } PRECEIVE_GUILD_LIST, * LPPRECEIVE_GUILD_LIST;
 
-// ±æµå¿ø ¸ñ·Ï ¸®½ºÆ®
+// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½Æ®
 typedef struct {
 	PWMSG_HEADER Header;
 	BYTE         Result;
@@ -1448,7 +1448,7 @@ typedef struct
 } NPC_QUESTEXP_REQUEST_INFO, *LPNPC_QUESTEXP_REQUEST_INFO;
 #pragma pack(pop)
 
-// º¸»ó
+// ï¿½ï¿½ï¿½ï¿½
 enum QUEST_REWARD_TYPE
 {
 	QUEST_REWARD_NONE		= 0x0000,
@@ -2555,7 +2555,7 @@ typedef struct
 } PMSG_ANS_CRYWOLF_INFO, *LPPMSG_ANS_CRYWOLF_INFO;
 
 //--------------------------------------------------------------------------
-// GC [0xBD][0x02] ¹æ¾î¸·, Á¦´Ü »óÅÂ Á¤º¸
+// GC [0xBD][0x02] ï¿½ï¿½î¸·, ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
 //--------------------------------------------------------------------------
 typedef struct
 {
@@ -3300,7 +3300,7 @@ typedef struct
 }PMSG_CASHSHOP_BUYITEM_REQ, *LPPMSG_CASHSHOP_BUYITEM_REQ;
 
 //----------------------------------------------------------------------------
-// ¾ÆÀÌÅÛ ±¸¸Å °á°ú (0xD2)(0x03)
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ (0xD2)(0x03)
 //----------------------------------------------------------------------------
 typedef struct
 {
@@ -3483,6 +3483,129 @@ typedef struct
 
 	BYTE				byResult;
 }PMSG_CASHSHOP_STORAGE_ITEM_THROW_ANS, *LPPMSG_CASHSHOP_STORAGE_ITEM_THROW_ANS;
+
+//----------------------------------------------------------------------------
+// (0xD2)(0x20)
+//
+// Server-side shelf prices. Sent in batches after a successful shop open, with
+// IsLast set on the final one; the terminal batch can be empty.
+//
+// The row layout MUST match CASH_SHOP_PRICE_ROW in 4.GameServer/CashShop.h and
+// 2.DataServer/CashShop.h - all three are the same 16 bytes on the wire.
+//
+// Only Count rows are actually sent, so the packet is short: read h.Size, or
+// read no further than Count.
+//----------------------------------------------------------------------------
+typedef struct
+{
+	int					lPackageSeq;		// package seq, or product seq when shRowKind is 1
+	int					lListPrice;
+	int					lEffectivePrice;
+	short				shDiscountPercent;
+	short				shRowKind;			// 0 = package seq, 1 = product seq
+}PMSG_CASHSHOP_PRICE_ROW, *LPPMSG_CASHSHOP_PRICE_ROW;
+
+typedef struct
+{
+	PBMSG_HEADER2		h;
+
+	BYTE				byCount;
+	BYTE				byIsLast;
+	BYTE				byPadding[2];	// this struct is inside a pack(push,1) region; the
+											// GameServer builds its copy at default alignment
+	PMSG_CASHSHOP_PRICE_ROW	Row[12];
+}PMSG_CASHSHOP_PRICELIST_ANS, *LPPMSG_CASHSHOP_PRICELIST_ANS;
+
+//----------------------------------------------------------------------------
+// (0xD2)(0x21)
+//
+// Admin-edited package display-name overrides. Same batching/IsLast contract
+// as the price list above, piggybacked on the same shop-open round trip - a
+// parallel packet rather than a field added to PMSG_CASHSHOP_PRICE_ROW, so the
+// already-live price batch is never touched.
+//
+// The row layout MUST match CASH_SHOP_NAME_ROW in 4.GameServer/CashShop.h and
+// 2.DataServer/CashShop.h.
+//----------------------------------------------------------------------------
+typedef struct
+{
+	int					lPackageSeq;
+	char				szDisplayName[32];
+}PMSG_CASHSHOP_NAME_ROW, *LPPMSG_CASHSHOP_NAME_ROW;
+
+typedef struct
+{
+	PBMSG_HEADER2		h;
+
+	BYTE				byCount;
+	BYTE				byIsLast;
+	BYTE				byPadding[2];	// same packing discipline as PMSG_CASHSHOP_PRICELIST_ANS
+	PMSG_CASHSHOP_NAME_ROW	Row[6];
+}PMSG_CASHSHOP_NAMELIST_ANS, *LPPMSG_CASHSHOP_NAMELIST_ANS;
+
+//----------------------------------------------------------------------------
+// (0xD2)(0x22)
+//
+// The currently active admin-uploaded banner (CustomCashShopBanners), sent
+// once per shop-open on the same round trip as prices/names. Single row, not
+// a batch - only one banner is ever active. lBannerId < 0 means "checked,
+// none active" - clear any stale banner rather than leaving an old one up.
+//
+// URL length capped at 200, not the DB column's NVARCHAR(260), because this
+// rides the same C1 (one-BYTE size field) header everything else here does -
+// see CASH_SHOP_BANNER_URL_LENGTH in 4.GameServer/CashShop.h for the exact
+// budget. 200 is comfortable margin for any realistic generated URL.
+//----------------------------------------------------------------------------
+typedef struct
+{
+	PBMSG_HEADER2		h;
+
+	int					lBannerId;
+	char				szImagePath[200];
+	int					lTargetPackageId;	// stored, not yet acted on
+}PMSG_CASHSHOP_BANNER_ANS, *LPPMSG_CASHSHOP_BANNER_ANS;
+
+//----------------------------------------------------------------------------
+// (0xD2)(0x24)
+//
+// One fragment of one display-catalog row.
+//
+// The catalog the player sees - tabs, cards, duration variants - used to exist
+// only as IBSCategory.txt, IBSPackage.txt and IBSProduct.txt, so nothing edited
+// in the admin tool could reach the shelf. The payload here is the SAME
+// @-delimited line those files hold, handed to the same
+// CShopCategory::SetCategory / CShopPackage::SetPackage /
+// CShopProduct::SetProduct parsers. Nothing downstream changes.
+//
+// Fragmented because a C1 size field is one byte and the longest package row is
+// already 228 of the 231 a single packet could carry. byFlags & 0x01 marks the
+// last fragment of a line.
+//
+// byRowKind 0/1/2 = category/package/product; 0xFE = "your version matches,
+// nothing follows"; 0xFF = end of catalog.
+//
+// PADDING IS LOAD-BEARING. This file is inside #pragma pack(push,1) while the
+// GameServer builds at default alignment; the two pad bytes put lVersion at
+// offset 8 on both sides. Removing them shifts every field after it by one.
+//----------------------------------------------------------------------------
+typedef struct
+{
+	PBMSG_HEADER2		h;
+
+	BYTE				byRowKind;		// 4
+	BYTE				byFlags;		// 5
+	BYTE				byPadding[2];	// 6..7
+	int					lVersion;		// 8..11
+	char				szFragment[200];
+}PMSG_CASHSHOP_CATALOG_ANS, *LPPMSG_CASHSHOP_CATALOG_ANS;
+
+#define IGS_CATALOG_ROW_CATEGORY	0
+#define IGS_CATALOG_ROW_PACKAGE		1
+#define IGS_CATALOG_ROW_PRODUCT		2
+#define IGS_CATALOG_ROW_UPTODATE	0xFE
+#define IGS_CATALOG_ROW_END			0xFF
+
+#define IGS_CATALOG_FLAG_LINE_END	0x01
 
 //----------------------------------------------------------------------------
 // (0xD2)(0x0B)

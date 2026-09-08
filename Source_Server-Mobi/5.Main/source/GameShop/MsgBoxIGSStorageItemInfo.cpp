@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "MsgBoxIGSStorageItemInfo.h"
+#include "MsgBoxIGSCommon.h"	// IGSIsModernSkin, IGSFillRect, IGSRenderModernPanel
 #include "wsclientinline.h"
 #include "DSPlaySound.h"
 #include "MsgBoxIGSUseItemConfirm.h"
@@ -159,16 +160,25 @@ CALLBACK_RESULT CMsgBoxIGSStorageItemInfo::CancelButtonDown(class CNewUIMessageB
 
 void CMsgBoxIGSStorageItemInfo::SetButtonInfo()
 {
-	m_BtnUse.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnUse.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnUse.MoveTextPos(0, -1);
 	m_BtnUse.SetText(GlobalText[228]);	
-	m_BtnCancel.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnCancel.MoveTextPos(0, -1);
 	m_BtnCancel.SetText(GlobalText[229]);	
 }
 
 void CMsgBoxIGSStorageItemInfo::RenderFrame()
 {
+	if( IGSIsModernSkin() )
+	{
+		if(m_wItemCode == 65535)
+			return;
+
+		IGSRenderModernPanel(GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
+		return;
+	}
+
 	if(m_wItemCode == 65535)
 		return;
 
@@ -193,6 +203,8 @@ void CMsgBoxIGSStorageItemInfo::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IGS_TEXT_ITEM_INFO_POS_X, GetPos().y+IGS_TEXT_ITEM_INFO_PERIOD_POS_Y, m_szPeriod, IGS_TEXT_ITEM_INFO_WIDTH, 0, RT3_SORT_LEFT);
 
 #ifdef FOR_WORK
+	if( IGSIsModernSkin() == false )
+	{
 	// debug
 	unicode::t_char szText[256] = {0,};
 	g_pRenderText->SetTextColor(255, 0, 0, 255);
@@ -209,6 +221,7 @@ void CMsgBoxIGSStorageItemInfo::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+20, szText, 150, 0, RT3_SORT_LEFT);
 	sprintf(szText, "Storage ItemSeq : %d", m_iStorageItemSeq);
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+30, szText, 150, 0, RT3_SORT_LEFT);
+	}
 #endif // FOR_WORK
 }
 

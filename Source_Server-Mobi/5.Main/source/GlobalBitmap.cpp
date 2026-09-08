@@ -723,6 +723,8 @@ bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, 
 	strncpy_s(pNewBitmap->FileName, MAX_BITMAP_FILE_NAME, filename.c_str(), MAX_BITMAP_FILE_NAME - 1);
 	pNewBitmap->Width      = (float)Width;
 	pNewBitmap->Height     = (float)Height;
+	pNewBitmap->SourceWidth  = (float)jpegWidth;
+	pNewBitmap->SourceHeight = (float)jpegHeight;
 	pNewBitmap->Components = 3;
 	pNewBitmap->Ref = 1;
 
@@ -801,11 +803,25 @@ bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, 
 
 		pNewBitmap->Width      = (float)Width;
 		pNewBitmap->Height     = (float)Height;
+		pNewBitmap->SourceWidth  = (float)cinfo.output_width;
+		pNewBitmap->SourceHeight = (float)cinfo.output_height;
 		pNewBitmap->Components = 3;
 		pNewBitmap->Ref = 1;
 		
 		size_t BufferSize = Width*Height*pNewBitmap->Components;
 		pNewBitmap->Buffer = new BYTE[BufferSize];
+
+		/*
+			Clear before the scanlines go in.
+
+			The texture is rounded up to a power of two and only the image's own
+			rows are written, so without this the margins are whatever the heap
+			last held - which renders as colour noise. The mobile path has always
+			memset here; this one never did, and it shows on any image that is not
+			already power-of-two. A 153x63 banner in a 256x64 texture is 40%
+			garbage.
+		*/
+		memset(pNewBitmap->Buffer, 0, BufferSize);
 		m_dwUsedTextureMemory += BufferSize;
 		
 		int offset=0;

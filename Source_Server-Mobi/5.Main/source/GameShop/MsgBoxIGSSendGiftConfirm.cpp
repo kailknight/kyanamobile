@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "MsgBoxIGSSendGiftConfirm.h"
+#include "MsgBoxIGSCommon.h"	// IGSIsModernSkin, IGSFillRect, IGSRenderModernPanel
 #include "DSPlaySound.h"
 #include "wsclientinline.h"
 
@@ -148,17 +149,32 @@ CALLBACK_RESULT CMsgBoxIGSSendGiftConfirm::CancelButtonDown(class CNewUIMessageB
 
 void CMsgBoxIGSSendGiftConfirm::SetButtonInfo()
 {
-	m_BtnOk.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnOk.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnOk.MoveTextPos(0, -1);
 	m_BtnOk.SetText(GlobalText[228]);	
 	
-	m_BtnCancel.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnCancel.MoveTextPos(0, -1);
 	m_BtnCancel.SetText(GlobalText[229]);	
 }
 
 void CMsgBoxIGSSendGiftConfirm::RenderFrame()
 {
+	if( IGSIsModernSkin() )
+	{
+		// The three-slice frame's real height is however many middle rows the
+		// text needed, not the enum's nominal FRAME_HEIGHT - the flat panel has
+		// to match what the slices would have covered or it clips the buttons.
+		int iPanelH = IMAGE_IGS_UP_HEIGHT + (m_iMiddleCount*IMAGE_IGS_LINE_HEIGHT) + IMAGE_IGS_DOWN_HEIGHT;
+
+		IGSRenderModernPanel(GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, iPanelH);
+
+		// The inset text box, as a plain well.
+		IGSFillRect(GetPos().x+IGS_TEXTBOX_POS_X, GetPos().y+IGS_TEXTBOX_POS_Y,
+			IMAGE_IGS_TEXTBOX_WIDTH, IMAGE_IGS_TEXTBOX_HEIGHT, 0.06f, 0.06f, 0.07f, 1.0f);
+		return;
+	}
+
 	int iY = GetPos().y;
 
 	RenderImage(IMAGE_IGS_BACK, GetPos().x, iY, IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
@@ -199,6 +215,8 @@ void CMsgBoxIGSSendGiftConfirm::RenderTexts()
 	}
 	
 #ifdef FOR_WORK
+	if( IGSIsModernSkin() == false )
+	{
 	unicode::t_char szText[256] = { 0, };
 	g_pRenderText->SetTextColor(255, 0, 0, 255);
 	sprintf(szText, "Package Seq : %d", m_iPackageSeq);
@@ -211,6 +229,7 @@ void CMsgBoxIGSSendGiftConfirm::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+40, szText, 200, 0, RT3_SORT_LEFT);
 	sprintf(szText, "CashType : %d", m_iCashType);
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+50, szText, 200, 0, RT3_SORT_LEFT);
+	}
 #endif // FOR_WORK
 }
 

@@ -4,6 +4,7 @@
 
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "MsgBoxIGSUseBuffConfirm.h"
+#include "MsgBoxIGSCommon.h"	// IGSIsModernSkin, IGSFillRect, IGSRenderModernPanel
 #include "wsclientinline.h"
 #include "DSPlaySound.h"
 
@@ -136,11 +137,11 @@ void CMsgBoxIGSUseBuffConfirm::SetAddCallbackFunc()
 
 void CMsgBoxIGSUseBuffConfirm::SetButtonInfo()
 {
-	m_BtnOk.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnOk.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnOk.MoveTextPos(0, -1);
 	m_BtnOk.SetText(GlobalText[228]);	
 
-	m_BtnCancel.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y,IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnCancel.MoveTextPos(0, -1);
 	m_BtnCancel.SetText(GlobalText[229]);	
 }
@@ -181,6 +182,8 @@ void CMsgBoxIGSUseBuffConfirm::RenderTexts()
  	}
 	
 #ifdef FOR_WORK
+	if( IGSIsModernSkin() == false )
+	{
 	unicode::t_char szText[256] = { 0, };
 	g_pRenderText->SetTextColor(255, 0, 0, 255);
 	sprintf(szText, "m_iStorageSeq : %d", m_iStorageSeq);
@@ -191,6 +194,7 @@ void CMsgBoxIGSUseBuffConfirm::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+30, szText, 150, 0, RT3_SORT_LEFT);
 	sprintf(szText, "m_szItemType : %c", m_szItemType);
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+40, szText, 150, 0, RT3_SORT_LEFT);
+	}
 #endif // FOR_WORK
 }
 

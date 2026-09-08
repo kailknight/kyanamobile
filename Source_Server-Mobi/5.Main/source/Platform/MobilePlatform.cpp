@@ -47,6 +47,13 @@ std::string MU_GetFirstExistingPath(std::initializer_list<const char*> candidate
 #if defined(__ANDROID__)
 jclass g_keyboardBridgeClass = nullptr;
 jmethodID g_showKeyboardMethod = nullptr;
+
+// Cached lazily on first use and cleared with the class in
+// MU_ClearKeyboardBridge, so they live beside it rather than further down.
+jmethodID g_batteryPercentMethod = nullptr;
+jmethodID g_wifiRssiMethod = nullptr;
+jmethodID g_bannerStartMethod = nullptr;
+jmethodID g_bannerPollMethod = nullptr;
 jmethodID g_hideKeyboardMethod = nullptr;
 
 void MU_ClearKeyboardBridge(JNIEnv* env)
@@ -64,6 +71,13 @@ void MU_ClearKeyboardBridge(JNIEnv* env)
 
     g_showKeyboardMethod = nullptr;
     g_hideKeyboardMethod = nullptr;
+
+    // These are cached against the class being released, so they cannot outlive
+    // it - a stale jmethodID on a new class is a crash, not a miss.
+    g_batteryPercentMethod = nullptr;
+    g_wifiRssiMethod = nullptr;
+    g_bannerStartMethod = nullptr;
+    g_bannerPollMethod = nullptr;
 }
 
 void MU_RegisterKeyboardBridge(JNIEnv* env, jobject activity)
@@ -141,11 +155,94 @@ void MU_CallKeyboardBridge(const char* methodName)
         env->ExceptionClear();
     }
 }
-
-jmethodID g_batteryPercentMethod = nullptr;
-jmethodID g_wifiRssiMethod = nullptr;
 #endif
 } // namespace
+
+bool MU_MobileStartBannerDownload(const char* url, const char* destPath)
+{
+#if defined(__ANDROID__)
+    if (url == nullptr || destPath == nullptr)
+    {
+        return false;
+    }
+
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return false;
+    }
+
+    if (g_bannerStartMethod == nullptr)
+    {
+        g_bannerStartMethod = env->GetStaticMethodID(
+            g_keyboardBridgeClass, "startBannerDownloadFromNative",
+            "(Ljava/lang/String;Ljava/lang/String;)Z");
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return false;
+        }
+    }
+
+    jstring jUrl = env->NewStringUTF(url);
+    jstring jPath = env->NewStringUTF(destPath);
+
+    bool started = false;
+
+    if (jUrl != nullptr && jPath != nullptr)
+    {
+        started = (env->CallStaticBooleanMethod(g_keyboardBridgeClass, g_bannerStartMethod, jUrl, jPath) == JNI_TRUE);
+
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            started = false;
+        }
+    }
+
+    // Local refs are cheap but not free, and this runs on the packet thread.
+    if (jUrl != nullptr) env->DeleteLocalRef(jUrl);
+    if (jPath != nullptr) env->DeleteLocalRef(jPath);
+
+    return started;
+#else
+    (void)url;
+    (void)destPath;
+    return false;
+#endif
+}
+
+int MU_MobilePollBannerDownload()
+{
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return 0;
+    }
+
+    if (g_bannerPollMethod == nullptr)
+    {
+        g_bannerPollMethod =
+            env->GetStaticMethodID(g_keyboardBridgeClass, "pollBannerDownloadFromNative", "()I");
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return 0;
+        }
+    }
+
+    const int result = env->CallStaticIntMethod(g_keyboardBridgeClass, g_bannerPollMethod);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return 0;
+    }
+    return result;
+#else
+    return 0;
+#endif
+}
 
 int MU_MobileGetBatteryPercent()
 {

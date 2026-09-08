@@ -7,6 +7,7 @@
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 
 #include "MsgBoxIGSDeleteItemConfirm.h"
+#include "MsgBoxIGSCommon.h"	// IGSIsModernSkin, IGSFillRect, IGSRenderModernPanel
 
 #include "wsclientinline.h"
 #include "DSPlaySound.h"
@@ -164,12 +165,12 @@ void CMsgBoxIGSDeleteItemConfirm::SetAddCallbackFunc()
 void CMsgBoxIGSDeleteItemConfirm::SetButtonInfo()
 {
 	// 확인 버튼
-	m_BtnDelete.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_DEL_POS_X, GetPos().y+IGS_BTN_POS_Y, 
+	m_BtnDelete.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_DEL_POS_X, GetPos().y+IGS_BTN_POS_Y, 
 						IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT);
 	m_BtnDelete.SetText(GlobalText[2932]);	
 	
 	// 취소 버튼
-	m_BtnCancel.SetInfo(IMAGE_IGS_BUTTON, GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, 
+	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, 
 						IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT);
 	m_BtnCancel.SetText(GlobalText[229]);	
 }
@@ -178,6 +179,17 @@ void CMsgBoxIGSDeleteItemConfirm::SetButtonInfo()
 // RenderFrame
 void CMsgBoxIGSDeleteItemConfirm::RenderFrame()
 {
+	if( IGSIsModernSkin() )
+	{
+		// The three-slice frame's real height is however many middle rows the
+		// text needed, not the enum's nominal FRAME_HEIGHT - the flat panel has
+		// to match what the slices would have covered or it clips the buttons.
+		int iPanelH = IMAGE_IGS_UP_HEIGHT + (m_iMiddleCount*IMAGE_IGS_LINE_HEIGHT) + IMAGE_IGS_DOWN_HEIGHT;
+
+		IGSRenderModernPanel(GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, iPanelH);
+		return;
+	}
+
 	int iY;
 
 	RenderImage(IMAGE_IGS_BACK, GetPos().x, GetPos().y, IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
@@ -216,6 +228,8 @@ void CMsgBoxIGSDeleteItemConfirm::RenderTexts()
  	}
 
 #ifdef FOR_WORK
+	if( IGSIsModernSkin() == false )
+	{
 	unicode::t_char szText[256] = { 0, };
 	g_pRenderText->SetTextColor(255, 0, 0, 255);
 	sprintf(szText, "m_iStorageSeq : %d", m_iStorageSeq);
@@ -224,6 +238,7 @@ void CMsgBoxIGSDeleteItemConfirm::RenderTexts()
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+20, szText, 150, 0, RT3_SORT_LEFT);
 	sprintf(szText, "m_szItemType : %c", m_szItemType);
 	g_pRenderText->RenderText(GetPos().x+IMAGE_IGS_FRAME_WIDTH, GetPos().y+30, szText, 150, 0, RT3_SORT_LEFT);
+	}
 #endif // FOR_WORK
 }
 

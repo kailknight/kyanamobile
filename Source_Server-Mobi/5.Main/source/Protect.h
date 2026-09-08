@@ -175,6 +175,18 @@ struct MAIN_FILE_INFO
 	// an empty slot means "not migrated yet", so MenuCustom.cpp falls back
 	// to the old Text_Button value for that one slot.
 	char MenuName[15][120];
+
+	// Which cash shop the CLIENT renders: 0 = original XShop, 1 = custom.
+	// Server-side CustomCashShop (GameServerInfo - Custom.ini) decides where the
+	// catalog and prices come from; this one only decides how the shop is drawn.
+	// Appended at the tail deliberately - every offset above stays put, so only
+	// this field is new on the wire.
+	//
+	// MAIN_FILE_INFO is duplicated between Protect.h and GetMainInfo.cpp and is
+	// written/read as a raw block, so the two MUST stay byte-identical. Changing
+	// one means rebuilding GetMainInfo.exe, regenerating CBGetMain.bin AND
+	// rebuilding Main.exe - a mismatch misreads every field after the change.
+	DWORD CustomCashShop;
 };
 
 class CProtect
