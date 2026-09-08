@@ -4408,11 +4408,19 @@ bool HandleVirtualJoystickFingerUp(const SDL_TouchFingerEvent& touch)
 
 // Is this tile one the character could step onto?
 //
-// The same test PATH::FindPath applies with its default TW_CHARACTER wall
-// (ZzzPath.h): the action, height and camera bits are not obstacles, anything at
-// or above TW_CHARACTER is. Asking PathFinding2 instead would answer a different
-// question - A* is happy to route around a single blocked tile, so it would
-// report a direction with a wall dead ahead as open.
+// The same test PATH::FindPath applies, but with TW_NOMOVE as the wall instead
+// of FindPath's default TW_CHARACTER (ZzzPath.h): the action, height and camera
+// bits are not obstacles, and neither is another character/monster standing on
+// the tile - only real terrain (TW_NOMOVE and above) blocks. Asking PathFinding2
+// instead would answer a different question - A* is happy to route around a
+// single blocked tile, so it would report a direction with a wall dead ahead as
+// open.
+//
+// Deliberately ignoring TW_CHARACTER here: gating the stick's direction on other
+// characters' occupied tiles made it slide to a different heading every time a
+// monster stepped in or out of the way, and monsters move every frame, so a
+// held push visibly rocked back and forth between two headings instead of
+// walking a straight line into the crowd.
 bool IsVirtualJoystickTileOpen(int tileX, int tileY)
 {
     if (tileX < 0 || tileX > 255 || tileY < 0 || tileY > 255)
@@ -4424,8 +4432,9 @@ bool IsVirtualJoystickTileOpen(int tileX, int tileY)
     if ((attribute & TW_ACTION) == TW_ACTION) attribute -= TW_ACTION;
     if ((attribute & TW_HEIGHT) == TW_HEIGHT) attribute -= TW_HEIGHT;
     if ((attribute & TW_CAMERA_UP) == TW_CAMERA_UP) attribute -= TW_CAMERA_UP;
+    if ((attribute & TW_CHARACTER) == TW_CHARACTER) attribute -= TW_CHARACTER;
 
-    return TW_CHARACTER > attribute;
+    return TW_NOMOVE > attribute;
 }
 
 // Which of the eight headings the character is walking right now, or -1 if it is
@@ -4708,7 +4717,11 @@ void ApplyVirtualJoystickMovement()
         TargetX = std::clamp(startX + (stepX * reach), 0, 255);
         TargetY = std::clamp(startY + (stepY * reach), 0, 255);
 
-        if (PathFinding2(startX, startY, TargetX, TargetY, &c->Path))
+        // TW_NOMOVE, not the PathFinding2 default of TW_CHARACTER: the heading was
+        // already chosen against real terrain only (IsVirtualJoystickTileOpen
+        // above), so the hop itself must not re-introduce monster/character
+        // avoidance and route around a tile the heading check already allowed.
+        if (PathFinding2(startX, startY, TargetX, TargetY, &c->Path, 0.0f, TW_NOMOVE))
         {
             // Immediately after the query and never on a path that has been
             // touched since: SendMove transmits PathX[0..] on the assumption that
