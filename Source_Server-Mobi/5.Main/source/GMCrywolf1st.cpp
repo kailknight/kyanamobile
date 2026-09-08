@@ -28,8 +28,24 @@ BYTE m_AltarState[5] = {2,2,2,2,2};
 #include "wsclientinline.h"
 
 bool	View_Bal = false;
-char	Suc_Or_Fail = -1;
-char	View_Suc_Or_Fail = -1;
+// MUST stay explicitly signed. Plain `char` is signed under MSVC but UNSIGNED
+// on ARM (the AAPCS default clang uses for Android), so the -1 "idle" sentinel
+// read back as 255 there and `Suc_Or_Fail >= 0` - the gate on the whole
+// win/lose rank-reveal in CNewUICryWolf::Render() - was true from the very
+// first frame. That is what drew the "RANK D / EXP:000000000" panel at anyone
+// entering Crywolf on mobile, with no server state involved at all.
+signed char	Suc_Or_Fail = -1;
+signed char	View_Suc_Or_Fail = -1;
+
+// Consumed once by the very next CheckCryWolf1stMVP() call after joining the
+// map. That call carries the server's CURRENT live state as of the join
+// (SendRequestCrywolfInfo()'s reply), not a transition the player watched
+// happen - and Crywolf spends real, ordinary time sitting in
+// CRYWOLF_STATE_END between battles. Without this, anyone who teleports or
+// logs in while it happens to be in that phase gets the win/lose rank-reveal
+// fired at them immediately, showing whatever placeholder rank/exp the
+// account has (0/"D" if it did not take part in the last battle).
+bool	g_bCrywolfSuppressNextEndReveal = false;
 float Deco_Insert  = 0.f;
 char Message_Box = 0;
 char   Box_String[2][200]={NULL,NULL};
@@ -104,6 +120,13 @@ bool M34CryWolf1st::IsCryWolf1stMVPStatePeace()
 
 void M34CryWolf1st::CheckCryWolf1stMVP(BYTE btOccupationState, BYTE btCrywolfState)
 {
+	// See g_bCrywolfSuppressNextEndReveal's declaration. Consumed here,
+	// unconditionally, so it only ever protects the one call right after a
+	// join/teleport - a genuine later transition to CRYWOLF_STATE_END while the
+	// player is already on the map still reveals normally.
+	bool bSuppressReveal = g_bCrywolfSuppressNextEndReveal;
+	g_bCrywolfSuppressNextEndReveal = false;
+
 	if( m_OccupationState == btOccupationState && m_CrywolfState == btCrywolfState )
 		return;
 
@@ -129,7 +152,7 @@ void M34CryWolf1st::CheckCryWolf1stMVP(BYTE btOccupationState, BYTE btCrywolfSta
 		for(int i = 0; i < 5; i++)
 			HeroScore[i] = -1;
 
-		if(btOccupationState != CRYWOLF_OCCUPATION_STATE_WAR)
+		if(btOccupationState != CRYWOLF_OCCUPATION_STATE_WAR && !bSuppressReveal)
 		{
 			Suc_Or_Fail = 1;
 //			View_Suc_Or_Fail = 1;

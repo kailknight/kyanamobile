@@ -16,8 +16,8 @@
 #include "GMCrywolf1st.h"
 
 extern bool	View_Bal;
-extern char	Suc_Or_Fail;
-extern char	View_Suc_Or_Fail;
+extern signed char	Suc_Or_Fail;	// signed: see its definition in GMCrywolf1st.cpp
+extern signed char	View_Suc_Or_Fail;
 extern float Deco_Insert;
 extern char Message_Box;
 extern char   Box_String[2][200];
@@ -49,6 +49,9 @@ extern int BackUpTick;
 extern BYTE m_OccupationState;
 extern BYTE m_CrywolfState;
 extern int m_StatueHP;
+
+extern int DisplayWinCDepthBox;
+extern int DisplayHeightExt;
 
 using namespace SEASON3B;
 
@@ -142,14 +145,33 @@ bool SEASON3B::CNewUICryWolf::Render()
 
 	char Text[300];
 
-	float Main[] = {518.f,278.f,122.f,119.f,120.f/128.f,118.f/128.f};
-	float Number[5][6] =   {{565.f,280.f,13.f,13.f,12.f/16.f,12.f/16.f},
-							{582.f,282.f,13.f,13.f,12.f/16.f,12.f/16.f},
-							{598.f,286.f,13.f,13.f,12.f/16.f,12.f/16.f},
-							{613.f,294.f,13.f,13.f,12.f/16.f,12.f/16.f},
-							{625.f,306.f,13.f,13.f,12.f/16.f,12.f/16.f}};
-	float Dark_Elf_Icon[] = {623.f,358.f,15.f,15.f,14.f/16.f,14.f/16.f};
-	float Val_Icon[] = {623.f,379.f,15.f,15.f,14.f/16.f,14.f/16.f};
+	// This whole cluster - wolf head, the 5 altar circles, the Dark Elf/Balgass
+	// gauges, the countdown digits and the statue HP bar further below - is
+	// drawn in absolute screen-space literals with no reference to m_Pos at
+	// all, unlike the desktop-widescreen-aware CNewUIEmpireGuardianTimer countdown
+	// box it sits next to. That left it glued to the base 640-wide region on PC
+	// widescreen (never following the box to the right corner) and sitting under
+	// the mobile attack wheel on Android. offX/offY carry the same delta into
+	// every literal below so the cluster keeps moving as one piece.
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Same anchor as the other instanced-event widgets (NewUIEmpireGuardianTimer
+	// and friends) - under the minimap. Main's desktop top-left (518,278) lands
+	// there; everything else keeps its offset from Main.
+	const float offX = 4.f - 518.f;
+	const float offY = 175.f - 278.f;
+#else
+	const float offX = (float)DisplayWinCDepthBox;
+	const float offY = (float)DisplayHeightExt;
+#endif
+
+	float Main[] = {518.f+offX,278.f+offY,122.f,119.f,120.f/128.f,118.f/128.f};
+	float Number[5][6] =   {{565.f+offX,280.f+offY,13.f,13.f,12.f/16.f,12.f/16.f},
+							{582.f+offX,282.f+offY,13.f,13.f,12.f/16.f,12.f/16.f},
+							{598.f+offX,286.f+offY,13.f,13.f,12.f/16.f,12.f/16.f},
+							{613.f+offX,294.f+offY,13.f,13.f,12.f/16.f,12.f/16.f},
+							{625.f+offX,306.f+offY,13.f,13.f,12.f/16.f,12.f/16.f}};
+	float Dark_Elf_Icon[] = {623.f+offX,358.f+offY,15.f,15.f,14.f/16.f,14.f/16.f};
+	float Val_Icon[] = {623.f+offX,379.f+offY,15.f,15.f,14.f/16.f,14.f/16.f};
 	int TotDelay = 400;
 
 	if(Suc_Or_Fail == 1)
@@ -294,14 +316,14 @@ bool SEASON3B::CNewUICryWolf::Render()
 		g_pCryWolfInterface->Render(Dark_Elf_Icon[0], Dark_Elf_Icon[1], Dark_Elf_Icon[2], Dark_Elf_Icon[3], 0.f,0.f,Dark_Elf_Icon[4], Dark_Elf_Icon[5],5);
 	}
 
-	g_pCryWolfInterface->Render(538, 392, 104, 37, 0.f,0.f,104.f/128.f, 36.f/64.f,12);
+	g_pCryWolfInterface->Render(538+offX, 392+offY, 104, 37, 0.f,0.f,104.f/128.f, 36.f/64.f,12);
 
 	glColor3f ( 1.f, 0.6f, 0.3f );
 	g_pRenderText->SetFont(g_hFont);
 	g_pRenderText->SetTextColor(255, 148, 21, 255);
 	g_pRenderText->SetBgColor(0);
 	wsprintf ( Text, GlobalText[1948], Dark_elf_Num );
-    g_pRenderText->RenderText(582, 359, Text, 0 ,0, RT3_WRITE_CENTER);
+    g_pRenderText->RenderText(582+offX, 359+offY, Text, 0 ,0, RT3_WRITE_CENTER);
 
 	if(View_Bal == true) 
 	{
@@ -314,12 +336,12 @@ bool SEASON3B::CNewUICryWolf::Render()
 			g_pCryWolfInterface->Render(Val_Icon[0], Val_Icon[1], Val_Icon[2], Val_Icon[3], 0.f,0.f,Val_Icon[4], Val_Icon[5],4);
 
 			wsprintf ( Text, GlobalText[1949]);
-			g_pRenderText->RenderText(600, 380, Text, 0 ,0, RT3_WRITE_CENTER);
+			g_pRenderText->RenderText(600+offX, 380+offY, Text, 0 ,0, RT3_WRITE_CENTER);
 
 			float Hp = ((67.f / 100.f) * (float)Val_Hp);
 			float nx = ((68.f / 100.f) * (float)Val_Hp);
 
-			g_pCryWolfInterface->Render(548, 388, nx, 8, 0.f,0.f,Hp/128.f, 8.f/8.f,1);
+			g_pCryWolfInterface->Render(548+offX, 388+offY, nx, 8, 0.f,0.f,Hp/128.f, 8.f/8.f,1);
 		}
 	}
 	if(View_Bal == false)
@@ -346,14 +368,14 @@ bool SEASON3B::CNewUICryWolf::Render()
 
 		if( m_iMinute < 10 )
 		{
-			RenderNumber2D ( 510+60, 384+18, 0, 14, 14 );
+			RenderNumber2D ( 510+60+offX, 384+18+offY, 0, 14, 14 );
 		}
-		RenderNumber2D ( 510+70, 384+18, m_iMinute, 14, 14 );
+		RenderNumber2D ( 510+70+offX, 384+18+offY, m_iMinute, 14, 14 );
 		if( m_iSecond/1000 < 10 )
 		{
-			RenderNumber2D ( 520+77, 384+18, 0, 14, 14 );
+			RenderNumber2D ( 520+77+offX, 384+18+offY, 0, 14, 14 );
 		}
-		RenderNumber2D ( 520+87, 384+18, m_iSecond/1000, 14, 14 );
+		RenderNumber2D ( 520+87+offX, 384+18+offY, m_iSecond/1000, 14, 14 );
 		
 		m_dwSyncTime = GetTickCount();
 		
@@ -366,16 +388,16 @@ bool SEASON3B::CNewUICryWolf::Render()
 	}
 	else
 	{
-		RenderNumber2D ( 510+60, 384+18, 0, 14, 14 );
-		RenderNumber2D ( 510+70, 384+18, 0, 14, 14 );
-		RenderNumber2D ( 520+77, 384+18, 0, 14, 14 );
-		RenderNumber2D ( 520+87, 384+18, 0, 14, 14 );
+		RenderNumber2D ( 510+60+offX, 384+18+offY, 0, 14, 14 );
+		RenderNumber2D ( 510+70+offX, 384+18+offY, 0, 14, 14 );
+		RenderNumber2D ( 520+77+offX, 384+18+offY, 0, 14, 14 );
+		RenderNumber2D ( 520+87+offX, 384+18+offY, 0, 14, 14 );
 	}
 
 	int HpS = 100 - m_StatueHP;
 	float Hp = ((88.f / 100.f) * (float)HpS);
 	float nx = ((89.f / 100.f) * (float)HpS);
-	RenderImage(IMAGE_MVP_INTERFACE + 9, 548 + nx, 323, 89.f - nx, 30 ,Hp/128.f,0.f,((((88.f / 100.f) * (float)(100.f - HpS)))/128.f),29.f/32.f);
+	RenderImage(IMAGE_MVP_INTERFACE + 9, 548 + nx + offX, 323 + offY, 89.f - nx, 30 ,Hp/128.f,0.f,((((88.f / 100.f) * (float)(100.f - HpS)))/128.f),29.f/32.f);
 	
 	M34CryWolf1st::RenderNoticesCryWolf();
 

@@ -59,8 +59,10 @@ using namespace M34CryWolf1st;
 
 extern BYTE m_AltarState[];
 extern bool	View_Bal;
-extern char Suc_Or_Fail,Message_Box;
+extern signed char Suc_Or_Fail;	// signed: see its definition in GMCrywolf1st.cpp
+extern char Message_Box;
 extern int m_StatueHP,Val_Hp,Dark_elf_Num;
 extern bool View_End_Result;
+extern bool g_bCrywolfSuppressNextEndReveal;
 
 #endif // _GMCRYWOLF1ST_H_

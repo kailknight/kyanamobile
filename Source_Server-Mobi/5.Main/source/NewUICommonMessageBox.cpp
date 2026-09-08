@@ -60,7 +60,7 @@ extern BYTE Ranking[5];
 extern BYTE HeroClass[5];
 extern int HeroScore[5];
 extern char HeroName[5][MAX_ID_SIZE+1];
-extern char	View_Suc_Or_Fail;
+extern signed char	View_Suc_Or_Fail;	// signed: see its definition in GMCrywolf1st.cpp
 extern char Need_Point;
 extern int In_Skill;
 

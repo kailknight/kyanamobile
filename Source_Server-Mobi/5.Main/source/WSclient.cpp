@@ -1036,8 +1036,18 @@ BOOL ReceiveJoinMapServer(BYTE *ReceiveBuffer, BOOL bEncrypted)
 	if(gMapManager.WorldActive == WD_34CRYWOLF_1ST)
 	{
 		SendRequestCrywolfInfo();
+
+		// SendRequestCrywolfInfo()'s reply carries the map's CURRENT live state,
+		// not a transition the player watched happen - and Crywolf spends
+		// ordinary time sitting in CRYWOLF_STATE_END between battles. Without
+		// this, CheckCryWolf1stMVP (GMCrywolf1st.cpp) fires the win/lose
+		// rank-reveal at anyone who joins/teleports in while it happens to be in
+		// that phase, showing the account's placeholder rank/exp. See
+		// g_bCrywolfSuppressNextEndReveal's declaration.
+		extern bool g_bCrywolfSuppressNextEndReveal;
+		g_bCrywolfSuppressNextEndReveal = true;
 	}
-	
+
     matchEvent::CreateEventMatch ( gMapManager.WorldActive );
 
 	HeroIndex = rand()%MAX_CHARACTERS_CLIENT;
@@ -1945,10 +1955,19 @@ BOOL ReceiveTeleport(BYTE *ReceiveBuffer, BOOL bEncrypted)
 			
 			gMapManager.WorldActive = Data->Map;
 			gMapManager.LoadWorld(gMapManager.WorldActive);
-			
+
 			if(gMapManager.WorldActive == WD_34CRYWOLF_1ST)
+			{
 				SendRequestCrywolfInfo();
-			
+
+				// Same fix as ReceiveJoinMapServer's: this is the actual
+				// teleport-in path (as opposed to a fresh login that happens to
+				// land inside Crywolf), and it needs the same protection - see
+				// g_bCrywolfSuppressNextEndReveal's declaration.
+				extern bool g_bCrywolfSuppressNextEndReveal;
+				g_bCrywolfSuppressNextEndReveal = true;
+			}
+
             if ( ( gMapManager.InChaosCastle(OldWorld) == true && OldWorld!=gMapManager.WorldActive ) || gMapManager.InChaosCastle()==true )
             {
                 PlayBuffer( SOUND_CHAOS_ENVIR, NULL, true );
