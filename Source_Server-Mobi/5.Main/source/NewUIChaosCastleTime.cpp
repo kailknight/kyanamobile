@@ -55,6 +55,15 @@ void CNewUIChaosCastleTime::Release()
 
 void CNewUIChaosCastleTime::SetPos(int x, int y)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// See NewUIEmpireGuardianTimer::SetPos: this and the other instanced-event
+	// status widgets (Battle Soccer score, Kanturu info, Doppelganger frame)
+	// all anchor under the minimap on mobile instead of their desktop spot,
+	// which sits under the attack wheel. Never more than one is visible at a
+	// time, so sharing the anchor is safe.
+	x = 4;
+	y = 175;
+#endif
 	m_Pos.x = x;
 	m_Pos.y = y;
 }

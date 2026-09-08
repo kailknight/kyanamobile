@@ -56,6 +56,15 @@ void CNewUIBloodCastle::Release()
 
 void CNewUIBloodCastle::SetPos(int x, int y)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// See NewUIEmpireGuardianTimer::SetPos: shared mobile anchor under the
+	// minimap for every instanced-event status widget, none of which are ever
+	// visible together. The desktop spot this replaces is the bottom-right
+	// corner ((640-127)+DisplayWinExt, DisplayHeight-132, set in
+	// CNewUISystem::Create), which is exactly where the mobile attack wheel is.
+	x = 4;
+	y = 175;
+#endif
 	m_Pos.x = x;
 	m_Pos.y = y;
 }

@@ -653,6 +653,13 @@ void SEASON3B::CNewUIKanturuInfoWindow::Release()
 
 void SEASON3B::CNewUIKanturuInfoWindow::SetPos(int x, int y)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// See NewUIEmpireGuardianTimer::SetPos: shared mobile anchor under the
+	// minimap for every instanced-event status widget, none of which are ever
+	// visible together.
+	x = 4;
+	y = 175;
+#endif
 	m_Pos.x = x;
 	m_Pos.y = y;
 }
