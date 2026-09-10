@@ -3,12 +3,15 @@
 #include "Protocol.h"
 #include "CBInterface.h"
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+// PC/console used to define this as *(DWORD*)0xE8CB3C - a hardcoded absolute
+// address from the original prebuilt client. On a recompiled exe that address
+// is arbitrary; writing through it is undefined behavior and crashes with an
+// access violation whenever the byte happens to land on an unmapped page
+// (STATUS_ACCESS_VIOLATION writing 0xE8CB3C, seen from CCustomEventTime::
+// OpenTestWindow after other UI activity shifted the heap). Now a real
+// variable on every platform, matching what Android/iOS already used.
 extern DWORD gAndroidSetCursorFocus;
 #define pSetCursorFocus			gAndroidSetCursorFocus
-#else
-#define pSetCursorFocus			*(DWORD*)0xE8CB3C
-#endif
 
 #define MAX_EVENTTIME 42
 

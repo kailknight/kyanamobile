@@ -83,9 +83,13 @@ extern int DisplayHeightExt;
 extern int DisplayWinExt;
 extern int DisplayWinReal;
 Interface gInterface;
-#if defined(__ANDROID__) || defined(MU_IOS)
+
+// Was Android/iOS-only; the PC/console build instead used a hardcoded
+// absolute address (*(DWORD*)0xE8CB3C) left over from the original prebuilt
+// client - meaningless on a recompiled exe, and an intermittent access
+// violation on write depending on what happens to be mapped there. See
+// CustomEventTime.h - both platforms now share this real variable.
 DWORD gAndroidSetCursorFocus = 0;
-#endif
 
 Interface::Interface() // OK
 {
