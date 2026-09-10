@@ -21,6 +21,7 @@
 #include "GOBoid.h"
 #include "CSparts.h"
 #include "CSItemOption.h"
+#include "SocketSystem.h"
 #include "CSChaosCastle.h"
 #include "GMHellas.h"
 #include "MapManager.h"
@@ -8211,6 +8212,50 @@ void CreateItem(ITEM_t *ip,BYTE *Item,vec3_t Position,int CreateFlag)
 		n->option_380 = false;
 		BYTE b = ( ( (Item[5] & 0x08) << 4) >>7);
 		n->option_380 = b;
+
+		// Ground/viewport items carry the same 12-byte wire format as an
+		// inventory item (see CNewUIItemMng::CreateItem) - bytes 6..11 are
+		// Harmony + the 5 socket seeds, but this path never read them, so a
+		// dropped item's tooltip showed no socket/Harmony section at all
+		// until it was picked up and recreated through the inventory path.
+		n->Jewel_Of_Harmony_Option = (Item[6] & 0xf0) >> 4;
+		n->Jewel_Of_Harmony_OptionLevel = Item[6] & 0x0f;
+
+		n->SocketCount = MAX_SOCKETS;
+
+		for(int i = 0; i < MAX_SOCKETS; ++i)
+		{
+			n->bySocketOption[i] = Item[7+i];
+		}
+
+		for(int i = 0; i < MAX_SOCKETS; ++i)
+		{
+			if(Item[7+i] == 0xFF)
+			{
+				n->SocketCount = i;
+				break;
+			}
+			else if(Item[7+i] == 0xFE)
+			{
+				n->SocketSeedID[i] = SOCKET_EMPTY;
+			}
+			else
+			{
+				n->SocketSeedID[i] = Item[7+i] % SEASON4A::MAX_SOCKET_OPTION;
+				n->SocketSphereLv[i] = int(Item[7+i] / SEASON4A::MAX_SOCKET_OPTION) + 1;
+			}
+		}
+
+		if(g_SocketItemMgr.IsSocketItem(n))
+		{
+			n->SocketSeedSetOption = Item[6];
+			n->Jewel_Of_Harmony_Option = 0;
+			n->Jewel_Of_Harmony_OptionLevel = 0;
+		}
+		else
+		{
+			n->SocketSeedSetOption = SOCKET_EMPTY;
+		}
 
 		if(CreateFlag)
 		{
