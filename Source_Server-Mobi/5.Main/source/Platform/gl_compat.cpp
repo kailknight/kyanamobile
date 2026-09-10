@@ -9,6 +9,7 @@
 #include "gl_compat.h"
 #include "MobileTime.h"
 #include <GLES3/gl32.h>
+#include <EGL/egl.h>
 #include <android/log.h>
 
 // Legacy client-state enums not present in GLES2 headers
@@ -205,6 +206,180 @@ static GLenum s_alphaFunc        = 0x0207; // GL_ALWAYS
 // call. We only need to know if ANY texture is bound.
 static GLuint s_boundTexture = 0;
 static GLsizeiptr s_vboCapacity = 0;
+
+// =============================================================================
+// Persistent-mapped streaming ring (attempt 3 on this bottleneck)
+//
+// Measured 2026-09-09 with simpleperf --app: the per-draw glBufferData(...,
+// GL_STREAM_DRAW) orphan just above costs ~62% of ALL CPU cycles in the
+// process (gsl_memory_alloc_pure_64 -> kgsl_sharedmem_alloc -> ioctl), on real
+// Adreno hardware, in a normal busy scene - not a stress test. libmain.so
+// itself was only 11%. The orphan trades that for safety: a fresh allocation
+// can never collide with whatever the GPU is still reading from the previous
+// draw's storage.
+//
+// Two earlier attempts at a plain ring (3 buffers, rotated per frame) both
+// made things worse, and both failed for the same underlying reason - a GL
+// call was still made *per draw* to get data in:
+//   - glMapBufferRange/glUnmapBuffer per draw: the map/unmap pair itself has
+//     real per-call driver cost (cache-direction bookkeeping) that scaled
+//     with ~900 draws/frame. Measured: StreamVertexData 93.6% inclusive,
+//     libc 21.5% (vs. 3% baseline). ~2 FPS.
+//   - glBufferSubData at an advancing offset, no map: GL's spec cannot know
+//     the ring guarantees non-overlap, so the driver must protect draws still
+//     queued against that buffer - it stalls or shadow-copies, the same class
+//     of cost the orphan exists to avoid. Visible flicker, FPS still worse.
+//
+// This is the standard fix for exactly this problem: map each ring buffer
+// ONCE, at creation (glBufferStorageEXT + GL_MAP_PERSISTENT_BIT), and keep
+// the returned pointer for the buffer's whole lifetime. Every draw after that
+// is a plain memcpy into already-mapped memory - no GL call, so none of the
+// per-call cost above exists. Safety no longer depends on "3 buffers should
+// be enough frames" - a real GPU fence (glFenceSync/glClientWaitSync) is
+// placed on a slot when its frame's draws are done, and waited on the next
+// time that same slot comes back around, so reuse is provably safe rather
+// than assumed.
+//
+// GL_EXT_buffer_storage is an extension, not core GLES - some devices (older
+// Mali in particular, matching the caution in the comment on
+// g_ForceSkipVBOOrphan in android_main.cpp) will not have it. Detected at
+// init; when absent, s_streamRingAvailable stays false and every draw below
+// falls straight back to the plain per-draw orphan above, unchanged from
+// today's shipped behaviour. This is a strict opt-in fast path, never a
+// required one.
+static constexpr int kStreamRingSize = 3;
+
+// Comfortably above one full kMaxBatchVerts batch (300000 * 36 bytes =
+// ~10.3 MB) so a single oversized batch does not by itself force the
+// overflow fallback below. 3 slots * 12 MB = 36 MB, trivial next to this
+// app's LARGE_HEAP manifest flag, and only ever allocated on devices where
+// the extension check below actually passes.
+static constexpr GLsizeiptr kStreamRingSlotBytes = 12 * 1024 * 1024;
+
+struct StreamRingSlot {
+    GLuint vbo = 0;
+    unsigned char* mapped = nullptr;
+    GLsync fence = nullptr;   // sync object: "GPU is done reading this slot's LAST frame of data"
+};
+
+static StreamRingSlot s_streamRing[kStreamRingSize];
+static int            s_streamIdx = 0;
+static GLsizeiptr     s_streamOffset = 0;
+static bool           s_streamRingAvailable = false;
+
+#ifndef GL_MAP_PERSISTENT_BIT_EXT
+#define GL_MAP_PERSISTENT_BIT_EXT 0x0040
+#endif
+#ifndef GL_MAP_COHERENT_BIT_EXT
+#define GL_MAP_COHERENT_BIT_EXT 0x0080
+#endif
+
+typedef void (GL_APIENTRY* MU_PFNGLBUFFERSTORAGEEXTPROC)(GLenum target, GLsizeiptr size, const void* data, GLbitfield flags);
+static MU_PFNGLBUFFERSTORAGEEXTPROC s_glBufferStorageEXT = nullptr;
+
+// Base vertex is ES 3.2. It links fine on-device (the driver exposes it via
+// eglGetProcAddress) but the NDK's API-21 stub library (minSdk here) has no
+// static entry point for it, so the direct symbol fails at link time - see
+// the build failure this produced the first time this was tried. Resolved at
+// runtime instead; devices where it comes back null simply never set
+// s_streamRingAvailable (see GL_Compat_Init), so DrawQuadIndicesFrom's
+// fallback branch below is unreachable with a non-zero firstVertex on them.
+typedef void (GL_APIENTRY* MU_PFNGLDRAWELEMENTSBASEVERTEX)(
+    GLenum mode, GLsizei count, GLenum type, const void* indices, GLint basevertex);
+static MU_PFNGLDRAWELEMENTSBASEVERTEX s_glDrawElementsBaseVertex = nullptr;
+
+// Every indexed-quad draw site funnels through here so there is exactly one
+// place that knows whether base-vertex is actually available.
+static inline void DrawQuadIndicesFrom(GLsizei indexCount, GLint firstVertex) {
+    if (firstVertex != 0 && s_glDrawElementsBaseVertex) {
+        s_glDrawElementsBaseVertex(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0, firstVertex);
+    } else {
+        glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
+    }
+}
+
+static void DestroyStreamRing() {
+    for (int i = 0; i < kStreamRingSize; ++i) {
+        StreamRingSlot& slot = s_streamRing[i];
+        if (slot.fence) {
+            glDeleteSync(slot.fence);
+            slot.fence = nullptr;
+        }
+        if (slot.vbo) {
+            if (slot.mapped) {
+                glBindBuffer(GL_ARRAY_BUFFER, slot.vbo);
+                glUnmapBuffer(GL_ARRAY_BUFFER);
+            }
+            glDeleteBuffers(1, &slot.vbo);
+            slot.vbo = 0;
+        }
+        slot.mapped = nullptr;
+    }
+    s_streamIdx = 0;
+    s_streamOffset = 0;
+    s_streamRingAvailable = false;
+}
+
+// Called once from GL_Compat_Init, after s_vbo/s_ebo exist (the ring's
+// fallback path binds s_vbo, so it must be valid before this can decide
+// anything). Leaves s_streamRingAvailable false - i.e. today's unchanged
+// per-draw-orphan behaviour - on any failure at any step.
+static void InitStreamRing() {
+    s_glDrawElementsBaseVertex = reinterpret_cast<MU_PFNGLDRAWELEMENTSBASEVERTEX>(
+        eglGetProcAddress("glDrawElementsBaseVertex"));
+    s_glBufferStorageEXT = reinterpret_cast<MU_PFNGLBUFFERSTORAGEEXTPROC>(
+        eglGetProcAddress("glBufferStorageEXT"));
+
+    int glMajor = 0, glMinor = 0;
+    if (const char* glVer = reinterpret_cast<const char*>(glGetString(GL_VERSION))) {
+        sscanf(glVer, "OpenGL ES %d.%d", &glMajor, &glMinor);
+    }
+    const bool hasBaseVertex = s_glDrawElementsBaseVertex != nullptr
+        && ((glMajor > 3) || (glMajor == 3 && glMinor >= 2));
+
+    bool hasBufferStorage = false;
+    if (s_glBufferStorageEXT != nullptr) {
+        if (const char* ext = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS))) {
+            hasBufferStorage = strstr(ext, "GL_EXT_buffer_storage") != nullptr;
+        }
+    }
+
+    LOGI("Stream ring capability: baseVertex=%d bufferStorage=%d (GLES %d.%d)",
+         hasBaseVertex ? 1 : 0, hasBufferStorage ? 1 : 0, glMajor, glMinor);
+
+    if (!hasBaseVertex || !hasBufferStorage) {
+        return;
+    }
+
+    const GLbitfield storageFlags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT_EXT | GL_MAP_COHERENT_BIT_EXT;
+    const GLbitfield mapFlags     = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT_EXT | GL_MAP_COHERENT_BIT_EXT;
+
+    for (int i = 0; i < kStreamRingSize; ++i) {
+        StreamRingSlot& slot = s_streamRing[i];
+        glGenBuffers(1, &slot.vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, slot.vbo);
+        s_glBufferStorageEXT(GL_ARRAY_BUFFER, kStreamRingSlotBytes, nullptr, storageFlags);
+        if (glGetError() != GL_NO_ERROR) {
+            LOGE("Stream ring: glBufferStorageEXT failed on slot %d, falling back", i);
+            DestroyStreamRing();
+            return;
+        }
+
+        slot.mapped = reinterpret_cast<unsigned char*>(
+            glMapBufferRange(GL_ARRAY_BUFFER, 0, kStreamRingSlotBytes, mapFlags));
+        if (slot.mapped == nullptr) {
+            LOGE("Stream ring: glMapBufferRange failed on slot %d, falling back", i);
+            DestroyStreamRing();
+            return;
+        }
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    s_streamIdx = 0;
+    s_streamOffset = 0;
+    s_streamRingAvailable = true;
+    LOGI("Stream ring: active, %d slots x %lld bytes", kStreamRingSize, (long long)kStreamRingSlotBytes);
+}
 static bool   s_samplerUniformInitialized = false;
 static bool   s_hasLastMvp = false;
 static Mat4   s_lastMvp = { 0 };
@@ -570,6 +745,13 @@ static inline void BindArrayBufferCached(GLuint buffer) {
     if (s_boundArrayBuffer != buffer) {
         glBindBuffer(GL_ARRAY_BUFFER, buffer);
         s_boundArrayBuffer = buffer;
+        // glVertexAttribPointer captures whichever buffer is bound when it is
+        // called. Until the stream ring, this was always the same s_vbo, so
+        // BindImmediateVertexAttribLayout's cache was safe to leave untouched
+        // by a rebind - now that draws rotate across ring slots (and can fall
+        // back to s_vbo mid-session), a real rebind must force the layout to
+        // be re-issued against the newly bound buffer.
+        s_imAttribValid = false;
     }
 }
 
@@ -870,6 +1052,8 @@ void GL_Compat_Init() {
 
     LOGI("GL_Compat_Init: OK (prog=%u, progOpaque=%u, vbo=%u, ebo=%u)", s_prog, s_progOpaque, s_vbo, s_ebo);
 
+    InitStreamRing();
+
     // GPU skinning: compiles/links the shader and allocates its UBO.
     //
     // This used to say GL_DrawSkinnedMesh was never called and a failure here
@@ -944,6 +1128,7 @@ void GL_Compat_Shutdown() {
     if (s_progOpaque) { glDeleteProgram(s_progOpaque); s_progOpaque = 0; }
     if (s_vbo)  { glDeleteBuffers(1, &s_vbo); s_vbo = 0; }
     if (s_ebo)  { glDeleteBuffers(1, &s_ebo); s_ebo = 0; }
+    DestroyStreamRing();
     s_verts.clear();
     s_expandedVerts.clear();
     s_arrayVerts.clear();
@@ -1096,22 +1281,30 @@ static inline void ApplyShaderStateCommon(bool modelViewBaked) {
     }
 }
 
-// Stream one draw's worth of vertices into the shared streaming VBO.
+// Stream one draw's worth of vertices and bind whichever buffer they landed
+// in. Returns the first-vertex index that draw should read from (always 0 for
+// every path except the ring), or -1 if nothing usable is bound at all.
+// `bytes` is always a whole number of IMVertex - every call site below
+// computes it as vertCount * sizeof(IMVertex) - so the ring's running offset
+// stays vertex-aligned and dividing it back into a vertex index is exact.
 //
-// Buffer orphaning gives the driver a fresh allocation so overwriting a buffer
-// the GPU may still be reading does not stall. The size it orphans matters: the
-// previous code passed s_vboCapacity, which is the high-water mark across every
-// batch in the session — the bulk vertex-array draws push it into the hundreds
-// of KB — and it did that before *every* draw, including the 36-byte-per-vertex
-// UI quads. At ~600 immediate-mode draws a frame that is hundreds of megabytes
-// of driver allocation per frame, and it measured at ~83us per 2D quad.
+// Fast path (s_streamRingAvailable): the ring slot for the current frame was
+// mapped once at init (see InitStreamRing) and never unmapped - this is a
+// plain memcpy into already-mapped memory, no GL call. See the long comment
+// above kStreamRingSize for why this exists and what two earlier attempts at
+// it got wrong.
 //
-// Orphaning at the size actually being drawn keeps the stall-avoidance property
-// (it is still a fresh allocation) and folds the upload into the same call.
-static void StreamVertexData(const void* data, GLsizeiptr bytes) {
+// Fallback (ring unavailable, or this one draw is larger than a whole ring
+// slot): the original per-draw glBufferData orphan. Buffer orphaning gives
+// the driver a fresh allocation so overwriting storage the GPU may still be
+// reading does not stall - the ~62% CPU cost this file's stream-ring comment
+// describes, but still strictly safe, which is why it stays as the fallback
+// rather than being removed.
+static GLint StreamVertexData(const void* data, GLsizeiptr bytes) {
     if (s_skipVBOOrphan) {
         // Software renderers (SwiftShader): a fresh allocation per draw is pure
         // malloc cost with no pipeline to stall, so keep a grow-only buffer.
+        BindArrayBufferCached(s_vbo);
         if (bytes > s_vboCapacity) {
             GLsizeiptr newCapacity = std::max<GLsizeiptr>(65536, s_vboCapacity);
             while (newCapacity < bytes) {
@@ -1121,11 +1314,31 @@ static void StreamVertexData(const void* data, GLsizeiptr bytes) {
             glBufferData(GL_ARRAY_BUFFER, s_vboCapacity, nullptr, GL_STREAM_DRAW);
         }
         glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, data);
-        return;
+        return 0;
     }
 
+    if (s_streamRingAvailable && bytes <= kStreamRingSlotBytes) {
+        StreamRingSlot& slot = s_streamRing[s_streamIdx];
+        if (s_streamOffset + bytes > kStreamRingSlotBytes) {
+            // This frame has filled the slot. Falling back to the orphan path
+            // for the rest of the frame is safe and simply costs what today's
+            // shipped build already costs for that one draw - wrapping back
+            // to offset 0 within the same frame would not be: earlier draws
+            // this frame already point the GPU at data earlier in this same
+            // slot, and it has not necessarily read it yet.
+        } else {
+            memcpy(slot.mapped + s_streamOffset, data, static_cast<size_t>(bytes));
+            const GLint firstVertex = static_cast<GLint>(s_streamOffset / static_cast<GLsizeiptr>(sizeof(IMVertex)));
+            s_streamOffset += bytes;
+            BindArrayBufferCached(slot.vbo);
+            return firstVertex;
+        }
+    }
+
+    BindArrayBufferCached(s_vbo);
     glBufferData(GL_ARRAY_BUFFER, bytes, data, GL_STREAM_DRAW);
     s_vboCapacity = bytes;
+    return 0;
 }
 
 static void DrawPreparedVerts(const IMVertex* verts, size_t vertCount, GLenum drawMode, bool modelViewBaked) {
@@ -1135,14 +1348,16 @@ static void DrawPreparedVerts(const IMVertex* verts, size_t vertCount, GLenum dr
 
     const GLsizeiptr drawBytes = static_cast<GLsizeiptr>(vertCount * sizeof(IMVertex));
 
-    BindArrayBufferCached(s_vbo);
-    StreamVertexData(verts, drawBytes);
+    const GLint first = StreamVertexData(verts, drawBytes);
+    if (first < 0) {
+        return;
+    }
 
     ApplyShaderStateCommon(modelViewBaked);
 
     BindImmediateVertexAttribLayout();
 
-    glDrawArrays(drawMode, 0, (GLsizei)vertCount);
+    glDrawArrays(drawMode, first, (GLsizei)vertCount);
     ++s_drawCallCount; ++s_drawSite[0];
     s_totalVertices += (int)vertCount;
 }
@@ -1210,15 +1425,17 @@ static bool DrawPreparedQuadsIndexed(const IMVertex* verts, size_t vertCount, bo
 
     const GLsizeiptr drawBytes = static_cast<GLsizeiptr>(vertCount * sizeof(IMVertex));
 
-    BindArrayBufferCached(s_vbo);
-    StreamVertexData(verts, drawBytes);
+    const GLint first = StreamVertexData(verts, drawBytes);
+    if (first < 0) {
+        return false;
+    }
 
     ApplyShaderStateCommon(modelViewBaked);
 
     BindImmediateVertexAttribLayout();
 
     BindElementArrayBufferCached(s_ebo);
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(quadCount * 6u), GL_UNSIGNED_SHORT, 0);
+    DrawQuadIndicesFrom(static_cast<GLsizei>(quadCount * 6u), first);
     ++s_drawCallCount; ++s_drawSite[2];
     s_totalVertices += (int)(quadCount * 6u);
     ++s_quadIndexedDrawCalls;
@@ -1377,6 +1594,43 @@ static void FlushPendingImmediateBatch(GLFlushCause cause) {
 
 void GL_FlushPending() {
     FlushPendingImmediateBatch(kFlushCauseFrame);
+
+    if (!s_streamRingAvailable) {
+        return;
+    }
+
+    // Mark this slot's contents as "in flight" - draws are queued, not
+    // executed synchronously, so the GPU can still be reading this slot for a
+    // while after this point (see the stream-ring comment above
+    // kStreamRingSize for the full design).
+    StreamRingSlot& finishedSlot = s_streamRing[s_streamIdx];
+    if (finishedSlot.fence) {
+        glDeleteSync(finishedSlot.fence);
+    }
+    finishedSlot.fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+
+    s_streamIdx = (s_streamIdx + 1) % kStreamRingSize;
+    s_streamOffset = 0;
+
+    // Before the new frame writes into this slot, confirm the GPU is
+    // actually done with what it held kStreamRingSize-1 frames ago - this is
+    // what makes reuse provably safe rather than "3 buffers should be
+    // enough". Finite timeout, not GL_TIMEOUT_IGNORED: with 3 slots the GPU
+    // normally has two whole frames of headroom to already be done, so this
+    // returns immediately in the ordinary case - if a fence is somehow still
+    // unsignaled after 2 seconds (a stalled/lost GPU context), freezing the
+    // game waiting on it forever is a worse failure than proceeding and
+    // risking one torn frame.
+    StreamRingSlot& nextSlot = s_streamRing[s_streamIdx];
+    if (nextSlot.fence) {
+        const GLuint64 kTwoSecondsNs = 2ull * 1000ull * 1000ull * 1000ull;
+        const GLenum waitResult = glClientWaitSync(nextSlot.fence, GL_SYNC_FLUSH_COMMANDS_BIT, kTwoSecondsNs);
+        if (waitResult == GL_TIMEOUT_EXPIRED || waitResult == GL_WAIT_FAILED) {
+            LOGE("Stream ring: fence wait on slot %d did not signal in time (result=0x%x)", s_streamIdx, waitResult);
+        }
+        glDeleteSync(nextSlot.fence);
+        nextSlot.fence = nullptr;
+    }
 }
 
 // =============================================================================
@@ -2138,8 +2392,8 @@ void GL_DrawQuadsBulk(const float* vertexData, int quadCount) {
     const GLsizei vertCount = quadCount * 4;
     const GLsizeiptr dataBytes = (GLsizeiptr)(vertCount * sizeof(IMVertex));
 
-    BindArrayBufferCached(s_vbo);
-    StreamVertexData(vertexData, dataBytes);
+    const GLint first = StreamVertexData(vertexData, dataBytes);
+    if (first < 0) return;
 
     ApplyShaderStateCommon(false);  // use full MVP (not baked)
 
@@ -2147,7 +2401,7 @@ void GL_DrawQuadsBulk(const float* vertexData, int quadCount) {
 
     BindElementArrayBufferCached(s_ebo);
     const GLsizei indexCount = quadCount * 6;
-    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
+    DrawQuadIndicesFrom(indexCount, first);
     ++s_drawCallCount; ++s_drawSite[4];
     s_totalVertices += indexCount;
 }
@@ -2160,15 +2414,15 @@ void GL_DrawTrisBulk(const float* vertexData, int triCount) {
     const GLsizei vertCount = triCount * 3;
     const GLsizeiptr dataBytes = (GLsizeiptr)(vertCount * sizeof(IMVertex));
 
-    BindArrayBufferCached(s_vbo);
-    StreamVertexData(vertexData, dataBytes);
+    const GLint first = StreamVertexData(vertexData, dataBytes);
+    if (first < 0) return;
 
     ApplyShaderStateCommon(false);
 
     BindImmediateVertexAttribLayout();
 
     BindElementArrayBufferCached(0);
-    glDrawArrays(GL_TRIANGLES, 0, vertCount);
+    glDrawArrays(GL_TRIANGLES, first, vertCount);
     ++s_drawCallCount; ++s_drawSite[5];
     s_totalVertices += vertCount;
 }
@@ -2479,15 +2733,15 @@ void GL_DrawTrisBulkBaked(const float* vertexData, int triCount) {
     const GLsizei vertCount = triCount * 3;
     const GLsizeiptr dataBytes = (GLsizeiptr)(vertCount * sizeof(IMVertex));
 
-    BindArrayBufferCached(s_vbo);
-    StreamVertexData(vertexData, dataBytes);
+    const GLint first = StreamVertexData(vertexData, dataBytes);
+    if (first < 0) return;
 
     ApplyShaderStateCommon(true);   // modelview already baked into the verts
 
     BindImmediateVertexAttribLayout();
 
     BindElementArrayBufferCached(0);
-    glDrawArrays(GL_TRIANGLES, 0, vertCount);
+    glDrawArrays(GL_TRIANGLES, first, vertCount);
     ++s_drawCallCount; ++s_drawSite[5];
     s_totalVertices += vertCount;
 }
