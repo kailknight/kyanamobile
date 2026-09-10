@@ -17,6 +17,7 @@ CB_GetMixRate* gCB_GetMixRate;
 CB_GetMixRate::CB_GetMixRate()
 {
 	this->RealMix = -1;
+	this->RealMixItemTotal = -1;
 	g_MixRecipeMgr.RealRate = -1;
 	g_MixRecipeMgr.RealZen = -1;
 }
@@ -25,18 +26,27 @@ CB_GetMixRate::~CB_GetMixRate()
 {
 }
 
-void CB_GetMixRate::SetInfoMixID(int MixID)
+void CB_GetMixRate::SetInfoMixID(int MixID, int ItemTotal)
 {
 	if (this->RealMix != -1 && MixID == 0)
 	{
 		this->RealMix = -1;
+		this->RealMixItemTotal = -1;
 		g_MixRecipeMgr.RealRate = -1;
 		g_MixRecipeMgr.RealZen = -1;
 	}
-	if (MixID != this->RealMix && MixID != 0)
+
+	// A quantity-only change (e.g. adding a second Jewel of Chaos to a slot
+	// the recipe already recognised) keeps the same MixID, so the MixID
+	// check alone never re-asks the server - the rate just sits stale until
+	// something forces a fresh request (closing/reopening the box, or an
+	// admin's Reload ChaosMix pushing every open box's remembered mix).
+	// Re-ask on either the recipe or the item count changing.
+	if (MixID != 0 && (MixID != this->RealMix || ItemTotal != this->RealMixItemTotal))
 	{
 		//gInterface.DrawMessage(1, "SetInfoMixID() %d", MixID);
 		this->RealMix = MixID;
+		this->RealMixItemTotal = ItemTotal;
 		this->CGSendMixInfo();
 		g_MixRecipeMgr.RealRate = -1;
 		g_MixRecipeMgr.RealZen = -1;

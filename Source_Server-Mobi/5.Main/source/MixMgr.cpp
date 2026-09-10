@@ -1230,7 +1230,17 @@ void CMixRecipeMgr::CheckMixInventory()
 	CheckRecipe(m_MixItemInventory.GetNumMixItems(), m_MixItemInventory.GetMixItems());
 	CheckRecipeSimilarity(m_MixItemInventory.GetNumMixItems(), m_MixItemInventory.GetMixItems());
 #if(CB_GETMIXRATE)
-	if (gCB_GetMixRate) gCB_GetMixRate->SetInfoMixID(this->GetCurMixID());
+	if (gCB_GetMixRate)
+	{
+		int iNumMixItems = m_MixItemInventory.GetNumMixItems();
+		CMixItem* pMixItems = m_MixItemInventory.GetMixItems();
+		int iItemTotal = 0;
+		for (int i = 0; i < iNumMixItems; ++i)
+		{
+			iItemTotal += pMixItems[i].m_iCount;
+		}
+		gCB_GetMixRate->SetInfoMixID(this->GetCurMixID(), iItemTotal);
+	}
 #endif
 }
 

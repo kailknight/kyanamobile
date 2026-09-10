@@ -21,10 +21,11 @@ public:
 
 	CB_GetMixRate();
 	~CB_GetMixRate();
-	void SetInfoMixID(int MixID);
+	void SetInfoMixID(int MixID, int ItemTotal = 0);
 	void CGSendMixInfo();
 
 	int RealMix;
+	int RealMixItemTotal; // last-requested total item count in the mix grid - lets a quantity change re-ask even when the recognized recipe (MixID) doesn't change
 
 	void GCRecvMixInfo(BYTE* lpMsg, int size);
 };
