@@ -943,7 +943,7 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderAttribute()
 	{
 		if (itemoption380Attack != 0 || iAttackPowerRate != 0)
 		{
-			unicode::_sprintf(strAttakMamage, GlobalText[2109], CharacterAttribute->PrintPlayer.ViewAttackSuccessRatePvP);
+			unicode::_sprintf(strAttakMamage, GlobalText[2109], CharacterAttribute->PrintPlayer.ViewAttackSuccessRatePvP, itemoption380Attack + iAttackPowerRate);
 		}
 		else
 		{
@@ -1253,7 +1253,7 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderAttribute()
 
 	if (itemoption380Defense != 0 || iDefenseRate != 0)
 	{
-		unicode::_sprintf(strBlocking, GlobalText[2110], CharacterAttribute->PrintPlayer.ViewDefenseSuccessRatePvP);
+		unicode::_sprintf(strBlocking, GlobalText[2110], CharacterAttribute->PrintPlayer.ViewDefenseSuccessRatePvP, itemoption380Defense + iDefenseRate);
 	}
 	else
 	{
