@@ -2277,6 +2277,22 @@ constexpr uint32_t kAndroidPendingBuffCastTimeoutMs = 4000;
 constexpr int kVirtualComboSlotCount = 3;
 constexpr uint32_t kVirtualComboResetMs = 2500;
 
+// How long a single step may keep being refused before the chain gives up and
+// restarts from the opener.
+//
+// This exists because kVirtualComboResetMs alone cannot break a stuck step:
+// that timeout is measured from the last press, and g_virtualComboLastMs is
+// refreshed on EVERY press including refused ones (deliberately - retrying a
+// blocked step should not itself time the chain out). Holding the attack button
+// repeats every g_virtualComboRepeatMs, i.e. 200-800ms, always well inside the
+// 2500ms window - so a step that can never succeed (its target died, walked out
+// of range, or it is on cooldown) was held forever and the counter sat on the
+// same number until the player stopped attacking for a full 2.5s. That is the
+// "CMB stuck on 2/3" report.
+//
+// Sized to allow several genuine retries at the slowest pacing before giving up.
+constexpr uint32_t kVirtualComboBlockedResetMs = 1200;
+
 // Combo settings panel, opened by a long-press on the toggle. One row per
 // combo slot rather than one shared value - see g_virtualComboRepeatMs.
 // Centred above the wheel rather than anchored to the toggle, so it never
@@ -2293,6 +2309,9 @@ constexpr float kComboSettingsButtonSize = 28.0f;
 bool g_virtualComboEnabled = false;
 int g_virtualComboStep = 0;
 uint32_t g_virtualComboLastMs = 0;
+// Tick of the FIRST consecutive refusal of the current step, or 0 when the step
+// is not currently blocked. Drives kVirtualComboBlockedResetMs above.
+uint32_t g_virtualComboBlockedSinceMs = 0;
 
 // Runtime ms-per-step, one value per wheel slot in the chain (step 0 = slot 1
 // / the opener, and so on) rather than a single pace for all three - a slow
@@ -8963,8 +8982,24 @@ bool TriggerVirtualAttackButtonPress()
         if ((nowMs - g_virtualComboLastMs) > kVirtualComboResetMs)
         {
             g_virtualComboStep = 0;
+            g_virtualComboBlockedSinceMs = 0;
         }
         g_virtualComboLastMs = nowMs;
+
+        // A step that has been refused continuously for this long is not going to
+        // succeed by being retried again - its target is dead or gone, or it is on
+        // cooldown. Restart the chain instead of holding the same step forever,
+        // which is what left the counter frozen mid-chain. Step 0 is the opener
+        // (and by convention the weapon step), so restarting also gets the player
+        // attacking again rather than standing there pressing a dead button.
+        if (g_virtualComboBlockedSinceMs != 0
+            && (nowMs - g_virtualComboBlockedSinceMs) > kVirtualComboBlockedResetMs)
+        {
+            LOGI("VirtualPad: combo step=%d blocked for %ums, restarting chain",
+                 g_virtualComboStep, nowMs - g_virtualComboBlockedSinceMs);
+            g_virtualComboStep = 0;
+            g_virtualComboBlockedSinceMs = 0;
+        }
 
         const int step = g_virtualComboStep;
         const int skillIndex = GetVirtualOverlayHotKeySkillIndex(step);
@@ -8977,6 +9012,7 @@ bool TriggerVirtualAttackButtonPress()
         if (!IsValidSkillIndex(skillIndex))
         {
             g_virtualComboStep = (step + 1) % kVirtualComboSlotCount;
+            g_virtualComboBlockedSinceMs = 0;
             g_androidComboLastResult = kAndroidComboResultWeapon;
             return AndroidTriggerNormalAttackButtonInternal();
         }
@@ -8990,6 +9026,7 @@ bool TriggerVirtualAttackButtonPress()
         {
             // Advance only once the skill actually went out.
             g_virtualComboStep = (step + 1) % kVirtualComboSlotCount;
+            g_virtualComboBlockedSinceMs = 0;
             g_androidComboLastResult = kAndroidComboResultCast;
             return true;
         }
@@ -9000,6 +9037,15 @@ bool TriggerVirtualAttackButtonPress()
         // never finished, because the next press moved on while this skill had
         // not landed. And deliberately do not swing the weapon instead, since a
         // normal attack in the middle of a combo resets the server's chain.
+        //
+        // Holding is bounded, though - the check at the top of this block gives
+        // up after kVirtualComboBlockedResetMs so a step that can never succeed
+        // does not freeze the chain (and the counter) indefinitely.
+        if (g_virtualComboBlockedSinceMs == 0)
+        {
+            g_virtualComboBlockedSinceMs = nowMs;
+        }
+
         g_androidComboLastResult = kAndroidComboResultBlocked;
         LOGI("VirtualPad: combo step=%d skillIndex=%d refused, holding step", step, skillIndex);
         return false;
@@ -14120,6 +14166,7 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         {
             g_virtualComboEnabled = !g_virtualComboEnabled;
             g_virtualComboStep = 0;
+            g_virtualComboBlockedSinceMs = 0;
             g_virtualSkillSlotsDirty = true;
             SaveVirtualSkillSlots();
             PlayBuffer(SOUND_CLICK01);
