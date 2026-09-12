@@ -475,6 +475,11 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				gVongQuay.GetInfoVQ(lpMsg);
 			}
 			break;
+			case 0x8D: // Spin wheel Rewards box - the prizes being held
+			{
+				gVongQuay.RecvClaimList(lpMsg);
+			}
+			break;
 #if(CB_BXHDMG)
 			case 0x2D: //Recv List
 			{

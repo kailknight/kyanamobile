@@ -73,6 +73,44 @@ public:
 		DWORD SoLan;
 	};
 
+	// ---- Rewards box ------------------------------------------------------
+	// Every prize the wheel awards is parked server-side and claimed by hand
+	// from this window - nothing goes straight to the inventory. Packed to match
+	// the GameServer's PMSG_SPINCLAIM_* in CustomVongQuay.h byte for byte; keep
+	// any field change mirrored on both sides.
+#pragma pack(push,1)
+
+	struct SPINCLAIM_ROW
+	{
+		BYTE slot;
+		BYTE Item[12];
+	};
+
+	// Server -> client, C2:D3:8D. Followed by `count` SPINCLAIM_ROW.
+	struct PMSG_SPINCLAIM_LIST_RECV
+	{
+		PSWMSG_HEAD header;
+		BYTE count;
+		BYTE free;
+	};
+
+	// Client -> server, C1:D3:8E. slot 0xFF claims everything.
+	struct PMSG_SPINCLAIM_CLAIM_SEND
+	{
+		PSBMSG_HEAD header;
+		BYTE slot;
+	};
+
+#pragma pack(pop)
+
+	// One held prize, decoded ready to render.
+	struct INFO_SPINCLAIM_LOCAL
+	{
+		int slot;
+		short Index;
+		ITEM* Item;
+	};
+
 	CVongQuay();
 	virtual ~CVongQuay();
 	void Init();
@@ -90,6 +128,13 @@ public:
 	void GetListVQ(BYTE* Recv);
 	void RecvListItemVQ(BYTE* Recv);
 	void GetInfoVQ(BYTE* Recv);
+
+	// Rewards box: prizes held server-side, waiting to be claimed.
+	std::vector<INFO_SPINCLAIM_LOCAL> ListClaim;
+	int ClaimFree;
+	void RecvClaimList(BYTE* Recv);
+	void SendClaim(int slot);
+	void ClearClaimList();
 private:
 	
 };

@@ -719,6 +719,11 @@ enum
 	BITMAP_INTERFACE_MACROUI_END = BITMAP_INTERFACE_MACROUI_BEGIN + 4,
 	//===Custom BITMAP
 	BITMAP_INTERFACE_CUSTOM,
+	// Spin wheel pointer (Custom\Interface\arrow.ozt). Slots +0, +2, +4, +5, +6
+	// and +7 of this block are already taken by NewUIBMacro and
+	// NewUIBCustomMenu; +1, +3 and +8 were free. Explicit value, so inserting
+	// this shifts nothing - _END and the Android block below both have their own.
+	BITMAP_SPINWHEEL_ARROW = BITMAP_INTERFACE_CUSTOM + 3,
 	BITMAP_INTERFACE_CUSTOM_END = BITMAP_INTERFACE_CUSTOM + 8,
 #if defined(__ANDROID__) && !defined(PBG_ADD_INGAMESHOP_UI_ITEMSHOP)
 	BITMAP_ANDROID_IGS_CATEGORY_BTN = BITMAP_INTERFACE_CUSTOM_END,

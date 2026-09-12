@@ -770,6 +770,13 @@ void Interface::BLoadImage()
 	g_pBCustomMenuInfo->BindObject(IMG_HPBarFrame, "Custom\\HPBarFrame.tga");
 	g_pBCustomMenuInfo->BindObject(IMG_HPBarValue, "Custom\\HPBarValue.jpg");
 
+	// Spin wheel pointer. Written .tga here but the file on disk is arrow.OZT -
+	// OpenTga swaps the extension itself (GlobalBitmap.cpp ExchangeExt). Loaded
+	// here rather than in the wheel window so it is always resident: the window
+	// is opened and closed constantly, and DeleteBitmap/LoadBitmap churn on a
+	// 256x256 texture every time would be worse than holding 256 KB.
+	LoadBitmap("Custom\\Interface\\arrow.tga", BITMAP_SPINWHEEL_ARROW, GL_LINEAR, GL_CLAMP_TO_EDGE);
+
 	gCBCTCMini.LoadImg();
 }
 std::string Interface::generateCaptcha(int n)
