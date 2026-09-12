@@ -1454,7 +1454,29 @@ void CNewUIInGameShop::RenderBanner()
 			fVH = pBannerArt->SourceHeight / pBannerArt->Height;
 		}
 
-		RenderImage(IMAGE_IGS_BANNER, (float)iArtX, (float)iArtY, (float)iArtW, (float)iArtH, 0.0f, 0.0f, fUW, fVH);
+		/*
+			V is passed inverted (start at fVH, span -fVH) - that is what puts the
+			uploaded banner the right way up.
+
+			MU's own .OZJ assets are stored PRE-FLIPPED vertically: they were made by
+			converting bottom-up TGAs to JPEG without re-ordering the rows, so
+			OpenJpeg's straight top-down copy renders them upright, and every other
+			OZJ in the game therefore looks correct.
+
+			An operator-uploaded banner is an ordinary, natural-orientation JPEG.
+			Convert_Format only prepends 24 dummy header bytes to make it an .OZJ
+			(GlobalBitmap.cpp) - it does not, and cheaply cannot, re-order the rows -
+			so this one texture arrives upside down relative to every other OZJ and
+			needs the flip here instead.
+
+			Done at draw time rather than in the loader because IMAGE_IGS_BANNER only
+			ever holds uploaded art: every InitBanner caller passes a downloaded path.
+			Flipping inside OpenJpeg would invert the entire game's textures.
+
+			NOT an EXIF problem, and the EXIF path cannot fix it: the banner in use
+			reports Orientation = 1, so ApplyExifOrientationRGB correctly does nothing.
+		*/
+		RenderImage(IMAGE_IGS_BANNER, (float)iArtX, (float)iArtY, (float)iArtW, (float)iArtH, 0.0f, fVH, fUW, -fVH);
 	}
 	else
 	{

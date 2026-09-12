@@ -827,13 +827,15 @@ void CNewUIHeroPositionInfo::DrawAndroidMiniMap() {
 
   const float usercurrentx = (float)(Hero->PositionX) / 256.0f;
   const float usercurrenty = (float)(256 - Hero->PositionY) / 256.0f;
-  // Negated so the player's facing direction is always "up" on screen - the
-  // map rotates the opposite way the player turns. If this reads backwards
-  // on device (map spins the wrong way, or blips end up mirrored), the fix
-  // is flipping this one sign, not re-deriving the formulas below - both the
-  // map quad and the blip placement use the same headingDeg, so they will
-  // stay consistent with each other either way.
-  const float headingDeg = -(Hero->Object.Angle[2]);
+  // FIXED (north-up) minimap: the map and the blips no longer counter-rotate as
+  // the player turns. The terrain keeps a constant orientation and the player
+  // marker below carries the facing instead.
+  //
+  // Set kMiniMapRotates back to true to restore the old spinning behaviour -
+  // headingDeg is the single input for both the map quad and the blip placement,
+  // so the two cannot disagree either way.
+  static const bool kMiniMapRotates = false;
+  const float headingDeg = (kMiniMapRotates ? -(Hero->Object.Angle[2]) : 0.0f);
 
   DrawRotatingMapQuad(IndexIMGMap, px, py, pw, ph, usercurrentx, usercurrenty,
                       (float)ScaleMap, headingDeg);
@@ -882,22 +884,36 @@ void CNewUIHeroPositionInfo::DrawAndroidMiniMap() {
     RenderColor(bx - 1.5f, by - 1.5f, 3.f, 3.f);
   }
 
-  // Player marker, fixed at the panel's center and always pointing up: the
-  // rotation above is entirely carried by the map and the blips instead.
+  // Player marker, fixed at the panel's center.
   glColor3f(0.16f, 0.94f, 0.35f);
   RenderColor(cx - 3.0f, cy - 3.0f, 6.0f, 6.0f);
   EndRenderColor();
 
+  // The facing cone. On a fixed map "up" no longer means "forward", so this now
+  // rotates to show which way the player is looking - otherwise turning the
+  // character would give no feedback here at all.
+  //
+  // Rotating the cone by +Angle[2] is the exact inverse of the -Angle[2] the map
+  // quad used to apply, so it points at whatever terrain used to be pushed to the
+  // top of the panel. Angles are in UI space, which is y-DOWN, hence the tip at
+  // -10 rather than +10.
+  //
+  // If the cone points the wrong way on device, flip the sign of facingRad only;
+  // the map and blips are independent of it now.
+  const float facingRad = Hero->Object.Angle[2] * (3.14159265f / 180.0f);
+  const float cosF = std::cos(facingRad);
+  const float sinF = std::sin(facingRad);
+
+  const float coneLocal[3][2] = { { 0.0f, -10.0f }, { -5.0f, 2.0f }, { 5.0f, 2.0f } };
+
   glDisable(GL_TEXTURE_2D);
-  const float coneX = ConvertX(cx);
-  const float coneTop = (float)WindowHeight - ConvertY(cy - 10.0f);
-  const float coneBottom = (float)WindowHeight - ConvertY(cy + 2.0f);
-  const float coneHalfW = ConvertX(cx + 5.0f) - ConvertX(cx);
   glColor4f(0.16f, 0.94f, 0.35f, 0.9f);
   glBegin(GL_TRIANGLES);
-  glVertex2f(coneX, coneTop);
-  glVertex2f(coneX - coneHalfW, coneBottom);
-  glVertex2f(coneX + coneHalfW, coneBottom);
+  for (int n = 0; n < 3; ++n) {
+    const float rx = (coneLocal[n][0] * cosF) - (coneLocal[n][1] * sinF);
+    const float ry = (coneLocal[n][0] * sinF) + (coneLocal[n][1] * cosF);
+    glVertex2f(ConvertX(cx + rx), (float)WindowHeight - ConvertY(cy + ry));
+  }
   glEnd();
   glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 

@@ -5862,7 +5862,12 @@ AndroidUiRect GetComboSettingsCloseRect()
 
 // Defined further down, next to the tab rendering.
 bool HandleAndroidChatTabTap(float uiX, float uiY);
-bool HandleAndroidChatLogTap(float uiX, float uiY);
+bool HandleAndroidChatLogFingerDown(float uiX, float uiY, SDL_FingerID fingerId);
+bool HandleAndroidChatLogFingerMotion(const SDL_TouchFingerEvent& touch, float uiX, float uiY);
+bool HandleAndroidChatLogFingerUp(const SDL_TouchFingerEvent& touch, float uiX, float uiY);
+
+// Defined next to IsAndroidChatFriendlyWindowOpen, further down.
+float GetAndroidChatBlockOffsetX();
 
 AndroidUiRect GetChatTabRect(int tab)
 {
@@ -5872,7 +5877,8 @@ AndroidUiRect GetChatTabRect(int tab)
     }
 
     return {
-        kChatTabsX + static_cast<float>(tab) * (kChatTabW + kChatTabGap),
+        kChatTabsX + GetAndroidChatBlockOffsetX()
+            + static_cast<float>(tab) * (kChatTabW + kChatTabGap),
         kChatTabsY,
         kChatTabW,
         kChatTabH
@@ -9341,6 +9347,159 @@ bool IsAndroidGameWindowOpen()
         }
     }
     return false;
+}
+
+// True when a screen-owning window is up that must NOT take chat away with it.
+//
+// Trade is the case that matters, and it is the reason this exists: a trade is a
+// negotiation, so the one moment a player most needs to type is exactly the
+// moment chat was dead. Four separate gates all keyed on IsAndroidGameWindowOpen()
+// conspired to make it total - the per-frame watchdog in RunAndroidGameFrame
+// force-closed the chat bar every frame, the tab/log tap was refused, the tab
+// strip was not drawn, and the log text itself was suppressed - so a fix to any
+// one of them alone would have changed nothing observable.
+//
+// Tested on INTERFACE_TRADE specifically rather than on "trade or inventory":
+// opening trade force-opens the inventory too (see Show(INTERFACE_TRADE) in
+// NewUISystem.cpp), so both are in kAndroidScreenOwningWindows for the duration,
+// and keying on the inventory would silently turn chat back on for anyone merely
+// browsing their bag. That may well be desirable, but it is a different decision
+// and not this one.
+// The subset of kAndroidScreenOwningWindows that must NOT take chat away with
+// them - trade, every NPC you can stand and talk to, and the shop/storage panels
+// you talk across. A trade or a sale is a negotiation, so these are exactly the
+// moments a player most needs to type.
+//
+// Membership is decided by GEOMETRY, because chat does not vanish for these - it
+// shifts into the free left column at x 11..236 (see
+// kAndroidChatBlockShiftedOffsetX) and its log claims taps there. So a window is
+// only listed if its panel leaves that lane clear. The MU convention makes this
+// easy: the NPC/shop/trade panel takes x 260..450 and the player's inventory
+// pairs with it at 450..640, leaving 0..260 free.
+//
+// INTERFACE_INVENTORY and ExpandInventory are listed not as a preference but out
+// of necessity: opening trade, an NPC shop or storage force-opens the inventory
+// alongside them, and the all-must-be-friendly rule below would otherwise veto
+// every one of those. Both are clear of the lane (450..640 and 260..450).
+//
+// Deliberately EXCLUDED, and the reason to check before adding anything here:
+//   - ExpandWarehouse. StorageInventoryExt is created at (260-190, 0), i.e.
+//     x 70..260, y 0..429 - straight through the shifted chat block. Enabling it
+//     would reinstate the exact bug this all fixes: chat covering a panel's
+//     controls AND eating the taps meant for them.
+//   - INGAMESHOP, MOVEMAP, MINI_MAP, OPTION, COMMAND, FRIEND, GUILDINFO,
+//     MASTER_LEVEL, GENSRANKING - full-canvas or near-full-canvas, so no lane is
+//     free, and none is an NPC conversation.
+//   - CHARACTER and MuHelper are safe geometrically but are not NPC windows;
+//     add them if chatting with the stat sheet open is wanted.
+constexpr SEASON3B::INTERFACE_LIST kAndroidChatFriendlyWindows[] = {
+    // Trade, shops, storage, crafting - all at x 260..450.
+    SEASON3B::INTERFACE_TRADE,
+    SEASON3B::INTERFACE_NPCSHOP,
+    SEASON3B::INTERFACE_STORAGE,
+    SEASON3B::INTERFACE_MIXINVENTORY,
+    SEASON3B::INTERFACE_MYSHOP_INVENTORY,
+    SEASON3B::INTERFACE_PURCHASESHOP_INVENTORY,
+
+    // Forced open alongside the above - see the note on necessity.
+    SEASON3B::INTERFACE_INVENTORY,
+    SEASON3B::INTERFACE_ExpandInventory,
+
+    // NPC conversations.
+    SEASON3B::INTERFACE_NPCGUILDMASTER,
+    SEASON3B::INTERFACE_NPC_DIALOGUE,
+    SEASON3B::INTERFACE_NPCQUEST,
+    SEASON3B::INTERFACE_MYQUEST,
+    SEASON3B::INTERFACE_NPCBREEDER,
+    SEASON3B::INTERFACE_GATEKEEPER,
+    SEASON3B::INTERFACE_GUARDSMAN,
+    SEASON3B::INTERFACE_SENATUS,
+    SEASON3B::INTERFACE_REFINERY,
+    SEASON3B::INTERFACE_REFINERYINFO,
+    SEASON3B::INTERFACE_DEVILSQUARE,
+    SEASON3B::INTERFACE_BLOODCASTLE,
+    SEASON3B::INTERFACE_KANTURU2ND_ENTERNPC,
+    SEASON3B::INTERFACE_CURSEDTEMPLE_NPC,
+    SEASON3B::INTERFACE_DOPPELGANGER_NPC,
+    SEASON3B::INTERFACE_EMPIREGUARDIAN_NPC,
+    SEASON3B::INTERFACE_UNITEDMARKETPLACE_NPC_JULIA,
+    SEASON3B::INTERFACE_GOLD_BOWMAN,
+    SEASON3B::INTERFACE_GOLD_BOWMAN_LENA,
+};
+
+// True when at least one screen-owning window is open AND every one that is, is
+// chat-friendly.
+//
+// Stricter-of-the-two, the same rule IsAndroidMovementAllowedWithOpenWindows
+// uses: one non-friendly window is enough to take chat away even if a friendly
+// one is up beside it. That is what keeps STORAGE + ExpandWarehouse safe - the
+// pair is common, and the Ext panel is the one that would be sat on.
+bool IsAndroidChatFriendlyWindowOpen()
+{
+    // Raw CBInterface popups (Features menu and friends) are not INTERFACE_
+    // windows, so the loop below cannot see them and cannot vet their geometry.
+    if (IsAndroidRawPopupWindowOpen())
+    {
+        return false;
+    }
+
+    if (g_pNewUISystem == nullptr)
+    {
+        return false;
+    }
+
+    bool anyOpen = false;
+
+    for (const SEASON3B::INTERFACE_LIST window : kAndroidScreenOwningWindows)
+    {
+        if (!g_pNewUISystem->IsVisible(window))
+        {
+            continue;
+        }
+
+        anyOpen = true;
+
+        bool friendly = false;
+        for (const SEASON3B::INTERFACE_LIST allowed : kAndroidChatFriendlyWindows)
+        {
+            if (window == allowed)
+            {
+                friendly = true;
+                break;
+            }
+        }
+
+        if (!friendly)
+        {
+            return false;
+        }
+    }
+
+    return anyOpen;
+}
+
+// Horizontal shift applied to the whole chat block (tab strip, log backing, log
+// text, log tap rect) while a chat-friendly window is up.
+//
+// At rest the block sits at x 211..436, which runs straight through the trade
+// window (x 260..450) - and because the log's tap handler claims that rect before
+// the touch reaches the window behind it, it did not merely sit on top of the
+// trade window's bottom buttons, it made them untappable.
+//
+// The right half of the screen is fully committed by every window in
+// kAndroidChatFriendlyWindows (the NPC/trade/shop panel at 260..450, the player
+// inventory it pairs with at 450..640), so the block moves into the free left
+// column: 211-200 = 11 through 236, leaving a 24px gap before the panel starts.
+// That clearance is the entry criterion for that list - see its comment.
+//
+// Applied through GetChatTabRect / the log backing / the log tap rect / the log
+// window's own SetPosition, all of which derive from kChatTabsX or kChatLogX, so
+// the drawn strip and its hit rect cannot drift apart.
+constexpr float kAndroidChatBlockShiftedOffsetX = -200.0f;
+
+float GetAndroidChatBlockOffsetX()
+{
+    return IsAndroidChatFriendlyWindowOpen() ? kAndroidChatBlockShiftedOffsetX : 0.0f;
 }
 
 // True when the joystick should stay drawn and tappable despite a window being
@@ -13545,14 +13704,21 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // yield to Inventory/NPCSHOP/Character/etc. windows that can visually
     // overlap the same bottom-centre screen region, the same as the pad
     // controls below do.
-    if (!IsAndroidGameWindowOpen() && IsAndroidChatUiAvailable())
+    //
+    // Chat-friendly windows are exempt (IsAndroidChatFriendlyWindowOpen): this sits ABOVE the
+    // blanket `if (IsAndroidGameWindowOpen()) return false;` further down, so it is
+    // the only remaining route into chat while a window owns the screen - the
+    // standalone quick button is compiled out (kShowVirtualChatQuickButton) and the
+    // right panel is both undrawn and geometrically buried under the inventory.
+    if ((!IsAndroidGameWindowOpen() || IsAndroidChatFriendlyWindowOpen())
+        && IsAndroidChatUiAvailable())
     {
         if (HandleAndroidChatTabTap(uiX, uiY))
         {
             return true;
         }
 
-        if (HandleAndroidChatLogTap(uiX, uiY))
+        if (HandleAndroidChatLogFingerDown(uiX, uiY, touch.fingerId))
         {
             return true;
         }
@@ -13919,6 +14085,20 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Chat log drag-to-scroll. Ranked here, above the world/pad handlers, for the
+    // same reason the tutorial is: the press was claimed at finger-down, so the
+    // drag has to be claimed too or a scroll would also walk the character.
+    {
+        float chatUiX = 0.0f;
+        float chatUiY = 0.0f;
+        TouchToVirtualUi(touch, chatUiX, chatUiY);
+
+        if (HandleAndroidChatLogFingerMotion(touch, chatUiX, chatUiY))
+        {
+            return true;
+        }
+    }
+
     // Does not claim the touch - see StartAndroidBagHold. Sliding off the slot
     // just abandons the hold, the same as sliding off a hotkey slot below does.
     UpdateAndroidBagHoldMotion(touch);
@@ -14031,6 +14211,20 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     if (HandleAndroidTutorialFingerUp(touch))
     {
         return true;
+    }
+
+    // Chat log press resolves here: a release that never became a drag is the tap
+    // that opens the keyboard (CommitAndroidChatLogTap); one that did was a scroll
+    // and must not raise it. Claimed either way, matching the finger-down.
+    {
+        float chatUiX = 0.0f;
+        float chatUiY = 0.0f;
+        TouchToVirtualUi(touch, chatUiX, chatUiY);
+
+        if (HandleAndroidChatLogFingerUp(touch, chatUiX, chatUiY))
+        {
+            return true;
+        }
     }
 
     // Does not claim the touch - see StartAndroidBagHold. If the hold already
@@ -15877,11 +16071,26 @@ void UpdateAndroidChatLogSuppression()
     static bool s_suppressed = false;
     static bool s_restoreShowChatLog = false;
 
+    // Keep the log's own window (which draws the message TEXT) on top of the
+    // backing panel and tap rect, both of which shift left during a trade. The
+    // window is created at (kChatLogX, kChatLogBottomY) = (215, 470) in
+    // NewUISystem.cpp, and SetPosition takes the same bottom-left anchor, so
+    // re-stamping it every frame is how the text follows. Cheap - two field
+    // writes - and it self-corrects the frame a trade opens or closes.
+    pLog->SetPosition(
+        static_cast<int>(kChatLogX + GetAndroidChatBlockOffsetX()),
+        static_cast<int>(kChatLogBottomY));
+
     // Same treatment for the first-time tutorial as for an open window: the
     // tour dims the screen and puts captions across it, and the chat log's
     // lines were reading straight through both. Left visible for the one step
     // that is actually about chat, and restored when the tour ends.
-    const bool shouldSuppress = IsAndroidGameWindowOpen() || ShouldSuppressAndroidChatForTutorial();
+    // Chat-friendly windows exempt: with the log hidden the player could not even
+    // READ what the person they were trading with - or standing at an NPC beside -
+    // was saying, which is half the complaint.
+    const bool shouldSuppress =
+        (IsAndroidGameWindowOpen() && !IsAndroidChatFriendlyWindowOpen())
+        || ShouldSuppressAndroidChatForTutorial();
 
     if (shouldSuppress && !s_suppressed)
     {
@@ -15935,8 +16144,12 @@ void RenderAndroidChatTabs()
     // The tutorial gets the same treatment for the same reason - it owns the
     // screen while it runs, and the strip sat under its captions. Its own chat
     // step lets this through so the thing being described is on screen.
+    // Chat-friendly windows are exempt, so the strip stays drawn and tappable - it is the
+    // only way into chat while a window owns the screen. See
+    // IsAndroidChatFriendlyWindowOpen; the tap gate in HandleVirtualFingerDown
+    // carries the identical condition, so drawn and tappable stay in step.
     if (!IsAndroidChatUiAvailable()
-        || IsAndroidGameWindowOpen()
+        || (IsAndroidGameWindowOpen() && !IsAndroidChatFriendlyWindowOpen())
         || ShouldSuppressAndroidChatForTutorial()
         || GetAndroidChatLog() == nullptr)
     {
@@ -15951,7 +16164,8 @@ void RenderAndroidChatTabs()
 
     // Backing behind the log area so the text stays readable over terrain, the
     // way the tabbed panel in the reference does.
-    DrawVirtualRectFilled(kChatLogX - 4.0f, kChatTabsY + kChatTabH,
+    DrawVirtualRectFilled(kChatLogX + GetAndroidChatBlockOffsetX() - 4.0f,
+                          kChatTabsY + kChatTabH,
                           (kChatTabW + kChatTabGap) * kChatTabCount + 8.0f,
                           kChatLogBottomY - (kChatTabsY + kChatTabH) + 2.0f,
                           0.02f, 0.02f, 0.03f, 0.45f);
@@ -16082,7 +16296,45 @@ bool HandleAndroidChatTabTap(float uiX, float uiY)
 // focus is enough, because the frame loop starts text input whenever a field
 // has focus. Opening is deliberate rather than a toggle, so a second tap while
 // typing does not dismiss the keyboard mid-message.
-bool HandleAndroidChatLogTap(float uiX, float uiY)
+// Is this point inside the log body? The tab strip directly above it is claimed
+// by HandleAndroidChatTabTap, which runs first.
+bool IsPointInAndroidChatLogBody(float uiX, float uiY)
+{
+    const float left = kChatLogX + GetAndroidChatBlockOffsetX() - 4.0f;
+    const float right = left + ((kChatTabW + kChatTabGap) * kChatTabCount) + 8.0f;
+    const float top = kChatTabsY + kChatTabH;
+
+    return !(uiX < left || uiX > right || uiY < top || uiY > kChatLogBottomY);
+}
+
+// ---- Chat log drag-to-scroll ---------------------------------------------
+// A press in the log body is HELD here rather than acted on: a vertical drag
+// scrolls the history, and only a release that never became a drag counts as the
+// tap that opens the keyboard. Without the hold, any attempt to scroll also
+// raised the keyboard and (if it started on a name) picked up a whisper target.
+namespace
+{
+    // Log body is kChatLogBottomY - (kChatTabsY + kChatTabH) = 102 units tall and
+    // shows 6 lines, so a line is ~17. One line of scroll per 17 units dragged
+    // tracks the content under the finger.
+    constexpr float kChatLogLineHeightUi = 17.0f;
+
+    // Movement before a press counts as a drag rather than a tap. Small enough
+    // that a deliberate scroll registers at once, large enough that the wobble in
+    // a normal tap does not eat the keyboard.
+    constexpr float kChatLogDragSlopUi = 6.0f;
+
+    bool         g_chatLogDragActive = false;
+    SDL_FingerID g_chatLogDragFinger = 0;
+    float        g_chatLogDragStartUiX = 0.0f;
+    float        g_chatLogDragStartUiY = 0.0f;
+    int          g_chatLogDragStartEndLine = 0;
+    bool         g_chatLogDragScrolled = false;
+}
+
+void CommitAndroidChatLogTap(float uiX, float uiY);
+
+bool HandleAndroidChatLogFingerDown(float uiX, float uiY, SDL_FingerID fingerId)
 {
     SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
     if (pLog == nullptr || g_pNewUISystem == nullptr || !IsAndroidChatUiAvailable())
@@ -16090,14 +16342,86 @@ bool HandleAndroidChatLogTap(float uiX, float uiY)
         return false;
     }
 
-    // Body of the log only. The tab strip directly above it is claimed by
-    // HandleAndroidChatTabTap, which runs first.
-    const float left = kChatLogX - 4.0f;
-    const float right = left + ((kChatTabW + kChatTabGap) * kChatTabCount) + 8.0f;
-    const float top = kChatTabsY + kChatTabH;
-    if (uiX < left || uiX > right || uiY < top || uiY > kChatLogBottomY)
+    if (!IsPointInAndroidChatLogBody(uiX, uiY))
     {
         return false;
+    }
+
+    g_chatLogDragActive = true;
+    g_chatLogDragFinger = fingerId;
+    g_chatLogDragStartUiX = uiX;
+    g_chatLogDragStartUiY = uiY;
+    g_chatLogDragStartEndLine = pLog->GetCurrentRenderEndLine();
+    g_chatLogDragScrolled = false;
+
+    // Claimed so the ambient touch-to-mouse simulation does not also walk the
+    // character to wherever the log happens to sit.
+    return true;
+}
+
+bool HandleAndroidChatLogFingerMotion(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    if (!g_chatLogDragActive || touch.fingerId != g_chatLogDragFinger)
+    {
+        return false;
+    }
+
+    SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
+    if (pLog == nullptr)
+    {
+        g_chatLogDragActive = false;
+        return false;
+    }
+
+    const float dy = uiY - g_chatLogDragStartUiY;
+
+    if (!g_chatLogDragScrolled
+        && (fabsf(dy) < kChatLogDragSlopUi)
+        && (fabsf(uiX - g_chatLogDragStartUiX) < kChatLogDragSlopUi))
+    {
+        // Still within the slop - might yet be a tap.
+        return true;
+    }
+
+    g_chatLogDragScrolled = true;
+
+    // Dragging DOWN reveals older lines, the direction the content moves with the
+    // finger. Scrolling() clamps to both ends itself, so no range check here.
+    const int lines = static_cast<int>(dy / kChatLogLineHeightUi);
+    pLog->Scrolling(g_chatLogDragStartEndLine - lines);
+
+    return true;
+}
+
+bool HandleAndroidChatLogFingerUp(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    if (!g_chatLogDragActive || touch.fingerId != g_chatLogDragFinger)
+    {
+        return false;
+    }
+
+    const bool wasScroll = g_chatLogDragScrolled;
+
+    g_chatLogDragActive = false;
+    g_chatLogDragScrolled = false;
+
+    // A drag was a scroll and nothing else - do not raise the keyboard, and do
+    // not touch the whisper target.
+    if (!wasScroll)
+    {
+        CommitAndroidChatLogTap(uiX, uiY);
+    }
+
+    return true;
+}
+
+// The original tap behaviour, now run on RELEASE rather than on press.
+void CommitAndroidChatLogTap(float uiX, float uiY)
+{
+    SEASON3B::CNewUIChatLogWindow* pLog = GetAndroidChatLog();
+    if (pLog == nullptr || g_pNewUISystem == nullptr || !IsAndroidChatUiAvailable())
+    {
+        return;
     }
 
     // Whisper target follows the tap, and can always be cleared without extra
@@ -16143,7 +16467,6 @@ bool HandleAndroidChatLogTap(float uiX, float uiY)
     }
 
     PlayBuffer(SOUND_CLICK01);
-    return true;
 }
 
 // Auto-combo toggle, Knight line only. Paired with HitTestComboToggle.
@@ -19852,9 +20175,48 @@ bool IsAggressiveMobilePerfModeEnabled()
 // handler normalises against g_NativePresentWidth/Height (below) rather than
 // the scaled drawable size.
 //
-// 1.0 = native (feature off). 0.75 renders ~44% fewer pixels.
-static float g_RenderScaleX = 0.75f;
-static float g_RenderScaleY = 0.75f;
+// Only the HEIGHT is pinned; the width is derived from the panel's real aspect
+// ratio in ComputeAndroidRenderSize below. That is not cosmetic: the 3D
+// projection is built from WindowWidth/WindowHeight, so a render target whose
+// aspect differs from the display's presents a horizontally stretched world
+// rather than letterboxing itself. On a 16:9 screen 576 gives exactly 1024x576;
+// on a 20:9 phone it gives 1280x576.
+//
+// This replaced a fractional 0.75 scale. A fraction preserved aspect for free
+// but produced a different resolution - and so a different fill-rate cost and a
+// different look - on every device.
+//
+// 0 = native (feature off). Never upscales: a panel shorter than this renders
+// at its own height.
+static int g_RenderTargetHeight = 576;
+
+// Render size for a given physical surface: height pinned to
+// g_RenderTargetHeight, width scaled to keep the physical aspect ratio.
+static void ComputeAndroidRenderSize(int screenW, int screenH, int& renderW, int& renderH)
+{
+    renderW = screenW;
+    renderH = screenH;
+
+    if ((g_RenderTargetHeight <= 0) || (screenW <= 0) || (screenH <= g_RenderTargetHeight))
+    {
+        return;
+    }
+
+    renderH = g_RenderTargetHeight;
+
+    // 64-bit intermediate: screenW * renderH overflows int for a 4K-wide panel.
+    // Rounded, not truncated, so the aspect error stays under half a pixel.
+    renderW = static_cast<int>(
+        ((static_cast<long long>(screenW) * renderH) + (screenH / 2)) / screenH);
+
+    // Even on both axes - the upscale blit and several ES drivers prefer it, and
+    // it costs at most one pixel of width.
+    renderW &= ~1;
+    renderH &= ~1;
+
+    if (renderW < 2) renderW = 2;
+    if (renderH < 2) renderH = 2;
+}
 
 // TEMP profiling: worst frame in a rolling window, with its bucket breakdown
 // latched, so a single screenshot can show what a hitch consisted of.
@@ -20065,11 +20427,10 @@ static void SyncAndroidDrawableSizeFromSokol(const char* reason)
     g_NativePresentHeight = screenH;
     RenderBackend_SetNativePresentSize(screenW, screenH);
 
-    // The engine is told the SCALED size - see the g_RenderScale* comment above.
-    int renderW = static_cast<int>(screenW * g_RenderScaleX);
-    int renderH = static_cast<int>(screenH * g_RenderScaleY);
-    if (renderW < 1) renderW = 1;
-    if (renderH < 1) renderH = 1;
+    // The engine is told the SCALED size - see g_RenderTargetHeight above.
+    int renderW = screenW;
+    int renderH = screenH;
+    ComputeAndroidRenderSize(screenW, screenH, renderW, renderH);
 
     ApplyAndroidDrawableSize(renderW, renderH, reason);
 }
@@ -21387,9 +21748,47 @@ static void RunAndroidGameFrame()
     // it, because an NPC window carrying its own text field - the Devias guild
     // master's guild-name entry, say - keeps hasFocusedTextInput true and
     // would otherwise leave the chat bar open on top of it.
-    if (g_pNewUISystem != nullptr
-        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX)
-        && (!hasFocusedTextInput || IsAndroidGameWindowOpen()))
+    //
+    // ...but a chat-friendly window (trade) is exempt from that second arm - see
+    // IsAndroidChatFriendlyWindowOpen. This line ran EVERY frame, so while trading
+    // it did not merely stop chat from opening, it slammed shut a bar the player
+    // already had open, one frame after the trade was accepted.
+    //
+    // The first arm still applies during trade: dismissing the keyboard closes the
+    // bar, exactly as it does in normal play.
+    //
+    // ...but not for the first moments after the bar appears, and that grace is
+    // what makes chat open on ONE tap. GiveFocus(TRUE) does not make
+    // AndroidHasFocusedTextInput() true in the same frame - it reports on the
+    // focused HWND, which the UI update hands over later, and MU_MobileStartTextInput
+    // above only runs once that is already set. So on the frame chat opened, the
+    // !hasFocusedTextInput arm was true and closed the bar again immediately: the
+    // first tap armed focus and lost the bar, and only a second tap - finding focus
+    // already set - made it stick. Hence "double tap to open".
+    //
+    // Detected here by watching the visibility edge rather than in each opener,
+    // because there are four of them (the log tap, the tab strip, the right-panel
+    // action and ToggleVirtualUtilityButton) and they would each need the same
+    // stamp.
+    static bool s_chatBarWasVisible = false;
+    static DWORD s_chatBarShownTick = 0;
+    constexpr DWORD kChatBarFocusGraceMs = 600;
+
+    const bool chatBarVisible = (g_pNewUISystem != nullptr)
+        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX);
+
+    if (chatBarVisible && !s_chatBarWasVisible)
+    {
+        s_chatBarShownTick = GetTickCount();
+    }
+    s_chatBarWasVisible = chatBarVisible;
+
+    const bool inFocusGrace = chatBarVisible
+        && ((GetTickCount() - s_chatBarShownTick) < kChatBarFocusGraceMs);
+
+    if (chatBarVisible
+        && ((!hasFocusedTextInput && !inFocusGrace)
+            || (IsAndroidGameWindowOpen() && !IsAndroidChatFriendlyWindowOpen())))
     {
         g_pNewUISystem->Hide(SEASON3B::INTERFACE_CHATINPUTBOX);
     }

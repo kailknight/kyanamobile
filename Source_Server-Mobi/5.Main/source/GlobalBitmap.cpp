@@ -647,6 +647,170 @@ GLuint CGlobalBitmap::FindAvailableTextureIndex(GLuint uiSeed)
 	return uiSeed+1;
 }
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+namespace
+{
+	/*
+		A raw libjpeg-turbo decode (tjDecompress2 below) only ever produces
+		pixels in the orientation the file physically stores them in - it does
+		not look at the EXIF Orientation tag a camera or export tool can embed
+		to say "display this rotated/mirrored". Every other jpg asset in this
+		codebase is original developer art with no such tag (orientation 1,
+		a no-op), which is why this has never come up before: the operator-
+		uploaded cash shop banner (GameShop/InGameShopSystem.cpp's
+		StartCustomBannerDownload) is the first jpg this client shows that
+		someone else's phone or editing tool produced, and it showed up
+		reported "upside down mirror" - exactly the look of orientation 3
+		(180 degrees), one of the two or three orientations real-world tools
+		actually emit.
+
+		Scans the raw file bytes for the APP1 Exif segment and pulls out the
+		tag by hand rather than pulling in a dependency - the format is small
+		and stable (EXIF 2.x). Returns 1 (no transform) if the tag is absent
+		or anything looks malformed, so a file with no Exif segment - or a
+		corrupt one - renders exactly as it did before this existed.
+	*/
+	int ReadJpegExifOrientation(const unsigned char* data, size_t size)
+	{
+		if(data == nullptr || size < 4 || data[0] != 0xFF || data[1] != 0xD8)
+			return 1;
+
+		size_t pos = 2;
+		while(pos + 4 <= size)
+		{
+			if(data[pos] != 0xFF)
+				break;
+
+			unsigned char marker = data[pos + 1];
+
+			// Markers with no length field: TEM/RST*, and a bare 0xFF fill byte.
+			if(marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7))
+			{
+				pos += 2;
+				continue;
+			}
+
+			// SOS starts the entropy-coded scan data - nothing past this point
+			// is a marker segment any more, so the Exif APP1 (which always
+			// comes first) was not present.
+			if(marker == 0xD9 || marker == 0xDA)
+				break;
+
+			if(pos + 4 > size)
+				break;
+
+			const unsigned int segLen = (static_cast<unsigned int>(data[pos + 2]) << 8) | data[pos + 3];
+			if(segLen < 2 || pos + 2 + segLen > size)
+				break;
+
+			if(marker == 0xE1 && segLen >= 8
+				&& data[pos + 4] == 'E' && data[pos + 5] == 'x'
+				&& data[pos + 6] == 'i' && data[pos + 7] == 'f')
+			{
+				const unsigned char* tiff = data + pos + 4 + 6;   // past "Exif\0\0"
+				const size_t tiffSize = segLen - 2 - 6;
+				if(tiffSize < 8)
+					return 1;
+
+				const bool little = (tiff[0] == 'I' && tiff[1] == 'I');
+				const bool big    = (tiff[0] == 'M' && tiff[1] == 'M');
+				if(!little && !big)
+					return 1;
+
+				auto rd16 = [little](const unsigned char* p) -> unsigned int
+				{
+					return little ? (p[0] | (static_cast<unsigned int>(p[1]) << 8))
+					              : ((static_cast<unsigned int>(p[0]) << 8) | p[1]);
+				};
+				auto rd32 = [little](const unsigned char* p) -> unsigned int
+				{
+					return little
+						? (p[0] | (static_cast<unsigned int>(p[1]) << 8) | (static_cast<unsigned int>(p[2]) << 16) | (static_cast<unsigned int>(p[3]) << 24))
+						: ((static_cast<unsigned int>(p[0]) << 24) | (static_cast<unsigned int>(p[1]) << 16) | (static_cast<unsigned int>(p[2]) << 8) | p[3]);
+				};
+
+				const unsigned int ifdOffset = rd32(tiff + 4);
+				if(static_cast<size_t>(ifdOffset) + 2 > tiffSize)
+					return 1;
+
+				const unsigned int entryCount = rd16(tiff + ifdOffset);
+				const size_t entriesStart = static_cast<size_t>(ifdOffset) + 2;
+
+				for(unsigned int i = 0; i < entryCount; ++i)
+				{
+					const size_t entryOff = entriesStart + static_cast<size_t>(i) * 12;
+					if(entryOff + 12 > tiffSize)
+						break;
+
+					if(rd16(tiff + entryOff) == 0x0112)   // Orientation tag
+					{
+						const unsigned int value = rd16(tiff + entryOff + 8);
+						return (value >= 1 && value <= 8) ? static_cast<int>(value) : 1;
+					}
+				}
+
+				return 1;   // Exif present, no Orientation entry in it
+			}
+
+			pos += 2 + segLen;
+		}
+
+		return 1;
+	}
+
+	// Applies the standard EXIF transform for `orientation` to a tightly
+	// packed RGB buffer. 5-8 swap width/height (a 90-degree turn), so the
+	// caller's dimensions are updated in place to match what comes back.
+	// orientation 1 (or anything unrecognised) is a straight copy, so this can
+	// be called unconditionally.
+	std::vector<unsigned char> ApplyExifOrientationRGB(const unsigned char* src, int& width, int& height, int orientation)
+	{
+		const int w = width;
+		const int h = height;
+
+		if(orientation <= 1 || orientation > 8)
+		{
+			std::vector<unsigned char> identity(static_cast<size_t>(w) * h * 3u);
+			memcpy(identity.data(), src, identity.size());
+			return identity;
+		}
+
+		const bool swapDims = (orientation >= 5);
+		const int dw = swapDims ? h : w;
+		const int dh = swapDims ? w : h;
+		std::vector<unsigned char> out(static_cast<size_t>(dw) * dh * 3u);
+
+		for(int y = 0; y < h; ++y)
+		{
+			for(int x = 0; x < w; ++x)
+			{
+				int dx = x;
+				int dy = y;
+				switch(orientation)
+				{
+				case 2: dx = w - 1 - x; dy = y;         break;   // mirror horizontal
+				case 3: dx = w - 1 - x; dy = h - 1 - y; break;   // rotate 180
+				case 4: dx = x;         dy = h - 1 - y; break;   // mirror vertical
+				case 5: dx = y;         dy = x;         break;   // transpose
+				case 6: dx = h - 1 - y; dy = x;         break;   // rotate 90 CW
+				case 7: dx = h - 1 - y; dy = w - 1 - x; break;   // transverse
+				case 8: dx = y;         dy = w - 1 - x; break;   // rotate 270 CW
+				default: break;
+				}
+
+				const unsigned char* s = src + (static_cast<size_t>(y) * w + x) * 3u;
+				unsigned char* d = out.data() + (static_cast<size_t>(dy) * dw + dx) * 3u;
+				d[0] = s[0]; d[1] = s[1]; d[2] = s[2];
+			}
+		}
+
+		width = dw;
+		height = dh;
+		return out;
+	}
+}   // namespace
+#endif
+
 bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, GLuint uiFilter, GLuint uiWrapMode)
 {
 #if defined(__ANDROID__) || defined(MU_IOS)
@@ -711,6 +875,15 @@ bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, 
 		return false;
 	}
 	tjDestroy(tjHandle);
+
+	// See ReadJpegExifOrientation's comment. jpegWidth/jpegHeight are updated
+	// in place for the 90-degree cases so every use below (POT sizing,
+	// SourceWidth/Height, the row copy loop) already sees the corrected shape.
+	const int exifOrientation = ReadJpegExifOrientation(jpegData, jpegSize);
+	if(exifOrientation != 1)
+	{
+		decoded = ApplyExifOrientationRGB(decoded.data(), jpegWidth, jpegHeight, exifOrientation);
+	}
 
 	int Width = 1;
 	while(Width < jpegWidth && Width < MAX_WIDTH) Width <<= 1;

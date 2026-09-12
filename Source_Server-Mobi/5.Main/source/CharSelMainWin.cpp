@@ -101,9 +101,32 @@ void CCharSelMainWin::SetPosition(int nXCoord, int nYCoord)
 	m_asprBack[CSMW_SPR_INFO].SetPosition(m_aBtn[CSMW_BTN_MENU].GetXPos() + nBtnWidth + 2, nYCoord + 5);
 
 	int nWinRPosX = nXCoord + CWin::GetWidth();
+	int nConnectGap = 1;
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Anchor the right-hand pair to the real screen edge, and put a finger-sized
+	// gap between Connect and Delete.
+	//
+	// CWin::GetWidth() is not usable for this on mobile. Create() builds it from
+	// (GetScreenWidth() - 266), which mixes a RENDER-pixel screen width with a
+	// 266 that is a logical-640 constant, while the buttons scale by
+	// ScaleLoginMetric (~1.11) rather than by g_fScreenRate_x (~2.0). The right
+	// edge therefore lands at
+	//     WindowWidth + (4 * ScaleLoginMetric(54) - 238)
+	// instead of the intended WindowWidth - 22. At a 1860px-wide render target
+	// that put Delete 66px off-screen (only ~10% of it tappable, which is why it
+	// felt broken); at 1280 it lands 2px over with a ONE pixel gap to Connect,
+	// which is how aiming at Connect deletes a character instead.
+	//
+	// On desktop the original expression is already correct (ScaleLoginMetric is
+	// identity, 216 + (640-266) + 6 + 22 == 640 - 22), so it is left alone.
+	nWinRPosX = CInput::Instance().GetScreenWidth() - ScaleLoginMetric(22);
+	nConnectGap = ScaleLoginMetric(14);
+#endif
+
 	m_asprBack[CSMW_SPR_DECO].SetPosition(nWinRPosX - (m_asprBack[CSMW_SPR_DECO].GetWidth() - 22), nYCoord - 59);
 	m_aBtn[CSMW_BTN_DELETE].SetPosition(nWinRPosX - nBtnWidth, nYCoord);
-	m_aBtn[CSMW_BTN_CONNECT].SetPosition(nWinRPosX - (nBtnWidth * 2 + 1), nYCoord);
+	m_aBtn[CSMW_BTN_CONNECT].SetPosition(nWinRPosX - (nBtnWidth * 2 + nConnectGap), nYCoord);
 }
 
 void CCharSelMainWin::Show(bool bShow)

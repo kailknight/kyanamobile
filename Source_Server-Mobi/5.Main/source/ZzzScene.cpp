@@ -1053,6 +1053,29 @@ void CreateCharacterScene()
     g_ErrorReport.Write( "> Character scene init success.\r\n");
 }
 
+#ifdef __ANDROID__
+// Character-select tap, deferred by one frame.
+//
+// SelectedCharacter is produced by SelectObjects() inside
+// NewRenderCharacterScene - the ray cast from MouseX/MouseY against each hero's
+// OBB - and MainScene runs NewMoveCharacterScene BEFORE that render pass. So
+// reading SelectedCharacter here used the ray from whatever the cursor was over
+// LAST time it moved.
+//
+// With a mouse that is invisible: the cursor moves continuously, so the previous
+// frame's ray is a pixel away from the current one. With touch, MouseX/MouseY
+// only change when a finger lands, so "one frame stale" means "one whole TAP
+// stale" - tapping hero 3 selected whoever the previous tap was over, and the
+// first tap after opening the screen selected nothing at all. That is the
+// misplaced-tap symptom.
+//
+// Latching here and applying on the next frame costs ~16ms of latency and means
+// the pick was cast from this tap's own coordinates. StartGame() still runs from
+// the move phase, as before, rather than from the middle of a render pass.
+static bool s_CharSelTapPending = false;
+static bool s_CharSelTapWasDouble = false;
+#endif
+
 void NewMoveCharacterScene()
 {
 	if (CurrentProtocolState < RECEIVE_CHARACTERS_LIST)
@@ -1137,11 +1160,46 @@ void NewMoveCharacterScene()
 		}
 	}
 
+#ifdef __ANDROID__
+	// Drain the PREVIOUS frame's tap before latching this one - see the comment on
+	// s_CharSelTapPending. Done ahead of the IsCursorOnUI() bail below so a latched
+	// tap always resolves, even if the finger has since drifted into the button bar.
+	if (s_CharSelTapPending)
+	{
+		s_CharSelTapPending = false;
+
+		const bool bValidPick = (SelectedCharacter >= 0 && SelectedCharacter <= 4);
+
+		if (s_CharSelTapWasDouble)
+		{
+			if (bValidPick && rUIMng.m_CharSelMainWin.IsShow())
+			{
+				SelectedHero = SelectedCharacter;
+				::StartGame();
+				return;
+			}
+		}
+		else
+		{
+			SelectedHero = (bValidPick ? SelectedCharacter : -1);
+			rUIMng.m_CharSelMainWin.UpdateDisplay();
+		}
+	}
+#endif
+
 	if (rUIMng.IsCursorOnUI())
 	{
 		return;
 	}
 
+#ifdef __ANDROID__
+	// Latch only; the pick this tap needs does not exist yet this frame.
+	if (rInput.IsLBtnDbl() || rInput.IsLBtnDn())
+	{
+		s_CharSelTapPending = true;
+		s_CharSelTapWasDouble = rInput.IsLBtnDbl();
+	}
+#else
 	if (rInput.IsLBtnDbl() && rUIMng.m_CharSelMainWin.IsShow())
 	{
 		if (SelectedCharacter < 0 || SelectedCharacter > 4)
@@ -1160,6 +1218,7 @@ void NewMoveCharacterScene()
 			SelectedHero = SelectedCharacter;
 		rUIMng.m_CharSelMainWin.UpdateDisplay();
 	}
+#endif
 
 	g_ConsoleDebug->UpdateMainScene();
 }

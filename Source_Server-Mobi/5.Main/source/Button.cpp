@@ -19,6 +19,46 @@ extern float g_fScreenRate_y;
 
 CButton*	CButton::m_pBtnHeld;
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+namespace
+{
+	// Tap debounce shared by EVERY legacy CButton.
+	//
+	// A touch screen produces stray repeat taps, and a fingertip is wide enough to
+	// register on two adjacent controls in quick succession. On the
+	// character-select bar that means aiming at Connect and getting Delete, which
+	// destroys a character. The debounce is deliberately global rather than
+	// per-button: a per-button one would still let the SECOND tap through on the
+	// neighbour, which is the case that actually hurts.
+	//
+	// Not applied on desktop - a mouse user double-clicking a button means it, and
+	// the position is exact. This is also NOT what guards double-tap-to-enter-game:
+	// that reads CInput::IsLBtnDbl() in NewMoveCharacterScene and never goes
+	// through CButton, so it is unaffected by this interval.
+	constexpr DWORD kButtonTapDebounceMs = 300;
+
+	DWORD g_LastButtonClickTick = 0;
+
+	// Side-effecting on purpose: returns whether this tap is accepted and, if so,
+	// starts the interval. Named "Consume" to make that obvious at the call site.
+	bool ConsumeButtonTapDebounce()
+	{
+		const DWORD nowTick = GetTickCount();
+
+		if ((g_LastButtonClickTick != 0) &&
+			((nowTick - g_LastButtonClickTick) < kButtonTapDebounceMs))
+		{
+			return false;
+		}
+
+		g_LastButtonClickTick = nowTick;
+		return true;
+	}
+}
+#else
+namespace { inline bool ConsumeButtonTapDebounce() { return true; } }
+#endif
+
 CButton::CButton() : m_szText(NULL), m_adwTextColorMap(NULL)
 {
 
@@ -98,7 +138,7 @@ void CButton::Update()
 
 		if(rInput.IsLBtnUp())
 		{
-			if(CursorInObject() && this == m_pBtnHeld)
+			if(CursorInObject() && this == m_pBtnHeld && ConsumeButtonTapDebounce())
 			{
 				m_bClick = true;
 
@@ -176,7 +216,7 @@ void CButton::Update()
 		}
 	}
 
-//	CSprite::Update(dDeltaTick);	// ¹öÆ° Animation.
+//	CSprite::Update(dDeltaTick);	// ï¿½ï¿½Æ° Animation.
 }
 
 void CButton::Render()
