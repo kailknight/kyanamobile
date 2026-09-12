@@ -3591,7 +3591,12 @@ bool GetAndroidMessageBoxRect(AndroidUiRect* outRect)
 // actually owns the item found, or nullptr if none - callers that need to poke
 // the control itself (SetEventState, IsLocked, ...) would otherwise have to
 // redo this exact lookup a second time to get it.
-ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventoryCtrl** outCtrl)
+// includeChaosBox opts in to the craft box (Chaos Machine / Chaos Card Master)
+// as a third place to look. Opt-in rather than always-on because
+// FindAndroidInventoryHotKeyItemAt shares this function, and the pending
+// hotkey-bind flow must not bind a potion out of the craft box.
+ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventoryCtrl** outCtrl,
+                                  bool includeChaosBox = false)
 {
     if (outCtrl != nullptr)
     {
@@ -3649,6 +3654,34 @@ ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventor
                 MouseY = savedMouseY;
             }
             return item;
+        }
+    }
+
+    // The craft box. One block covers Chaos Goblin AND Chaos Card Master: both
+    // are INTERFACE_MIXINVENTORY driven by the same CNewUIMixInventory control,
+    // differing only in g_MixRecipeMgr's mix type (ReceiveTalk case 3 vs 0x15),
+    // which BMoveItemNew reads for itself when it picks the storage flag. So
+    // Osbourne, Jerridon, Elpis and the rest come along for free.
+    //
+    // MIX_READY only. SetMixState(MIX_REQUESTED) locks both inventory controls
+    // while a mix is in flight, but BMoveItemNew - which the right-click pulse
+    // ends up calling - never consults IsLocked(), so nothing downstream would
+    // stop a hold from yanking an ingredient out mid-mix. This is that guard.
+    if (includeChaosBox
+        && g_pMixInventory != nullptr
+        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY)
+        && g_pMixInventory->GetMixState() == SEASON3B::CNewUIMixInventory::MIX_READY)
+    {
+        if (SEASON3B::CNewUIInventoryCtrl* mixCtrl = g_pMixInventory->GetInventoryCtrl())
+        {
+            if (ITEM* item = mixCtrl->FindItemAtPt(mouseX, mouseY))
+            {
+                if (outCtrl != nullptr)
+                {
+                    *outCtrl = mixCtrl;
+                }
+                return item;
+            }
         }
     }
 
@@ -13572,7 +13605,11 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // polled from UpdateVirtualPadHolds).
     {
         SEASON3B::CNewUIInventoryCtrl* bagCtrl = nullptr;
-        if (ITEM* bagItem = FindAndroidBagItemAndCtrlAt(uiX, uiY, &bagCtrl))
+        // includeChaosBox: a hold on an item sitting IN the craft box has to arm
+        // too, or there is no way to take an ingredient back out but the
+        // double-tap-to-pick-up-then-tap-to-drop dance. StartAndroidBagHold does
+        // not claim the touch, so that dance keeps working alongside this.
+        if (ITEM* bagItem = FindAndroidBagItemAndCtrlAt(uiX, uiY, &bagCtrl, /*includeChaosBox*/ true))
         {
             // CNewUIInventoryCtrl::UpdateProcess only resets EVENT_HOVER to
             // EVENT_NONE when the pointer moves off every filled slot, not when
@@ -14634,7 +14671,8 @@ void UpdateAndroidBagHold()
     // longer should not also try to use/bind whatever is still sitting in the
     // slot underneath it.
     SEASON3B::CNewUIInventoryCtrl* ctrl = nullptr;
-    ITEM* item = FindAndroidBagItemAndCtrlAt(g_androidBagHold.uiX, g_androidBagHold.uiY, &ctrl);
+    ITEM* item = FindAndroidBagItemAndCtrlAt(g_androidBagHold.uiX, g_androidBagHold.uiY, &ctrl,
+                                             /*includeChaosBox*/ true);
     if (item == nullptr)
     {
         ClearAndroidBagHold();
@@ -14671,8 +14709,18 @@ void UpdateAndroidBagHold()
     MouseLButton = false;
     ClearAndroidLongPressRightClick(false);
 
+    // While a craft box is open, a hold ALWAYS transfers - it never hotkey-binds.
+    //
+    // Jewels and several other craft ingredients pass CanRegisterItemHotKey, so
+    // without this the branch below would swallow the hold and quietly bind a
+    // Bless/Soul to a potion slot instead of putting it in the box: the one
+    // gesture this feature exists for would fail on exactly the items most often
+    // mixed. Binding is still available the moment the box is closed.
+    const bool chaosBoxOpen = (g_pNewUISystem != nullptr)
+        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY);
+
     const int itemLevel = (item->Level >> 3) & 15;
-    if (SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(item->Type))
+    if (!chaosBoxOpen && SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(item->Type))
     {
         // Consumables bind to a hotkey slot instead of being used directly -
         // this is what tapping one used to do; it moved to a hold so a plain
