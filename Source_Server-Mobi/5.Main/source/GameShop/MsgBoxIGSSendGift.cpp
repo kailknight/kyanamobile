@@ -75,7 +75,17 @@ void CMsgBoxIGSSendGift::InitInputBox()
 	m_MessageInputBox.SetBackColor(0, 0, 0, 0);
 	m_MessageInputBox.SetState(UISTATE_NORMAL);
 	m_MessageInputBox.SetTextColor(255, 0, 0, 0);
-	
+
+	// Black-on-white suited the parchment art. The modern skin draws both fields
+	// as dark wells, where black text vanishes and the white back shows up as a
+	// bright strip behind the name. (a, r, g, b order.)
+	if( IGSIsModernSkin() )
+	{
+		m_IDInputBox.SetTextColor(255, 255, 255, 255);
+		m_IDInputBox.SetBackColor(255, 15, 15, 18);
+		m_MessageInputBox.SetTextColor(255, 230, 230, 230);
+	}
+
 	m_IDInputBox.GiveFocus();
 }
 
@@ -270,7 +280,10 @@ void CMsgBoxIGSSendGift::RenderTexts()
 
 	g_pRenderText->RenderText(GetPos().x+IGS_TEXT_ID_TITLE_POS_X, GetPos().y+IGS_TEXT_ID_TITLE_POS_Y,GlobalText[2918], IGS_TEXT_ID_TITLE_WIDTH, 0, RT3_SORT_LEFT);
 
-	g_pRenderText->SetTextColor(0, 0, 0, 255);
+	if( IGSIsModernSkin() )
+		g_pRenderText->SetTextColor(200, 200, 205, 255);
+	else
+		g_pRenderText->SetTextColor(0, 0, 0, 255);
 	g_pRenderText->RenderText(GetPos().x, GetPos().y+IGS_TEXT_MESSAGE_TITLE_POS_Y, GlobalText[2919], IMAGE_IGS_FRAME_WIDTH, 0, RT3_SORT_CENTER);
 
 	g_pRenderText->SetFont(g_hFont);
