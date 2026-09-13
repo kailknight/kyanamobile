@@ -5,6 +5,9 @@
 #include "stdafx.h"
 #include "NewUIQuickCommandWindow.h"
 #include "NewUISystem.h"
+// For gProtect.m_MainInfo.HidePlayerMenu and the PLAYER_MENU_HIDE_* bits - not
+// reachable via stdafx.h.
+#include "Protect.h"
 #include "DSPlaySound.h"
 #if(CB_VIEWCHARITEM)
 #include "CB_ViewCharItem.h"
@@ -19,6 +22,14 @@ SEASON3B::CNewUIQuickCommandWindow::CNewUIQuickCommandWindow()
 
 	m_iSelectedIndex = -1;
 	m_iSelectedCharacterIndex = -1;
+
+	// Every entry visible until the first OpenQuickCommand consults the mask, so
+	// a stray render before the window is ever opened cannot walk a garbage map.
+	for (int i = 0; i < QCE_COUNT; ++i)
+	{
+		m_aVisibleEntry[i] = i;
+	}
+	m_nVisibleCount = QCE_COUNT;
 }
 
 SEASON3B::CNewUIQuickCommandWindow::~CNewUIQuickCommandWindow()
@@ -69,7 +80,7 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 
 	POINT pt = { m_Pos.x, m_Pos.y+38 };
 
-	for(int i = 0; i < 6; ++i)
+	for(int i = 0; i < m_nVisibleCount; ++i)
 	{
 		if(CheckMouseIn(pt.x, pt.y, 112, 19) == true)
 		{
@@ -80,11 +91,13 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 		pt.y += 20.f;
 	}
 
-	if(m_iSelectedIndex > -1 && SEASON3B::IsRelease(VK_LBUTTON))
+	if(m_iSelectedIndex > -1 && m_iSelectedIndex < m_nVisibleCount && SEASON3B::IsRelease(VK_LBUTTON))
 	{
-		switch(m_iSelectedIndex)
+		// The clicked ROW, mapped back to the action it actually stands for -
+		// with rows hidden they are no longer the same number.
+		switch(m_aVisibleEntry[m_iSelectedIndex])
 		{
-		case 0:
+		case QCE_TRADE:
 			{
 				CHARACTER* pCha = &CharactersClient[m_iSelectedCharacterIndex];
 				g_pCommandWindow->CommandTrade(pCha);
@@ -93,7 +106,7 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 				return false;
 			}
 			break;
-		case 1:
+		case QCE_BUY:
 			{
 				CHARACTER* pCha = &CharactersClient[m_iSelectedCharacterIndex];
 				g_pCommandWindow->CommandPurchase(pCha);
@@ -102,7 +115,7 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 				return false;
 			}
 			break;
-		case 2:
+		case QCE_PARTY:
 			{
 				CHARACTER* pCha = &CharactersClient[m_iSelectedCharacterIndex];
 				g_pCommandWindow->CommandParty(pCha->Key);
@@ -111,7 +124,7 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 				return false;
 			}
 			break;
-		case 3:
+		case QCE_FOLLOW:
 			{
 				g_pCommandWindow->CommandFollow(m_iSelectedCharacterIndex);
 				CloseQuickCommand();
@@ -119,7 +132,7 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 				return false;
 			}
 			break;
-		case 4:
+		case QCE_DUEL:
 			{
 				CHARACTER* pCha = &CharactersClient[m_iSelectedCharacterIndex];
 				g_pCommandWindow->CommandDual(pCha);
@@ -129,7 +142,7 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 			}
 			break;
 #if(CB_VIEWCHARITEM)
-		case 5: //viewitem
+		case QCE_VIEWITEM:
 		{
 			CHARACTER* pCha = &CharactersClient[m_iSelectedCharacterIndex];
 			if(gCB_ViewCharItem) gCB_ViewCharItem->SendRequestViewItem(pCha->Key);
@@ -141,7 +154,11 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 		}
 	}
 
-	if(CheckMouseIn(m_Pos.x, m_Pos.y+30, 112, 130) == false)
+	// Both boxes were hardcoded to the six-row height (130 and 160). With rows
+	// hidden they have to shrink with the art, or a click in the empty space
+	// below a short menu still counts as inside it - the menu would neither
+	// highlight anything nor close.
+	if(CheckMouseIn(m_Pos.x, m_Pos.y+30, 112, (19 * GetVisibleRowCount()) + 16) == false)
 	{
 		m_iSelectedIndex = -1;
 
@@ -152,7 +169,7 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 		}
 	}
 
-	if(CheckMouseIn(m_Pos.x, m_Pos.y, 112, 160))
+	if(CheckMouseIn(m_Pos.x, m_Pos.y, 112, (int)(95.f + GetMenuFillerHeight())))
 	{
 		return false;
 	}
@@ -225,11 +242,38 @@ bool SEASON3B::CNewUIQuickCommandWindow::Render()
 	return true;
 }
 
+int SEASON3B::CNewUIQuickCommandWindow::GetVisibleRowCount() const
+{
+	// Falls back to the full list rather than 0: Render() can run a frame before
+	// OpenQuickCommand has built the map, and a zero-row frame would flash as a
+	// collapsed sliver.
+	return (m_nVisibleCount > 0) ? m_nVisibleCount : (int)QCE_COUNT;
+}
+
+float SEASON3B::CNewUIQuickCommandWindow::GetMenuFillerHeight() const
+{
+	/*
+		Height of the stretchable middle section. 65px was the hardcoded original
+		(4 x 15 + 5) for six rows, and each removed row takes 19px - the row pitch
+		- off it, so a full menu reproduces the old geometry exactly.
+
+		Clamped at 0 because the two 45px caps already carry the title and the
+		last row between them: below about three entries there is simply no filler
+		left to remove, and a negative height would flip the art inside out.
+	*/
+	float fFiller = 65.f - ((float)(QCE_COUNT - GetVisibleRowCount()) * 19.f);
+
+	return (fFiller < 0.f) ? 0.f : fFiller;
+}
+
 void SEASON3B::CNewUIQuickCommandWindow::RenderFrame()
 {
+	const int nRows = GetVisibleRowCount();
+	const float fFiller = GetMenuFillerHeight();
+
 	float x, y, width, height;
-	
-	x = m_Pos.x; y = m_Pos.y; width = 112.f; height = 150;
+
+	x = m_Pos.x; y = m_Pos.y; width = 112.f; height = 85.f + fFiller;
 
 	RenderImage(IMAGE_QUICKCOMMAND_BACK, x, y, width, height);
 
@@ -237,20 +281,31 @@ void SEASON3B::CNewUIQuickCommandWindow::RenderFrame()
 	RenderImage(IMAGE_QUICKCOMMAND_FRAME_UP, m_Pos.x, y, 112.f, 45.f);
 	y += 45.f;
 
-	for(int i = 0; i < 4; ++i)
+	// Tiled in 15px slices with the remainder last, rather than one stretched
+	// call: the filler art is a repeating strip, and stretching it would smear
+	// whatever gradient it carries.
+	const int nFullSlices = (int)(fFiller / 15.f);
+
+	for(int i = 0; i < nFullSlices; ++i)
 	{
 		RenderImage(IMAGE_QUICKCOMMAND_FRAME_MIDDLE, m_Pos.x, y, 112.f, 15.f);
 		y += 15.f;
 	}
 
-	RenderImage(IMAGE_QUICKCOMMAND_FRAME_MIDDLE, m_Pos.x, y, 112.f, 5.f);
-	y += 5.f;
+	const float fRemainder = fFiller - ((float)nFullSlices * 15.f);
+
+	if(fRemainder > 0.f)
+	{
+		RenderImage(IMAGE_QUICKCOMMAND_FRAME_MIDDLE, m_Pos.x, y, 112.f, fRemainder);
+		y += fRemainder;
+	}
 
 	RenderImage(IMAGE_QUICKCOMMAND_FRAME_DOWN, m_Pos.x, y, 112.f, 45.f);
 
 	y = m_Pos.y + 55.f;
 
-	for(int i = 0; i < 5; ++i)
+	// One separator BETWEEN rows, so one fewer than there are rows.
+	for(int i = 0; i < (nRows - 1); ++i)
 	{
 		RenderImage(IMAGE_QUICKCOMMAND_LINE, m_Pos.x + 15.f, y, 82.f, 2.f);
 		y += 19.f;
@@ -270,9 +325,17 @@ void SEASON3B::CNewUIQuickCommandWindow::RenderContents()
 	g_pRenderText->SetFont(g_hFont);
 	g_pRenderText->SetTextColor(255, 255, 255, 255);
 
-	int iGlobalText[] = { 943, 1124, 944, 948, 949 };
-	for(int i = 0; i < 6; ++i)
+	// Indexed by QUICK_COMMAND_ENTRY, so it stays aligned with the enum even as
+	// rows are hidden. QCE_VIEWITEM has no GlobalText id, hence the -1 sentinel
+	// and the literal below.
+	static const int iGlobalText[QCE_COUNT] = { 943, 1124, 944, 948, 949, -1 };
+
+	const int nRows = GetVisibleRowCount();
+
+	for(int i = 0; i < nRows; ++i)
 	{
+		const int iEntry = m_aVisibleEntry[i];
+
 		if(m_iSelectedIndex == i)
 		{
 			g_pRenderText->SetTextColor(255, 255, 0, 255);
@@ -281,14 +344,16 @@ void SEASON3B::CNewUIQuickCommandWindow::RenderContents()
 		{
 			g_pRenderText->SetTextColor(255, 255, 255, 255);
 		}
-		if (i < 5)
+
+		if(iEntry >= 0 && iEntry < QCE_COUNT && iGlobalText[iEntry] >= 0)
 		{
-			g_pRenderText->RenderText(m_Pos.x, y, GlobalText[iGlobalText[i]], 112, 0, RT3_SORT_CENTER);
+			g_pRenderText->RenderText(m_Pos.x, y, GlobalText[iGlobalText[iEntry]], 112, 0, RT3_SORT_CENTER);
 		}
 		else
 		{
 			g_pRenderText->RenderText(m_Pos.x, y, "View Item Char", 112, 0, RT3_SORT_CENTER);
 		}
+
 		y += 19.f;
 	}
 }
@@ -352,8 +417,67 @@ void SEASON3B::CNewUIQuickCommandWindow::UnloadImages()
 	DeleteBitmap(IMAGE_QUICKCOMMAND_ARROWR);
 }
 
+/*
+	Packs the entries HidePlayerMenu leaves alone into m_aVisibleEntry, so the
+	popup closes the gaps rather than drawing holes where removed rows were.
+
+	View Item Char is additionally gated on CB_VIEWCHARITEM, exactly as the
+	dispatch switch is - without that the row would be listed on a build that has
+	no handler compiled in and clicking it would do nothing.
+*/
+int SEASON3B::CNewUIQuickCommandWindow::BuildVisibleEntries()
+{
+	const DWORD dwHide = gProtect.m_MainInfo.HidePlayerMenu;
+
+	m_nVisibleCount = 0;
+
+	if ((dwHide & PLAYER_MENU_HIDE_ALL) != 0)
+	{
+		return 0;
+	}
+
+	static const struct { int iEntry; DWORD dwFlag; } aEntryFlag[] =
+	{
+		{ QCE_TRADE,	PLAYER_MENU_HIDE_TRADE		},
+		{ QCE_BUY,		PLAYER_MENU_HIDE_BUY		},
+		{ QCE_PARTY,	PLAYER_MENU_HIDE_PARTY		},
+		{ QCE_FOLLOW,	PLAYER_MENU_HIDE_FOLLOW		},
+		{ QCE_DUEL,		PLAYER_MENU_HIDE_DUEL		},
+		{ QCE_VIEWITEM,	PLAYER_MENU_HIDE_VIEWITEM	},
+	};
+
+	for (int i = 0; i < (sizeof(aEntryFlag) / sizeof(aEntryFlag[0])); ++i)
+	{
+#if(!CB_VIEWCHARITEM)
+		if (aEntryFlag[i].iEntry == QCE_VIEWITEM)
+		{
+			continue;
+		}
+#endif
+		if ((dwHide & aEntryFlag[i].dwFlag) != 0)
+		{
+			continue;
+		}
+
+		m_aVisibleEntry[m_nVisibleCount++] = aEntryFlag[i].iEntry;
+	}
+
+	return m_nVisibleCount;
+}
+
 void SEASON3B::CNewUIQuickCommandWindow::OpenQuickCommand(const char* strID, int iIndex, int x, int y)
 {
+	// Operator switch: HidePlayerMenu in MainInfo.ini removes individual entries,
+	// or the whole popup when nothing survives the mask.
+	//
+	// Gated here rather than at the call site (NewUIHotKey.cpp) so any future
+	// caller is covered too, and so the window's own state machine never sees a
+	// half-open menu.
+	if (BuildVisibleEntries() <= 0)
+	{
+		return;
+	}
+
 	g_pNewUISystem->Show(SEASON3B::INTERFACE_QUICK_COMMAND);
 
 	SetID(strID);

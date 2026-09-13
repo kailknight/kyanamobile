@@ -80,6 +80,9 @@ bool MainLoad::Load()
 	gProtect.CheckPluginFile();
 	gProtect.CheckLauncher();
 	gProtect.CheckInstance();
+	// Runs here, before the anti-cheat below: refusing an extra copy should be
+	// instant and should not have spent 60s in EntryProc's server handshake first.
+	gProtect.CheckInstanceLimit();
 
 	//=== Set IP Serrial 
 	szServerIpAddress = gProtect.m_MainInfo.IpAddress;

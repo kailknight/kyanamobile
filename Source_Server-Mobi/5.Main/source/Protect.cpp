@@ -194,6 +194,72 @@ void CProtect::CheckInstance() // OK
 	return;
 }
 
+void CProtect::CheckInstanceLimit() // OK
+{
+#if defined(__ANDROID__) || defined(MU_IOS)
+	/*
+		Windows-only by nature. The OS already runs a single instance of an app, so
+		there is nothing to cap - and the two APIs this needs are not available:
+		MessageBoxA does not exist here, and CreateMutex is stubbed to return
+		(HANDLE)1 unconditionally (Platform/PlatformDefs.h), so the slot loop below
+		would always claim the first slot and mean nothing.
+	*/
+	return;
+#else
+	const DWORD limit = this->m_MainInfo.MaxClientInstance;
+
+	if (limit == 0)
+	{
+		return;
+	}
+
+	/*
+		One named mutex per slot; the first slot we can create exclusively is ours,
+		and its handle is deliberately never closed - it is released when the
+		process dies.
+
+		A counting semaphore looks like the obvious primitive and is the wrong one:
+		closing a handle does NOT give back a count that was acquired with a wait,
+		so a client that crashed would leak its slot until the machine rebooted.
+		A named mutex is destroyed with its last handle, so a crash frees the slot
+		by itself.
+
+		No prefix, so these live in the caller's session namespace - the cap is
+		per logged-in Windows user, which is what "how many clients can one person
+		run" means. A "Global\\" prefix would make it machine-wide across sessions.
+	*/
+	for (DWORD n = 0; n < limit; n++)
+	{
+		char szSlotName[128] = {0};
+		wsprintf(szSlotName, "MuClientInstance_%s_%u", this->m_MainInfo.CustomerName, n);
+
+		HANDLE hSlot = CreateMutex(NULL, TRUE, szSlotName);
+
+		if (hSlot == NULL)
+		{
+			// Cannot tell whether this slot is free - do not burn it, try the next.
+			continue;
+		}
+
+		if (GetLastError() != ERROR_ALREADY_EXISTS)
+		{
+			// Slot n is ours. Keep hSlot open for the lifetime of the process.
+			return;
+		}
+
+		CloseHandle(hSlot);
+	}
+
+	char szMessage[256] = {0};
+	wsprintf(szMessage, "You can only run %u copies of the game at the same time.", limit);
+
+	::MessageBoxA(NULL, szMessage, this->m_MainInfo.WindowName,
+		MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST);
+
+	::ExitProcess(0);
+#endif
+}
+
 void CProtect::CheckClientFile() // OK
 {
 	if(this->m_MainInfo.ClientCRC32 == 0)

@@ -14,8 +14,25 @@
 namespace SEASON3B
 {
 	
-	class CNewUIQuickCommandWindow  : public CNewUIObj 
+	class CNewUIQuickCommandWindow  : public CNewUIObj
 	{
+	public:
+		// The popup's entries, in the order they are drawn. Rows can now be
+		// hidden individually (MAIN_FILE_INFO::HidePlayerMenu), so the row a
+		// click lands on is NOT the action - m_aVisibleEntry maps one to the
+		// other. Anything indexing rows directly is a bug.
+		enum QUICK_COMMAND_ENTRY
+		{
+			QCE_TRADE = 0,
+			QCE_BUY,
+			QCE_PARTY,
+			QCE_FOLLOW,
+			QCE_DUEL,
+			QCE_VIEWITEM,
+			QCE_COUNT
+		};
+
+	private:
 		enum IMAGE_LIST
 		{
 			IMAGE_QUICKCOMMAND_BACK = CNewUIMessageBoxMng::IMAGE_MSGBOX_BACK,
@@ -52,6 +69,19 @@ namespace SEASON3B
 		void SetSelectedCharacterIndex(int iIndex);
 
 	private:
+		// Fills m_aVisibleEntry / m_nVisibleCount from HidePlayerMenu and returns
+		// how many rows survived. Rebuilt on every open so editing MainInfo.ini
+		// (and regenerating CBGetMain.bin) does not need a client restart.
+		int BuildVisibleEntries();
+
+		// The popup used to be hardcoded to six rows in five separate places -
+		// the back plate, the filler art, the separator lines and both of
+		// UpdateMouseEvent's outside-click tests. These are the one authority now,
+		// because a hit test that disagrees with the art means clicks landing on
+		// nothing (or the menu refusing to close below its own bottom edge).
+		int GetVisibleRowCount() const;
+		float GetMenuFillerHeight() const;
+
 		void LoadImages();
 		void UnloadImages();
 		
@@ -63,9 +93,14 @@ namespace SEASON3B
 		CNewUIManager*	m_pNewUIMng;
 		POINT			m_Pos;
 
+		// Index into m_aVisibleEntry (a ROW), not a QUICK_COMMAND_ENTRY.
 		int m_iSelectedIndex;
 		char m_strID[32];
 		int m_iSelectedCharacterIndex;
+
+		// Row -> entry map, and how many of it is live.
+		int m_aVisibleEntry[QCE_COUNT];
+		int m_nVisibleCount;
 	};
 	
 }

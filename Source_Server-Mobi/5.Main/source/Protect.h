@@ -49,6 +49,28 @@ struct TEXT_FILE_INFO
 	nText m_TRSTooltipText[MaxLineItemToolTip];
 };
 
+/*
+	Bits for MAIN_FILE_INFO::HidePlayerMenu - which entries of the player-click
+	popup to REMOVE (CNewUIQuickCommandWindow).
+
+	The polarity is "hide", not "show", so that 0 - the value an absent or blank
+	MainInfo.ini key yields - means vanilla behaviour with the whole menu intact.
+
+	Bit 0 is deliberately reserved for HIDE_ALL rather than being the first
+	entry, so the per-entry bits start at bit 1 and no single-entry value can
+	ever collide with the "remove everything" shorthand.
+*/
+enum PLAYER_MENU_HIDE_FLAG
+{
+	PLAYER_MENU_HIDE_ALL		= 0x01,	//  1
+	PLAYER_MENU_HIDE_TRADE		= 0x02,	//  2
+	PLAYER_MENU_HIDE_BUY		= 0x04,	//  4
+	PLAYER_MENU_HIDE_PARTY		= 0x08,	//  8
+	PLAYER_MENU_HIDE_FOLLOW		= 0x10,	// 16
+	PLAYER_MENU_HIDE_DUEL		= 0x20,	// 32
+	PLAYER_MENU_HIDE_VIEWITEM	= 0x40,	// 64
+};
+
 struct MAIN_FILE_INFO
 {
 	DWORD GSPortMin;
@@ -187,6 +209,22 @@ struct MAIN_FILE_INFO
 	// one means rebuilding GetMainInfo.exe, regenerating CBGetMain.bin AND
 	// rebuilding Main.exe - a mismatch misreads every field after the change.
 	DWORD CustomCashShop;
+
+	// Which entries of the player-click popup to remove - a MASK of
+	// PLAYER_MENU_HIDE_* bits, not an on/off flag. 0 shows everything,
+	// PLAYER_MENU_HIDE_ALL (1) removes the popup entirely, and the per-entry bits
+	// add together: 96 (DUEL|VIEWITEM) leaves Trade, Buy, Party and Follow alone.
+	//
+	// Appended at the tail for the same reason CustomCashShop was - every offset
+	// above stays put. The struct grows by 8 bytes with the field below, so the
+	// new CBGetMain.bin and the new Main.exe MUST ship together: ReadMainFile
+	// checks the file size exactly, so an old blob against a new exe (or the
+	// reverse) dies with "Config corrupt!".
+	DWORD HidePlayerMenu;
+
+	// How many copies of the client may run at once. 0 = unlimited.
+	// Enforced by CProtect::CheckInstanceLimit, one named mutex per slot.
+	DWORD MaxClientInstance;
 };
 
 class CProtect
@@ -198,6 +236,10 @@ public:
 	bool ReadTextFile(char* name);
 	void CheckLauncher();
 	void CheckInstance();
+	// Caps concurrent clients at MAIN_FILE_INFO::MaxClientInstance. Separate from
+	// CheckInstance above, which is the launcher gate and unrelated despite the
+	// similar name.
+	void CheckInstanceLimit();
 	void CheckClientFile();
 	void CheckPluginFile();
 	void CheckCameraFile();
