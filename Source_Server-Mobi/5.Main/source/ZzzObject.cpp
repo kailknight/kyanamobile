@@ -1562,6 +1562,108 @@ void BodyLight(OBJECT *o,BMD *b)
 
 extern float BoneScale;
 
+/*
+	True only when p is exactly the embedded Object of a CharactersClient entry.
+
+	OBJECT::Owner has a narrow contract: every writer that sets it non-NULL stores
+	&<CHARACTER>.Object (ZzzCharacter.cpp:6262, :10687, :10730), and the only other
+	writes are the two NULLs in EffectDestructor (ZzzEffect.cpp:247, :265). So any
+	other value is garbage, and Owner is read back through g_isCharacterBuff, which
+	dereferences Owner->m_BuffMap - a std::map.
+
+	A wild Owner therefore does not fail gracefully: it faults inside
+	std::_Tree::_Find_lower_bound while walking a garbage head pointer. That is the
+	0xC0000005 "read of 0x00000006" crash in RenderEffects, seen on both the
+	Windows and Android clients.
+
+	A plain "!= NULL" check cannot catch it, so validate the pointer instead:
+	inside the array, and landing exactly on a CHARACTER's Object offset. The
+	stride test matters - an in-range but misaligned pointer would read m_BuffMap
+	from the middle of some other field and fault just the same.
+
+	CharactersClient is CharacterMemoryDump + rand()%128 into an array of
+	MAX_CHARACTERS_CLIENT+1+128 entries, so indices 0..MAX_CHARACTERS_CLIENT are
+	always within the allocation.
+*/
+/*
+	Diagnostic for the wild-Owner crash. The guard below stops the fault, but
+	something is still writing a garbage pointer into OBJECT::Owner, and a
+	suppressed crash tells us nothing about which creation path did it.
+
+	So record the OBJECT's identity the first time each Type/SubType pair shows up
+	with a bad Owner. That names the effect, which names the creator.
+
+	Deliberately deduplicated: a rejected pointer recurs every frame for as long as
+	the effect lives, so an unfiltered log would fill the disk in seconds.
+
+	fopen rather than g_ConsoleDebug: this has to work on Android too, where
+	logcat is empty for this app and fopen tracing is the proven route (fopen is
+	remapped to the app data root by AndroidFopen).
+*/
+static void ReportBadObjectOwner(const OBJECT* o)
+{
+	if(o == NULL)
+	{
+		return;
+	}
+
+	enum { MAX_REPORTED = 64 };
+	static int s_iSeenType[MAX_REPORTED] = {0};
+	static int s_iSeenSubType[MAX_REPORTED] = {0};
+	static int s_iSeenCount = 0;
+
+	for(int i = 0; i < s_iSeenCount; i++)
+	{
+		if(s_iSeenType[i] == o->Type && s_iSeenSubType[i] == o->SubType)
+		{
+			return;
+		}
+	}
+
+	if(s_iSeenCount < MAX_REPORTED)
+	{
+		s_iSeenType[s_iSeenCount] = o->Type;
+		s_iSeenSubType[s_iSeenCount] = o->SubType;
+		s_iSeenCount++;
+	}
+
+	FILE* fp = fopen("mu_badowner.txt", "a");
+
+	if(fp != NULL)
+	{
+		fprintf(fp, "bad Owner=%p  Type=%d SubType=%d Live=%d Kind=%d Scale=%.2f\n",
+			(void*)o->Owner, o->Type, o->SubType, (int)o->Live, (int)o->Kind, o->Scale);
+		fclose(fp);
+	}
+}
+
+static bool IsCharacterOwnedObject(const OBJECT* p)
+{
+	if(p == NULL || CharactersClient == NULL)
+	{
+		return false;
+	}
+
+	const char* pBase = reinterpret_cast<const char*>(CharactersClient);
+	const size_t nStride = sizeof(CHARACTER);
+	const size_t nObjectOffset =
+		static_cast<size_t>(reinterpret_cast<const char*>(&CharactersClient[0].Object) - pBase);
+
+	const ptrdiff_t nDelta = reinterpret_cast<const char*>(p) - pBase;
+
+	if(nDelta < 0)
+	{
+		return false;
+	}
+
+	if(nDelta >= static_cast<ptrdiff_t>(nStride * (MAX_CHARACTERS_CLIENT + 1)))
+	{
+		return false;
+	}
+
+	return (static_cast<size_t>(nDelta) % nStride) == nObjectOffset;
+}
+
 bool Calc_RenderObject(OBJECT *o,bool Translate,int Select, int ExtraMon)
 {
     if(gMapManager.InChaosCastle() == true && Hero->Object.m_bActionStart == true)
@@ -1599,12 +1701,21 @@ bool Calc_RenderObject(OBJECT *o,bool Translate,int Select, int ExtraMon)
 		VectorCopy(Position,b->BodyOrigin);
     }
 
-	if(o->Owner != NULL)
+	// Validated, not merely null-checked - see IsCharacterOwnedObject above. A
+	// garbage Owner here faults inside m_BuffMap's std::map rather than returning
+	// a wrong answer.
+	if(IsCharacterOwnedObject(o->Owner))
 	{
-		if(g_isCharacterBuff(o->Owner, eDeBuff_Stun) || g_isCharacterBuff(o->Owner, eDeBuff_Sleep) )	
+		if(g_isCharacterBuff(o->Owner, eDeBuff_Stun) || g_isCharacterBuff(o->Owner, eDeBuff_Sleep) )
 		{
 			o->AnimationFrame = 0.f;
 		}
+	}
+	else if(o->Owner != NULL)
+	{
+		// Non-NULL but not a real character Object - this is the crash we are
+		// suppressing. Name it so the creation path can be found.
+		ReportBadObjectOwner(o);
 	}
 
     const bool reuseAdaptivePose = ShouldReuseObjectAnimationPose(o, Select);
