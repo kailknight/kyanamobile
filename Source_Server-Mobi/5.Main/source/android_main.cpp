@@ -584,6 +584,24 @@ static void InitializeTakumiProtectState()
         static_cast<unsigned int>(gProtect.m_MainInfo.ZoomMin),
         static_cast<unsigned int>(gProtect.m_MainInfo.ZoomMax));
 
+    /*
+        Seed g_bGMObservation from mShowName, which Winmain.cpp does on PC right
+        after reading config.ini and which nothing did here.
+
+        CNewUINameWindow::RenderName draws every nearby player's name only when
+        g_bGMObservation is set; otherwise just the one under SelectedCharacter.
+        On PC that second case is fed by mouse HOVER, so names appear as the
+        pointer sweeps over people. Touch has no hover, so on mobile it collapsed
+        to "tap a player to learn their name".
+
+        mShowName is already 1 in android_link_stubs.cpp, so the Options window's
+        "Show Name" checkbox rendered as CHECKED while names were in fact off -
+        the flag it mirrors had never been copied across. Toggling it off and on
+        was the only way to get names, because that is the only code that
+        assigns g_bGMObservation on this platform.
+    */
+    g_bGMObservation = (mShowName != 0);
+
     LOGI(
         "Protect loaded: gsPorts=%u-%u server=%s:%u clientVersion=%s serial=%s",
         static_cast<unsigned int>(gProtect.m_MainInfo.GSPortMin),
