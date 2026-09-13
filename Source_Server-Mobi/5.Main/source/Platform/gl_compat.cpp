@@ -1817,6 +1817,19 @@ void GL_GetFloatv(GLenum pname, float* params) {
     if (!params) return;
     if (pname == 0x0BA6 /*GL_MODELVIEW_MATRIX*/)  { memcpy(params, s_mvStack[s_mvDepth],   sizeof(Mat4)); return; }
     if (pname == 0x0BA7 /*GL_PROJECTION_MATRIX*/) { memcpy(params, s_projStack[s_projDepth], sizeof(Mat4)); return; }
+    // GL_CURRENT_COLOR is fixed-function state that GLES3 does not have, so the
+    // fall-through below used to raise GL_INVALID_ENUM and leave `params`
+    // untouched. Callers that read the colour back to drive something other
+    // than a vertex - the item-name renderers pick their text colour from it
+    // (ZzzInventory.cpp RenderItemName/RenderItemNameS6) - therefore saw
+    // whatever they had pre-initialised the buffer to, which is why excellent
+    // and ancient drops printed white on mobile while PC coloured them.
+    // s_cur IS this layer's current colour, so serving the query from it is
+    // both correct and cheaper than the rejected driver round trip.
+    if (pname == 0x0B00 /*GL_CURRENT_COLOR*/) {
+        params[0] = s_cur.r; params[1] = s_cur.g; params[2] = s_cur.b; params[3] = s_cur.a;
+        return;
+    }
     glGetFloatv(pname, params);  // fall through to real GL for other params
 }
 
