@@ -3591,12 +3591,17 @@ bool GetAndroidMessageBoxRect(AndroidUiRect* outRect)
 // actually owns the item found, or nullptr if none - callers that need to poke
 // the control itself (SetEventState, IsLocked, ...) would otherwise have to
 // redo this exact lookup a second time to get it.
-// includeChaosBox opts in to the craft box (Chaos Machine / Chaos Card Master)
-// as a third place to look. Opt-in rather than always-on because
-// FindAndroidInventoryHotKeyItemAt shares this function, and the pending
-// hotkey-bind flow must not bind a potion out of the craft box.
+// includeTransferBoxes opts in to the windows a held item can be moved OUT of -
+// the craft box (Chaos Machine / Chaos Card Master) and the warehouse plus its
+// expansion page - as further places to look. Opt-in rather than always-on
+// because FindAndroidInventoryHotKeyItemAt shares this function, and the pending
+// hotkey-bind flow must not bind a potion out of the craft box or the vault.
+//
+// One flag rather than one per window because the two callers that want any of
+// them (arming the hold, then firing it) want all of them, and only one such
+// window is ever on screen at a time.
 ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventoryCtrl** outCtrl,
-                                  bool includeChaosBox = false)
+                                  bool includeTransferBoxes = false)
 {
     if (outCtrl != nullptr)
     {
@@ -3667,7 +3672,7 @@ ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventor
     // while a mix is in flight, but BMoveItemNew - which the right-click pulse
     // ends up calling - never consults IsLocked(), so nothing downstream would
     // stop a hold from yanking an ingredient out mid-mix. This is that guard.
-    if (includeChaosBox
+    if (includeTransferBoxes
         && g_pMixInventory != nullptr
         && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY)
         && g_pMixInventory->GetMixState() == SEASON3B::CNewUIMixInventory::MIX_READY)
@@ -3681,6 +3686,53 @@ ITEM* FindAndroidBagItemAndCtrlAt(float uiX, float uiY, SEASON3B::CNewUIInventor
                     *outCtrl = mixCtrl;
                 }
                 return item;
+            }
+        }
+    }
+
+    // The warehouse, and then its expansion page. Depositing already worked -
+    // the hold's right-click pulse reaches HandleInventoryActions, which calls
+    // g_pStorageInventory->ProcessMyInvenItemAutoMove() whenever INTERFACE_STORAGE
+    // is up - but withdrawing did not, because the finder only ever searched the
+    // bag, so no hold could arm over a vault slot. With the slot found, the same
+    // pulse lands in CNewUIStorageInventory::ProcessInventoryCtrl, whose own
+    // IsPress(VK_RBUTTON) branch calls ProcessStorageItemAutoMove().
+    //
+    // No in-flight guard is needed here, unlike the craft box above:
+    // ProcessStorageItemAutoMove opens with `if (IsItemAutoMove()) return;` and
+    // holds that flag until the server answers, so a second hold mid-transfer is
+    // already a no-op. It also refuses when the bag has no room for the item.
+    if (includeTransferBoxes
+        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE))
+    {
+        if (g_pStorageInventory != nullptr)
+        {
+            if (SEASON3B::CNewUIInventoryCtrl* storageCtrl = g_pStorageInventory->GetInventoryCtrl())
+            {
+                if (ITEM* item = storageCtrl->FindItemAtPt(mouseX, mouseY))
+                {
+                    if (outCtrl != nullptr)
+                    {
+                        *outCtrl = storageCtrl;
+                    }
+                    return item;
+                }
+            }
+        }
+
+        if (g_pStorageInventoryExt != nullptr
+            && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_ExpandWarehouse))
+        {
+            if (SEASON3B::CNewUIInventoryCtrl* storageExtCtrl = g_pStorageInventoryExt->GetInventoryCtrl())
+            {
+                if (ITEM* item = storageExtCtrl->FindItemAtPt(mouseX, mouseY))
+                {
+                    if (outCtrl != nullptr)
+                    {
+                        *outCtrl = storageExtCtrl;
+                    }
+                    return item;
+                }
             }
         }
     }
@@ -13605,11 +13657,11 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // polled from UpdateVirtualPadHolds).
     {
         SEASON3B::CNewUIInventoryCtrl* bagCtrl = nullptr;
-        // includeChaosBox: a hold on an item sitting IN the craft box has to arm
-        // too, or there is no way to take an ingredient back out but the
-        // double-tap-to-pick-up-then-tap-to-drop dance. StartAndroidBagHold does
-        // not claim the touch, so that dance keeps working alongside this.
-        if (ITEM* bagItem = FindAndroidBagItemAndCtrlAt(uiX, uiY, &bagCtrl, /*includeChaosBox*/ true))
+        // includeTransferBoxes: a hold on an item sitting IN the craft box or the
+        // warehouse has to arm too, or there is no way to take it back out but
+        // the double-tap-to-pick-up-then-tap-to-drop dance. StartAndroidBagHold
+        // does not claim the touch, so that dance keeps working alongside this.
+        if (ITEM* bagItem = FindAndroidBagItemAndCtrlAt(uiX, uiY, &bagCtrl, /*includeTransferBoxes*/ true))
         {
             // CNewUIInventoryCtrl::UpdateProcess only resets EVENT_HOVER to
             // EVENT_NONE when the pointer moves off every filled slot, not when
@@ -14672,7 +14724,7 @@ void UpdateAndroidBagHold()
     // slot underneath it.
     SEASON3B::CNewUIInventoryCtrl* ctrl = nullptr;
     ITEM* item = FindAndroidBagItemAndCtrlAt(g_androidBagHold.uiX, g_androidBagHold.uiY, &ctrl,
-                                             /*includeChaosBox*/ true);
+                                             /*includeTransferBoxes*/ true);
     if (item == nullptr)
     {
         ClearAndroidBagHold();
@@ -14709,18 +14761,22 @@ void UpdateAndroidBagHold()
     MouseLButton = false;
     ClearAndroidLongPressRightClick(false);
 
-    // While a craft box is open, a hold ALWAYS transfers - it never hotkey-binds.
+    // While a craft box or the warehouse is open, a hold ALWAYS transfers - it
+    // never hotkey-binds.
     //
     // Jewels and several other craft ingredients pass CanRegisterItemHotKey, so
     // without this the branch below would swallow the hold and quietly bind a
     // Bless/Soul to a potion slot instead of putting it in the box: the one
     // gesture this feature exists for would fail on exactly the items most often
-    // mixed. Binding is still available the moment the box is closed.
-    const bool chaosBoxOpen = (g_pNewUISystem != nullptr)
-        && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY);
+    // mixed. The warehouse is the same trap with worse odds - a vault is mostly
+    // jewels and stacked potions, and those are precisely what people move in and
+    // out of it. Binding is still available the moment the window is closed.
+    const bool transferWindowOpen = (g_pNewUISystem != nullptr)
+        && (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY)
+            || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE));
 
     const int itemLevel = (item->Level >> 3) & 15;
-    if (!chaosBoxOpen && SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(item->Type))
+    if (!transferWindowOpen && SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(item->Type))
     {
         // Consumables bind to a hotkey slot instead of being used directly -
         // this is what tapping one used to do; it moved to a hold so a plain
