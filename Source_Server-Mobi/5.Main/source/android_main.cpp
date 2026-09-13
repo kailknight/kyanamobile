@@ -13726,6 +13726,28 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Directly after the pinch tracker (which only registers the finger here,
+    // it does not claim a lone touch): a modal message box outranks every
+    // other surface, the same way it does on PC. See
+    // HandleAndroidMessageBoxFingerDown.
+    //
+    // Must come before the register overlay below: SubmitRegistration opens a
+    // message box for every validation failure (empty field, ID already
+    // taken, ...) without closing the overlay - OnShow only goes false on
+    // success - so the dialog sits on top of a panel that is still visible
+    // and still modal. The register panel's rect (170-470, 140-298 in UI
+    // space) is dead centre of the screen, exactly where OpenMessageBox
+    // renders, so with the checks the other way round the panel's own
+    // catch-all ("tap anywhere else on the panel drops focus but stays
+    // claimed") ate the message box's OK button first. The player could not
+    // dismiss the error or reach Submit again - it read as a broken Register
+    // button, when the button was fine and the dialog on top of it was
+    // unreachable.
+    if (HandleAndroidMessageBoxFingerDown(touch, uiX, uiY))
+    {
+        return true;
+    }
+
     // Before the register overlay: the notice reports that overlay's own
     // validation errors, and the overlay's catch-all claims every tap on its
     // panel. Behind it, the notice could never be dismissed - and an undismissed
@@ -13747,15 +13769,6 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     // The press is only recorded here; the row or the collapse toggle fires on
     // release, once HandleAndroidNpcPickerFingerUp knows it was not a drag.
     if (HandleAndroidNpcPickerFingerDown(uiX, uiY, touch.fingerId))
-    {
-        return true;
-    }
-
-    // Directly after the pinch tracker (which only registers the finger here,
-    // it does not claim a lone touch): a modal message box outranks every
-    // other surface, the same way it does on PC. See
-    // HandleAndroidMessageBoxFingerDown.
-    if (HandleAndroidMessageBoxFingerDown(touch, uiX, uiY))
     {
         return true;
     }
