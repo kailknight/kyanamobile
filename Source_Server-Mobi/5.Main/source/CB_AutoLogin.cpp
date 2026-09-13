@@ -92,6 +92,42 @@ namespace
 	constexpr int kAccountListRowWidth = 105;
 	constexpr int kAccountListDeleteX = 245;
 	constexpr int kAccountListDeleteSize = 12;
+
+	/*
+		Row hit-box size in the 640x480 space MouseX/MouseY live in.
+
+		Everything here builds positions as (XPos + ScaleLoginMetric(k)) / rate,
+		so ScaleLoginMetric values are in the same units as XPos/YPos and only
+		become comparable to MouseX/MouseY after that division. The sizes handed
+		to CheckMouseIn skipped it, and the row pitch is the one place that breaks
+		visibly: consecutive rows are drawn exactly (KC / rate_y) apart in the
+		compared space, so a box KC tall covers about rate_y rows.
+
+		On a phone that is ~2.9 rows per box. Two rows lit up at once, and because
+		the loop selects the first i whose box matches, tapping the third account
+		selected the first - so the list looked like it refused to select.
+
+		Derived from the pitch rather than from any assumption about the units,
+		because the loop's own y expression is the proof: it advances by
+		(KC * i) / rate_y per row.
+	*/
+	inline float AccountRowHitHeight(int rowPitchScaled)
+	{
+		const float rate = (g_fScreenRate_y > 0.f) ? g_fScreenRate_y : 1.f;
+		return static_cast<float>(rowPitchScaled) / rate;
+	}
+
+	inline float AccountRowHitWidth()
+	{
+		const float rate = (g_fScreenRate_x > 0.f) ? g_fScreenRate_x : 1.f;
+		return static_cast<float>(ScaleLoginMetric(kAccountListRowWidth)) / rate;
+	}
+
+	inline float AccountDeleteHitSize()
+	{
+		const float rate = (g_fScreenRate_x > 0.f) ? g_fScreenRate_x : 1.f;
+		return static_cast<float>(ScaleLoginMetric(kAccountListDeleteSize)) / rate;
+	}
 	constexpr int kAccountListToggleX = 245;
 	constexpr int kAccountListToggleY = 110;
 	constexpr int kAccountListToggleSize = 14;
@@ -139,7 +175,10 @@ void CB_AutoLogin::DrawInfo(int XPos, int YPos)
 		for (int i = 0; i < this->totalSavedAcc; i++)
 		{
 			DWORD BGColor = 0x000000FF;
-			if (SEASON3B::CheckMouseIn(int((XPos + ScaleLoginMetric(kAccountListIdX)) / g_fScreenRate_x), int((YPos + ScaleLoginMetric(kAccountListStartY) + (KC * i)) / g_fScreenRate_y), ScaleLoginMetric(kAccountListRowWidth), KC) == 1)
+			// Sizes divided by the screen rate, like the positions above them -
+			// see AccountRowHitHeight. Passing the raw scaled pitch here made one
+			// row's box cover about three rows.
+			if (SEASON3B::CheckMouseIn(int((XPos + ScaleLoginMetric(kAccountListIdX)) / g_fScreenRate_x), int((YPos + ScaleLoginMetric(kAccountListStartY) + (KC * i)) / g_fScreenRate_y), static_cast<int>(AccountRowHitWidth()), static_cast<int>(AccountRowHitHeight(KC))) == 1)
 			{
 				BGColor = 0xA5A100FF;
 				if (GetKeyState(VK_LBUTTON) & 0x8000 && GetTickCount() > this->TickCount +500)
@@ -196,13 +235,16 @@ bool CB_AutoLogin::HitsControlArea(int XPos, int YPos, float uiX, float uiY) con
 		for (int i = 0; i < this->totalSavedAcc; ++i)
 		{
 			const float rowY = (YPos + ScaleLoginMetric(kAccountListStartY) + (KC * i)) / g_fScreenRate_y;
+			// Divided, matching DrawInfo's own hit test - these two mirror each
+			// other by hand, so an undivided size here would put the touch
+			// dispatcher's idea of the list out of step with the highlight.
 			if (within(uiX, uiY, (XPos + ScaleLoginMetric(kAccountListIdX)) / g_fScreenRate_x, rowY,
-				static_cast<float>(ScaleLoginMetric(kAccountListRowWidth)), static_cast<float>(KC)))
+				AccountRowHitWidth(), AccountRowHitHeight(KC)))
 			{
 				return true;
 			}
 			if (within(uiX, uiY, (XPos + ScaleLoginMetric(kAccountListDeleteX)) / g_fScreenRate_x, rowY,
-				static_cast<float>(ScaleLoginMetric(kAccountListDeleteSize)), static_cast<float>(ScaleLoginMetric(kAccountListDeleteSize))))
+				AccountDeleteHitSize(), AccountDeleteHitSize()))
 			{
 				return true;
 			}
