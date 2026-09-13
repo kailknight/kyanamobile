@@ -817,6 +817,15 @@ extern bool Teleport;
 extern int CachTexture;
 extern int AlphaBlendType;
 
+// Login-screen notice (defined further down, outside the anonymous namespace
+// because ZzzScene.cpp calls the renderer). Declared HERE, at global scope, and
+// not as a block-scope extern inside HandleVirtualFingerDown: that function
+// lives in the anonymous namespace below, so a declaration written inside it
+// would name (anonymous namespace)::IsAndroidLoginNoticeOpen and link to
+// nothing - which is exactly what happened.
+bool IsAndroidLoginNoticeOpen();
+bool HandleAndroidLoginNoticeFingerDown(float uiX, float uiY);
+
 namespace
 {
 constexpr bool kUseLegacyMainHud = true;
@@ -13586,6 +13595,15 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Before the register overlay: the notice reports that overlay's own
+    // validation errors, and the overlay's catch-all claims every tap on its
+    // panel. Behind it, the notice could never be dismissed - and an undismissed
+    // notice means OpenMessageBox's guard swallows every later message.
+    if (::IsAndroidLoginNoticeOpen() && ::HandleAndroidLoginNoticeFingerDown(uiX, uiY))
+    {
+        return true;
+    }
+
     // The registration overlay is modal while it is up - it sits on the login
     // screen, so nothing behind it should see a tap at all.
     if (AndroidRegisterOverlayVisible() && HandleAndroidRegisterOverlayFingerDown(uiX, uiY))
@@ -19127,6 +19145,180 @@ void SetAndroidRegisterOverlayVisible(bool visible)
 void RenderAndroidRegisterOverlay()
 {
     AndroidRegisterOverlayRender();
+}
+
+/*
+    ── Login-screen notice ───────────────────────────────────────────────────
+    Surfaces gInterface's message box while the login scene is up, because
+    nothing else does.
+
+    There are TWO unrelated message-box systems in this client. SEASON3B's
+    g_MessageBox is created in CNewUISystem::Create() but only Show(true)n in
+    LoadMainSceneInterface(). gInterface's (CBInterface.cpp) is painted solely by
+    Interface::DrawMessageBox, reached from gInterface.Work(), which is called
+    from exactly one place: CNewUIBCustomMenuInfo::Render(). That object is also
+    built in LoadMainSceneInterface(), so on the login screen g_pBCustomMenuInfo
+    is null and neither system draws anything.
+
+    SubmitRegistration and RecvKQRegInGame both report through
+    gInterface.OpenMessageBox. So every registration message - "Vui long nhap
+    tai khoan", "ID already exists", and the success confirmation - set OnShow on
+    a box that was never rendered.
+
+    That alone is invisible feedback. What made it look like a dead button is the
+    guard at the top of OpenMessageBox:
+
+        if (gInterface.Data[eWindowMessageBox].OnShow) return;
+
+    Once the first unrendered message latched OnShow, it stayed latched with no
+    way to dismiss it, and every later message - including the one saying the
+    account was created - was silently dropped. Registration went permanently
+    mute after the first validation slip.
+
+    Draining OnShow here is therefore the load-bearing half: the text gets shown,
+    and the flag is released so the next message is not swallowed.
+*/
+namespace
+{
+struct AndroidLoginNotice
+{
+    char caption[64];
+    char text[512];
+    bool active;
+};
+
+AndroidLoginNotice g_androidLoginNotice{};
+
+constexpr float kLoginNoticeW = 260.0f;
+constexpr float kLoginNoticeX = (640.0f - kLoginNoticeW) * 0.5f;
+constexpr float kLoginNoticeY = 96.0f;
+constexpr float kLoginNoticeLineH = 12.0f;
+
+// Copies a pending gInterface message box in and releases OnShow immediately, so
+// OpenMessageBox's "one at a time" guard cannot latch. Nothing else on the login
+// screen consumes that flag.
+void DrainInterfaceMessageBoxIntoLoginNotice()
+{
+    if (gInterface.Data[eWindowMessageBox].OnShow == 0)
+    {
+        return;
+    }
+
+    strncpy(g_androidLoginNotice.caption, gInterface.MsgBoxCaption,
+            sizeof(g_androidLoginNotice.caption) - 1);
+    g_androidLoginNotice.caption[sizeof(g_androidLoginNotice.caption) - 1] = 0;
+
+    strncpy(g_androidLoginNotice.text, gInterface.MsgBoxText,
+            sizeof(g_androidLoginNotice.text) - 1);
+    g_androidLoginNotice.text[sizeof(g_androidLoginNotice.text) - 1] = 0;
+
+    g_androidLoginNotice.active = true;
+
+    gInterface.Data[eWindowMessageBox].OnShow = 0;
+}
+
+int CountLoginNoticeLines()
+{
+    int lines = 1;
+    for (const char* p = g_androidLoginNotice.text; *p != 0; ++p)
+    {
+        if (*p == '\n')
+        {
+            ++lines;
+        }
+    }
+    return lines;
+}
+
+float LoginNoticeHeight()
+{
+    return 34.0f + (static_cast<float>(CountLoginNoticeLines()) * kLoginNoticeLineH) + 22.0f;
+}
+
+AndroidUiRect GetLoginNoticeCloseRect()
+{
+    const float h = LoginNoticeHeight();
+    const float w = 80.0f;
+    return AndroidUiRect{ kLoginNoticeX + (kLoginNoticeW - w) * 0.5f,
+                          kLoginNoticeY + h - 20.0f, w, 15.0f };
+}
+} // namespace
+
+bool IsAndroidLoginNoticeOpen()
+{
+    return g_androidLoginNotice.active;
+}
+
+// Any tap dismisses, not just the button: the notice sits over the register
+// panel's own catch-all, and a player who cannot find a 15-unit-tall button has
+// no other way out of a modal that blocks all further messages.
+bool HandleAndroidLoginNoticeFingerDown(float /*uiX*/, float /*uiY*/)
+{
+    if (!g_androidLoginNotice.active)
+    {
+        return false;
+    }
+
+    g_androidLoginNotice = AndroidLoginNotice{};
+    PlayBuffer(SOUND_CLICK01);
+    return true;
+}
+
+void AndroidRenderLoginNotice()
+{
+    // Drained on every login-scene frame, not only while the notice is up: the
+    // success path calls OpenMessageBox and then closes the register window, so
+    // the message has to be picked up independently of that overlay's lifetime.
+    DrainInterfaceMessageBoxIntoLoginNotice();
+
+    if (!g_androidLoginNotice.active)
+    {
+        return;
+    }
+
+    const float h = LoginNoticeHeight();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRectFilled(kLoginNoticeX - 4.0f, kLoginNoticeY - 4.0f,
+                          kLoginNoticeW + 8.0f, h + 8.0f, 0.0f, 0.0f, 0.0f, 0.60f);
+    DrawVirtualRectFilled(kLoginNoticeX, kLoginNoticeY, kLoginNoticeW, h,
+                          0.06f, 0.07f, 0.12f, 0.95f);
+    DrawVirtualRectOutline(kLoginNoticeX, kLoginNoticeY, kLoginNoticeW, h,
+                           0.42f, 0.68f, 0.98f, 0.96f, 2.0f);
+
+    DrawVirtualRightPanelButtonBox(GetLoginNoticeCloseRect(), true);
+
+    HFONT titleFont = (g_hFontBold != nullptr) ? g_hFontBold : g_hFont;
+    HFONT bodyFont  = (g_hFont != nullptr) ? g_hFont : titleFont;
+
+    TextDraw(titleFont, kLoginNoticeX, kLoginNoticeY + 8.0f, 0xFFE8F4FF, 0x0,
+             kLoginNoticeW, 0, 3,
+             (g_androidLoginNotice.caption[0] != 0) ? g_androidLoginNotice.caption : "Notice");
+
+    // TextDraw does not break on '\n', so the lines are walked by hand.
+    float y = kLoginNoticeY + 28.0f;
+    const char* line = g_androidLoginNotice.text;
+    while (line != nullptr && *line != 0)
+    {
+        const char* nl = strchr(line, '\n');
+        char buffer[256] = {};
+        const size_t len = (nl != nullptr) ? static_cast<size_t>(nl - line) : strlen(line);
+        strncpy(buffer, line, (len < sizeof(buffer) - 1) ? len : sizeof(buffer) - 1);
+
+        TextDraw(bodyFont, kLoginNoticeX, y, 0xFFFFFFFF, 0x0, kLoginNoticeW, 0, 3, buffer);
+        y += kLoginNoticeLineH;
+
+        line = (nl != nullptr) ? (nl + 1) : nullptr;
+    }
+
+    const AndroidUiRect closeRect = GetLoginNoticeCloseRect();
+    TextDraw(bodyFont, closeRect.x, closeRect.y + 3.0f, 0xFFE8F4FF, 0x0,
+             closeRect.w, 0, 3, "Close");
 }
 
 // The reply handler reports the account it just created and copies the

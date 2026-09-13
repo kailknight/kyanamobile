@@ -1699,10 +1699,21 @@ bool NewRenderLogInScene(HDC hDC)
 	g_pRenderText->RenderText(0, DisplayHeight -Size.cy* DisplayWin /WindowWidth-1,Text);
 
     RenderInfomation();
-	
+
 #ifdef ENABLE_EDIT
 	RenderDebugWindow();
 #endif //ENABLE_EDIT
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Last thing in the login scene's 2D pass, so it sits above the register
+	// overlay. This is the only thing that renders gInterface's message box
+	// before the main scene exists - see the comment block on
+	// AndroidRenderLoginNotice for why neither message-box system does.
+	{
+		extern void AndroidRenderLoginNotice();
+		AndroidRenderLoginNotice();
+	}
+#endif
 
 	EndBitmap();
 
