@@ -197,7 +197,7 @@ public:
 	enum IGS_SERVER_PRICE_KIND
 	{
 		IGS_PRICE_KIND_PACKAGE	= 0,	// keyed by CShopPackage::PackageProductSeq
-		IGS_PRICE_KIND_PRODUCT	= 1,	// keyed by CShopProduct::ProductSeq
+		IGS_PRICE_KIND_PRODUCT	= 1,	// keyed by CShopProduct::PriceSeq (the variant)
 	};
 
 	void	ClearServerPrices();

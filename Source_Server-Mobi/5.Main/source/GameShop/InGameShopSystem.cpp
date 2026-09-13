@@ -1078,10 +1078,15 @@ bool CInGameShopSystem::GetProductInfo(CShopProduct* pProduct, int iAttrType, OU
 			// Server price where there is one, so the item-select and confirm boxes
 			// quote the same number the purchase will actually take. IBSProduct.txt
 			// knows nothing about sales, so it can only ever offer the list price.
+			//
+			// Keyed by PriceSeq, not ProductSeq: the server sends one row per
+			// CustomCashShopProducts.MainIndex, which is the variant. Duration
+			// variants share a ProductSeq, so looking that up gave every variant
+			// the first one's price while the purchase charged the right one.
 			IGS_SERVER_PRICE ServerPrice;
 
 			if( gProtect.m_MainInfo.CustomCashShop != 0
-				&& GetServerPrice(IGS_PRICE_KIND_PRODUCT, pProduct->ProductSeq, ServerPrice) == true )
+				&& GetServerPrice(IGS_PRICE_KIND_PRODUCT, pProduct->PriceSeq, ServerPrice) == true )
 			{
 				iValue = ServerPrice.iEffectivePrice;
 			}
