@@ -20223,47 +20223,43 @@ bool IsAggressiveMobilePerfModeEnabled()
 // handler normalises against g_NativePresentWidth/Height (below) rather than
 // the scaled drawable size.
 //
-// Only the HEIGHT is pinned; the width is derived from the panel's real aspect
-// ratio in ComputeAndroidRenderSize below. That is not cosmetic: the 3D
-// projection is built from WindowWidth/WindowHeight, so a render target whose
-// aspect differs from the display's presents a horizontally stretched world
-// rather than letterboxing itself. On a 16:9 screen 576 gives exactly 1024x576;
-// on a 20:9 phone it gives 1280x576.
+// A FRACTION of the physical size, not an absolute target - and that distinction
+// is load-bearing. An absolute 576-line target was tried and reverted, because it
+// breaks text layout across the entire UI:
 //
-// This replaced a fractional 0.75 scale. A fraction preserved aspect for free
-// but produced a different resolution - and so a different fill-rate cost and a
-// different look - on every device.
+//   fontSize = ceil(12 + (WindowHeight - 480)/200)   (further down this file)
 //
-// 0 = native (feature off). Never upscales: a panel shorter than this renders
-// at its own height.
-static int g_RenderTargetHeight = 576;
+// is only weakly tied to the render height, while g_fScreenRate_x/y are strictly
+// PROPORTIONAL to it. Controls are sized in logical (640x480) units, so what
+// matters is the text width measured in those units - fontSize / g_fScreenRate_x:
+//
+//   0.75 of 1116 -> 837 tall, font 14, rate_x 2.906 -> 4.82   (what the UI is tuned to)
+//   fixed 576    -> 576 tall, font 13, rate_x 2.000 -> 6.50   (+35%, text overflows)
+//
+// At +35% the login labels overflowed their controls, and the centring in
+// UIControls.cpp - (m_iWidth - TextSize.cx / g_fScreenRate_x) / 2 - went negative,
+// so AndroidTextOut's dstX < 0 guard silently dropped the leading glyphs
+// ("Account" rendered as "ccount"). Every fixed-pixel-font-vs-logical-control site
+// in the client has that exposure, not just the login window.
+//
+// A fraction keeps fontSize and g_fScreenRate moving together, so the ratio above
+// stays put on any panel. Pinning an absolute height therefore requires a
+// proportional font pass first (fontSize must scale with g_fScreenRate, not
+// additively) - which needs on-device iteration, not a blind edit.
+//
+// 1.0 = native (feature off). 0.75 renders ~44% fewer pixels.
+static float g_RenderScaleX = 0.75f;
+static float g_RenderScaleY = 0.75f;
 
-// Render size for a given physical surface: height pinned to
-// g_RenderTargetHeight, width scaled to keep the physical aspect ratio.
+// Render size for a given physical surface. Aspect is preserved for free because
+// both axes take the same fraction.
 static void ComputeAndroidRenderSize(int screenW, int screenH, int& renderW, int& renderH)
 {
-    renderW = screenW;
-    renderH = screenH;
+    renderW = static_cast<int>(screenW * g_RenderScaleX);
+    renderH = static_cast<int>(screenH * g_RenderScaleY);
 
-    if ((g_RenderTargetHeight <= 0) || (screenW <= 0) || (screenH <= g_RenderTargetHeight))
-    {
-        return;
-    }
-
-    renderH = g_RenderTargetHeight;
-
-    // 64-bit intermediate: screenW * renderH overflows int for a 4K-wide panel.
-    // Rounded, not truncated, so the aspect error stays under half a pixel.
-    renderW = static_cast<int>(
-        ((static_cast<long long>(screenW) * renderH) + (screenH / 2)) / screenH);
-
-    // Even on both axes - the upscale blit and several ES drivers prefer it, and
-    // it costs at most one pixel of width.
-    renderW &= ~1;
-    renderH &= ~1;
-
-    if (renderW < 2) renderW = 2;
-    if (renderH < 2) renderH = 2;
+    if (renderW < 1) renderW = 1;
+    if (renderH < 1) renderH = 1;
 }
 
 // TEMP profiling: worst frame in a rolling window, with its bucket breakdown
@@ -20475,7 +20471,7 @@ static void SyncAndroidDrawableSizeFromSokol(const char* reason)
     g_NativePresentHeight = screenH;
     RenderBackend_SetNativePresentSize(screenW, screenH);
 
-    // The engine is told the SCALED size - see g_RenderTargetHeight above.
+    // The engine is told the SCALED size - see the g_RenderScale* comment above.
     int renderW = screenW;
     int renderH = screenH;
     ComputeAndroidRenderSize(screenW, screenH, renderW, renderH);

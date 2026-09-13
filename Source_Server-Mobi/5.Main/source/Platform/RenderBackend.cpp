@@ -27,7 +27,7 @@ namespace
 
 // ── Render scale ──────────────────────────────────────────────────────────
 // The engine renders into an offscreen FBO sized to the drawable size it was
-// given (android_main.cpp shrinks that to g_RenderTargetHeight), and Present()
+// given (android_main.cpp shrinks that by g_RenderScaleX/Y), and Present()
 // blits that FBO up to the physical surface with GL_LINEAR so it fills the
 // whole screen.
 //
