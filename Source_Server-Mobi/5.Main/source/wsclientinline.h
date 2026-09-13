@@ -2463,7 +2463,15 @@ __forceinline bool SendRequestMixExit()
     spe.Send(); \
 }
 
-#define SendRequestIGS_SendItemGift(lGiftItemPackageSeq, lGiftItemPriceSeq, lGiftItemDisplaySeq, \
+/*
+	Field order is PMSG_CASH_SHOP_ITEM_GIF_RECV on the GameServer: package, display
+	(Category), price (ProductMainIndex), sale zone, item, currency, MileageFlag,
+	name, message. MileageFlag was missing, so the server read the recipient's
+	first letter as the flag and the rest as the name - every gift answered
+	"recipient not found". The buy packet has the same flag last, where leaving
+	it off costs nothing.
+*/
+#define SendRequestIGS_SendItemGift(lGiftItemPackageSeq, lGiftItemDisplaySeq, lGiftItemPriceSeq, \
 	lSaleZone, wItemCode, iCashType, pstrReceiveUserID, pstrGiftMessage) \
 { \
 	char strReceiveUserID[MAX_ID_SIZE+1]; \
@@ -2476,11 +2484,12 @@ __forceinline bool SendRequestMixExit()
     spe.Init( 0xC1, 0xD2); \
 	spe << (BYTE)0x04; \
 	spe << (int)lGiftItemPackageSeq; \
-	spe << (int)lGiftItemPriceSeq; \
 	spe << (int)lGiftItemDisplaySeq; \
+	spe << (int)lGiftItemPriceSeq; \
 	spe << (int)lSaleZone; \
 	spe << (WORD)wItemCode; \
 	spe << (int)iCashType; \
+	spe << (BYTE)0; \
 	spe.AddData( strReceiveUserID, MAX_ID_SIZE+1); \
 	spe.AddData( strGiftMessage, MAX_GIFT_MESSAGE_SIZE); \
     spe.Send(); \
