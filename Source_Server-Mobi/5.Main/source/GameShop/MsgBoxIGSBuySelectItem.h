@@ -52,6 +52,27 @@ private:
 		IGS_TEXT_PRICE_POX_Y	= 288,
 		IGS_TEXT_PRICE_WIDTH	= 66,
 		IGS_TEXT_DISCRIPTION_WIDTH	= 185,
+
+		/*
+			Description line pitch and how many lines there is room for.
+
+			The lines were drawn 10px apart with a font whose line box is about
+			13, so consecutive lines overlapped each other by a few pixels - and
+			a fourth line ran out of the well entirely and onto the duration list
+			below it.
+
+			13 is the pitch the rest of this UI uses (CUIBuyingListBox in the
+			single-price dialog, and the CUITextListBox rows here). Three lines at
+			that pitch start at 118 and finish at 157, which is why the modern
+			skin's description well is drawn 54 tall and its duration-list plate
+			starts at 172 - still clear of the list's own content, which begins at
+			177 (position 277 less its 100 height).
+
+			Modern skin only. The legacy skin keeps the 10px pitch its ornate art
+			was drawn around.
+		*/
+		IGS_TEXT_ATTR_LINE_HEIGHT	= 13,
+		IGS_TEXT_ATTR_MAX_LINE		= 3,
 		IGS_LISTBOX_POS_X		= 17,
 		IGS_LISTBOX_POS_Y		= 277,
 		IGS_3DITEM_POS_X		= 60,

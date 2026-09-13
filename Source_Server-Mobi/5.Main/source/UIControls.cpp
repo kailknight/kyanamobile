@@ -7060,7 +7060,14 @@ void CUIBuyingListBox::AddText(const char* pszExplanationText)
 
 	static IGS_BuyList sIGS_Buying;
 	sIGS_Buying.m_bIsSelected = FALSE;
-	strncpy(sIGS_Buying.m_pszItemExplanation, pszExplanationText, LINE_TEXTMAX);
+
+	// strncpy writes no terminator when the source fills the buffer, and this one
+	// is static so the tail is whatever the last line left there. Leave room and
+	// terminate explicitly - the size bump on LINE_TEXTMAX is not the fix on its
+	// own, because a line at exactly the limit still has to end somewhere.
+	strncpy(sIGS_Buying.m_pszItemExplanation, pszExplanationText, LINE_TEXTMAX-1);
+	sIGS_Buying.m_pszItemExplanation[LINE_TEXTMAX-1] = '\0';
+
 	m_TextList.push_front(sIGS_Buying);
 
 	RemoveText();
@@ -7134,8 +7141,19 @@ BOOL CUIBuyingListBox::RenderDataLine(int iLineNumber)
 	char Text[MAX_TEXT_LENGTH + 1] = {0};
 	if(m_TextListIter->m_pszItemExplanation != NULL)
 	{
-		sprintf(Text,"%s",m_TextListIter->m_pszItemExplanation);
-		g_pRenderText->RenderText(iPos_x, iPos_y, Text);
+		strncpy(Text, m_TextListIter->m_pszItemExplanation, MAX_TEXT_LENGTH);
+		Text[MAX_TEXT_LENGTH] = '\0';
+
+		// With no box width RenderText does not clip, so a line wider than the
+		// list box drew straight out of it and past the edge of the dialog. The
+		// caller wraps to the box width already; this is what holds when it
+		// cannot (one unbroken word, or a font that measured differently).
+		//
+		// Deliberately wider than the caller's wrap width (m_iWidth is 175, the
+		// dialog wraps to 158) so a legitimately wrapped line is never clipped a
+		// glyph short - both scale by g_fScreenRate_x, so the margin holds at any
+		// resolution. It still lands inside the description well.
+		g_pRenderText->RenderText(iPos_x, iPos_y, Text, m_iWidth - 6, 0, RT3_SORT_LEFT);
 	}
 	DisableAlphaBlend();
 

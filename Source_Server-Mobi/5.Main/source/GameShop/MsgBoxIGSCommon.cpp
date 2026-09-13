@@ -46,6 +46,46 @@ void IGSRenderModernPanel(int x, int y, int w, int h)
 	IGSFillRect(x+1, y+1, w-2, 22, 0.80f, 0.15f, 0.12f, 1.0f);
 }
 
+void IGSNormalizeShopText(const char* pszSrc, char* pszDst, int cchDst)
+{
+	if( pszDst == NULL || cchDst <= 0 )
+		return;
+
+	pszDst[0] = '\0';
+
+	if( pszSrc == NULL )
+		return;
+
+	int iWrite = 0;
+	const int iLimit = cchDst - 1;
+
+	for( int iRead = 0 ; pszSrc[iRead] != '\0' && iWrite < iLimit ; iRead++ )
+	{
+		unsigned char ch = (unsigned char)pszSrc[iRead];
+
+		if( ch == '\r' || ch == '\n' )
+		{
+			// A CRLF pair, or a run of blank lines, is one break. strtok inside
+			// DivideStringByPixel collapses consecutive delimiters anyway, so
+			// emitting more would only fill the destination.
+			if( iWrite > 0 && pszDst[iWrite-1] == '#' )
+				continue;
+
+			pszDst[iWrite++] = '#';
+			continue;
+		}
+
+		// Other C0 controls have no glyph and no meaning here. UTF-8
+		// continuation bytes are all >= 0x80, so multi-byte names are untouched.
+		if( ch < 0x20 )
+			continue;
+
+		pszDst[iWrite++] = pszSrc[iRead];
+	}
+
+	pszDst[iWrite] = '\0';
+}
+
 CMsgBoxIGSCommon::CMsgBoxIGSCommon()
 {
 	m_szTitle[0] = '\0';

@@ -1128,7 +1128,22 @@ protected:
 	virtual int GetRenderLinePos_y(int nLine);
 };
 
-#define LINE_TEXTMAX	64
+/*
+	One line of the cash shop's buying list box.
+
+	Was 64, which was shorter than the lines its only caller produces.
+	CMsgBoxIGSBuyPackageItem wraps a package description to IGS_LISTBOX_WIDTH
+	*pixels* into MAX_TEXT_LENGTH-byte rows, and CutStr wraps against
+	width * g_fScreenRate_x - so on a high-DPI client a single wrapped line is
+	comfortably past 64 bytes. AddText's strncpy then filled the array with no
+	room for a terminator and RenderDataLine's sprintf("%s") read on into the
+	next list node, printing its bytes as a tail on this line.
+
+	Matched to MAX_TEXT_LENGTH+1 so any line the caller can produce fits whole.
+	LINE_TEXTMAX, IGS_BuyList and CUIBuyingListBox are used by that one dialog and
+	nothing else, so this widens one std::list's element and touches nothing more.
+*/
+#define LINE_TEXTMAX	(MAX_TEXT_LENGTH + 1)
 #define INFO_LINEMAX	10
 #define INFO_LINE_CNTMAX	50
 

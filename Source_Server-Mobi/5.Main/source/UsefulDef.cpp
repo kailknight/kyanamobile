@@ -36,8 +36,13 @@ int DivideStringByPixel(LPTSTR alpszDst, int nDstRow, int nDstColumn, LPCTSTR lp
 	if (NULL == alpszDst || 0 >= nDstRow || 0 >= nDstColumn || NULL == lpszSrc || 16 > nPixelPerLine)
 		return 0;
 
+	// Bounded: the longest thing handed to this is a package description, and
+	// CShopPackage::Description is 2048 bytes - twice this buffer. An unchecked
+	// strcpy here was one long description away from a stack overwrite, in a
+	// function 24 call sites share.
 	char szWorkSrc[1024];
-	::strcpy(szWorkSrc, lpszSrc);
+	::strncpy(szWorkSrc, lpszSrc, sizeof(szWorkSrc)-1);
+	szWorkSrc[sizeof(szWorkSrc)-1] = '\0';
 
 	char szWorkToken[1024];
 	int nLine = 0;

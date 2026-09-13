@@ -150,9 +150,17 @@ void CMsgBoxIGSBuyPackageItem::Initialize(CShopPackage* pPackage)
 	m_wItemCode = atoi(pPackage->InGamePackageID);
 
 	ZeroMemory(m_szDescription, sizeof(unicode::t_char)*UIMAX_TEXT_LINE*MAX_TEXT_LENGTH);
-	
+
 	g_pRenderText->SetFont(g_hFont);
-	int nLine = ::DivideStringByPixel(&m_szDescription[0][0], UIMAX_TEXT_LINE, MAX_TEXT_LENGTH, pPackage->Description, IGS_LISTBOX_WIDTH, false, '#');
+
+	// A description saved with real newlines instead of '#' wrapped as one line
+	// and drew the CR/LF as notdef glyphs, running its sentences together. The
+	// admin tool and the DataServer both store/send '#' now; this covers a
+	// catalog that has not been re-pushed, and hand-edited IBSPackage.txt rows.
+	unicode::t_char szDesc[SHOPLIST_LENGTH_PACKAGEDESC] = {'\0', };
+	::IGSNormalizeShopText(pPackage->Description, szDesc, sizeof(szDesc));
+
+	int nLine = ::DivideStringByPixel(&m_szDescription[0][0], UIMAX_TEXT_LINE, MAX_TEXT_LENGTH, szDesc, IGS_LISTBOX_WIDTH, false, '#');
 
 	for (int i=0; i < nLine; ++i)
 	{

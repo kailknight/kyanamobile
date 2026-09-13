@@ -104,9 +104,14 @@ void CMsgBoxIGSBuySelectItem::Initialize(CShopPackage* pPackage)
 	}
 
 	ZeroMemory(m_szDescription, sizeof(unicode::t_char)*UIMAX_TEXT_LINE*MAX_TEXT_LENGTH);
-	
+
 	g_pRenderText->SetFont(g_hFont);
-	m_iDescriptionLine = ::DivideStringByPixel(&m_szDescription[0][0], UIMAX_TEXT_LINE, MAX_TEXT_LENGTH, pPackage->Description, IGS_TEXT_DISCRIPTION_WIDTH, false, '#');
+
+	// Same normalisation as the single-price dialog - see the comment there.
+	unicode::t_char szDesc[SHOPLIST_LENGTH_PACKAGEDESC] = {'\0', };
+	::IGSNormalizeShopText(pPackage->Description, szDesc, sizeof(szDesc));
+
+	m_iDescriptionLine = ::DivideStringByPixel(&m_szDescription[0][0], UIMAX_TEXT_LINE, MAX_TEXT_LENGTH, szDesc, IGS_TEXT_DISCRIPTION_WIDTH, false, '#');
 
 	pPackage->SetProductSeqFirst();
 	if( pPackage->GetProductSeqNext(iProductSeq) == false )
@@ -180,8 +185,11 @@ void CMsgBoxIGSBuySelectItem::RenderFrame()
 		IGSFillRect(X+1, Y+1, W-2, 22, 0.80f, 0.15f, 0.12f, 1.0f);
 
 		IGSFillRect(X+8, Y+28, W-16, 68, 0.15f, 0.15f, 0.16f, 1.0f);	// item
-		IGSFillRect(X+8, Y+114, W-16, 34, 0.13f, 0.13f, 0.14f, 1.0f);	// attributes
-		IGSFillRect(X+8, Y+154, W-16, 126, 0.13f, 0.13f, 0.14f, 1.0f);	// duration list
+		// 54 tall, not 34: three description lines on the 13px pitch finish at
+		// 157. The duration plate gives that room back and still clears the
+		// list's own content at 177. See IGS_TEXT_ATTR_LINE_HEIGHT.
+		IGSFillRect(X+8, Y+114, W-16, 54, 0.13f, 0.13f, 0.14f, 1.0f);	// attributes
+		IGSFillRect(X+8, Y+172, W-16, 108, 0.13f, 0.13f, 0.14f, 1.0f);	// duration list
 		IGSFillRect(X+8, Y+283, W-16, 22, 0.28f, 0.10f, 0.09f, 1.0f);	// price chip
 	}
 	else
@@ -201,9 +209,22 @@ void CMsgBoxIGSBuySelectItem::RenderTexts()
 	g_pRenderText->SetFont(g_hFont);
 	g_pRenderText->SetTextColor(255, 255, 255, 255);
 
-	for(int i=0 ; i<m_iDescriptionLine ; i++)
+	/*
+		Modern skin: 13px pitch, clamped to the lines the well holds. At the old
+		10px every line overlapped the next, and a long description walked out of
+		the well and over the duration list underneath. Clamping loses the tail of
+		an over-long description, which the admin tool warns about while it is
+		being typed - better than drawing it on top of the controls.
+
+		Legacy skin unchanged: 10px is what its art was drawn around.
+	*/
+	const bool bModern    = IGSIsModernSkin();
+	const int  iLinePitch = bModern ? (int)IGS_TEXT_ATTR_LINE_HEIGHT : 10;
+	const int  iMaxLines  = bModern ? (int)IGS_TEXT_ATTR_MAX_LINE : m_iDescriptionLine;
+
+	for(int i=0 ; i<m_iDescriptionLine && i<iMaxLines ; i++)
 	{
-		g_pRenderText->RenderText(GetPos().x+IGS_TEXT_ATTR_POS_X, GetPos().y+IGS_TEXT_ATTR_POS_Y+(i*10), m_szDescription[i], IGS_TEXT_ATTR_WIDTH, 0, RT3_SORT_LEFT);
+		g_pRenderText->RenderText(GetPos().x+IGS_TEXT_ATTR_POS_X, GetPos().y+IGS_TEXT_ATTR_POS_Y+(i*iLinePitch), m_szDescription[i], IGS_TEXT_ATTR_WIDTH, 0, RT3_SORT_LEFT);
 	}
 	
 	g_pRenderText->RenderText(GetPos().x+IGS_TEXT_PRICE_POS_X, GetPos().y+IGS_TEXT_PRICE_POX_Y, m_szPrice, IGS_TEXT_PRICE_WIDTH, 0, RT3_SORT_RIGHT);

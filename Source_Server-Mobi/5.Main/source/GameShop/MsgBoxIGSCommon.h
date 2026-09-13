@@ -139,6 +139,24 @@ void IGSRenderModernPanel(int x, int y, int w, int h);
 */
 int IGSDialogButtonImage(bool bPrimary, int iLegacyImage);
 
+/*
+	Shop text made safe to hand to DivideStringByPixel.
+
+	'#' is this client's only line break - every shop dialog wraps with
+	DivideStringByPixel(..., '#'), the same convention IBSPackage.txt uses. CR and
+	LF mean nothing to it: they survive the wrap inside a line and reach GDI as
+	notdef glyphs, so a description written on three lines renders as one run of
+	text with blank gaps where the breaks were.
+
+	The admin tool now stores '#', and the DataServer scrubs these fields on the
+	way out, so this is belt and braces for the third case: a client running
+	against a catalog that has not been re-pushed, or a hand-edited IBSPackage.txt.
+	It costs one pass over a short string once per dialog open.
+
+	Copies at most cchDst-1 bytes and always terminates.
+*/
+void IGSNormalizeShopText(const char* pszSrc, char* pszDst, int cchDst);
+
 class CMsgBoxIGSCommonLayout : public TMsgBoxLayout<CMsgBoxIGSCommon>
 {
 public:
