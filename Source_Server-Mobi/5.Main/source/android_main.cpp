@@ -382,65 +382,88 @@ static void InitializeTakumiProtectState()
     };
 
     /*
-        CustomCashShop is the one setting this build cannot read out of the
-        struct, and it is the one that decides which cash shop gets drawn.
+        MAIN_FILE_INFO's appended tail fields cannot be read out of the struct on
+        this platform at all.
 
-        It is the LAST member of MAIN_FILE_INFO, and MAIN_FILE_INFO is written
-        by a 32-bit tool and read here by a 64-bit build - so the prefix logic
-        above exists precisely because offsets drift once any member's size
-        differs between the two ABIs, and the tail is the worst case of that.
-        Read through the struct it comes back as 0 (short file) or garbage from
-        the middle (long file), which silently pins mobile to the legacy shop no
-        matter what MainInfo.ini says.
+        CBGetMain.bin is written by a 32-bit tool and read here by a 64-bit build.
+        The prefix logic above exists because member offsets drift as soon as any
+        member's size differs between the two ABIs, and the tail is the worst case
+        of that: read through the struct these come back as 0 (short file) or
+        garbage from the middle (long file).
 
-        What IS reliable is the file. GetMainInfo writes this DWORD last and
-        adds no trailing padding - the generated CBGetMain.bin decodes to
-        01 00 00 00 in its final four bytes for CustomCashShop = 1 - so the last
-        four bytes are this setting whatever the layout does in between. Decode
-        them at their real file offsets with the same position-based
-        obfuscation, and accept only 0 or 1: any other value means the
-        assumption broke, and legacy is the safe answer.
+        What IS reliable is the file. GetMainInfo writes these DWORDs last, in
+        declaration order, with no trailing padding - so each one's distance from
+        the END of the file is fixed no matter what the layout does in between.
+
+        ── ADDING A TAIL FIELD ──────────────────────────────────────────────────
+        Appending to MAIN_FILE_INFO is the usual "safe" way to add a setting
+        because no existing offset moves. On mobile it is not safe on its own: the
+        new field takes over the end of the file and pushes every existing tail
+        field further from it, so the offsets below MUST be updated in the same
+        change. Getting this wrong is silent - the field just reads 0.
+
+        That is exactly how HidePlayerMenu and MaxClientInstance broke
+        CustomCashShop: they were appended after it, the reader here still took
+        the last four bytes, and it started reading MaxClientInstance (0) instead
+        - pinning mobile back to the legacy shop.
+
+        Offsets are from the end, so the LAST declared field is 4.
     */
-    auto readCustomCashShopFromTail = [](const char* path) -> DWORD
+    constexpr long kTailOffsetMaxClientInstance = 4;   // last declared
+    constexpr long kTailOffsetHidePlayerMenu    = 8;
+    constexpr long kTailOffsetCustomCashShop    = 12;
+
+    /*
+        Decodes one tail DWORD at `offsetFromEnd` bytes before EOF, using the same
+        position-based obfuscation readProtectBlob uses - the key is the byte's
+        absolute offset in the file, which is why this cannot be done on a buffer
+        read from somewhere else.
+
+        `maxValid` is a sanity bound: anything above it means the layout
+        assumption broke, and the caller's default is the safe answer rather than
+        nonsense from the middle of the file.
+    */
+    auto readTailDword = [](const char* path, long offsetFromEnd, DWORD fallback, DWORD maxValid) -> DWORD
     {
         FILE* fp = fopen(path, "rb");
 
         if (fp == nullptr)
         {
-            return 0;
+            return fallback;
         }
 
         std::fseek(fp, 0, SEEK_END);
         const long fileSize = std::ftell(fp);
 
-        if (fileSize < 4)
+        if (fileSize < offsetFromEnd)
         {
             std::fclose(fp);
-            return 0;
+            return fallback;
         }
 
-        std::fseek(fp, fileSize - 4, SEEK_SET);
+        const long base = fileSize - offsetFromEnd;
+        std::fseek(fp, base, SEEK_SET);
         BYTE raw[4] = {0};
         const size_t got = std::fread(raw, 1, sizeof(raw), fp);
         std::fclose(fp);
 
         if (got != sizeof(raw))
         {
-            return 0;
+            return fallback;
         }
 
         DWORD value = 0;
 
         for (size_t i = 0; i < sizeof(raw); ++i)
         {
-            const size_t n = static_cast<size_t>(fileSize - 4) + i;
+            const size_t n = static_cast<size_t>(base) + i;
             BYTE b = raw[i];
             b -= static_cast<BYTE>(0x95 ^ HIBYTE(n));
             b ^= static_cast<BYTE>(0xCA ^ LOBYTE(n));
             value |= static_cast<DWORD>(b) << (i * 8);
         }
 
-        return (value <= 1) ? value : 0;
+        return (value <= maxValid) ? value : fallback;
     };
 
     static MAIN_FILE_INFO mainInfo {};   // ~1MB; far too big for the stack
@@ -524,11 +547,39 @@ static void InitializeTakumiProtectState()
     std::memcpy(&gProtect.m_MainInfo, &mainInfo, sizeof(MAIN_FILE_INFO));
     gProtect.LoadEncDec();
 
-    // Overwrite what the struct read produced for this one field: see the
-    // lambda above for why the struct cannot be trusted this far in. Doing it
-    // here rather than inside readProtectBlob keeps the blob reader honest -
-    // it returns the file, this decides what to believe about it.
-    gProtect.m_MainInfo.CustomCashShop = readCustomCashShopFromTail("Data/Local/CBGetMain.bin");
+    /*
+        Overwrite every tail field with a value read straight from the file: see
+        the comment on readTailDword for why the struct cannot be trusted this far
+        in. Done here rather than inside readProtectBlob to keep the blob reader
+        honest - it returns the file, this decides what to believe about it.
+
+        HidePlayerMenu is a mask of PLAYER_MENU_HIDE_* bits, so its bound is the
+        OR of every defined bit; a value with unknown bits set means the layout
+        moved and 0 (show the whole menu) is the safe answer. MaxClientInstance is
+        read for completeness only - CheckInstanceLimit is compiled out on mobile.
+    */
+    {
+        const char* kProtectBlobPath = "Data/Local/CBGetMain.bin";
+
+        constexpr DWORD kHidePlayerMenuAllBits =
+            PLAYER_MENU_HIDE_ALL | PLAYER_MENU_HIDE_TRADE | PLAYER_MENU_HIDE_BUY
+            | PLAYER_MENU_HIDE_PARTY | PLAYER_MENU_HIDE_FOLLOW | PLAYER_MENU_HIDE_DUEL
+            | PLAYER_MENU_HIDE_VIEWITEM;
+
+        gProtect.m_MainInfo.CustomCashShop =
+            readTailDword(kProtectBlobPath, kTailOffsetCustomCashShop, 0, 1);
+
+        gProtect.m_MainInfo.HidePlayerMenu =
+            readTailDword(kProtectBlobPath, kTailOffsetHidePlayerMenu, 0, kHidePlayerMenuAllBits);
+
+        gProtect.m_MainInfo.MaxClientInstance =
+            readTailDword(kProtectBlobPath, kTailOffsetMaxClientInstance, 0, 64);
+
+        LOGI("Protect tail: CustomCashShop=%u HidePlayerMenu=%u MaxClientInstance=%u",
+             static_cast<unsigned int>(gProtect.m_MainInfo.CustomCashShop),
+             static_cast<unsigned int>(gProtect.m_MainInfo.HidePlayerMenu),
+             static_cast<unsigned int>(gProtect.m_MainInfo.MaxClientInstance));
+    }
 
     // Reading the file only fills gProtect. On PC, MainLoad::Load then hands
     // that data to the managers that actually read it - custom messages, jewels,
