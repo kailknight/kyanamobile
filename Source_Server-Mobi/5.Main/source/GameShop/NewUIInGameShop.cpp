@@ -1475,8 +1475,16 @@ void CNewUIInGameShop::RenderBanner()
 
 			NOT an EXIF problem, and the EXIF path cannot fix it: the banner in use
 			reports Orientation = 1, so ApplyExifOrientationRGB correctly does nothing.
+
+			Mobile only. The PC build draws the same upload upright with the plain
+			0..fVH range, and the inverted range turned it upside down there - so
+			whatever makes mobile need the flip is not shared with desktop.
 		*/
+#if defined(__ANDROID__) || defined(MU_IOS)
 		RenderImage(IMAGE_IGS_BANNER, (float)iArtX, (float)iArtY, (float)iArtW, (float)iArtH, 0.0f, fVH, fUW, -fVH);
+#else
+		RenderImage(IMAGE_IGS_BANNER, (float)iArtX, (float)iArtY, (float)iArtW, (float)iArtH, 0.0f, 0.0f, fUW, fVH);
+#endif
 	}
 	else
 	{
