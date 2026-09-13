@@ -6392,6 +6392,81 @@ void EnsureOffensiveSkillTarget()
     EnsureCombatTarget();
 }
 
+/*
+    A buff can only land on a live player other than the caster.
+
+    Monsters are excluded even though IsValidAutoCombatTarget allows them:
+    SelectedCharacter normally still holds the nearest monster from the previous
+    attack, and handing that to a buff is not a friendly target at all.
+*/
+bool IsAndroidBuffableTarget(int characterIndex, int heroIdx)
+{
+    if (CharactersClient == nullptr
+        || characterIndex < 0
+        || characterIndex >= MAX_CHARACTERS_CLIENT
+        || characterIndex == heroIdx)
+    {
+        return false;
+    }
+
+    if (!IsValidAutoCombatTarget(characterIndex))
+    {
+        return false;
+    }
+
+    if (CharactersClient[characterIndex].Object.Kind != KIND_PLAYER)
+    {
+        return false;
+    }
+
+    return IsWithinVirtualAutoAcquireRange(characterIndex);
+}
+
+/*
+    Buff / friendly skills (eTypeSkill_Buff, eTypeSkill_FrendlySkill) - Greater
+    Damage, Greater Defense and the rest.
+
+    The desktop client casts these at whatever the pointer is over: another
+    player takes the buff, empty ground or a monster falls back to the caster.
+    The virtual pad used to skip all of that and assign the hero unconditionally
+    ("safer when explicitly bound to self target"), so a buff could never reach a
+    party member from a phone no matter what was aimed at.
+
+    The AIM picker is the aiming gesture this needs, and it already fits: its
+    candidate list is players-only (IsAndroidTargetPickerCandidate) and
+    IsValidAutoCombatTarget accepts any live player, friendly ones included - a
+    lock is deliberately inert until a skill is pressed, which is exactly here.
+
+    Order matters. An AIM lock is an explicit choice by the player and outranks
+    SelectedCharacter, which the auto-acquire chain rewrites to the nearest
+    monster on every offensive cast.
+*/
+void EnsureSupportSkillTarget()
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const int heroIdx = GetHeroCharacterIndex();
+
+    const int lockedTarget = ResolveAndroidLockedTargetIndex();
+    if (IsAndroidBuffableTarget(lockedTarget, heroIdx))
+    {
+        SelectedCharacter = lockedTarget;
+        return;
+    }
+
+    if (IsAndroidBuffableTarget(SelectedCharacter, heroIdx))
+    {
+        return;
+    }
+
+    // Nothing friendly aimed - self, which is both the old behaviour and what
+    // the PC client does with the pointer over nothing.
+    SelectedCharacter = heroIdx;
+}
+
 void EnsureNormalAttackTarget()
 {
     if (!IsVirtualPadAvailable())
@@ -8367,8 +8442,10 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
     }
     else
     {
-        // Buff/friendly skills are safer when explicitly bound to self target.
-        SelectedCharacter = GetHeroCharacterIndex();
+        // Buff/friendly skills: whoever is aimed, falling back to self. This used
+        // to assign the hero unconditionally, which is why Greater Damage and
+        // Greater Defense could never be cast on a party member.
+        EnsureSupportSkillTarget();
     }
 
     // Nova is offensive but does not need a target: it is an area attack
@@ -8624,7 +8701,10 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
 
     if (supportSkill)
     {
-        SelectedCharacter = GetHeroCharacterIndex();
+        // Same as the skill-slot path: aimed friendly player first, self only as
+        // a fallback. Both entry points have to agree or a buff would land on a
+        // party member from the arc but on the caster from a Q/W/E/R hotkey.
+        EnsureSupportSkillTarget();
     }
     else if (groundSkill)
     {
