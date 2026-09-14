@@ -12,6 +12,9 @@
 
 CMsgBoxIGSSendGift::CMsgBoxIGSSendGift()
 {
+	m_bKeyboardLayout = false;
+	m_iKeyboardLayoutHold = 0;
+	m_iRestPosY		= 0;
 	m_iPackageSeq	= 0;
 	m_iDisplaySeq	= 0;
 	m_iPriceSeq		= 0;
@@ -47,7 +50,9 @@ bool CMsgBoxIGSSendGift::Create(float fPriority)
 	CNewUIMessageBoxBase::Create((IMAGE_IGS_WINDOW_WIDTH/2)-(IMAGE_IGS_FRAME_WIDTH/2), 
 		(IMAGE_IGS_WINDOW_HEIGHT/2)-(IMAGE_IGS_FRAME_HEIGHT/2), 
 		IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT, fPriority);
-	
+
+	m_iRestPosY = GetPos().y;
+
 	SetButtonInfo();
 	InitInputBox();
 
@@ -110,8 +115,59 @@ void CMsgBoxIGSSendGift::Release()
 	UnloadImages();
 }
 
+/*
+	The soft keyboard starts around y=168 of the 480-unit UI space and the dialog
+	is 267 tall, so no vertical position keeps OK/Cancel clear of it - centred
+	they sit at ~311, and even pinned to the top they would be at ~234.
+
+	So while either field has focus the dialog pins to the top and the two
+	buttons move into the empty space to its right, level with the name field.
+	Focus goes (tapping elsewhere, or Enter) and everything returns to its normal
+	place.
+*/
+void CMsgBoxIGSSendGift::UpdateKeyboardLayout()
+{
+	// Held for a moment after focus goes: tapping OK can take focus off the field
+	// on the press frame, and snapping the buttons back down then would move OK
+	// out from under the release frame, so the click would never land.
+	const int kHoldFrames = 20;
+
+	bool bTyping = (m_IDInputBox.HaveFocus() == TRUE) || (m_MessageInputBox.HaveFocus() == TRUE);
+
+	if( bTyping )
+	{
+		m_iKeyboardLayoutHold = kHoldFrames;
+	}
+	else if( m_iKeyboardLayoutHold > 0 )
+	{
+		--m_iKeyboardLayoutHold;
+		bTyping = true;
+	}
+
+	if( bTyping == m_bKeyboardLayout )
+		return;
+
+	m_bKeyboardLayout = bTyping;
+
+	SetPos(GetPos().x, bTyping ? 4 : m_iRestPosY);
+
+	// CNewUIMessageBoxMng only delivers clicks inside the box's own size, so the
+	// buttons beside the frame need the box widened to reach them. Only the hit
+	// area changes - the frame is drawn from IMAGE_IGS_FRAME_*.
+	SetSize(bTyping ? (IMAGE_IGS_FRAME_WIDTH + 8 + IMAGE_IGS_BTN_WIDTH) : IMAGE_IGS_FRAME_WIDTH, IMAGE_IGS_FRAME_HEIGHT);
+
+	SetButtonInfo();
+
+	m_IDInputBox.SetPosition(GetPos().x+IGS_ID_INPUT_TEXT_POS_X, GetPos().y+IGS_ID_INPUT_TEXT_POS_Y);
+	m_MessageInputBox.SetPosition(GetPos().x+IGS_MESSAGE_INPUT_TEXT_POS_X, GetPos().y+IGS_MESSAGE_INPUT_TEXT_POS_Y);
+}
+
 bool CMsgBoxIGSSendGift::Update()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	UpdateKeyboardLayout();
+#endif
+
 	m_BtnOk.Update();
 	m_BtnCancel.Update();
 
@@ -217,11 +273,25 @@ CALLBACK_RESULT CMsgBoxIGSSendGift::CancelButtonDown(class CNewUIMessageBoxBase*
 
 void CMsgBoxIGSSendGift::SetButtonInfo()
 {
-	m_BtnOk.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_OK_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	int iOkX = GetPos().x+IGS_BTN_OK_POS_X;
+	int iOkY = GetPos().y+IGS_BTN_POS_Y;
+	int iCancelX = GetPos().x+IGS_BTN_CANCEL_POS_X;
+	int iCancelY = iOkY;
+
+	if( m_bKeyboardLayout )
+	{
+		// Beside the dialog, stacked, level with the name field - above the
+		// keyboard. See UpdateKeyboardLayout.
+		iOkX = iCancelX = GetPos().x+IMAGE_IGS_FRAME_WIDTH+8;
+		iOkY = GetPos().y+IMAGE_IGS_ID_INPUT_BOX_POS_Y-4;
+		iCancelY = iOkY+IMAGE_IGS_BTN_HEIGHT+8;
+	}
+
+	m_BtnOk.SetInfo(IGSDialogButtonImage(true, IMAGE_IGS_BUTTON), iOkX, iOkY, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnOk.MoveTextPos(0, -1);
-	m_BtnOk.SetText(GlobalText[228]);	
-	
-	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), GetPos().x+IGS_BTN_CANCEL_POS_X, GetPos().y+IGS_BTN_POS_Y, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
+	m_BtnOk.SetText(GlobalText[228]);
+
+	m_BtnCancel.SetInfo(IGSDialogButtonImage(false, IMAGE_IGS_BUTTON), iCancelX, iCancelY, IMAGE_IGS_BTN_WIDTH, IMAGE_IGS_BTN_HEIGHT, CNewUIMessageBoxButton::MSGBOX_BTN_CUSTOM, true);
 	m_BtnCancel.MoveTextPos(0, -1);
 	m_BtnCancel.SetText(GlobalText[229]);	
 }

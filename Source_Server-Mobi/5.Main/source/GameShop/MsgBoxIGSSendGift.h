@@ -22,19 +22,19 @@ public:
 	
 	enum IMAGESIZE_IGS_SEND_GIFT
 	{
-		IMAGE_IGS_WINDOW_WIDTH	= 640,	// ÀÎ°ÔÀÓ¼¥ ¹è°æ »çÀÌÁî
+		IMAGE_IGS_WINDOW_WIDTH	= 640,	// ï¿½Î°ï¿½ï¿½Ó¼ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 		IMAGE_IGS_WINDOW_HEIGHT = 429,
-		IMAGE_IGS_FRAME_WIDTH	= 210,	// ¸Þ¼¼Áö¹Ú½º Size
+		IMAGE_IGS_FRAME_WIDTH	= 210,	// ï¿½Þ¼ï¿½ï¿½ï¿½ï¿½Ú½ï¿½ Size
 		IMAGE_IGS_FRAME_HEIGHT	= 267,
 		IMAGE_IGS_DECO_WIDTH	= 17,	// Deco
 		IMAGE_IGS_DECO_HEIGHT	= 19,
 		IMAGE_IGS_ID_INPUT_BOX_WIDTH	= 76,	// Input TextBox
 		IMAGE_IGS_ID_INPUT_BOX_HEIGHT	= 17,
-		IMAGE_IGS_BTN_WIDTH		= 52,	// ¹öÆ° Size
+		IMAGE_IGS_BTN_WIDTH		= 52,	// ï¿½ï¿½Æ° Size
 		IMAGE_IGS_BTN_HEIGHT	= 26,	
 	};
 	
-	// ¸Þ¼¼Áö¹Ú½º»óÀÇ »ó´ëÁÂÇ¥
+	// ï¿½Þ¼ï¿½ï¿½ï¿½ï¿½Ú½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç¥
 	enum IGS_SEND_GIFT_POS
 	{
 		IMAGE_IGS_DECO_POS_X			= 10,	// Deco
@@ -97,8 +97,16 @@ private:
 	void UnloadImages();
 
 	void InitInputBox();
-	
+
+	// Mobile: while a field is focused the soft keyboard covers the lower
+	// two thirds of the screen, OK/Cancel included. See the definition.
+	void UpdateKeyboardLayout();
+
 private:
+	bool	m_bKeyboardLayout;
+	int		m_iKeyboardLayoutHold;
+	int		m_iRestPosY;
+
 	// buttons
 	CNewUIMessageBoxButton m_BtnOk;
 	CNewUIMessageBoxButton m_BtnCancel;
