@@ -1287,7 +1287,7 @@ constexpr float kTopBarY = 8.0f;
 // HP/MP/SD/AG panel. That panel's constants are declared much further down, so
 // the value is written out here and static_assert'd against them at their
 // definition rather than being allowed to drift.
-constexpr float kTopBarSideX = 250.0f;
+constexpr float kTopBarSideX = 164.0f;
 
 // The location chip sits under the row, matching the reference. The gold/Zen
 // chip that used to sit beside it was removed. 108 rather than the old 128 -
@@ -1863,7 +1863,9 @@ constexpr float kPortraitPanelX     = 6.0f;
 constexpr float kPortraitPanelY     = 6.0f;
 constexpr float kPortraitAvatarSize = 46.0f;
 constexpr float kPortraitBarLeft    = kPortraitPanelX + kPortraitAvatarSize + 6.0f;
-constexpr float kPortraitBarRight   = 246.0f;
+// 160 rather than 246: the bars were cut from 188 wide to 113, then 10% more
+// to 102. Height is unchanged so the numbers drawn on them still fit.
+constexpr float kPortraitBarRight   = 160.0f;
 // Keeps the off-row Helper/Play column flush against this panel; kTopBarSideX
 // has to be spelled out up there because it is used before this point.
 static_assert(kTopBarSideX == kPortraitBarRight + kTopBarButtonGap,
@@ -18397,6 +18399,13 @@ void RenderVirtualPortraitHud()
     const int textX = static_cast<int>(kPortraitBarLeft);
     const int textW = static_cast<int>(kPortraitBarW);
 
+    // White with a dark outline (shadow type 1). Plain white vanished on the
+    // bright SD and EXP fills, and the bars are too short for a backing box.
+    if (g_pRenderText != nullptr)
+    {
+        g_pRenderText->SetShadowText(1);
+    }
+
     // Align 3 centres the string in textW, the same call shape the trade picker
     // and the utility labels use.
     TextDraw(barFont, textX, static_cast<int>(yHP + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
@@ -18424,6 +18433,11 @@ void RenderVirtualPortraitHud()
              gCharacterManager.IsMasterLevel(CharacterAttribute->Class)
                  ? Master_Level_Data.nMLevel
                  : 0);
+
+    if (g_pRenderText != nullptr)
+    {
+        g_pRenderText->SetShadowText(0);
+    }
 
     // Skill/cast diagnostic. Off in normal play; flip kShowAndroidSkillDebug to
     // bring it back when something in the cast path needs tracing again, since
