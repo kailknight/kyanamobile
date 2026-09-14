@@ -225,6 +225,11 @@ struct MAIN_FILE_INFO
 	// How many copies of the client may run at once. 0 = unlimited.
 	// Enforced by CProtect::CheckInstanceLimit, one named mutex per slot.
 	DWORD MaxClientInstance;
+
+	// 1 = the registration form asks for a 7-digit PIN, 0 = it does not and a
+	// fixed placeholder is sent instead. Must match GetMainInfo.cpp; appending it
+	// moved every tail offset in android_main.cpp by 4.
+	DWORD RegisterPinCode;
 };
 
 class CProtect

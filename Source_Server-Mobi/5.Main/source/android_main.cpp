@@ -408,10 +408,19 @@ static void InitializeTakumiProtectState()
         - pinning mobile back to the legacy shop.
 
         Offsets are from the end, so the LAST declared field is 4.
+
+        RegisterPinCode moved everything by 4. A phone keeps whatever
+        CBGetMain.bin data.zip gave it, so an APK with these offsets can meet the
+        previous file - and would then read CustomCashShop from the field before
+        it. That previous file has a known exact size, so it is recognised and read
+        at its own offsets, with RegisterPinCode at its default.
     */
-    constexpr long kTailOffsetMaxClientInstance = 4;   // last declared
-    constexpr long kTailOffsetHidePlayerMenu    = 8;
-    constexpr long kTailOffsetCustomCashShop    = 12;
+    constexpr long kTailOffsetRegisterPinCode   = 4;   // last declared
+    constexpr long kTailOffsetMaxClientInstance = 8;
+    constexpr long kTailOffsetHidePlayerMenu    = 12;
+    constexpr long kTailOffsetCustomCashShop    = 16;
+
+    constexpr long kBlobSizeBeforeRegisterPinCode = 1142008;
 
     /*
         Decodes one tail DWORD at `offsetFromEnd` bytes before EOF, using the same
@@ -566,19 +575,38 @@ static void InitializeTakumiProtectState()
             | PLAYER_MENU_HIDE_PARTY | PLAYER_MENU_HIDE_FOLLOW | PLAYER_MENU_HIDE_DUEL
             | PLAYER_MENU_HIDE_VIEWITEM;
 
+        long blobSize = 0;
+        if (FILE* fp = fopen(kProtectBlobPath, "rb"))
+        {
+            std::fseek(fp, 0, SEEK_END);
+            blobSize = std::ftell(fp);
+            std::fclose(fp);
+        }
+
+        // The pre-RegisterPinCode file ends 4 bytes sooner, so every older field
+        // sits 4 closer to its end.
+        const bool legacyBlob = (blobSize == kBlobSizeBeforeRegisterPinCode);
+        const long shift = legacyBlob ? 4 : 0;
+
         gProtect.m_MainInfo.CustomCashShop =
-            readTailDword(kProtectBlobPath, kTailOffsetCustomCashShop, 0, 1);
+            readTailDword(kProtectBlobPath, kTailOffsetCustomCashShop - shift, 0, 1);
 
         gProtect.m_MainInfo.HidePlayerMenu =
-            readTailDword(kProtectBlobPath, kTailOffsetHidePlayerMenu, 0, kHidePlayerMenuAllBits);
+            readTailDword(kProtectBlobPath, kTailOffsetHidePlayerMenu - shift, 0, kHidePlayerMenuAllBits);
 
         gProtect.m_MainInfo.MaxClientInstance =
-            readTailDword(kProtectBlobPath, kTailOffsetMaxClientInstance, 0, 64);
+            readTailDword(kProtectBlobPath, kTailOffsetMaxClientInstance - shift, 0, 64);
 
-        LOGI("Protect tail: CustomCashShop=%u HidePlayerMenu=%u MaxClientInstance=%u",
+        gProtect.m_MainInfo.RegisterPinCode = legacyBlob
+            ? 0
+            : readTailDword(kProtectBlobPath, kTailOffsetRegisterPinCode, 0, 1);
+
+        LOGI("Protect tail: size=%ld legacy=%d CustomCashShop=%u HidePlayerMenu=%u MaxClientInstance=%u RegisterPinCode=%u",
+             blobSize, legacyBlob ? 1 : 0,
              static_cast<unsigned int>(gProtect.m_MainInfo.CustomCashShop),
              static_cast<unsigned int>(gProtect.m_MainInfo.HidePlayerMenu),
-             static_cast<unsigned int>(gProtect.m_MainInfo.MaxClientInstance));
+             static_cast<unsigned int>(gProtect.m_MainInfo.MaxClientInstance),
+             static_cast<unsigned int>(gProtect.m_MainInfo.RegisterPinCode));
     }
 
     // Reading the file only fills gProtect. On PC, MainLoad::Load then hands
@@ -7502,6 +7530,23 @@ struct AndroidRegisterOverlayState
 
 AndroidRegisterOverlayState g_androidRegister{};
 
+// MainInfo RegisterPinCode off drops the PIN row (always the last one), and the
+// panel and its buttons close up by one row spacing so there is no gap.
+int AndroidRegisterFieldCount()
+{
+    return CB_DangKyInGame::PinCodeEnabled() ? static_cast<int>(kRegFieldCount) : static_cast<int>(kRegFieldNumber);
+}
+
+float AndroidRegisterRowsRemoved()
+{
+    return kRegRowSpacing * static_cast<float>(kRegFieldCount - AndroidRegisterFieldCount());
+}
+
+float AndroidRegisterPanelH()
+{
+    return kRegPanelH - AndroidRegisterRowsRemoved();
+}
+
 char* AndroidRegisterFieldBuffer(int field, int& outMaxLen)
 {
     switch (field)
@@ -7530,13 +7575,13 @@ AndroidUiRect GetAndroidRegisterFieldRect(int field)
 
 AndroidUiRect GetAndroidRegisterSubmitRect()
 {
-    return { kRegPanelX + 16.0f, AndroidRegisterPanelY() + kRegButtonOffset, kRegButtonW, kRegButtonH };
+    return { kRegPanelX + 16.0f, AndroidRegisterPanelY() + kRegButtonOffset - AndroidRegisterRowsRemoved(), kRegButtonW, kRegButtonH };
 }
 
 AndroidUiRect GetAndroidRegisterCancelRect()
 {
     return { kRegPanelX + kRegPanelW - kRegButtonW - 16.0f,
-             AndroidRegisterPanelY() + kRegButtonOffset, kRegButtonW, kRegButtonH };
+             AndroidRegisterPanelY() + kRegButtonOffset - AndroidRegisterRowsRemoved(), kRegButtonW, kRegButtonH };
 }
 
 // The number row takes digits only, matching the PC field's UIOPTION_NUMBERONLY.
@@ -7666,7 +7711,7 @@ void AndroidRegisterOverlayAdvanceField()
         return;
     }
 
-    if (g_androidRegister.activeField >= 0 && g_androidRegister.activeField < (kRegFieldCount - 1))
+    if (g_androidRegister.activeField >= 0 && g_androidRegister.activeField < (AndroidRegisterFieldCount() - 1))
     {
         ++g_androidRegister.activeField;
         g_androidRegister.caretBlink = 0;
@@ -7700,7 +7745,7 @@ bool HandleAndroidRegisterOverlayFingerDown(float uiX, float uiY)
         return false;
     }
 
-    for (int field = 0; field < kRegFieldCount; ++field)
+    for (int field = 0; field < AndroidRegisterFieldCount(); ++field)
     {
         if (HitTestAndroidUiRect(uiX, uiY, GetAndroidRegisterFieldRect(field)))
         {
@@ -7729,7 +7774,7 @@ bool HandleAndroidRegisterOverlayFingerDown(float uiX, float uiY)
     // Anywhere else on the panel drops focus (and so closes the keyboard) but
     // stays claimed, so the tap never reaches the world behind it.
     if (uiX >= kRegPanelX && uiX <= (kRegPanelX + kRegPanelW)
-        && uiY >= AndroidRegisterPanelY() && uiY <= (AndroidRegisterPanelY() + kRegPanelH))
+        && uiY >= AndroidRegisterPanelY() && uiY <= (AndroidRegisterPanelY() + AndroidRegisterPanelH()))
     {
         g_androidRegister.activeField = -1;
         return true;
@@ -7746,6 +7791,7 @@ void AndroidRegisterOverlayRender()
     }
 
     const float panelY = AndroidRegisterPanelY();
+    const float panelH = AndroidRegisterPanelH();
 
     BeginBitmap();
     DisableTexture();
@@ -7754,17 +7800,17 @@ void AndroidRegisterOverlayRender()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     // Same layered shadow/fill/border treatment as the item menu and pickers.
-    DrawVirtualRectFilled(kRegPanelX - 4.0f, panelY - 4.0f, kRegPanelW + 8.0f, kRegPanelH + 8.0f,
+    DrawVirtualRectFilled(kRegPanelX - 4.0f, panelY - 4.0f, kRegPanelW + 8.0f, panelH + 8.0f,
                           0.0f, 0.0f, 0.0f, 0.55f);
-    DrawVirtualRectFilled(kRegPanelX, panelY, kRegPanelW, kRegPanelH, 0.10f, 0.04f, 0.05f, 0.92f);
-    DrawVirtualRectFilled(kRegPanelX + 2.0f, panelY + 2.0f, kRegPanelW - 4.0f, kRegPanelH - 4.0f,
+    DrawVirtualRectFilled(kRegPanelX, panelY, kRegPanelW, panelH, 0.10f, 0.04f, 0.05f, 0.92f);
+    DrawVirtualRectFilled(kRegPanelX + 2.0f, panelY + 2.0f, kRegPanelW - 4.0f, panelH - 4.0f,
                           0.22f, 0.09f, 0.10f, 0.80f);
-    DrawVirtualRectOutline(kRegPanelX, panelY, kRegPanelW, kRegPanelH, 0.86f, 0.34f, 0.34f, 0.96f, 2.0f);
+    DrawVirtualRectOutline(kRegPanelX, panelY, kRegPanelW, panelH, 0.86f, 0.34f, 0.34f, 0.96f, 2.0f);
 
     // Field boxes and the caret first, while texturing is still off - TextDraw
     // leaves it enabled, and an untextured rect drawn after one renders nothing
     // (the same trap the item menu's collapse toggle hit).
-    for (int field = 0; field < kRegFieldCount; ++field)
+    for (int field = 0; field < AndroidRegisterFieldCount(); ++field)
     {
         const AndroidUiRect rect = GetAndroidRegisterFieldRect(field);
         const bool active = (g_androidRegister.activeField == field);
@@ -7851,7 +7897,7 @@ void AndroidRegisterOverlayRender()
 
     static const char* const kRegLabels[kRegFieldCount] = { "Account", "Password", "7 Digit Pin Code" };
 
-    for (int field = 0; field < kRegFieldCount; ++field)
+    for (int field = 0; field < AndroidRegisterFieldCount(); ++field)
     {
         const AndroidUiRect rect = GetAndroidRegisterFieldRect(field);
 

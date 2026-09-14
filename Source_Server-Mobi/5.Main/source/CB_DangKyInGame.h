@@ -42,6 +42,10 @@ public:
 	// Android registration overlay keeps its own buffers. See the definition.
 	bool SubmitRegistration(const char* accountText, const char* passText, const char* snoText);
 
+	// MainInfo RegisterPinCode. Off: no PIN row on either form, and
+	// SubmitRegistration sends a placeholder instead of validating one.
+	static bool PinCodeEnabled();
+
 	void RecvKQRegInGame(XULY_CGPACKET* lpMsg);
 	void Clear();
 	

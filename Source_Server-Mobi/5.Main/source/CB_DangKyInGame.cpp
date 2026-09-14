@@ -21,6 +21,7 @@ const char* AndroidRegisterOverlayPasswordText();
 #include "UIMng.h"
 #include "Input.h"
 #include "CustomEventTime.h"
+#include "Protect.h"
 
 CB_DangKyInGame* gCB_DangKyInGame;
 
@@ -38,6 +39,7 @@ namespace
 	// between them so each tap lands on exactly one field.
 	const float kInputSpacing = 26.0f;
 	const char* kDefaultRegisterPhone = "0000000000";
+	const char* kPlaceholderRegisterPin = "0000000";
 
 	bool IsRegisterInputTap()
 	{
@@ -266,6 +268,10 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		11
 	};
 
+	// The last row actually shown: the PIN row only exists with RegisterPinCode on.
+	const int lastRow = PinCodeEnabled() ? Snonumber : Pass;
+	const float windowHeight = PinCodeEnabled() ? kRegisterWindowHeight : (kRegisterWindowHeight - kInputSpacing);
+
 	float startX = (MAX_WIN_WIDTH / 2) - (kRegisterWindowWidth / 2);
 	float startY = 40.0f;
 	float inputPosX = 0.0f;
@@ -276,7 +282,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		&startX,
 		&startY,
 		kRegisterWindowWidth,
-		kRegisterWindowHeight,
+		windowHeight,
 		eWindow_DangKyInGame,
 		"Register Account");
 
@@ -299,7 +305,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 
 	startY += 30.0f;
 
-	for (int i = Account; i <= Snonumber; ++i)
+	for (int i = Account; i <= lastRow; ++i)
 	{
 		RenderRegisterText(g_hFontBold, startX + 18.0f, startY + 48.0f, 96.0f, 16.0f, 1, labels[i]);
 		inputPosY[i] = startY + 50.0f;
@@ -326,7 +332,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		CInputData[Account]->SetTabTarget(CInputData[Pass]);
 	}
 
-	if (CInputData[Pass] != NULL && CInputData[Snonumber] != NULL)
+	if (lastRow == Snonumber && CInputData[Pass] != NULL && CInputData[Snonumber] != NULL)
 	{
 		CInputData[Pass]->SetTabTarget(CInputData[Snonumber]);
 	}
@@ -336,7 +342,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 		CInputData[Snonumber]->SetTabTarget(CInputData[Phone]);
 	}
 
-	for (int i = Account; i <= Snonumber; ++i)
+	for (int i = Account; i <= lastRow; ++i)
 	{
 		// 24 tall against 26 spacing - a 2px gap, so this path cannot claim a tap
 		// meant for the neighbouring row either.
@@ -360,7 +366,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 	// Enter used to submit from the captcha box, which was the last field.
 	// With the captcha gone, submit from the last remaining input instead so
 	// the on-screen keyboard's done key still finishes registration.
-	else if (CInputData[Snonumber] != NULL && CInputData[Snonumber]->HaveFocus() && SEASON3B::IsPress(VK_RETURN))
+	else if (CInputData[lastRow] != NULL && CInputData[lastRow]->HaveFocus() && SEASON3B::IsPress(VK_RETURN))
 	{
 		submitRegister();
 	}
@@ -375,7 +381,7 @@ bool CB_DangKyInGame::RequsetDKTK()
 {
 	if (CInputData[Account] == NULL
 		|| CInputData[Pass] == NULL
-		|| CInputData[Snonumber] == NULL)
+		|| (PinCodeEnabled() && CInputData[Snonumber] == NULL))
 	{
 		return false;
 	}
@@ -386,7 +392,10 @@ bool CB_DangKyInGame::RequsetDKTK()
 
 	CInputData[Account]->GetText(szID, MAX_ID_SIZE + 1);
 	CInputData[Pass]->GetText(szPass, MAX_PASSWORD_SIZE + 1);
-	CInputData[Snonumber]->GetText(szSno, sizeof(szSno));
+	if (CInputData[Snonumber] != NULL)
+	{
+		CInputData[Snonumber]->GetText(szSno, sizeof(szSno));
+	}
 
 	return SubmitRegistration(szID, szPass, szSno);
 }
@@ -397,6 +406,11 @@ bool CB_DangKyInGame::RequsetDKTK()
 // own text buffers (the PC edit-control path never worked properly under touch)
 // and calls this with them, so both share one copy of the rate limit, the
 // validation, the messages and the packet.
+bool CB_DangKyInGame::PinCodeEnabled()
+{
+	return gProtect.m_MainInfo.RegisterPinCode != 0;
+}
+
 bool CB_DangKyInGame::SubmitRegistration(const char* accountText, const char* passText, const char* snoText)
 {
 	char szID[MAX_ID_SIZE + 1] = { 0 };
@@ -412,9 +426,13 @@ bool CB_DangKyInGame::SubmitRegistration(const char* accountText, const char* pa
 	{
 		std::memcpy(szPass, passText, min(sizeof(szPass) - 1, std::strlen(passText)));
 	}
-	if (snoText != NULL)
+	// With the PIN turned off the server still gets a well-formed 7 digits: it
+	// stores them in MEMB_INFO.sno__numb, and PersonalCodeCheck = 0 means nothing
+	// reads them back.
+	const char* pinSource = PinCodeEnabled() ? snoText : kPlaceholderRegisterPin;
+	if (pinSource != NULL)
 	{
-		std::memcpy(szSno, snoText, min(sizeof(szSno) - 1, std::strlen(snoText)));
+		std::memcpy(szSno, pinSource, min(sizeof(szSno) - 1, std::strlen(pinSource)));
 	}
 	std::memcpy(szSDT, kDefaultRegisterPhone, min(sizeof(szSDT) - 1, std::strlen(kDefaultRegisterPhone)));
 
