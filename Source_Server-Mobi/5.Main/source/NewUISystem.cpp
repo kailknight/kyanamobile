@@ -413,8 +413,15 @@ bool SEASON3B::CNewUISystem::LoadMainSceneInterface()
 	}
 
 	m_pNewSiegeWarfare = new CNewUISiegeWarfare;
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Top right, over the spot the mobile minimap panel normally takes (which
+	// stands down in Loren Deep). The PC position lands on the attack buttons.
+	if(m_pNewSiegeWarfare->Create(m_pNewUIMng, 640 - CNewUISiegeWarBase::MINIMAP_FRAME_WIDTH - 4, 36) == false)
+		return false;
+#else
 	if(m_pNewSiegeWarfare->Create(m_pNewUIMng, 486 + DisplayWinExt, DisplayHeightExt +234) == false)
 		return false;
+#endif
 
 	m_pNewItemEnduranceInfo = new CNewUIItemEnduranceInfo;
 	if( m_pNewItemEnduranceInfo->Create( m_pNewUIMng, 2, 26 ) == false )

@@ -104,7 +104,19 @@ bool SEASON3B::CNewUISiegeWarBase::Render()
 	g_pRenderText->SetTextColor( 255, 255, 255, 255 );
 	g_pRenderText->SetBgColor( 0, 0, 0, 0 );
 	
+#if defined(__ANDROID__) || defined(MU_IOS)
+	/*
+		The map texture comes out vertically flipped on mobile, the same split the
+		cash shop banner has (NewUIInGameShop.cpp RenderBanner). Confirmed on the
+		device against the real World31\Map1: standing at (124,73) showed image
+		rows 9-137 upside down instead of rows 119-247. The whole texture is
+		flipped, not just this window of it, so the window starts at 1-V and runs
+		backwards. Hero and command markers are placed by geometry and were right.
+	*/
+	RenderBitmap ( IMAGE_MINIMAP, (float)(m_MiniMapPos.x), (float)(m_MiniMapPos.y), 128.f, 128.f, m_fMiniMapTexU, 1.f - m_fMiniMapTexV, 0.5f*m_iMiniMapScale, -0.5f*m_iMiniMapScale );
+#else
 	RenderBitmap ( IMAGE_MINIMAP, (float)(m_MiniMapPos.x), (float)(m_MiniMapPos.y), 128.f, 128.f, m_fMiniMapTexU, m_fMiniMapTexV, 0.5f*m_iMiniMapScale, 0.5f*m_iMiniMapScale );
+#endif
 
 	RenderImage( IMAGE_MINIMAP_FRAME, m_MiniMapFramePos.x, m_MiniMapFramePos.y, MINIMAP_FRAME_WIDTH, MINIMAP_FRAME_HEIGHT );
 	RenderImage( IMAGE_TIME_FRAME, m_TimeUIPos.x, m_TimeUIPos.y, TIME_FRAME_WIDTH, TIME_FRAME_HEIGHT );	
@@ -269,7 +281,7 @@ bool SEASON3B::CNewUISiegeWarBase::UpdateMouseEvent()
 	
 	if( CheckMouseIn(m_MiniMapFramePos.x, m_MiniMapFramePos.y, MINIMAP_FRAME_WIDTH, MINIMAP_FRAME_HEIGHT)
 		|| CheckMouseIn(m_TimeUIPos.x, m_TimeUIPos.y, TIME_FRAME_WIDTH, TIME_FRAME_HEIGHT) )
-		return false;	
+		return false;
 	
 	if( m_bRenderSkillUI == true )
 	{
@@ -491,8 +503,18 @@ void SEASON3B::CNewUISiegeWarBase::SetPos( int x, int y )
 	m_MiniMapPos.y = m_MiniMapFramePos.y + 28; 
 	m_TimeUIPos.x = m_MiniMapFramePos.x + 20; 
 	m_TimeUIPos.y = m_MiniMapFramePos.y + MINIMAP_FRAME_HEIGHT - 4;
+#if defined(__ANDROID__) || defined(MU_IOS)
+	/*
+		Mobile docks this top right (NewUISystem::Create) - the PC spot is on top
+		of the attack buttons. The battle skill frame sits above the map on PC,
+		which is off the top of the screen here, so it goes under the timer.
+	*/
+	m_SkillFramePos.x = x + 26;
+	m_SkillFramePos.y = m_TimeUIPos.y + TIME_FRAME_HEIGHT + 2;
+#else
 	m_SkillFramePos.x = x + 26;
 	m_SkillFramePos.y = y - BATTLESKILL_FRAME_HEIGHT;
+#endif
 	m_BtnSkillScrollUpPos.x = m_SkillFramePos.x + 48;
 	m_BtnSkillScrollUpPos.y = m_SkillFramePos.y + 21;
 	m_BtnSkillScrollDnPos.x = m_BtnSkillScrollUpPos.x;

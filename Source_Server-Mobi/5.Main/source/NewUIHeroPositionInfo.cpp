@@ -818,6 +818,10 @@ void CNewUIHeroPositionInfo::DrawAndroidMiniMap() {
   if (Hero == NULL || IndexIMGMap == -1 || !mShowMiniMap)
     return;
 
+  // Loren Deep has the siege minimap docked in this corner instead.
+  if (gMapManager.InBattleCastle())
+    return;
+
   float px, py, pw, ph;
   if (!AndroidGetMiniMapPanelRect(&px, &py, &pw, &ph))
     return;

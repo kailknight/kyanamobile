@@ -72,7 +72,8 @@ namespace SEASON3B
 		POINT		m_CurKillCountPos;
 		POINT		m_BtnAlphaPos;
 		POINT		m_SkillTooltipPos;
-		
+
+
 		POINT		m_HeroPosInWorld;
 		POINT		m_HeroPosInMiniMap;
 		POINT		m_MiniMapScaleOffset;

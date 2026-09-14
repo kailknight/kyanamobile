@@ -1700,6 +1700,14 @@ AndroidUiRect GetTopRightStackButtonRect(int stackIndex)
     };
 }
 
+// The always-on panel under the location chip is not there in Loren Deep: the
+// siege minimap is docked in that corner instead (NewUISystem::Create), and its
+// own buttons need the taps the panel would otherwise turn into "open map".
+bool IsTopBarMiniMapPanelShown()
+{
+    return !gMapManager.InBattleCastle();
+}
+
 bool IsMiniMapPanelVisible()
 {
     return g_pNewUISystem != nullptr
@@ -5378,6 +5386,7 @@ bool HandleVirtualTopControlTap(float uiX, float uiY)
     // and the taps inside reach the map instead of the joystick.
     if (!IsMiniMapPanelVisible()
         && IsVirtualPadAvailable()
+        && IsTopBarMiniMapPanelShown()
         && HitTestAndroidUiRect(uiX, uiY, GetTopBarMiniMapPanelRect()))
     {
         if ((nowMs - g_virtualLastMiniMapTapMs) >= kVirtualMiniMapButtonCooldownMs)
@@ -14101,6 +14110,7 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
             || HitTestVirtualTopBarButton(uiX, uiY) != kTopBarActionNone
             || (!IsMiniMapPanelVisible()
                 && IsVirtualPadAvailable()
+                && IsTopBarMiniMapPanelShown()
                 && HitTestAndroidUiRect(uiX, uiY, GetTopBarMiniMapPanelRect())));
     if (!tapOnOverlayButton
         && IsAndroidMovementAllowedWithOpenWindows()
