@@ -2275,6 +2275,11 @@ bool g_joystickPcMouseCaptured = false;
 bool g_virtualSkillSlotsLoaded = false;
 bool g_virtualSkillSlotsDirty = false;
 bool g_virtualAssignModeActive = false;
+// True only between tapping a skill in the Select Skill list and that
+// assignment ending - the white "put it here" ring on the wheel keys off this,
+// not off assign mode itself, which also switches on when the picker merely
+// opens or closes with an old selection still remembered.
+bool g_virtualAssignRingShown = false;
 int g_virtualAssignSkillIndex = -1;
 uint32_t g_virtualAssignModeUntilMs = 0;
 bool g_virtualLastSkillPickerOpen = false;
@@ -3479,6 +3484,8 @@ void SetVirtualSkillSlot(int slot, int skillIndex)
 
 void DeactivateVirtualAssignMode(const char* reason)
 {
+    g_virtualAssignRingShown = false;
+
     if (!g_virtualAssignModeActive)
     {
         return;
@@ -3593,6 +3600,7 @@ void UpdateVirtualAssignMode()
     {
         if (!g_virtualLastSkillPickerOpen)
         {
+            g_virtualAssignRingShown = false;
             g_virtualAssignPickerSkillIndex = -1;
             g_virtualAssignConsumedForPickerSkill = false;
             g_virtualAssignConsumedForPickerSession = false;
@@ -4066,6 +4074,7 @@ void CommitAndroidSkillPickerChoice(int chosenSkill)
         g_virtualAssignConsumedForPickerSkill = false;
         g_virtualAssignConsumedForPickerSession = false;
         ActivateVirtualAssignMode(chosenSkill, "picker-touch");
+        g_virtualAssignRingShown = true;
     }
     else
     {
@@ -18705,8 +18714,6 @@ void RenderVirtualPad()
         constexpr float kVirtualSkillIconCover = 0.94f;   // of the frame radius, inside its border
         const float renderSkillIconW = kVirtualSkillButtonRadius * 2.0f * kVirtualSkillIconCover;
         const float renderSkillIconH = renderSkillIconW;
-        const bool assignModeActive = IsVirtualAssignModeActive()
-            || IsVirtualOverlayHotKeySkillIndex(g_virtualAssignPickerSkillIndex);
         for (int visualSlot = 0; visualSlot < kVirtualVisibleSkillButtonCount; ++visualSlot)
         {
             const int buttonIndex = kVirtualSkillButtonBase + visualSlot;
@@ -18726,6 +18733,23 @@ void RenderVirtualPad()
                 && g_pSkillList != nullptr
                 && g_pSkillList->IsSkillPickerOpen();
 
+            // White ring on every skill slot once a skill has been tapped in the
+            // Select Skill list, until it is placed or assign mode ends, so the
+            // player can see where it can go. Not shown otherwise, so it
+            // never competes with the armed slot's ornate border. A disc drawn
+            // behind the frame: the frame covers its middle and leaves a band
+            // around the edge. Raw GL, so the engine's texture and blend
+            // trackers are reset the same way DrawIconButtonUv does.
+            if (!isSelector && g_virtualAssignRingShown && IsVirtualAssignModeActive())
+            {
+                glDisable(GL_TEXTURE_2D);
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                TextureEnable  = false;
+                AlphaBlendType = -1;
+                DrawVirtualCircle(button.cx, button.cy, button.radius + 4.0f, 1.0f, 1.0f, 1.0f, 0.95f, true);
+            }
+
             // skillbox.png background instead of the attack button's plain blue
             // GL frame - only the skill row and the Q/W/E/R potion slots switch
             // to the textured frame (DrawVirtualSkillBoxFrame), the attack button
@@ -18736,7 +18760,7 @@ void RenderVirtualPad()
                 button.cy,
                 button.radius,
                 pressed,
-                assignModeActive && !isSelector);
+                !isSelector && g_virtualAssignRingShown && IsVirtualAssignModeActive());
 
             // Armed skill / open picker is a persistent state, not a touch flash,
             // so it needs its own marker rather than sharing the frame's "pressed"
