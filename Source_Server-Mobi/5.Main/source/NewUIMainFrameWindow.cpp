@@ -4090,7 +4090,24 @@ void SEASON3B::CNewUISkillList::RenderSkillIcon(int iIndex, float x, float y, fl
 
 			if (g_pMasterSkillTreeInterface->GetXYImgMaster(&GetXY, bySkillType))
 			{
-				if (bCantSkill == true)
+				if (bRoundMask)
+				{
+					// Master-tree skills come off their own sheet, and this branch
+					// only ever drew a quad - so the moment a skill was mastered
+					// and its icon switched here, the mobile ring showed a square
+					// hanging over its frame. Same disc as the regular icons
+					// below: centre of the 20x28 cell, equal UV radii (the sheet
+					// is square), centre-cropped to the shorter side.
+					const float fMasterStepU = 0.0390625f;
+					const float fMasterStepV = 0.053710938f;
+					const float fMasterRadius = ((fMasterStepU < fMasterStepV) ? fMasterStepU : fMasterStepV) * 0.5f;
+
+					RenderBitmapCircle(BITMAP_INTERFACE_MASTER_BEGIN + (bCantSkill ? 3 : 2), x, y, width * 0.5f,
+						(float)GetXY.CalcX + fMasterStepU * 0.5f, (float)GetXY.CalcY + fMasterStepV * 0.5f,
+						fMasterRadius, fMasterRadius,
+						true, true, 0.f);
+				}
+				else if (bCantSkill == true)
 				{
 					SEASON3B::RenderImage(BITMAP_INTERFACE_MASTER_BEGIN + 3, x, y, width, height, GetXY.CalcX, GetXY.CalcY, 0.0390625, 0.053710938); //Non
 				}
