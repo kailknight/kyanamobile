@@ -16979,6 +16979,15 @@ void MoveEffect(OBJECT * o, int iIndex)
 	}break;
 	case MODEL_EFFECT_SD_AURA:
 	{
+		// The aura only goes away on the buff-removed packet. When the wearer
+		// dies or leaves view that packet can be skipped, and the aura kept
+		// rendering at the last bone position on the empty ground.
+		if (o->Owner == NULL || o->Owner->Live == false || !g_isCharacterBuff(o->Owner, eBuff_SD_Addition))
+		{
+			o->Live = false;
+			break;
+		}
+
 		vec3_t Temp_Pos;
 		BMD* b = &Models[o->Owner->Type];
 		b->TransformByObjectBone(Temp_Pos, o->Owner, 18);
