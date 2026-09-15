@@ -1708,6 +1708,66 @@ bool IsTopBarMiniMapPanelShown()
     return !gMapManager.InBattleCastle();
 }
 
+// The player can collapse the minimap panel with the "-" in its top-right
+// corner; it then leaves only a small map icon in that same top-right corner,
+// which brings it back. The choice survives restarts through a flag file in the
+// app's private directory, the same way tutorial_shown.flag does.
+constexpr const char* kAndroidMiniMapCollapsedFlagFile = "minimap_collapsed.flag";
+constexpr float kMiniMapCollapseButtonSize = 18.0f;
+constexpr float kMiniMapRestoreButtonSize = 26.0f;
+constexpr float kMiniMapToggleTouchSlop = 5.0f;
+int g_androidMiniMapCollapsedState = -1; // -1 = flag file not read yet
+
+bool IsAndroidMiniMapCollapsed()
+{
+    if (g_androidMiniMapCollapsedState < 0)
+    {
+        FILE* f = fopen(kAndroidMiniMapCollapsedFlagFile, "rb");
+        g_androidMiniMapCollapsedState = (f != nullptr) ? 1 : 0;
+        if (f != nullptr)
+        {
+            fclose(f);
+        }
+    }
+    return g_androidMiniMapCollapsedState == 1;
+}
+
+void SetAndroidMiniMapCollapsed(bool collapsed)
+{
+    g_androidMiniMapCollapsedState = collapsed ? 1 : 0;
+    if (collapsed)
+    {
+        if (FILE* f = fopen(kAndroidMiniMapCollapsedFlagFile, "wb"))
+        {
+            fclose(f);
+        }
+    }
+    else
+    {
+        remove(kAndroidMiniMapCollapsedFlagFile);
+    }
+    LOGI("AndroidMiniMap: %s", collapsed ? "collapsed" : "restored");
+}
+
+AndroidUiRect GetMiniMapCollapseButtonRect()
+{
+    const AndroidUiRect panel = GetTopBarMiniMapPanelRect();
+    return { panel.x + panel.w - kMiniMapCollapseButtonSize, panel.y, kMiniMapCollapseButtonSize, kMiniMapCollapseButtonSize };
+}
+
+AndroidUiRect GetMiniMapRestoreButtonRect()
+{
+    const AndroidUiRect panel = GetTopBarMiniMapPanelRect();
+    return { panel.x + panel.w - kMiniMapRestoreButtonSize, panel.y, kMiniMapRestoreButtonSize, kMiniMapRestoreButtonSize };
+}
+
+// The one button that toggles the panel in its current state: "-" while it is
+// open, the map icon while it is collapsed.
+AndroidUiRect GetMiniMapToggleButtonRect()
+{
+    return IsAndroidMiniMapCollapsed() ? GetMiniMapRestoreButtonRect() : GetMiniMapCollapseButtonRect();
+}
+
 bool IsMiniMapPanelVisible()
 {
     return g_pNewUISystem != nullptr
@@ -1806,6 +1866,40 @@ bool HitTestAndroidUiRect(float uiX, float uiY, const AndroidUiRect& rect)
         && uiX <= (rect.x + rect.w)
         && uiY >= rect.y
         && uiY <= (rect.y + rect.h);
+}
+
+bool IsVirtualPadAvailable();
+
+// Whether the minimap corner (panel and its toggle button) is on screen and
+// taking taps - the same guard for the tap handler, the joystick's
+// "tap on an overlay button" check and the draw.
+bool IsMiniMapCornerActive()
+{
+    return !IsMiniMapPanelVisible()
+        && IsVirtualPadAvailable()
+        && IsTopBarMiniMapPanelShown();
+}
+
+bool HitTestMiniMapToggleCornerButton(float uiX, float uiY)
+{
+    if (!IsMiniMapCornerActive())
+    {
+        return false;
+    }
+
+    AndroidUiRect rect = GetMiniMapToggleButtonRect();
+    rect.x -= kMiniMapToggleTouchSlop;
+    rect.y -= kMiniMapToggleTouchSlop;
+    rect.w += kMiniMapToggleTouchSlop * 2.0f;
+    rect.h += kMiniMapToggleTouchSlop * 2.0f;
+    return HitTestAndroidUiRect(uiX, uiY, rect);
+}
+
+bool HitTestMiniMapCornerPanel(float uiX, float uiY)
+{
+    return IsMiniMapCornerActive()
+        && !IsAndroidMiniMapCollapsed()
+        && HitTestAndroidUiRect(uiX, uiY, GetTopBarMiniMapPanelRect());
 }
 
 float GetAndroidCompactMiniMapTopYInternal()
@@ -5395,10 +5489,19 @@ bool HandleVirtualTopControlTap(float uiX, float uiY)
     // INTERFACE_MINI_MAP, which is full-canvas and click-to-move; it is in
     // kAndroidScreenOwningWindows, so the overlay hides itself while it is up
     // and the taps inside reach the map instead of the joystick.
-    if (!IsMiniMapPanelVisible()
-        && IsVirtualPadAvailable()
-        && IsTopBarMiniMapPanelShown()
-        && HitTestAndroidUiRect(uiX, uiY, GetTopBarMiniMapPanelRect()))
+    // Checked before the panel itself: the "-" sits inside the panel's corner.
+    if (HitTestMiniMapToggleCornerButton(uiX, uiY))
+    {
+        if ((nowMs - g_virtualLastMiniMapTapMs) >= kVirtualMiniMapButtonCooldownMs)
+        {
+            g_virtualLastMiniMapTapMs = nowMs;
+            SetAndroidMiniMapCollapsed(!IsAndroidMiniMapCollapsed());
+        }
+
+        return true;
+    }
+
+    if (HitTestMiniMapCornerPanel(uiX, uiY))
     {
         if ((nowMs - g_virtualLastMiniMapTapMs) >= kVirtualMiniMapButtonCooldownMs)
         {
@@ -14119,10 +14222,8 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         && (HitTestVirtualMirrorHotKeySlot(uiX, uiY) >= 0
             || HitTestVirtualPortraitAvatar(uiX, uiY)
             || HitTestVirtualTopBarButton(uiX, uiY) != kTopBarActionNone
-            || (!IsMiniMapPanelVisible()
-                && IsVirtualPadAvailable()
-                && IsTopBarMiniMapPanelShown()
-                && HitTestAndroidUiRect(uiX, uiY, GetTopBarMiniMapPanelRect())));
+            || HitTestMiniMapToggleCornerButton(uiX, uiY)
+            || HitTestMiniMapCornerPanel(uiX, uiY));
     if (!tapOnOverlayButton
         && IsAndroidMovementAllowedWithOpenWindows()
         && HandleVirtualJoystickFingerDown(touch))
@@ -16070,6 +16171,96 @@ void DrawVirtualMapButton()
 {
 }
 
+// The minimap panel's "-" while it is open, or the map icon it collapses to.
+// Expects the regular alpha blend the top utility controls run under and puts
+// it back afterwards.
+void DrawVirtualMiniMapToggleButton()
+{
+    if (SceneFlag != MAIN_SCENE || g_pNewUISystem == nullptr || !IsMiniMapCornerActive())
+    {
+        return;
+    }
+
+    const bool collapsed = IsAndroidMiniMapCollapsed();
+    const AndroidUiRect rect = GetMiniMapToggleButtonRect();
+
+    const float left = UiToScreenX(rect.x);
+    const float right = UiToScreenX(rect.x + rect.w);
+    const float top = static_cast<float>(WindowHeight) - UiToScreenY(rect.y);
+    const float bottom = static_cast<float>(WindowHeight) - UiToScreenY(rect.y + rect.h);
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glColor4f(0.08f, 0.08f, 0.08f, 0.85f);
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(left, bottom);
+    glVertex2f(right, bottom);
+    glVertex2f(right, top);
+    glVertex2f(left, top);
+    glEnd();
+
+    // Same gold as the panel frame (DrawAndroidMiniMap).
+    glLineWidth(2.0f);
+    glColor4f(0.85f, 0.68f, 0.22f, 0.95f);
+    glBegin(GL_LINE_LOOP);
+    glVertex2f(left, bottom);
+    glVertex2f(right, bottom);
+    glVertex2f(right, top);
+    glVertex2f(left, top);
+    glEnd();
+
+    if (!collapsed)
+    {
+        const float cx = (left + right) * 0.5f;
+        const float cy = (top + bottom) * 0.5f;
+        const float arm = (right - left) * 0.28f;
+        glColor4f(1.0f, 1.0f, 1.0f, 0.95f);
+        glBegin(GL_LINES);
+        glVertex2f(cx - arm, cy);
+        glVertex2f(cx + arm, cy);
+        glEnd();
+    }
+    glLineWidth(1.0f);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+    if (collapsed)
+    {
+        const float inset = 3.0f;
+        if (g_uiTex_minimap.id != 0)
+        {
+            DrawIconButton(rect.x + inset, rect.y + inset, rect.w - inset * 2.0f, rect.h - inset * 2.0f, g_uiTex_minimap, 1.0f);
+        }
+        else
+        {
+            // No icon texture: a "+" so the button still reads as "open".
+            const float cx = (left + right) * 0.5f;
+            const float cy = (top + bottom) * 0.5f;
+            const float arm = (right - left) * 0.25f;
+            glLineWidth(2.0f);
+            glColor4f(1.0f, 1.0f, 1.0f, 0.95f);
+            glBegin(GL_LINES);
+            glVertex2f(cx - arm, cy);
+            glVertex2f(cx + arm, cy);
+            glVertex2f(cx, cy - arm);
+            glVertex2f(cx, cy + arm);
+            glEnd();
+            glLineWidth(1.0f);
+            glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+    }
+
+    // DrawIconButton leaves additive blend behind; the controls drawn after this
+    // one need the regular alpha blend back.
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    TextureEnable = false;
+    CachTexture = 0x7FFFFFFF;
+    AlphaBlendType = -1;
+}
+
 void RenderVirtualTopRightControls()
 {
     if (SceneFlag != MAIN_SCENE || g_pNewUISystem == nullptr || AndroidHasFocusedTextInput())
@@ -17820,6 +18011,7 @@ void RenderVirtualTopBar()
     // ortho projection BeginBitmap sets up.
     DrawTopBarRowToggleButton();
     DrawTopBarLocationChevron();
+    DrawVirtualMiniMapToggleButton();
 
     EndBitmap();
 }
@@ -19603,6 +19795,11 @@ bool AndroidGetMoveMapWindowPosition(int panelWidth, int panelHeight, int* outX,
 bool AndroidGetMiniMapPanelRect(float* outX, float* outY, float* outW, float* outH)
 {
     if (outX == nullptr || outY == nullptr || outW == nullptr || outH == nullptr)
+    {
+        return false;
+    }
+
+    if (IsAndroidMiniMapCollapsed())
     {
         return false;
     }
