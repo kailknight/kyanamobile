@@ -804,6 +804,30 @@ struct _EXCEPTION_POINTERS {};
 #define ALOGW(...) __android_log_print(ANDROID_LOG_WARN,  ANDROID_TAG, __VA_ARGS__)
 #endif
 
+// Release builds compile the log macros above out, and the test phones keep no
+// logcat anyway, so whatever makes the game close itself was never recorded.
+// This appends it to mu_exit_trace.txt in the working directory, which is the
+// app's external files dir once startup has chdir'd there.
+#include <cstdarg>
+inline void MU_AppendExitTrace(const char* fmt, ...)
+{
+    FILE* f = fopen("mu_exit_trace.txt", "a");
+    if (f == nullptr)
+    {
+        return;
+    }
+    time_t now = time(nullptr);
+    char stamp[32] = {0};
+    strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    fprintf(f, "[%s] ", stamp);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(f, fmt, args);
+    va_end(args);
+    fputc('\n', f);
+    fclose(f);
+}
+
 // Live input/window state comes from core client globals.
 extern int MouseX;
 extern int MouseY;
@@ -1187,12 +1211,14 @@ inline bool AndroidInjectUtf8ToFocusedTextInput(const char* textUtf8)
 
 inline int   MessageBox(HWND, LPCSTR txt, LPCSTR cap, UINT) {
     ALOGW("MessageBox [%s]: %s", cap ? cap : "", txt ? txt : "");
+    MU_AppendExitTrace("MessageBox [%s]: %s", cap ? cap : "", txt ? txt : "");
     return IDOK;
 }
 inline BOOL GetTextExtentPoint32W(HDC hdc, LPCWSTR text, int len, SIZE* size) { int w = 0; int h = 0; bool ok = AndroidGetTextExtentPoint32(hdc, text, len, &w, &h); if (size) { size->cx = w; size->cy = h; } return ok ? TRUE : FALSE; }
 inline BOOL TextOutW(HDC hdc, int x, int y, LPCWSTR text, int len) { return AndroidTextOut(hdc, x, y, text, len); }
 inline int   MessageBox(HWND, LPCWSTR txt, LPCWSTR cap, UINT) {
     ALOGW("MessageBox [%ls]: %ls", cap, txt);
+    MU_AppendExitTrace("MessageBox [%ls]: %ls", cap ? cap : L"", txt ? txt : L"");
     return IDOK;
 }
 inline void  ShowCursor(BOOL)                       {}
@@ -2276,7 +2302,25 @@ inline void* RtlSecureZeroMemory(void* ptr, size_t sz) {
 #define MessageBoxW(hwnd,txt,cap,flags) MessageBox((hwnd),(txt),(cap),(flags))
 
 // ── ExitProcess → exit() on Android ──────────────────────────────────────
-inline void ExitProcess(UINT code) { exit((int)code); }
+// Logs which code asked to exit: the return address, as an offset into the
+// library that holds it (resolve with llvm-addr2line against libmain.so).
+#include <dlfcn.h>
+__attribute__((noinline)) inline void ExitProcess(UINT code)
+{
+    void* caller = __builtin_return_address(0);
+    Dl_info info;
+    if (dladdr(caller, &info) != 0 && info.dli_fname != nullptr)
+    {
+        MU_AppendExitTrace("ExitProcess(%u) from %s+0x%lx (%s)", code, info.dli_fname,
+            static_cast<unsigned long>(static_cast<char*>(caller) - static_cast<char*>(info.dli_fbase)),
+            info.dli_sname ? info.dli_sname : "?");
+    }
+    else
+    {
+        MU_AppendExitTrace("ExitProcess(%u) from %p", code, caller);
+    }
+    exit((int)code);
+}
 
 // ── CFS_POINT (IME composition position style) ────────────────────────────
 #ifndef CFS_POINT

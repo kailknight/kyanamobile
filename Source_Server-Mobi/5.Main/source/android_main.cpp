@@ -22157,6 +22157,15 @@ static bool InitializeAndroidGame()
 
     MU_MobilePlatformInit();
     SetWorkingDirectoryToMobileDataRoot();
+    MU_AppendExitTrace("startup: native init begin");
+    // exit() runs this, so an exit that bypassed every trace above (sokol's own
+    // onDestroy, a direct exit() in a loader) still leaves a line behind.
+    static bool s_exitHookInstalled = false;
+    if (!s_exitHookInstalled)
+    {
+        s_exitHookInstalled = true;
+        atexit([]() { MU_AppendExitTrace("process exit (SceneFlag=%d)", (int)SceneFlag); });
+    }
     InitializeTakumiProtectState();
     InitializeTakumiPacketKeys();
     // Audio is available: MuAudio (SoundPool + MediaPlayer) needs neither SDL
@@ -22212,6 +22221,7 @@ static bool InitializeAndroidGame()
         else
         {
             LOGE("No render backend could be initialized");
+            MU_AppendExitTrace("startup: no render backend could be initialized");
             ShutdownAndroidGame();
             return false;
         }
@@ -22409,6 +22419,7 @@ static bool InitializeAndroidGame()
     g_AndroidFrameState.hackLastTickMs = MU_MobileGetTicks();
 
     g_AndroidGameInitialized = true;
+    MU_AppendExitTrace("startup: native init done");
     LOGI("All systems initialized - sokol frame loop active");
     return true;
 }
@@ -22421,6 +22432,7 @@ static void RunAndroidGameFrame()
         {
             if (!g_AndroidQuitRequested)
             {
+                MU_AppendExitTrace("quit: InitializeAndroidGame failed (frame)");
                 g_AndroidQuitRequested = true;
                 MU_MobileRequestAppQuit();
             }
@@ -22432,6 +22444,7 @@ static void RunAndroidGameFrame()
     {
         if (!g_AndroidQuitRequested)
         {
+            MU_AppendExitTrace("quit: Destroy set by an event (SceneFlag=%d)", (int)SceneFlag);
             g_AndroidQuitRequested = true;
             MU_MobileRequestAppQuit();
         }
@@ -22451,6 +22464,7 @@ static void RunAndroidGameFrame()
     {
         if (!g_AndroidQuitRequested)
         {
+            MU_AppendExitTrace("quit: Destroy set before frame");
             g_AndroidQuitRequested = true;
             MU_MobileRequestAppQuit();
         }
@@ -23299,6 +23313,7 @@ static void OnAndroidSappInit()
 {
     if (!InitializeAndroidGame() && !g_AndroidQuitRequested)
     {
+        MU_AppendExitTrace("quit: InitializeAndroidGame failed (init)");
         g_AndroidQuitRequested = true;
         MU_MobileRequestAppQuit();
     }
@@ -23424,6 +23439,7 @@ int SDL_main(int argc, char* argv[])
             if (!initializeRenderBackend(RenderBackendType::OpenGLCompat))
             {
                 LOGE("No render backend could be initialized");
+            MU_AppendExitTrace("startup: no render backend could be initialized");
                 KillGLWindow();
                 SDL_Quit();
                 return -1;
