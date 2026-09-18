@@ -5,6 +5,16 @@ plugins {
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
+import java.util.Properties
+
+// Release signing: credentials live in keystore/keystore.properties (not
+// committed - the whole android/ folder is gitignored already), not inlined
+// here, so a real signing key never ends up in a diff or a build log.
+def keystorePropsFile = rootProject.file("keystore/keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
 
 def requiredNativeLibs = [
     "libSDL2.so",
@@ -269,17 +279,131 @@ def patchNativeDirTo16k = { File dir, String label ->
 }
 
 android {
+    // Deliberately NOT changed to match applicationId below: this is the
+    // Java source package (app/src/main/java/com/muonline/client/*.java -
+    // the actual package declaration inside those files), which Android
+    // fully allows to differ from applicationId. Renaming it would mean
+    // moving every Java file to a new folder and updating its package
+    // statement, for a namespace nothing outside this module reads.
     namespace 'com.muonline.client'
-    compileSdk 34
+    compileSdk 36
 
     flavorDimensions 'target'
 
     defaultConfig {
-        applicationId "com.muonline.client"
+        // This is the Play Store / installed-package identity - Android
+        // scopes each app's private storage (/sdcard/Android/data/<this>/...,
+        // /data/data/<this>/...) to it at install time, which is why the
+        // native-code path constants below had to change to match (see
+        // android_main.cpp, Platform/AndroidGDI.cpp, Platform/MobilePlatform.cpp).
+        applicationId "com.worldofkira"
         minSdk 21          // Android 5.0 - covers Sony SO-02L (API 28)
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        targetSdk 36
+        // Bumped 11 -> 12. Verify this is still higher than the max versionCode
+        // present on ANY Play Console release/draft (including abandoned ones)
+        // before uploading, or the "doesn't allow existing users to upgrade"
+        // rollout error will recur.
+        //
+        // History: 9 never shipped a release artifact - only a debug APK
+        // (2026-09-10) - and the last release APK was 8 (2026-09-08). 10 was
+        // used for the universal release AAB built 2026-09-12. 11 was built as a
+        // universal release AAB the same day (2026-09-12) and burned before
+        // upload - Play Console already had a release/draft at that code - so 12
+        // is the first code free for upload.
+        //
+        // 11 carried, on top of 10:
+        //   - spin wheel rework and claim box
+        //   - fixed minimap; chat surviving trade/NPC windows (drag-to-scroll,
+        //     one-tap open)
+        //   - character-select stale-tap and Connect/Delete fixes; legacy-button
+        //     tap debounce
+        //   - cash shop banner flip; craft-box hold-to-move
+        //   - warehouse hold-to-move (the withdraw direction could never arm)
+        //   - drop item names keep their rarity colour (GL_CURRENT_COLOR is not
+        //     a GLES3 query, so the colour was written and never read back)
+        //   - saved-account list selects the row you tap (hit boxes were sized in
+        //     window units but compared in 640x480 space, so one box covered ~3
+        //     rows)
+        //   - player names show without tapping (g_bGMObservation was never
+        //     seeded from mShowName on this platform)
+        //   - registration reports success and failure (its message box is only
+        //     painted by main-scene UI, so nothing drew it on the login screen,
+        //     and the undismissable box then muted every later message)
+        //   - buff skills land on the aimed player instead of always self
+        //   - MainInfo HidePlayerMenu mask; CustomCashShop honoured again
+        //   - containment guard for the garbage OBJECT::Owner crash
+        //
+        // NOT in 11, despite being in some 2026-09-12 debug APKs: the 576p
+        // render target. It was reverted - fixing an absolute render height to
+        // 576 raised logical text width ~35% and clipped login labels, because
+        // font size is only weakly tied to render height while g_fScreenRate is
+        // proportional to it. Back to the fractional 0.75 scale.
+        //
+        // 12 carries, on top of 11 (2026-09-13, cash shop buy-dialog text path):
+        //   - package descriptions saved with real CR/LF (not '#') normalised
+        //     before wrapping, so they no longer draw as one run with notdef
+        //     glyphs where the line breaks were (IGSNormalizeShopText)
+        //   - buy-select dialog: modern-skin description lines drawn on their
+        //     real 13px pitch and clamped to 3 lines, with the attribute/duration
+        //     plates resized so they no longer overlap or run under the list
+        //   - DivideStringByPixel's internal 1KB copy bounded with strncpy - a
+        //     long package description could overrun it (was a bare strcpy)
+        //   - CUIBuyingListBox::LINE_TEXTMAX widened to MAX_TEXT_LENGTH+1 and its
+        //     strncpy terminated explicitly - the old 64-byte limit was shorter
+        //     than lines its own caller produces, so a full line left no room for
+        //     a terminator and the render read on into the next list node
+        //   - CUIBuyingListBox::RenderDataLine now clips to box width - with no
+        //     width it did not clip, so an unbroken long line drew past the
+        //     dialog edge
+        //   - Android: modal message-box handling moved back ahead of the
+        //     register-overlay tap handler, so a registration validation error
+        //     (empty field, ID taken, ...) is dismissable instead of eating taps
+        //     meant for the message box's OK button
+        //
+        // 13 carries, on top of 12 (2026-09-13, cash shop variants and gifting):
+        //   - variant dialog shows each duration's own price - the server price
+        //     was looked up by ProductSeq, which all variants share, so every row
+        //     showed the first variant's price while the buy charged the right one
+        //   - gifting works - the 0xD2:0x04 send omitted the MileageFlag byte, so
+        //     the server read the recipient name one byte shifted ("not found")
+        //   - gift dialog text readable on the modern skin (was black on dark)
+        //   - PC-only cash shop banner orientation fix is also in this source,
+        //     but the mobile draw path is unchanged
+        //
+        // 14 carries, on top of 13 (2026-09-14):
+        //   - registration 7-digit PIN optional via MainInfo RegisterPinCode;
+        //     tail offsets moved +4, with the previous CBGetMain.bin size still
+        //     recognised so un-updated data.zip installs keep CustomCashShop
+        //   - Loren Deep siege map docked top right, minimap panel stands down
+        //     there, and the map texture is no longer upside down
+        //   - HP/MP/SD/AG/EXP bars narrowed (188 -> 102), Helper/Play follow,
+        //     bar numbers outlined
+        //   - skill slots ringed while a picked skill waits to be placed
+        //   - gift dialog OK/Cancel kept above the soft keyboard and tappable
+        //   - mastered skill icons drawn round in the skill ring
+        //
+        // 15 (2026-09-15): Play Console rejected an upload of the stale v12
+        // AAB still sitting in Working Project\APK, so skip past 13/14 to be
+        // safe. Adds the SD boost aura no longer lingering after its owner dies.
+        // 16 (2026-09-18): a WorldOfKira-1.0.15-release.apk already exists in
+        // Working Project\APK, so 15 may well be spoken for on the Console -
+        // bumped rather than risk another stale-version rejection. Carries:
+        //   - CMB combo no longer skips a step: the chain advances only when a
+        //     skill request actually reaches the wire, not on ExecuteSkill's
+        //     return value, which reports the PREVIOUS cast
+        //   - a second finger on the attack button no longer double-advances it
+        //   - the game keeps running (muted) in a floating window instead of
+        //     freezing when it loses focus; sensorLandscape follows the phone
+        //   - Muun collector skips drops the server refused instead of
+        //     re-asking every second - the "does not belong to you" spam
+        //   - Chaos Machine: talisman bonus no longer double-counted in the
+        //     displayed rate (showed 100% on a mix the server rolled at 53%),
+        //     talismans excluded from ingredient matching, cap shown in the
+        //     window, and real messages on the two refusal cases
+        // NOTE: the mix-info packet gained 4 bytes - needs the 2026-09-18
+        // GameServer build or the ingredient list misparses.
+        versionCode 16
+        versionName "1.0.16"
 
         externalNativeBuild {
             cmake {
@@ -331,6 +455,17 @@ android {
         buildConfig true
     }
 
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file("keystore/" + keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         debug {
             debuggable true
@@ -338,10 +473,25 @@ android {
             buildConfigField "boolean", "ENABLE_LOGS", muEnableLogs ? "true" : "false"
         }
         release {
-            minifyEnabled false
+            // See proguard-rules.pro's header comment: com.muonline.client.*
+            // and org.libsdl.app.* are kept wholesale because native code
+            // resolves their methods by string name over JNI, not by a
+            // compile-time-checked reference R8 could trace - shrinking is
+            // still real here (resources + the androidx.appcompat
+            // dependency), it just can't touch this project's own two Java
+            // packages.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             debuggable false
-            signingConfig signingConfigs.debug
+            signingConfig keystorePropsFile.exists() ? signingConfigs.release : signingConfigs.debug
             buildConfigField "boolean", "ENABLE_LOGS", muEnableLogs ? "true" : "false"
+            ndk {
+                // Play Console's "native debug symbols" warning: package the
+                // symbol table (not the much larger FULL debug info) so
+                // Play can symbolicate native crash/ANR stack traces.
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
         }
     }
 

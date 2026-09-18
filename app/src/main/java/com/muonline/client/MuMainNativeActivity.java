@@ -1,12 +1,23 @@
 package com.muonline.client;
 
 import android.app.NativeActivity;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.AssetManager;
 import android.graphics.Color;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.util.Log;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.atomic.AtomicInteger;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -19,6 +30,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,8 +53,45 @@ public class MuMainNativeActivity extends NativeActivity {
         int repeatCount);
     private native void nativeSetKeyboardBridge();
     private native void nativeClearKeyboardBridge();
+    private static native void nativeOnWindowFocusChanged(boolean hasFocus);
 
     private BridgeEditText imeBridge;
+
+    // onBackPressed() never fires here: NativeActivity delivers key events to
+    // the native AInputQueue directly, a separate pipeline from the normal
+    // View/Activity key dispatch that onBackPressed hangs off of. sokol_app's
+    // Android backend reads BACK straight from that queue and used to call
+    // its own shutdown the instant it saw AKEYCODE_BACK (see the note in
+    // SokolRuntime.cpp, where that shutdown call is neutralised) - but even
+    // with that neutralised, an unhandled event from the queue is just
+    // dropped, it does not fall back to Java.
+    //
+    // dispatchKeyEvent is the one point every key event passes through in
+    // Java before the framework hands it anywhere else, so intercepting BACK
+    // here and returning true consumes it outright - it never reaches the
+    // native queue at all, and never reaches the default NativeActivity
+    // behaviour of finishing the activity. Forwarded through the same native
+    // key bridge every other key already uses: the game decides what back
+    // means (close the open window, or ask for confirmation when nothing is
+    // open), never the framework.
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            try {
+                nativeOnKeyEvent(
+                    event.getAction(),
+                    KeyEvent.KEYCODE_BACK,
+                    0,
+                    event.getMetaState(),
+                    event.getRepeatCount());
+            } catch (UnsatisfiedLinkError e) {
+                // Native library not up yet - still consume below rather
+                // than let it fall through to the default finish().
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
 
     public void showKeyboardFromBridge() {
         runOnUiThread(new Runnable() {
@@ -86,6 +135,171 @@ public class MuMainNativeActivity extends NativeActivity {
                 activity.hideKeyboardInternal();
             }
         });
+    }
+
+    /*
+     * Cash shop banner download.
+     *
+     * The PC client uses urlmon on a worker thread; Android has neither that
+     * nor the bundled curl (which is a Windows .lib), so the fetch lives here,
+     * where HttpsURLConnection already exists and threading is easy.
+     *
+     * Asynchronous for the same reason as PC: native calls this from the packet
+     * handler, and a blocking fetch there froze the client on the first shop
+     * open. Native starts it and then polls.
+     *
+     * 0 = idle or still running, 1 = the file is on disk, -1 = failed. The
+     * state is consumed by the poll so each outcome is reported exactly once.
+     */
+    private static final AtomicInteger bannerState = new AtomicInteger(0);
+    private static volatile boolean bannerRunning = false;
+
+    public static boolean startBannerDownloadFromNative(String url, String destPath) {
+        if (url == null || destPath == null || url.length() == 0 || destPath.length() == 0) {
+            return false;
+        }
+
+        // One at a time. A second shop open while the first fetch is in flight
+        // would otherwise race two writers onto the same file.
+        synchronized (bannerState) {
+            if (bannerRunning) {
+                return false;
+            }
+            bannerRunning = true;
+            bannerState.set(0);
+        }
+
+        final String fUrl = url;
+        final String fPath = destPath;
+
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                boolean ok = false;
+                File tmp = new File(fPath + ".part");
+                HttpURLConnection conn = null;
+
+                try {
+                    File parent = tmp.getParentFile();
+                    if (parent != null) {
+                        parent.mkdirs();
+                    }
+
+                    conn = (HttpURLConnection) new URL(fUrl).openConnection();
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(20000);
+                    conn.setInstanceFollowRedirects(true);
+                    conn.setRequestProperty("User-Agent", "MuClient");
+                    conn.connect();
+
+                    if (conn.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                        InputStream in = conn.getInputStream();
+                        FileOutputStream out = new FileOutputStream(tmp);
+                        try {
+                            byte[] buf = new byte[8192];
+                            int n;
+                            while ((n = in.read(buf)) > 0) {
+                                out.write(buf, 0, n);
+                            }
+                            out.flush();
+                            ok = true;
+                        } finally {
+                            try { out.close(); } catch (Exception ignored) { }
+                            try { in.close(); } catch (Exception ignored) { }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w("MuBanner", "banner download failed: " + e);
+                    ok = false;
+                } finally {
+                    if (conn != null) {
+                        conn.disconnect();
+                    }
+                }
+
+                /*
+                 * Download to <path>.part and rename only on success.
+                 *
+                 * The native side treats "the file exists" as "it is cached and
+                 * good", so a half-written file left by a dropped connection
+                 * would be loaded forever as a corrupt banner and never
+                 * re-fetched.
+                 */
+                if (ok) {
+                    File dest = new File(fPath);
+                    dest.delete();
+                    ok = tmp.renameTo(dest);
+                }
+
+                if (!ok) {
+                    tmp.delete();
+                }
+
+                bannerState.set(ok ? 1 : -1);
+                bannerRunning = false;
+            }
+        }, "MuBannerDownload");
+
+        t.setDaemon(true);
+        t.start();
+        return true;
+    }
+
+    public static int pollBannerDownloadFromNative() {
+        return bannerState.getAndSet(0);
+    }
+
+    // Sticky-broadcast read rather than a registered receiver: ACTION_BATTERY_CHANGED
+    // is always latched by the system, so passing a null receiver to
+    // registerReceiver returns the last broadcast immediately without needing to
+    // keep a receiver registered for the activity's whole lifetime. Needs no
+    // permission. Returns -1 if the status bar HUD polls before the first
+    // broadcast lands (practically never).
+    public static int getBatteryPercentFromNative() {
+        final MuMainNativeActivity activity = instance;
+        if (activity == null) {
+            return -1;
+        }
+        try {
+            IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            Intent battery = activity.registerReceiver(null, filter);
+            if (battery == null) {
+                return -1;
+            }
+            int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+            int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+            if (level < 0 || scale <= 0) {
+                return -1;
+            }
+            return Math.round(level * 100.0f / scale);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    // RSSI in dBm (typically -30 "excellent" to -90 "unusable"). Needs
+    // ACCESS_WIFI_STATE (install-time only, no runtime prompt). Returns
+    // Integer.MIN_VALUE when wifi is off/disconnected so the native side can
+    // tell "no signal" apart from a real weak-signal reading.
+    public static int getWifiRssiFromNative() {
+        final MuMainNativeActivity activity = instance;
+        if (activity == null) {
+            return Integer.MIN_VALUE;
+        }
+        try {
+            WifiManager wifiManager =
+                (WifiManager) activity.getApplicationContext().getSystemService(WIFI_SERVICE);
+            if (wifiManager == null) {
+                return Integer.MIN_VALUE;
+            }
+            WifiInfo info = wifiManager.getConnectionInfo();
+            if (info == null || info.getNetworkId() == -1) {
+                return Integer.MIN_VALUE;
+            }
+            return info.getRssi();
+        } catch (Exception e) {
+            return Integer.MIN_VALUE;
+        }
     }
 
     private void showKeyboardInternal() {
@@ -313,22 +527,52 @@ public class MuMainNativeActivity extends NativeActivity {
     }
 
 
+    // Re-reads the whole asset into memory to compare against what's already
+    // on disk - fine here since every file under ui/ and data/ is small (the
+    // two folders together are under 1MB), and it means this stays correct
+    // for a workflow where these get swapped for new art/scripts repeatedly
+    // without needing a versionCode bump to notice each change (a version-
+    // gated "only re-copy once per app version" check was tried first and
+    // discarded for exactly that reason - it left content-only rebuilds
+    // silently stuck on stale files, which was already the whole bug).
     private void copyAssetFile(AssetManager assetMgr, String srcAssetPath, File destFile) {
-        if (destFile.exists()) {
+        byte[] assetBytes;
+        try (InputStream in = assetMgr.open(srcAssetPath)) {
+            assetBytes = readAllBytes(in);
+        } catch (IOException ex) {
             return;
         }
+
+        if (destFile.exists() && destFile.length() == assetBytes.length
+                && filesContentEqual(assetBytes, destFile)) {
+            return;
+        }
+
         File parent = destFile.getParentFile();
         if (parent != null && !parent.exists()) {
             parent.mkdirs();
         }
-        try (InputStream in = assetMgr.open(srcAssetPath);
-             OutputStream out = new FileOutputStream(destFile)) {
-            byte[] buf = new byte[8192];
-            int len;
-            while ((len = in.read(buf)) > 0) {
-                out.write(buf, 0, len);
-            }
+        try (OutputStream out = new FileOutputStream(destFile)) {
+            out.write(assetBytes);
         } catch (IOException ignored) {
+        }
+    }
+
+    private static byte[] readAllBytes(InputStream in) throws IOException {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int len;
+        while ((len = in.read(chunk)) > 0) {
+            buffer.write(chunk, 0, len);
+        }
+        return buffer.toByteArray();
+    }
+
+    private static boolean filesContentEqual(byte[] assetBytes, File destFile) {
+        try (InputStream in = new FileInputStream(destFile)) {
+            return java.util.Arrays.equals(readAllBytes(in), assetBytes);
+        } catch (IOException ex) {
+            return false;
         }
     }
 
@@ -429,9 +673,17 @@ public class MuMainNativeActivity extends NativeActivity {
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
+        // super first, deliberately: NativeActivity forwards this to sokol,
+        // which posts its own MSG_NO_FOCUS. Ours has to land behind that one.
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             configureFullscreenWindow();
         }
+        // Losing focus is not the same as going to the background, and sokol's
+        // frame loop treats it as if it were - it parks until the next system
+        // message, so a floating window the player taps outside of freezes
+        // mid-game. The native side keeps it running and mutes it instead; a
+        // real background trip still stops both, through onPause.
+        nativeOnWindowFocusChanged(hasFocus);
     }
 }

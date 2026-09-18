@@ -4,6 +4,8 @@
     <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Wifi signal readout in the status HUD (install-time only, no runtime prompt) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <!-- Storage (for game data on older Android) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -19,18 +21,33 @@
 
     <application
         android:allowBackup="false"
-        android:label="MU Online"
+        android:label="World of Kira"
         android:icon="@mipmap/ic_launcher"
         android:hardwareAccelerated="true"
         android:largeHeap="true"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:resizeableActivity="true">
+
+        <!--
+            Android 12+ signal that the game redraws correctly at whatever size
+            it is given, rather than needing to be letterboxed or restarted.
+            The renderer already does: SyncAndroidDrawableSizeFromSokol runs
+            once per frame and rebuilds the 576p target from the current
+            drawable, so a window being dragged to a new size just follows.
+            Some OEM floating-window launchers (RedMagic's "hang app" among
+            them) read this before they will accept an app.
+        -->
+        <meta-data
+            android:name="android.supports_size_changes"
+            android:value="true" />
 
         <activity
             android:name=".PreloadActivity"
-            android:label="MU Online"
+            android:label="World of Kira"
             android:exported="true"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|keyboard|navigation|uiMode"
             android:launchMode="singleTask"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:keepScreenOn="true">
@@ -43,10 +60,11 @@
 
         <activity
             android:name=".MuMainNativeActivity"
-            android:label="MU Online"
+            android:label="World of Kira"
             android:exported="false"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|keyboard|navigation|uiMode"
             android:launchMode="singleTask"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:keepScreenOn="true">
