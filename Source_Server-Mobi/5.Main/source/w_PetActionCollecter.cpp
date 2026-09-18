@@ -11,6 +11,126 @@
 #include "DSPlaySound.h"
 
 //////////////////////////////////////////////////////////////////////
+// Refused-drop blacklist, shared by every collector pet.
+// Declared in w_PetAction.h; lives here because this is the original
+// collector and the others already link against it.
+//////////////////////////////////////////////////////////////////////
+
+namespace
+{
+	// Small on purpose. A pet only chases drops within SEARCH_LENGTH, so more
+	// than a handful of simultaneously-unavailable ones nearby is unusual, and
+	// the oldest entry being overwritten just means one more refused request.
+	const int   kPetRefusedSlotCount = 16;
+
+	// How long a drop stays skipped. Long enough to break the retry loop that
+	// filled the chat, short enough that a reservation expiring - or the slot
+	// being reused by a completely different drop - frees it again quickly.
+	const DWORD kPetRefusedHoldMs = 15000;
+
+	// A refusal has to arrive soon after the pet asked, or it belongs to
+	// somebody else's request - most likely the player clicking an item.
+	const DWORD kPetRequestMatchMs = 3000;
+
+	struct PetRefusedItem
+	{
+		int   itemIndex;
+		DWORD tick;
+	};
+
+	PetRefusedItem g_petRefused[kPetRefusedSlotCount] = {};
+	bool  g_petRefusedInit = false;
+
+	int   g_petLastRequestIndex = -1;
+	DWORD g_petLastRequestTick = 0;
+
+	void PetRefusedEnsureInit()
+	{
+		if (g_petRefusedInit)
+			return;
+
+		for (int i = 0; i < kPetRefusedSlotCount; ++i)
+			g_petRefused[i].itemIndex = -1;
+
+		g_petRefusedInit = true;
+	}
+}
+
+void PetCollectNoteRequestedItem(int itemIndex)
+{
+	g_petLastRequestIndex = itemIndex;
+	g_petLastRequestTick = timeGetTime();
+}
+
+void PetCollectOnPickupRefused()
+{
+	PetRefusedEnsureInit();
+
+	if (g_petLastRequestIndex < 0)
+		return;
+
+	const DWORD now = timeGetTime();
+
+	if ((now - g_petLastRequestTick) > kPetRequestMatchMs)
+		return;
+
+	// Already listed, or a free/expired slot - either way reuse it. Falls back
+	// to the stalest entry when every slot is live.
+	int slot = -1;
+
+	for (int i = 0; i < kPetRefusedSlotCount; ++i)
+	{
+		if (g_petRefused[i].itemIndex == g_petLastRequestIndex)
+		{
+			slot = i;
+			break;
+		}
+
+		if (g_petRefused[i].itemIndex == -1 || (now - g_petRefused[i].tick) > kPetRefusedHoldMs)
+		{
+			slot = i;
+			break;
+		}
+
+		if (slot == -1 || (now - g_petRefused[i].tick) > (now - g_petRefused[slot].tick))
+			slot = i;
+	}
+
+	g_petRefused[slot].itemIndex = g_petLastRequestIndex;
+	g_petRefused[slot].tick = now;
+
+	// Consumed - one refusal blacklists one drop, so a later unrelated failure
+	// cannot list it a second time.
+	g_petLastRequestIndex = -1;
+}
+
+bool PetCollectIsItemRefused(int itemIndex)
+{
+	PetRefusedEnsureInit();
+
+	if (itemIndex < 0)
+		return false;
+
+	const DWORD now = timeGetTime();
+
+	for (int i = 0; i < kPetRefusedSlotCount; ++i)
+	{
+		if (g_petRefused[i].itemIndex != itemIndex)
+			continue;
+
+		if ((now - g_petRefused[i].tick) > kPetRefusedHoldMs)
+		{
+			g_petRefused[i].itemIndex = -1;
+			return false;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+//////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
@@ -160,7 +280,11 @@ bool PetActionCollecter::Move( OBJECT* obj, CHARACTER *Owner, int targetKey, DWO
 
 	case eAction_Get:
 		{
-			if(	!m_isRooting || SEARCH_LENGTH < Distance || CompTimeControl(3000, m_dwRootingTime))
+			// PetCollectIsItemRefused added to the existing give-up conditions: once
+			// the server has said no to this drop, waiting out the remaining chase
+			// time only produces more refusals. Drop it now and go find another.
+			if(	!m_isRooting || SEARCH_LENGTH < Distance || CompTimeControl(3000, m_dwRootingTime)
+				|| PetCollectIsItemRefused(m_RootItem.itemIndex))
 			{
 				m_isRooting = false;
 				m_dwRootingTime = GetTickCount();
@@ -176,7 +300,12 @@ bool PetActionCollecter::Move( OBJECT* obj, CHARACTER *Owner, int targetKey, DWO
 			if(CompTimeControl(1000, m_dwSendDelayTime))
 			{
 				if(&Hero->Object == obj->Owner)
+				{
+					// Remember what was asked for, so a refusal coming back can be
+					// pinned on this drop and the pet can stop chasing it.
+					PetCollectNoteRequestedItem(m_RootItem.itemIndex);
 					SendRequestGetItem(m_RootItem.itemIndex);
+				}
 			}	
 		}
 		break;
@@ -310,6 +439,14 @@ void PetActionCollecter::FindZen(OBJECT* obj)
 		{
 			//if( -1 == g_pMyInventory->FindEmptySlot(&Items[i].Item) && Items[i].Item.Type != ITEM_POTION+15 )
 			if( Items[i].Item.Type != ITEM_POTION+15 )
+			{
+				continue;
+			}
+
+			// Refused a moment ago - reserved for whoever earned it. Chasing it
+			// again just burns another request and another refusal, and keeps the
+			// pet off drops it could actually take.
+			if( PetCollectIsItemRefused(i) )
 			{
 				continue;
 			}

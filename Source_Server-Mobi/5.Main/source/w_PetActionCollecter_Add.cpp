@@ -154,7 +154,11 @@ bool PetActionCollecterAdd::Move( OBJECT* obj, CHARACTER *Owner, int targetKey, 
 	case eAction_Get:
 
 		{
-			if(	!m_isRooting || SEARCH_LENGTH < Distance || CompTimeControl(3000, m_dwRootingTime))
+			// PetCollectIsItemRefused added to the existing give-up conditions: once
+			// the server has said no to this drop, waiting out the remaining chase
+			// time only produces more refusals. Drop it now and go find another.
+			if(	!m_isRooting || SEARCH_LENGTH < Distance || CompTimeControl(3000, m_dwRootingTime)
+				|| PetCollectIsItemRefused(m_RootItem.itemIndex))
 			{
 				m_isRooting = false;
 				m_dwRootingTime = GetTickCount();
@@ -172,7 +176,12 @@ bool PetActionCollecterAdd::Move( OBJECT* obj, CHARACTER *Owner, int targetKey, 
 			if(CompTimeControl(1000, m_dwSendDelayTime))
 			{
 				if(&Hero->Object == obj->Owner)
+				{
+					// Remember what was asked for, so a refusal coming back can be
+					// pinned on this drop and the pet can stop chasing it.
+					PetCollectNoteRequestedItem(m_RootItem.itemIndex);
 					SendRequestGetItem(m_RootItem.itemIndex);
+				}
 			}	
 		}
 		break;
@@ -292,6 +301,14 @@ void PetActionCollecterAdd::FindZen(OBJECT* obj)
 		if( SEARCH_LENGTH > dl )
 		{
 			if( Items[i].Item.Type != ITEM_POTION+15 )
+			{
+				continue;
+			}
+
+			// Refused a moment ago - reserved for whoever earned it. Chasing it
+			// again just burns another request and another refusal, and keeps the
+			// pet off drops it could actually take.
+			if( PetCollectIsItemRefused(i) )
 			{
 				continue;
 			}
@@ -454,7 +471,11 @@ bool PetActionCollecterSkeleton::Move( OBJECT* obj, CHARACTER *Owner, int target
 
 	case eAction_Get:
 		{
-			if(	!m_isRooting || SEARCH_LENGTH < Distance || CompTimeControl(3000, m_dwRootingTime))
+			// PetCollectIsItemRefused added to the existing give-up conditions: once
+			// the server has said no to this drop, waiting out the remaining chase
+			// time only produces more refusals. Drop it now and go find another.
+			if(	!m_isRooting || SEARCH_LENGTH < Distance || CompTimeControl(3000, m_dwRootingTime)
+				|| PetCollectIsItemRefused(m_RootItem.itemIndex))
 			{
 				m_isRooting = false;
 				m_dwRootingTime = GetTickCount();
@@ -472,7 +493,12 @@ bool PetActionCollecterSkeleton::Move( OBJECT* obj, CHARACTER *Owner, int target
 			if(CompTimeControl(1000, m_dwSendDelayTime))
 			{
 				if(&Hero->Object == obj->Owner)
+				{
+					// Remember what was asked for, so a refusal coming back can be
+					// pinned on this drop and the pet can stop chasing it.
+					PetCollectNoteRequestedItem(m_RootItem.itemIndex);
 					SendRequestGetItem(m_RootItem.itemIndex);
+				}
 			}
 		}
 		break;

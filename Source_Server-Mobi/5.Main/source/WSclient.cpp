@@ -4,6 +4,7 @@
 #include "ZzzBMD.h"
 #include "ZzzInfomation.h"
 #include "ZzzObject.h"
+#include "w_PetAction.h"
 #include "ZzzCharacter.h"
 #include "ZzzInterface.h"
 #include "ZzzInventory.h"
@@ -136,6 +137,7 @@ BYTE    g_byPacketSerialRecv = 0;
 
 BOOL    g_bGameServerConnected = FALSE;
 DWORD   g_dwLatestMagicTick = 0;
+DWORD   g_SkillRequestSendSeq = 0;
 
 PMSG_MATCH_RESULT	g_wtMatchResult;
 PMSG_MATCH_TIMEVIEW	g_wtMatchTimeLeft;
@@ -6125,6 +6127,13 @@ void ReceiveGetItem( BYTE *ReceiveBuffer )
 	auto Data = (LPPRECEIVE_GET_ITEM)ReceiveBuffer;
 	if (Data->Result == NOT_GET_ITEM)
 	{
+		// The pickup was refused. If a collector pet asked for this one, that
+		// is the only signal it will ever get - the reply carries no item
+		// index, so the pet matches it against the drop it just requested and
+		// blacklists that drop. Without this it re-asks about once a second
+		// for as long as it keeps chasing, which is what filled the chat with
+		// "This item does not belong to you".
+		PetCollectOnPickupRefused();
 	}
 	else
 	{
@@ -8389,6 +8398,21 @@ void ReceiveMix( BYTE *ReceiveBuffer )
 		g_pMixInventory->DeleteAllItems();
 		g_pMixInventory->InsertItem(0, Data->Item);
         break;
+	// Talisman of Luck refusals. 240 has always been sent for "too many", but
+	// nothing handled it, so the mix just silently did nothing and the player
+	// had no way to tell that the talismans were the problem. 241 is the new
+	// "wrong combination type" - only the item upgrade and the Regular
+	// Combination take one.
+	case 240:
+		g_pChatListBox->AddText("", "Too many Talismans of Luck in the Chaos Machine.", SEASON3B::TYPE_ERROR_MESSAGE);
+		g_pMixInventory->SetMixState(SEASON3B::CNewUIMixInventory::MIX_FINISHED);
+		break;
+
+	case 241:
+		g_pChatListBox->AddText("", "Talisman of Luck cannot be used in this combination.", SEASON3B::TYPE_ERROR_MESSAGE);
+		g_pMixInventory->SetMixState(SEASON3B::CNewUIMixInventory::MIX_FINISHED);
+		break;
+
 	case 3:
 	case 5:
 	case 7:

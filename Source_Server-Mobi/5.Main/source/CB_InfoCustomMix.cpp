@@ -18,6 +18,7 @@ CB_InfoCustomMix* gCB_InfoCustomMix;
 CB_InfoCustomMix::CB_InfoCustomMix()
 {
 	this->m_DataInfoCustomMix.clear();
+	this->MaxTalismanOfLuck = -1;
 }
 
 CB_InfoCustomMix::~CB_InfoCustomMix()
@@ -29,13 +30,31 @@ void CB_InfoCustomMix::AddItemToMixItemInventory(ITEM* pItem)
 	//{
 	//	this->m_DataInfoCustomMix.clear();
 	//}
+
+	// Mirrors the skip in the GameServer's CheckItemMixForIndex /
+	// GetChaoMixItemCount. A Talisman of Luck is a success-rate modifier, not
+	// an ingredient; leaving it in this list lets it satisfy a recipe row
+	// whose index range happens to cover it, so the panel would tick an
+	// ingredient green that the server does not count as present.
+	if (pItem != NULL
+		&& (pItem->Type == ITEM_POTION + 53        // Talisman of Luck
+		||  pItem->Type == ITEM_POTION + 189))     // Elemental Talisman of Luck
+	{
+		return;
+	}
+
 	this->m_DataListItemMixInv.push_back(pItem);
-	
+
 }
 
 void CB_InfoCustomMix::RecvInfo(PMSG_BCUSTOM_MIX_INFO* lpMsg)
 {
 	this->m_DataInfoCustomMix.clear();
+
+	// Kept before the early return: the server sends the cap on every info
+	// packet, including the "no recipe matched" one, and the window states it
+	// whether or not a recipe is currently matched.
+	this->MaxTalismanOfLuck = lpMsg->MaxTalismanOfLuck;
 
 	if (lpMsg->Index == -1 || g_MixRecipeMgr.GetMixInventoryType() != SEASON3A::MIXTYPE_GOBLIN_NORMAL) return;
 

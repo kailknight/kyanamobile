@@ -11,7 +11,30 @@
 #if(CB_GETMIXRATE)
 #include "CB_GetMixRate.h"
 #endif
+#if(CB_CUSTOMMIXINFO)
+#include "CB_InfoCustomMix.h"
+#endif
 using namespace SEASON3A;
+
+// The Talisman of Luck cap the server is actually enforcing
+// (MaxTalismanOfLuck in CustomConfig.ini), or 10 - the value hardcoded here
+// before, and the GameServer's own MAX_TALISMAN_OF_LUCK default - while no mix
+// info packet has arrived yet to say otherwise.
+//
+// Worth reading rather than assuming: this gate decides whether a talisman
+// counts as a mix source at all, so a client stuck on 10 against a server
+// configured higher would drop the 11th talisman out of the recipe match and
+// blank the panel, while the server was perfectly happy to take it.
+static int GetTalismanOfLuckLimit()
+{
+#if(CB_CUSTOMMIXINFO)
+	if (gCB_InfoCustomMix != NULL && gCB_InfoCustomMix->MaxTalismanOfLuck >= 0)
+	{
+		return gCB_InfoCustomMix->MaxTalismanOfLuck;
+	}
+#endif
+	return 10;
+}
 
 static BYTE bBuxCode[3] = {0xfc,0xcf,0xab};
 
@@ -278,7 +301,7 @@ BOOL CMixRecipes::IsMixSource(ITEM * pItem)
 	if (IsCharmItem(mixitem))
 	{
 		if ((GetCurRecipe() == NULL || GetCurRecipe()->m_bCharmOption == 'A')
-			&& m_wTotalCharmBonus + mixitem.m_iCount <= 10)
+			&& m_wTotalCharmBonus + mixitem.m_iCount <= GetTalismanOfLuckLimit())
 		{
 			return TRUE;
 		}
@@ -866,10 +889,29 @@ void CMixRecipes::CalcMixRate(int iNumMixItems, CMixItem * pMixItems)
 	{
 		m_iSuccessRate = GetCurRecipe()->m_iSuccessRate;
 	}
+	// Whether the number came from the server rather than the client's own
+	// recipe maths. It decides who owns the Talisman of Luck bonus below.
+	bool bServerRate = false;
+
 #if(CB_GETMIXRATE)
-	if (g_MixRecipeMgr.RealRate != -1)  m_iSuccessRate = g_MixRecipeMgr.RealRate;
+	if (g_MixRecipeMgr.RealRate != -1)
+	{
+		m_iSuccessRate = g_MixRecipeMgr.RealRate;
+		bServerRate = true;
+	}
 #endif
-	if (GetCurRecipe()->m_bCharmOption == 'A')
+
+	// The talisman bonus goes on ONCE.
+	//
+	// When the rate came from the server it is already in there:
+	// CChaosBox::GetTalismanOfLuckRate adds it before RecalcAndSendMixRate
+	// sends the value. Adding m_wTotalCharmBonus on top double-counted it, and
+	// badly - m_iCount is the talisman's DURABILITY (5 each, see SetItem's
+	// m_bCanStack branch), not a count of talismans. Ten talismans made the
+	// server's honest 53% display as 53 + 50 = 103, clamped to a flat 100%,
+	// on a mix the server then rolled at 53. The player saw a guaranteed
+	// success fail.
+	if (bServerRate == false && GetCurRecipe()->m_bCharmOption == 'A')
 	{
 		m_iSuccessRate += m_wTotalCharmBonus;
 	}

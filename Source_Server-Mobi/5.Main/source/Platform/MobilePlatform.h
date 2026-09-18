@@ -35,6 +35,25 @@ const void* MU_MobileGetEglContext();
 // same public NDK call for our own "really quit" flow (Destroy == true).
 void MU_MobileRequestAppQuit();
 
+// Tells sokol the window still counts as focused, and wakes its frame loop.
+//
+// sokol_app's Android frame gate is
+//
+//     is_in_front = _sapp.android.has_resumed && _sapp.android.has_focus
+//
+// and when it is false the loop does not just skip a frame - it parks in
+// ALooper_pollOnce(-1) until the next system message. Losing *focus* alone is
+// enough, so a freeform/floating window that the player taps outside of stops
+// dead: no rendering, no input, and no network pump, even though the window is
+// still on screen and the activity is still resumed.
+//
+// has_resumed is the flag that actually means "this app is in the background",
+// and it stays true in that case, so it is the only one of the two worth
+// gating on. Called when the window loses focus while still resumed; the
+// message is posted rather than the flag poked directly, so the sokol thread
+// sets it in its own message pump instead of racing with the UI thread.
+void MU_MobileKeepRenderingWhileUnfocused();
+
 /*
 	Fetch the cash shop banner over HTTPS.
 

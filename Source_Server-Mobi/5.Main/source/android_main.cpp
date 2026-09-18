@@ -8990,21 +8990,44 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
         g_novaTapCharging = false;
     }
 
+    // Whether the request actually reached the wire, which is the only honest
+    // answer to "did this cast go out".
+    //
+    // ExecuteSkill's return value cannot answer it. That value is
+    // ExecuteSkillComplete() = SkillSuccess && !Movement, and SkillSuccess is
+    // written in exactly one place: WSclient's handlers for the server's own
+    // skill reply. So it describes the PREVIOUS cast, one round trip late -
+    // true while this one silently failed, false while this one is still in
+    // flight. Everything downstream that branches on it was reading noise.
+    //
+    // A silent failure is the common case, not a corner: AttackKnight and its
+    // siblings return void and drop the send on mana, skill-mana, energy,
+    // charisma, a wrong weapon in hand, or CheckSkillDelay (the client-side
+    // cooldown) - and SendRequestMagic has its own 300ms rate limit on top,
+    // which swallows anything pressed faster than that without a word.
+    const DWORD skillSendSeqBefore = g_SkillRequestSendSeq;
+
     const int executeResult = ExecuteSkill(Hero, skillToSend, skillDistance);
+    const bool skillRequestSent = (g_SkillRequestSendSeq != skillSendSeqBefore);
     const bool startedSkillMove = Hero->Movement && Hero->MovementType == MOVEMENT_SKILL;
 
     LOGI(
-        "VirtualPad: hotkey skill skillIndex=%d skillType=%d target=%d result=%d move=%d movementType=%d visible=%d",
+        "VirtualPad: hotkey skill skillIndex=%d skillType=%d target=%d result=%d sent=%d move=%d movementType=%d visible=%d",
         hotKeySkillIndex,
         rawSkillType,
         SelectedCharacter,
         executeResult,
+        skillRequestSent ? 1 : 0,
         startedSkillMove ? 1 : 0,
         Hero->MovementType,
         (SelectedCharacter >= 0 && SelectedCharacter < MAX_CHARACTERS_CLIENT && CharactersClient[SelectedCharacter].Object.Visible) ? 1 : 0);
 
     Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
-    return executeResult != 0 || startedSkillMove;
+
+    // startedSkillMove stays: a skill that walks the hero into range sends a
+    // move rather than a magic request on this frame, and that is not a
+    // failure. executeResult is deliberately gone - see above.
+    return skillRequestSent || startedSkillMove;
 
 }
 
@@ -14440,6 +14463,21 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
             return true;
         }
 
+        // One finger owns the attack button at a time. A second finger landing
+        // on it would take its own touch slot, and the hold pump walks every
+        // slot - so the button would fire twice per interval, advancing the
+        // combo two steps at once and skipping the one in between. Swallow the
+        // press instead of stacking a second stream on top of the first.
+        for (const ActiveVirtualTouch& held : g_activeVirtualTouches)
+        {
+            if (held.button == kVirtualAttackButton
+                && held.fingerId != static_cast<SDL_FingerID>(-1)
+                && held.fingerId != touch.fingerId)
+            {
+                return true;
+            }
+        }
+
         const int slot = AcquireActiveVirtualTouchSlot(touch.fingerId);
         if (slot >= 0)
         {
@@ -19857,6 +19895,7 @@ extern "C" void AndroidAudioInit();
 extern "C" void AndroidAudioPlayMusic(const char* absolutePath, bool loop);
 extern "C" void AndroidAudioStopMusic();
 extern "C" bool AndroidAudioIsMusicPlaying();
+extern "C" void AndroidAudioSetFocusMuted(bool muted);
 
 static char g_LastFailedMp3Name[256] = {};
 static uint32_t g_LastFailedMp3Tick = 0;
@@ -22121,6 +22160,33 @@ Java_com_muonline_client_MuMainNativeActivity_nativeOnKeyEvent(
     QueueAndroidKeyEvent(action, keyCode, unicodeChar, metaState, repeatCount);
 }
 
+// The window gained or lost focus while the activity is still resumed - a
+// floating/freeform window the player tapped outside of, or the notification
+// shade pulled down over a fullscreen one. Distinct from going to the
+// background, which arrives as SAPP_EVENTTYPE_SUSPENDED and is handled in
+// QueueSappEventAsSDL.
+//
+// sokol emits no focus events at all on Android (its backend only ever raises
+// RESUMED and SUSPENDED), so the Java callback is the only notice there is.
+extern "C" JNIEXPORT void JNICALL
+Java_com_muonline_client_MuMainNativeActivity_nativeOnWindowFocusChanged(
+    JNIEnv*,
+    jclass,
+    jboolean hasFocus)
+{
+    const bool focused = (hasFocus == JNI_TRUE);
+
+    // Play on, quietly. The frame loop has to be re-armed before anything
+    // else, or losing focus parks it and the game stops mid-swing - see
+    // MU_MobileKeepRenderingWhileUnfocused.
+    if (!focused)
+    {
+        MU_MobileKeepRenderingWhileUnfocused();
+    }
+
+    AndroidAudioSetFocusMuted(!focused);
+}
+
 static void ProcessAndroidEventQueue()
 {
     int screenW = g_DrawableWidth;
@@ -22444,7 +22510,7 @@ static void RunAndroidGameFrame()
     {
         if (!g_AndroidQuitRequested)
         {
-            MU_AppendExitTrace("quit: Destroy set by an event (SceneFlag=%d)", (int)SceneFlag);
+            MU_AppendExitTrace("quit: Destroy set before frame");
             g_AndroidQuitRequested = true;
             MU_MobileRequestAppQuit();
         }
@@ -22464,7 +22530,7 @@ static void RunAndroidGameFrame()
     {
         if (!g_AndroidQuitRequested)
         {
-            MU_AppendExitTrace("quit: Destroy set before frame");
+            MU_AppendExitTrace("quit: Destroy set by an event (SceneFlag=%d)", (int)SceneFlag);
             g_AndroidQuitRequested = true;
             MU_MobileRequestAppQuit();
         }

@@ -657,6 +657,39 @@ NextRateShow:
 			}
 		}
 
+		// The Talisman of Luck cap, straight from the server's
+		// MaxTalismanOfLuck (CustomConfig.ini) - see CB_InfoCustomMix. Shown
+		// only here, in the Regular Combination branch, because that is the
+		// only combination that accepts a talisman at all: every other mix
+		// refuses outright if one is in the box.
+		//
+		// -1 means no info packet has arrived yet, so there is no real number
+		// to print; 0 means the cap is configured off.
+		if (gCB_InfoCustomMix->MaxTalismanOfLuck >= 0)
+		{
+			g_pRenderText->SetTextColor(120, 200, 255, 255);
+
+			if (gCB_InfoCustomMix->MaxTalismanOfLuck == 0)
+			{
+				unicode::_sprintf(szText, "Talisman of Luck is disabled on this server.");
+			}
+			else
+			{
+				unicode::_sprintf(szText, "Talisman of Luck: up to %d (+1%% success each).",
+					gCB_InfoCustomMix->MaxTalismanOfLuck);
+			}
+
+			iTextLines = CutStr(szText, szTempText[0], 156, 2, 100);
+
+			for (int i = 0; i < iTextLines; i++)
+			{
+				if (i >= 2)
+					break;
+
+				g_pRenderText->RenderText(fPos_x, fPos_y + fLine_y + (iTextPos_y * 15), szTempText[i]);
+				iTextPos_y++;
+			}
+		}
 
 	}
 	else if (g_MixRecipeMgr.GetMostSimilarRecipe() != NULL)
@@ -693,16 +726,46 @@ NextRateShow:
 			else if (iResult == SEASON3A::MIX_SOURCE_YES) g_pRenderText->SetTextColor(255, 255, 48, 255);
 			
 			iTextLines = CutStr(szText, szTempText[0], 156, 2, 100);
-			
+
 			for(int i=0 ; i<iTextLines ; i++)
 			{
 				if( i >= 2 )
 					break;
-				
+
 				g_pRenderText->RenderText(fPos_x, fPos_y + fLine_y + (iTextPos_y*15), szTempText[i]);
 				iTextPos_y++;
 			}
 		}
+
+#if(CB_CUSTOMMIXINFO)
+		// Same Talisman of Luck notice as the custom-recipe branch above, for
+		// the built-in recipes that take one - the item-level upgrade being
+		// the one that matters. Gated on the recipe's own m_bCharmOption,
+		// which comes straight out of the client's recipe data file, so this
+		// only appears on recipes that actually accept a talisman rather than
+		// on every mix in this window.
+		if (gCB_InfoCustomMix != NULL
+			&& gCB_InfoCustomMix->MaxTalismanOfLuck > 0
+			&& g_MixRecipeMgr.GetMostSimilarRecipe() != NULL
+			&& g_MixRecipeMgr.GetMostSimilarRecipe()->m_bCharmOption == 'A')
+		{
+			g_pRenderText->SetTextColor(120, 200, 255, 255);
+
+			unicode::_sprintf(szText, "Talisman of Luck: up to %d (+1%% success each).",
+				gCB_InfoCustomMix->MaxTalismanOfLuck);
+
+			iTextLines = CutStr(szText, szTempText[0], 156, 2, 100);
+
+			for (int i = 0; i < iTextLines; i++)
+			{
+				if (i >= 2)
+					break;
+
+				g_pRenderText->RenderText(fPos_x, fPos_y + fLine_y + (iTextPos_y * 15), szTempText[i]);
+				iTextPos_y++;
+			}
+		}
+#endif
 	}
 	else if (g_MixRecipeMgr.IsMixInit())
 	{

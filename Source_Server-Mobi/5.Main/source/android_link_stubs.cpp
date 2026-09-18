@@ -130,6 +130,13 @@ constexpr long kAndroidDsVolumeMax = 0;
 bool g_androidSoundEnabled = true;
 long g_androidMasterVolume = 0;
 
+// Silenced because the window lost focus - a floating window the player tapped
+// outside of, or the notification shade over a fullscreen one. Deliberately a
+// separate flag from g_androidSoundEnabled, which is the player's own sound
+// setting: this one has to be able to come and go without overwriting, or
+// being overwritten by, what they chose in the options.
+bool g_androidFocusMuted = false;
+
 // Defined further down, next to the rest of the JNI bridge. Declared here
 // because the volume and enable/disable entry points sit above it and an
 // anonymous namespace is one namespace across the whole file.
@@ -139,7 +146,7 @@ void CallMuAudioVoid(const char* method, const char* sig, ...);
 // silent and 0 full. MuAudio wants a plain 0-100 percentage.
 int ConvertDirectSoundVolumeToPercent(long volume)
 {
-    if (!g_androidSoundEnabled)
+    if (!g_androidSoundEnabled || g_androidFocusMuted)
     {
         return 0;
     }
@@ -675,6 +682,26 @@ extern "C" void AndroidAudioPlayMusic(const char* absolutePath, bool loop)
 extern "C" void AndroidAudioStopMusic()
 {
     CallMuAudioVoid("stopMusic", "()V");
+}
+
+// Mute, not stop: MuAudio.setVolume walks the live SoundPool streams and the
+// MediaPlayer and only changes their gain, so the map's music keeps its
+// position and comes back where it left off when focus returns. Stopping it
+// instead would restart the track from the top every time the player tapped
+// away from a floating window.
+//
+// Called from the UI thread via the focus bridge. Safe from there: MuAudio's
+// setVolume is static synchronized, and AndroidAudioEnv attaches whatever
+// thread asks.
+extern "C" void AndroidAudioSetFocusMuted(bool muted)
+{
+    if (g_androidFocusMuted == muted)
+    {
+        return;
+    }
+
+    g_androidFocusMuted = muted;
+    ApplyAndroidMasterVolume();
 }
 
 extern "C" bool AndroidAudioIsMusicPlaying()

@@ -41,6 +41,11 @@ public:
 		int  Advice1;
 		int  Advice2;
 		int  Advice3;
+
+		// Mirrors PMSG_BCUSTOM_MIX_INFO in the GameServer's CustomMix.h. Must
+		// stay the LAST field and stay in step with it - the ingredient rows
+		// that follow are addressed as sizeof(*this) + n * sizeof(row).
+		int  MaxTalismanOfLuck;
 	};
 
 	struct LOCAL_DATA_INFOCUSTOMMIX
@@ -69,6 +74,13 @@ public:
 	int GetSourceName(int iItemNum, unicode::t_char* pszNameOut);
 
 	int CheckCountMix;
+
+	// The server's MaxTalismanOfLuck (CustomConfig.ini). Held on the class
+	// rather than in m_DataInfoCustomMix because RecvInfo clears that vector
+	// whenever no recipe matches, and the mix window states the cap either
+	// way. -1 until the first packet arrives, which suppresses the notice
+	// rather than printing a made-up number.
+	int MaxTalismanOfLuck;
 	bool CheckCustomMixOK();
 	BOOL GetCurRecipeDesc(unicode::t_char* pszDescOut, int iDescLine);
 	BOOL GetRecipeAdvice(unicode::t_char* pszDescOut, int iDescLine);

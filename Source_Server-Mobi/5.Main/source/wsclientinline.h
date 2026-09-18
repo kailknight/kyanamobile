@@ -506,6 +506,12 @@ __forceinline void SendCharacterMove(unsigned short Key,float Angle,unsigned cha
 
 extern DWORD g_dwLatestMagicTick;
 
+// Bumped every time a skill request actually reaches the wire. Callers that
+// need to know whether a cast went out compare this across an ExecuteSkill
+// call - ExecuteSkill's own return value cannot answer that, because it
+// reports SkillSuccess, which only a later server reply sets.
+extern DWORD g_SkillRequestSendSeq;
+
 #ifndef _DEBUG
 
 #ifdef PBG_ADD_NEWCHAR_MONK_SKILL
@@ -518,6 +524,7 @@ extern DWORD g_dwLatestMagicTick;
 		WORD Type = (WORD)p_Type;\
 		spe.Init( 0xC1, 0x19);\
 		spe << ( BYTE)(HIBYTE(Type))<<( BYTE)(LOBYTE(Type)) << ( BYTE)( ( p_Key)>>8) << ( BYTE)( ( p_Key)&0xff);\
+		++g_SkillRequestSendSeq;\
 		spe.Send( TRUE);\
 	}\
 }
@@ -531,6 +538,7 @@ extern DWORD g_dwLatestMagicTick;
 		WORD Type = (WORD)p_Type;\
 		spe.Init( 0xC1, 0x19);\
 		spe << ( BYTE)(HIBYTE(Type))<<( BYTE)(LOBYTE(Type)) << ( BYTE)( ( p_Key)>>8) << ( BYTE)( ( p_Key)&0xff);\
+		++g_SkillRequestSendSeq;\
 		spe.Send( TRUE);\
 	}\
 }
@@ -554,6 +562,7 @@ __forceinline void SendRequestMagic(int Type,int Key)
 		WORD p_Type = (WORD)Type;
 		spe.Init( 0xC1, 0x19);
 		spe << ( BYTE)(HIBYTE(p_Type))<<( BYTE)(LOBYTE(p_Type))<< ( BYTE)( Key>>8) << ( BYTE)( Key&0xff);
+		++g_SkillRequestSendSeq;
 		spe.Send( TRUE);
 	
 	g_ConsoleDebug->Write(MCD_SEND, "0x19 [SendRequestMagic(%d %d)]", Type, Key);
@@ -588,6 +597,7 @@ BYTE MakeSkillSerialNumber(BYTE * pSerialNumber);
 			spe << ( BYTE)(pKey[i]>>8) << ( BYTE)( pKey[i]&0xff);\
 			spe << ( BYTE)p_SkillSerial;\
 		}\
+		++g_SkillRequestSendSeq;\
 		spe.Send( TRUE);\
 	}\
 }
@@ -605,6 +615,7 @@ __forceinline void SendRequestMagicAttack(int Type,int x,int y,BYTE Serial,int C
 		spe << ( BYTE)(Key[i]>>8) << ( BYTE)( Key[i]&0xff);
 		spe << ( BYTE)SkillSerial;
 	}
+	++g_SkillRequestSendSeq;
 	spe.Send( TRUE);
 
 	g_ConsoleDebug->Write(MCD_SEND, "0x1D [SendRequestMagicAttack(%d)]", Serial);
@@ -640,6 +651,7 @@ inline BYTE GetDestValue( int xPos, int yPos, int xDst, int yDst)
 		spe.Init( 0xC1, 0x1E);\
 		spe << ( BYTE)(HIBYTE(Type))<<( BYTE)(LOBYTE(Type)) << ( BYTE)( p_x) << ( BYTE)( p_y) << ( BYTE)( p_Angle) << ( BYTE)( p_Dest) << ( BYTE)( p_Tpos) << ( BYTE)( ( p_TKey)>>8) << ( BYTE)( ( p_TKey)&0xff);\
 		spe << MakeSkillSerialNumber(p_SkillSerial);\
+		++g_SkillRequestSendSeq;\
 		spe.Send( TRUE);\
 	}\
 }
@@ -656,6 +668,7 @@ __forceinline void SendRequestMagicContinue(int Type,int x,int y,int Angle, BYTE
 	spe << ( BYTE)(HIBYTE(p_Type))<<( BYTE)(LOBYTE(p_Type))
 		<< ( BYTE)( x) << ( BYTE)( y) << ( BYTE)( Angle) << ( BYTE)( Dest) << ( BYTE)( Tpos) << ( BYTE)( ( TKey)>>8) << ( BYTE)( ( TKey)&0xff);
 	spe << MakeSkillSerialNumber(pSkillSerial);
+	++g_SkillRequestSendSeq;
 	spe.Send( TRUE);
 
 	g_ConsoleDebug->Write(MCD_SEND, "0x1E [SendRequestMagicContinue]");
@@ -680,6 +693,7 @@ extern bool Teleport;
 		spe.Init( 0xC1, 0x1C);\
 		spe.AddNullData( 1);\
 		spe << ( WORD)( p_Type) << ( BYTE)( p_x) << ( BYTE)( p_y);\
+		++g_SkillRequestSendSeq;\
 		spe.Send( TRUE);\
 \
 		*( p_pbResult) = true;\
@@ -699,6 +713,7 @@ extern bool Teleport;
 		CStreamPacketEngine spe;\
 		spe.Init( 0xC1, 0xB0);\
 		spe << ( WORD)( p_Index) << ( BYTE)( p_x) << ( BYTE)( p_y);\
+		++g_SkillRequestSendSeq;\
 		spe.Send( TRUE);\
 \
 		*( p_pbResult) = true;\

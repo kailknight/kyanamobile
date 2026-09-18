@@ -73,4 +73,30 @@ void MU_MobileRequestAppQuit()
 #endif
 }
 
+void MU_MobileKeepRenderingWhileUnfocused()
+{
+#if defined(__ANDROID__)
+    // Only this file can reach _sapp_android_msg - it is _SOKOL_PRIVATE, and
+    // this is the translation unit that defines SOKOL_APP_IMPL.
+    //
+    // MSG_FOCUS is the same message sokol posts for a real focus gain: the
+    // sokol thread picks it up in its own switch, sets has_focus itself, and
+    // the write wakes the looper out of its indefinite poll. Nothing here
+    // touches _sapp from the UI thread beyond the pipe write, which is what
+    // the pipe is for.
+    //
+    // Ordering is what makes this work. NativeActivity.onWindowFocusChanged
+    // calls through to sokol first, so MSG_NO_FOCUS is already in the pipe and
+    // our MSG_FOCUS lands behind it - the pump applies both in order and ends
+    // on focused. A genuine background trip is unaffected: MSG_PAUSE clears
+    // has_resumed, and no amount of focus says otherwise.
+    if (!_sapp.valid || !_sapp.android.is_thread_started || _sapp.android.is_thread_stopping)
+    {
+        return;
+    }
+
+    _sapp_android_msg(_SOKOL_ANDROID_MSG_FOCUS);
+#endif
+}
+
 #endif // defined(__ANDROID__) || defined(MU_IOS)
