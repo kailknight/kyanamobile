@@ -19,6 +19,18 @@
     <!-- Keep screen on during gameplay -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Proximity voice chat. Declaring it is not enough on its own: from
+         Android 6 the player must also grant it at runtime, and until they do
+         SDL simply reports a capture device that will not open. Phase 5 owns
+         asking. Until then the client falls back to its test tone, so the
+         transport can still be exercised on a phone. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Declared optional so a device with no microphone at all - and the Play
+         Store listing - does not treat voice chat as a requirement for
+         installing a game that works perfectly well without it. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <application
         android:allowBackup="false"
         android:label="World of Kira"

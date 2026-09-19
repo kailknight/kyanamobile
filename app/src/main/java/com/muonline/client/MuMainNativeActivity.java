@@ -255,6 +255,66 @@ public class MuMainNativeActivity extends NativeActivity {
     // keep a receiver registered for the activity's whole lifetime. Needs no
     // permission. Returns -1 if the status bar HUD polls before the first
     // broadcast lands (practically never).
+    // ---- proximity voice chat: RECORD_AUDIO --------------------------------
+    //
+    // The manifest declaring RECORD_AUDIO is not enough from Android 6 onward;
+    // the player has to grant it while the app is running. Until they do,
+    // OpenSL's CreateAudioRecorder simply fails with no detail, which from the
+    // native side is indistinguishable from a device that has no microphone.
+    //
+    // Asked for only when somebody first tries to talk, rather than at startup.
+    // A game that demands microphone access before the player has seen a reason
+    // for it mostly gets told no, and a denial is much harder to walk back than
+    // a prompt that arrives with obvious context.
+
+    private static final int REQUEST_CODE_RECORD_AUDIO = 0x5643;   // 'VC'
+
+    public static int hasMicPermissionFromNative() {
+        final MuMainNativeActivity activity = instance;
+        if (activity == null) {
+            return 0;
+        }
+        // Below Android 6 a manifest permission is granted at install time and
+        // there is nothing to ask for.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return 1;
+        }
+        try {
+            return (activity.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) ? 1 : 0;
+        } catch (Exception e) {
+            Log.w(TAG, "mic permission check failed", e);
+            return 0;
+        }
+    }
+
+    public static void requestMicPermissionFromNative() {
+        final MuMainNativeActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return;
+        }
+        // Fire and forget. The result arrives asynchronously in the system
+        // dialog, so native does not wait on it - it polls
+        // hasMicPermissionFromNative on the next attempt to talk. Blocking the
+        // game thread on a dialog the player may leave sitting there would
+        // freeze the client.
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    activity.requestPermissions(
+                            new String[] { android.Manifest.permission.RECORD_AUDIO },
+                            REQUEST_CODE_RECORD_AUDIO);
+                } catch (Exception e) {
+                    Log.w(TAG, "mic permission request failed", e);
+                }
+            }
+        });
+    }
+
     public static int getBatteryPercentFromNative() {
         final MuMainNativeActivity activity = instance;
         if (activity == null) {

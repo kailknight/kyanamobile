@@ -119,12 +119,15 @@ set_target_properties(botan PROPERTIES IMPORTED_LOCATION "${JNI_LIBS_DIR}/libbot
 add_library(mpg123 SHARED IMPORTED)
 set_target_properties(mpg123 PROPERTIES IMPORTED_LOCATION "${JNI_LIBS_DIR}/libmpg123.so")
 
-file(GLOB_RECURSE GAME_SOURCES "${GAME_SRC_DIR}/*.cpp")
+# CONFIGURE_DEPENDS: without it, CMake caches this glob at configure time and
+# a newly-added .cpp silently never gets compiled (no error - it just isn't
+# there) until something else forces a reconfigure. This makes CMake re-check
+# the glob (and reconfigure if it changed) on every build.
+file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS "${GAME_SRC_DIR}/*.cpp")
 list(APPEND GAME_SOURCES "${GAME_SRC_DIR}/ScenePerfTelemetry.cpp")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*[Ww]inmain\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*MuEditor.*\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX ".*imgui.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*MuParallel\\.cpp$")
 # Only the WinINet-based FTP/HTTP downloader implementation is excluded:
 # the shop's category/package/product data loads from local script files
 # and skips the live downloader whenever those files already exist
@@ -161,6 +164,16 @@ list(LENGTH GAME_SOURCES GAME_SOURCE_COUNT)
 message(STATUS "Game source files count: ${GAME_SOURCE_COUNT}")
 
 add_library(main SHARED ${GAME_SOURCES})
+
+# ZzzScene.cpp bakes __DATE__/__TIME__ into the on-screen build stamp. Without
+# this, an incremental build that does not touch that file leaves the stamp
+# showing an older time than the build actually is, which reads on-device as
+# "the install did not take" and sends debugging down a false trail. Touching
+# it every build keeps the stamp meaning what it looks like it means.
+add_custom_command(
+    TARGET main PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} -E touch_nocreate "${GAME_SRC_DIR}/ZzzScene.cpp"
+    COMMENT "Refreshing build stamp timestamp in ZzzScene.cpp")
 
 set(SDL2_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/SDL2/include")
 
@@ -207,7 +220,17 @@ target_link_options(main PRIVATE
     -Wl,-z,max-page-size=16384
 )
 
-target_link_libraries(main PRIVATE SDL2 SDL2_image SDL2_mixer SDL2_ttf SDL_net mpg123 botan android log GLESv3 EGL z c++_static)
+# OpenSLES is for proximity voice chat (VoiceAudioOpenSL.cpp).
+#
+# NOT SDL, even though SDL2 is linked right here. SDL's audio is unreachable in
+# this app: sokol_app is the entry point, SDL_main is inside an #if 0, and the
+# launched activity is PreloadActivity -> MuMainNativeActivity rather than the
+# SDLActivity subclass - so SDL.java's SDLAudioManager.nativeSetupJNI() never
+# runs and SDL has no Java side to open a device with.
+#
+# OpenSL ES is part of the NDK, needs no Java bootstrap at all, and covers the
+# whole minSdk 21 range (AAudio would have meant API 26+ plus a fallback).
+target_link_libraries(main PRIVATE SDL2 SDL2_image SDL2_mixer SDL2_ttf SDL_net mpg123 botan android log GLESv3 EGL z OpenSLES c++_static)
 
 if(MU_ENABLE_BGFX)
     target_link_libraries(main PRIVATE mu_bgfx)
