@@ -10,6 +10,9 @@
 #include "ZzzInterface.h"
 #include "CBInterface.h"
 #include "GameConfig/GameConfig.h"
+#include "VoiceClient.h"
+#include "VoiceAudio.h"
+#include "GameConfig/GameConfigConstants.h"
 
 using namespace SEASON3B;
 
@@ -170,6 +173,7 @@ bool SEASON3B::CNewUIOptionWindow::Render()
 	RenderContents();
 	RenderButtons();
 	RenderCustomFrame();
+	RenderVoiceMicRows();
 	DisableAlphaBlend();
 	return true;
 }
@@ -385,6 +389,173 @@ void SEASON3B::CNewUIOptionWindow::RenderCustomFrame()
 		if (g_pBCustomMenuInfo->RenderCheckBox(x + 15, y + 15, 0xFFCC00C8, pNameWindow->IsShowItemName(), "Show ItemNames"))
 		{
 			pNameWindow->SetShowItemName(!pNameWindow->IsShowItemName());
+		}
+	}
+
+	// Proximity voice chat. Shown only when the server actually has voice
+	// switched on - CustomConfig.ini's VoiceChatEnable, off by default - so
+	// servers that do not use it get no dead controls in their options window.
+	//
+	// The first of these takes the free right-hand slot of the ItemNames row
+	// rather than starting a new one, which keeps the section the same height
+	// on a server without voice and one row taller on a server with it.
+	if (gVoiceClient.IsEnabled())
+	{
+		if (g_pBCustomMenuInfo->RenderCheckBox(x + 15 + 80, y + 15, 0xFFCC00C8,
+			VoiceSettingGetEnabled() ? TRUE : FALSE, "Voice Chat"))
+		{
+			VoiceSettingSetEnabled(!VoiceSettingGetEnabled());
+		}
+
+		y = y + 17;
+
+		// Mutes everyone else without leaving voice: the player can still talk
+		// and is still heard. These are genuinely different wants - "I do not
+		// want to listen right now" and "I do not want to take part" - and
+		// collapsing them into one switch serves neither.
+		if (g_pBCustomMenuInfo->RenderCheckBox(x + 15, y + 15, 0xFFCC00C8,
+			VoiceSettingGetMuteOthers() ? TRUE : FALSE, "Mute Voices"))
+		{
+			VoiceSettingSetMuteOthers(!VoiceSettingGetMuteOthers());
+		}
+
+		// The microphone rows used to be here and are now in RenderVoiceMicRows,
+		// drawn in the LEFT panel. This panel's rows are 80px-pitch pairs and a
+		// device name does not fit in one; it ran off the bottom of the window
+		// instead. The left panel has a genuinely empty strip below the render
+		// level bar, which is where they belong.
+	}
+}
+
+// Microphone settings, in the empty strip at the bottom of the left panel.
+//
+// That strip runs from about y+200 (below the render level bar, whose hit area
+// ends at y+197) to the window's bottom edge at y+275, and is 160 wide. It is
+// the only place in this window with room for a full-width row, which a device
+// name needs.
+void SEASON3B::CNewUIOptionWindow::RenderVoiceMicRows()
+{
+	// Nothing at all on a server without voice, so servers that do not use it
+	// see no dead controls.
+	if (gVoiceClient.IsEnabled() == false)
+	{
+		return;
+	}
+
+	const float x = m_Pos.x + 15.f;
+	float y = m_Pos.y + 205.f;
+
+	const float rowW = 160.f;
+	const float rowH = 15.f;
+
+	// A shared debounce for both rows. Without it one click walks several stops
+	// before the button comes up.
+	const bool bClickReady =
+		((GetKeyState(VK_LBUTTON) & 0x8000) != 0)
+		&& (GetTickCount() - gInterface.Data[eTIME].EventTick > 500);
+
+	// -- device picker ----------------------------------------------------
+	//
+	// Only where a choice exists: Android reports zero devices because OpenSL
+	// ES cannot select an input, and a single-microphone PC has nothing to
+	// choose between. A click cycles rather than opening a dropdown - this
+	// window has no list control, and for a handful of devices cycling is far
+	// less to go wrong than building one.
+	const int deviceCount = VoiceAudioGetCaptureDeviceCount();
+
+	if (deviceCount > 1)
+	{
+		char szDevice[64];
+		VoiceAudioGetSelectedCaptureDeviceName(szDevice, sizeof(szDevice));
+
+		// Not RenderCheckBox: that helper formats its arguments into a buffer
+		// and then draws the raw format string instead, so the device name
+		// would never appear. It is also not a toggle, and a tick box beside it
+		// would say that it was.
+		TextDraw(g_hFont, (int)x, (int)y, 0xFFCC00C8, 0x0, 0, 0, 1,
+			"Mic: %s", szDevice);
+
+		if (bClickReady && SEASON3B::CheckMouseIn(x, y, (int)rowW, (int)rowH) == 1)
+		{
+			gInterface.Data[eTIME].EventTick = GetTickCount();
+			PlayBuffer(SOUND_CLICK01);
+
+			// -1 (system default) sits at the front of the cycle, so there are
+			// deviceCount + 1 stops and the default is always one click from
+			// the end.
+			int next = VoiceSettingGetMicDevice() + 1;
+
+			if (next >= deviceCount)
+			{
+				next = -1;
+			}
+
+			VoiceSettingSetMicDevice(next);
+
+			// Closed now rather than left to expire, so a player who changes
+			// device mid-sentence does not keep recording from the old one.
+			gVoiceAudio.RequestCaptureReopen();
+		}
+
+		y += 17.f;
+	}
+
+	// -- input boost ------------------------------------------------------
+	//
+	// Shown on every platform, unlike the picker: this is the setting that
+	// answers "I have to shout", and a phone needs it at least as much as a PC.
+	{
+		TextDraw(g_hFont, (int)x, (int)y, 0xFFCC00C8, 0x0, 0, 0, 1,
+			"Mic boost: %d%%   (auto-levelled)", VoiceSettingGetMicBoost());
+
+		if (bClickReady && SEASON3B::CheckMouseIn(x, y, (int)rowW, (int)rowH) == 1)
+		{
+			gInterface.Data[eTIME].EventTick = GetTickCount();
+			PlayBuffer(SOUND_CLICK01);
+
+			VoiceSettingSetMicBoost(VoiceSettingNextMicBoost(VoiceSettingGetMicBoost()));
+		}
+
+		y += 17.f;
+	}
+
+	// -- talk mode --------------------------------------------------------
+	//
+	// PC only. Holding a key costs nothing, so both modes are worth offering
+	// there - but on a phone holding a button parks a thumb on the HUD that is
+	// also needed to steer, so mobile is toggle-only and there is nothing to
+	// choose between.
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	{
+		const bool bToggle =
+			(VoiceSettingGetTalkMode() == CfgDefaults::CfgVoiceTalkModeToggle);
+
+		TextDraw(g_hFont, (int)x, (int)y, 0xFFCC00C8, 0x0, 0, 0, 1,
+			"Talk: %s", bToggle ? "toggle on/off" : "hold to talk");
+
+		if (bClickReady && SEASON3B::CheckMouseIn(x, y, (int)rowW, (int)rowH) == 1)
+		{
+			gInterface.Data[eTIME].EventTick = GetTickCount();
+			PlayBuffer(SOUND_CLICK01);
+
+			VoiceSettingSetTalkMode(bToggle
+				? CfgDefaults::CfgVoiceTalkModeHold
+				: CfgDefaults::CfgVoiceTalkModeToggle);
+		}
+
+		y += 17.f;
+	}
+#endif
+
+	// -- noise gate -------------------------------------------------------
+	//
+	// A real checkbox here, because unlike the rows above this genuinely is a
+	// two-state toggle and should look like one.
+	{
+		if (g_pBCustomMenuInfo->RenderCheckBox(x, y, 0xFFCC00C8,
+			VoiceSettingGetNoiseGate() ? TRUE : FALSE, "Noise gate"))
+		{
+			VoiceSettingSetNoiseGate(!VoiceSettingGetNoiseGate());
 		}
 	}
 }

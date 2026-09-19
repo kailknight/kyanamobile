@@ -93,6 +93,24 @@ void CNewUIGuardWindow::SetPos(int x, int y)
 {
 	m_Pos.x = x;
 	m_Pos.y = y;
+
+	// The two list boxes carry hardcoded screen coordinates from their own
+	// constructors - CUIBCDeclareGuildListBox at (465,364) and
+	// CUIBCGuildListBox at (465,324) in UIControls.cpp. Those were written for
+	// the 640-wide layout, where this window sits at 640-190 = 450, so they
+	// were really window-relative offsets of +15 all along.
+	//
+	// The window itself is created at 640-190 + DisplayWinCDepthBox, so on a
+	// widescreen client it moves right and the lists did not follow: the frame
+	// and headers drew inside the window while the rows drew out over the game
+	// world, several hundred pixels to the left. Re-anchoring them here keeps
+	// the original layout exactly at the original position and makes them
+	// track the window everywhere else.
+	//
+	// Every other child control in Create() is already positioned off m_Pos
+	// this way; these two were simply missed.
+	m_DeclareGuildListBox.SetPosition(m_Pos.x + 15, m_Pos.y + 364);
+	m_GuildListBox.SetPosition(m_Pos.x + 15, m_Pos.y + 324);
 }
 
 bool CNewUIGuardWindow::UpdateMouseEvent()

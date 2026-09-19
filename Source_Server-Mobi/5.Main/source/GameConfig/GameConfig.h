@@ -36,6 +36,29 @@ public:
     void SetMusicEnabled(bool enabled);
     void SetVolumeLevel(int level);
 
+    // Proximity voice chat.
+    //
+    // NOTE: these do not persist on Android. GameConfig::Load and Save are
+    // no-ops there, so every setting in this class resets on each launch. That
+    // is a pre-existing gap and not specific to voice, but it does mean a
+    // mobile player who mutes has to mute again next time - which is why the
+    // defaults are the common case rather than the cautious one.
+    bool GetVoiceEnabled()    const { return m_voiceEnabled; }
+    bool GetVoiceMuteOthers() const { return m_voiceMuteOthers; }
+    int  GetVoiceVolume()     const { return m_voiceVolume; }
+    int  GetVoicePttKey()     const { return m_voicePttKey; }
+    int  GetVoiceMicBoost()   const { return m_voiceMicBoost; }
+    bool GetVoiceNoiseGate()  const { return m_voiceNoiseGate; }
+    int  GetVoiceTalkMode()   const { return m_voiceTalkMode; }
+
+    void SetVoiceEnabled(bool enabled);
+    void SetVoiceMuteOthers(bool mute);
+    void SetVoiceVolume(int volume);
+    void SetVoicePttKey(int virtualKey);
+    void SetVoiceMicBoost(int percent);
+    void SetVoiceNoiseGate(bool enabled);
+    void SetVoiceTalkMode(int mode);
+
     // Text rendering
     int GetRenderTextType() const { return m_renderTextType; }
     void SetRenderTextType(int type);
@@ -85,6 +108,14 @@ private:
     int  m_volumeLevel;
 
     int m_renderTextType;
+
+    bool m_voiceEnabled;
+    bool m_voiceMuteOthers;
+    int  m_voiceVolume;
+    int  m_voicePttKey;
+    int  m_voiceMicBoost;
+    bool m_voiceNoiseGate;
+    int  m_voiceTalkMode;
 
     bool m_rememberMe;
     std::wstring m_languageSelection;

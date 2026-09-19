@@ -80,4 +80,11 @@ int MU_MobileGetBatteryPercent();
 // wifi is off/disconnected.
 int MU_MobileGetWifiRssiDbm();
 
+// Proximity voice chat. The manifest's RECORD_AUDIO is not enough from Android
+// 6 on; without a runtime grant OpenSL's recorder just fails with no detail.
+// The request is asynchronous - it returns before the player has answered - so
+// callers ask again rather than waiting on it.
+bool MU_MobileHasMicPermission();
+void MU_MobileRequestMicPermission();
+
 #endif // defined(__ANDROID__) || defined(MU_IOS)

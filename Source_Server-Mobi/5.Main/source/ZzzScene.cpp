@@ -21,6 +21,8 @@
 #include <android/log.h>
 #endif
 #include "ZzzScene.h"
+#include "VoiceClient.h"
+#include "VoiceAudio.h"
 #include "ZzzEffect.h"
 #include "ZzzAI.h"
 #include "DSPlaySound.h"
@@ -2327,6 +2329,14 @@ void MoveMainScene()
 	{
 		EnableMainRender = true;
 	}
+
+	// Above the EnableMainRender gate on purpose: the voice socket has to keep
+	// being pumped while the world is not being drawn, or a player who alt-tabs
+	// or minimises goes deaf and the receive queue backs up behind them.
+	gVoiceClient.Proc();
+	VoiceChatProcInput();
+	gVoiceAudio.Proc();
+
 	if(EnableMainRender == false)
 	{
 		return;
@@ -2832,6 +2842,8 @@ bool RenderMainScene()
 
 	RenderInfomation();
 
+	RenderVoiceChatDebug();
+
 #ifdef ENABLE_EDIT
 	RenderDebugWindow();
 #endif //ENABLE_EDIT
@@ -3248,9 +3260,41 @@ void MainScene(HDC hDC)
 				sprintf(szBatteryPct, "%d%%", s_batteryPercent);
 			}
 
-			unicode::t_char szFpsOnly[96];
-			unicode::_sprintf(szFpsOnly, "%s   Ping %s   FPS %.1f   %s",
-				szBatteryPct, s_szPing, FPS_AVG, s_szBuildStamp);
+			// Voice state, appended to the line diagnostics already live on.
+			//
+			// Here because the mic button HIDES itself when voice is
+			// unavailable, which means its absence cannot be told apart from a
+			// bug in the button. This says which it is, in the one place on
+			// this HUD that is already a status readout, without adding
+			// anything new to a crowded screen.
+			//
+			// srv-off = the server never sent voice info (VoiceChatEnable=0, or
+			// an un-updated GameServer). me-off = the player's own Voice Chat
+			// setting. conn = waiting for the service to answer HELLO.
+			char szVoiceState[24];
+
+			if (gVoiceClient.IsEnabled() == false)
+			{
+				strcpy(szVoiceState, "srv-off");
+			}
+			else if (gVoiceClient.IsPlayerEnabled() == false)
+			{
+				strcpy(szVoiceState, "me-off");
+			}
+			else
+			{
+				switch (gVoiceClient.GetState())
+				{
+				case VOICE_CLIENT_READY:      strcpy(szVoiceState, "ready"); break;
+				case VOICE_CLIENT_CONNECTING: strcpy(szVoiceState, "conn"); break;
+				case VOICE_CLIENT_REJECTED:   strcpy(szVoiceState, "refused"); break;
+				default:                      strcpy(szVoiceState, "idle"); break;
+				}
+			}
+
+			unicode::t_char szFpsOnly[128];
+			unicode::_sprintf(szFpsOnly, "%s   Ping %s   FPS %.1f   Voice %s   %s",
+				szBatteryPct, s_szPing, FPS_AVG, szVoiceState, s_szBuildStamp);
 
 			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
 			g_pRenderText->SetBgColor(0, 0, 0, 140);
@@ -3320,6 +3364,21 @@ void MainScene(HDC hDC)
 			glColor4f(0.85f, 0.85f, 0.85f, 0.9f);
 			RenderColor((float)(iconX + kBatteryBodyW), (float)(iconY + 2), (float)kBatteryTipW, (float)(kBatteryBodyH - 4));
 			EndRenderColor();
+
+			// Published so the voice push-to-talk button can sit directly above
+			// this icon. Its x is not a constant - it is derived from the width
+			// of the FPS/ping text beside it, which changes with the build
+			// stamp and the ping digits - so the button has to read the real
+			// position rather than duplicate the calculation.
+			{
+				extern float g_AndroidBatteryIconX;
+				extern float g_AndroidBatteryIconY;
+				extern float g_AndroidBatteryIconW;
+
+				g_AndroidBatteryIconX = (float)iconX;
+				g_AndroidBatteryIconY = (float)iconY;
+				g_AndroidBatteryIconW = (float)(kBatteryBodyW + kBatteryTipW);
+			}
 
 			g_pRenderText->SetFont(g_hFont);
 			EndBitmap();

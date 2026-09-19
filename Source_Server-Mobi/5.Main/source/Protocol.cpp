@@ -65,6 +65,7 @@
 #include "CB_BXHTopDmg.h"
 #include "VongQuay.h"
 #include "RedeemCodeWindow.h"
+#include "VoiceClient.h"
 
 extern int g_iLimitAttackTimeSet;
 bool StatusAutoReset = false;
@@ -460,6 +461,24 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 			}
 			break;
 #endif
+			case 0x7A: // Proximity voice chat - where the service is, and our token
+			{
+				if (size >= (int)sizeof(PMSG_VOICE_INFO_RECV))
+				{
+					const PMSG_VOICE_INFO_RECV* lpVoice = (const PMSG_VOICE_INFO_RECV*)lpMsg;
+
+					// The host string comes off the wire and is used to open a
+					// socket, so terminate it here rather than trusting it.
+					char szHost[64];
+					memcpy(szHost, lpVoice->Host, sizeof(szHost) - 1);
+					szHost[sizeof(szHost) - 1] = '\0';
+
+					gVoiceClient.SetServerInfo(lpVoice->Enable, szHost, lpVoice->Port, lpVoice->Token);
+				}
+
+				return 1;
+			}
+			break;
 			case 0x8A:
 			{
 				gVongQuay.GetListVQ(lpMsg);

@@ -55,6 +55,8 @@ jmethodID g_wifiRssiMethod = nullptr;
 jmethodID g_bannerStartMethod = nullptr;
 jmethodID g_bannerPollMethod = nullptr;
 jmethodID g_hideKeyboardMethod = nullptr;
+jmethodID g_hasMicPermissionMethod = nullptr;
+jmethodID g_requestMicPermissionMethod = nullptr;
 
 void MU_ClearKeyboardBridge(JNIEnv* env)
 {
@@ -78,6 +80,8 @@ void MU_ClearKeyboardBridge(JNIEnv* env)
     g_wifiRssiMethod = nullptr;
     g_bannerStartMethod = nullptr;
     g_bannerPollMethod = nullptr;
+    g_hasMicPermissionMethod = nullptr;
+    g_requestMicPermissionMethod = nullptr;
 }
 
 void MU_RegisterKeyboardBridge(JNIEnv* env, jobject activity)
@@ -273,6 +277,70 @@ int MU_MobileGetBatteryPercent()
     return result;
 #else
     return -1;
+#endif
+}
+
+bool MU_MobileHasMicPermission()
+{
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return false;
+    }
+
+    if (g_hasMicPermissionMethod == nullptr)
+    {
+        g_hasMicPermissionMethod =
+            env->GetStaticMethodID(g_keyboardBridgeClass, "hasMicPermissionFromNative", "()I");
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return false;
+        }
+    }
+
+    const int result = env->CallStaticIntMethod(g_keyboardBridgeClass, g_hasMicPermissionMethod);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return false;
+    }
+    return (result != 0);
+#else
+    return true;
+#endif
+}
+
+void MU_MobileRequestMicPermission()
+{
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return;
+    }
+
+    if (g_requestMicPermissionMethod == nullptr)
+    {
+        g_requestMicPermissionMethod =
+            env->GetStaticMethodID(g_keyboardBridgeClass, "requestMicPermissionFromNative", "()V");
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            return;
+        }
+    }
+
+    // Returns immediately. The system dialog is answered whenever the player
+    // gets round to it, so the caller polls MU_MobileHasMicPermission rather
+    // than waiting - blocking the game thread on a dialog nobody has to answer
+    // would freeze the client.
+    env->CallStaticVoidMethod(g_keyboardBridgeClass, g_requestMicPermissionMethod);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+    }
 #endif
 }
 

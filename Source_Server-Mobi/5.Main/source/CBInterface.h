@@ -242,6 +242,9 @@ enum ObjectID
 #endif
 #if(CB_BXHDMG)
 	eWindowBXHDmg,
+	// The boss HP bar: name and bar as one movable group, so it gets its own
+	// entry purely to borrow gInterface.Data's position and drag state.
+	eWindowBossHpBar,
 #endif
 	eActiveInvasionsMain,
 	eWindowVongQuay,

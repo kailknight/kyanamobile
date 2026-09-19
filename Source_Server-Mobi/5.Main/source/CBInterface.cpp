@@ -1,5 +1,9 @@
 #include "stdafx.h"
 #include "CBInterface.h"
+#include "VoiceClient.h"
+#include "VoiceAudio.h"
+#include "GameConfig/GameConfigConstants.h"
+
 #include "NewUISystem.h"
 #include "UIControls.h"
 #include "TrayMode.h"
@@ -342,6 +346,105 @@ bool Interface::CheckWindow(int WindowID)
 {
 	return g_pNewUISystem->IsVisible(WindowID);
 }
+// Proximity voice: push to talk.
+//
+// Deliberately NOT part of the UseHotKey chain. That chain is edge-triggered
+// and returns true to say "this key is mine", which is the wrong shape for a
+// key whose whole meaning is being held down - it would swallow the key from
+// every handler after it for as long as somebody was speaking.
+//
+// On Android there is no key to hold, so the on-screen button sets this flag
+// instead and the keyboard path is skipped entirely.
+bool g_VoiceTouchTalking = false;
+
+bool g_VoicePttKeyHeld = false;
+bool g_VoicePttBlockedByChat = false;
+
+void VoiceChatProcInput()
+{
+	// The key is read FIRST, before any of the reasons voice might be
+	// unavailable. The readout needs to know the key registered even when
+	// nothing can come of it: "I pressed it and nothing happened" and "the
+	// keybind is dead" are the two things a player cannot otherwise tell
+	// apart, and they lead to completely different places.
+	bool bHeld = false;
+	bool bBlockedByChat = false;
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// The touch handler owns both modes on this platform - it knows whether a
+	// tap toggled or a finger is still down - so this just follows its flag.
+	bHeld = g_VoiceTouchTalking;
+#else
+	const bool bToggleMode =
+		(VoiceSettingGetTalkMode() == CfgDefaults::CfgVoiceTalkModeToggle);
+
+	// A latch, for toggle mode. Not persisted: the safe state for a microphone
+	// at the start of a session is closed.
+	static bool s_bToggleLatched = false;
+	static bool s_bKeyWasDown = false;
+	// Not while typing: the chat box owns the keyboard, and a player writing
+	// the letter that happens to be bound should not start broadcasting.
+	if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX))
+	{
+		bBlockedByChat = true;
+
+		// Opening chat drops a latched toggle. Leaving it live while somebody
+		// types is exactly how an open microphone gets forgotten about.
+		s_bToggleLatched = false;
+		s_bKeyWasDown = false;
+	}
+	else
+	{
+		const int iKey = VoiceSettingGetPttKey();
+
+		// A key of 0 means "unbound", which must not be read as virtual-key
+		// zero - IsPress would index the input table at 0 and report whatever
+		// happens to be there.
+		if (iKey > 0 && iKey <= 254)
+		{
+			const bool bKeyDown = (SEASON3B::IsPress(iKey) || SEASON3B::IsRepeat(iKey));
+
+			if (bToggleMode)
+			{
+				// Edge-triggered: flip on the frame the key goes down, and
+				// ignore it being held. Reading the level would toggle once per
+				// frame for as long as it was pressed.
+				if (bKeyDown && s_bKeyWasDown == false)
+				{
+					s_bToggleLatched = !s_bToggleLatched;
+				}
+
+				bHeld = s_bToggleLatched;
+			}
+			else
+			{
+				// Switching away from toggle must not leave the latch stuck on.
+				s_bToggleLatched = false;
+				bHeld = bKeyDown;
+			}
+
+			s_bKeyWasDown = bKeyDown;
+		}
+		else
+		{
+			s_bToggleLatched = false;
+			s_bKeyWasDown = false;
+		}
+	}
+#endif
+
+	g_VoicePttKeyHeld = bHeld;
+	g_VoicePttBlockedByChat = bBlockedByChat;
+
+	if (gVoiceClient.IsEnabled() == false || gVoiceClient.IsPlayerEnabled() == false)
+	{
+		gVoiceAudio.SetTalking(false);
+		return;
+	}
+
+	gVoiceAudio.SetTalking(bHeld);
+}
+
 bool Interface::UseHotKey()
 {
 	if (GetForegroundWindow() != g_hWnd || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX))
@@ -406,6 +509,7 @@ bool Interface::UseHotKey()
 		PlayBuffer(SOUND_CLICK01);
 		return true;
 	}
+
 
 	//===Ranking
 	if (gProtect.m_MainInfo.Menu[eButtonRanking])
@@ -652,6 +756,7 @@ void Interface::Clear()
 void Interface::Work()
 {
 	if (gCB_BXHTopDmg) gCB_BXHTopDmg->DrawWindowMini();//
+	if (gCB_BXHTopDmg) gCB_BXHTopDmg->DrawBossHpBar();
 
 	if (gCB_DrawCustomRank) gCB_DrawCustomRank->Draw();
 #if(SAUDOIITEM)
@@ -1762,6 +1867,16 @@ int Interface::RenderHPBarNew(CHARACTER* c)
 
 	OBJECT* o = &c->Object;
 	if (!c || c == Hero || !o->Live || c->InfoHealBar.Life < 1) return 0;
+
+#if(CB_BXHDMG)
+	// Same rule as the over-head plate in ZzzInterface's RenderHPBar: the boss
+	// already showing the big bar does not get a second readout of the same
+	// health. Everything else is untouched.
+	if (gCB_BXHTopDmg != NULL && gCB_BXHTopDmg->IsBossHpBarShownFor(c->MonsterIndex))
+	{
+		return 0;
+	}
+#endif
 
 	float StartX = DisplayWinMid;
 	float StartY = 30;

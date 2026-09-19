@@ -9165,6 +9165,17 @@ void RenderInterface(bool Render)
     RenderOutSides();
     RenderPartyHP ();
 	RenderHPBar();
+
+	// Same pass as the over-head health plates, for the same reason: these are
+	// world-anchored marks that have to sit on top of the characters they
+	// belong to. Declared locally rather than through VoiceClient.h, which
+	// would pull `using namespace SEASON3B` in here and make
+	// INTERFACE_NPCGUILDMASTER ambiguous.
+	{
+		extern void RenderVoiceSpeakingMarks();
+		RenderVoiceSpeakingMarks();
+	}
+
 	RenderSwichState();
     battleCastle::RenderBuildTimes ();
 	
@@ -9503,6 +9514,25 @@ void RenderHPBar()
 			CHARACTER* c = &CharactersClient[j]; //SelectedCharacter
 			OBJECT* o = &c->Object;
 			if (!c || c == Hero || !o->Live || c->InfoHealBar.Life < 1) continue;
+#if(CB_BXHDMG)
+			// The boss with the big HP bar up does not also get a plate over
+			// its head - that is the same number twice. Only that one monster
+			// stands down; every other monster and player on screen keeps its
+			// plate, and the boss gets its own back the moment the big bar
+			// goes away.
+			//
+			// Declared here rather than by including CB_BXHTopDmg.h, which
+			// would pull "using namespace SEASON3B" into this file and make
+			// INTERFACE_NPCGUILDMASTER ambiguous.
+			{
+				extern bool BossHpBarShownFor(int MonsterClass);
+
+				if (BossHpBarShownFor(c->MonsterIndex))
+				{
+					continue;
+				}
+			}
+#endif
 			if (o->Kind == c->InfoHealBar.Type)
 			{
 				OBJECT* o = &c->Object;

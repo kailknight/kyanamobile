@@ -95,6 +95,10 @@ namespace SEASON3B
 		void RenderCustomFrame();
 		void RenderButtons();
 
+		// Microphone settings, bottom-left of the window. Kept out of
+		// RenderCustomFrame because that panel has no room for a full-width row.
+		void RenderVoiceMicRows();
+
 	private:
 		CNewUIManager*				m_pNewUIMng;
 		POINT						m_Pos;

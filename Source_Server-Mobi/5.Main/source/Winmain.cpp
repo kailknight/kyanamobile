@@ -144,8 +144,22 @@ char Mp3FileName[256];
 #pragma comment(lib, "wzAudio.lib")
 #include <wzAudio.h>
 
+// Defined further down this file, next to g_bDirectSoundCreated. Declared here
+// because every function below has to check it: wzAudio keeps its state in an
+// instance it allocates in wzAudioCreate, and calling into the DLL when that
+// call failed - or after wzAudioDestroy has released it - dereferences null
+// inside the DLL. Seen as an access violation reading 0x00000004 at
+// wzAudio+0x1D9C on a machine whose audio device would not initialise: startup
+// creates wzAudio unconditionally now, but nothing checked whether it worked
+// before the login screen's first PlayMp3 went in. The answers for "no audio"
+// mirror the Android implementations of these same four functions
+// (android_main.cpp), which have always reported "nothing is playing".
+extern bool g_bWzAudioCreated;
+
 void StopMp3(char *Name, BOOL bEnforce)
 {
+	if(!g_bWzAudioCreated) return;
+
     if(!m_MusicOnOff && !bEnforce) return;
 
 	if(Mp3FileName[0] != NULL)
@@ -159,14 +173,16 @@ void StopMp3(char *Name, BOOL bEnforce)
 
 void PlayMp3(char *Name, BOOL bEnforce )
 {
+	if(!g_bWzAudioCreated) return;
+
 	if(Destroy) return;
     if(!m_MusicOnOff && !bEnforce) return;
 
-	if(strcmp(Name,Mp3FileName) == 0) 
+	if(strcmp(Name,Mp3FileName) == 0)
 	{
 		return;
 	}
-	else 
+	else
 	{
 		wzAudioPlay(Name, 1);
 		strcpy(Mp3FileName,Name);
@@ -175,6 +191,10 @@ void PlayMp3(char *Name, BOOL bEnforce )
 
 bool IsEndMp3()
 {
+	// "Nothing is playing" rather than "still playing": callers use this to stop
+	// a track or move an event on, and a permanent false leaves those waiting.
+	if(!g_bWzAudioCreated) return true;
+
 	if (100 == wzAudioGetStreamOffsetRange())
 		return true;
 	return false;
@@ -182,6 +202,9 @@ bool IsEndMp3()
 
 int GetMp3PlayPosition()
 {
+	// 100 is the value IsEndMp3 reads as finished.
+	if(!g_bWzAudioCreated) return 100;
+
 	return wzAudioGetStreamOffsetRange();
 }
 
@@ -545,7 +568,19 @@ void DestroySound()
 		ReleaseBuffer(i);
 
 	FreeDirectSound();
-	wzAudioDestroy();
+
+	// Clearing the flag is the point. This runs from WM_DESTROY, and the process
+	// does not end until several calls later (DestroyWindow, KillGLWindow,
+	// CloseMainExe, ExitProcess) - every other thread is still running through
+	// all of it. One of them calling PlayMp3/StopMp3 in that window goes into the
+	// DLL with the instance already released, which is the same null dereference
+	// a failed wzAudioCreate produces, and it shows up as a crash on a thread
+	// that has nothing to do with shutdown.
+	if(g_bWzAudioCreated)
+	{
+		wzAudioDestroy();
+		g_bWzAudioCreated = false;
+	}
 }
 
 int g_iInactiveTime = 0;

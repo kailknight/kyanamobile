@@ -106,6 +106,9 @@ static void android_set_data_dir_early()
 #include "NewUISystem.h"
 #include "NewUIFriendWindow.h"
 #include "CBInterface.h"
+#include "VoiceClient.h"
+#include "VoiceAudio.h"
+#include "GameConfig/GameConfigConstants.h"
 #include "RedeemCodeWindow.h"
 #include "WindowClass.h"
 #include "Translation/i18n.h"
@@ -904,6 +907,18 @@ extern int AlphaBlendType;
 // nothing - which is exactly what happened.
 bool IsAndroidLoginNoticeOpen();
 bool HandleAndroidLoginNoticeFingerDown(float uiX, float uiY);
+
+// Where the battery icon on the bottom status line ended up this frame, in
+// 640x480 UI units. Published by the code that draws it in ZzzScene.cpp so the
+// voice mic button can sit directly above it: that icon is right-aligned
+// against the FPS/ping text, so its x is not a constant and duplicating the
+// calculation would drift.
+//
+// External linkage on purpose, and therefore outside the anonymous namespace
+// below.
+float g_AndroidBatteryIconX = 0.0f;
+float g_AndroidBatteryIconY = 0.0f;
+float g_AndroidBatteryIconW = 18.0f;
 
 namespace
 {
@@ -9146,6 +9161,217 @@ bool HitTestSkillPageButton(float uiX, float uiY)
     return HitTestAndroidUiRect(uiX, uiY, GetSkillPageButtonRect());
 }
 
+// ---- proximity voice: push to talk ---------------------------------------
+
+// Which finger is on the button, or -1. A toggle does not need to track the
+// finger to know whether to keep transmitting, but it does need to ignore the
+// matching release so that letting go does not read as a second tap.
+SDL_FingerID g_voicePttFingerId = static_cast<SDL_FingerID>(-1);
+
+// Sits immediately right of Helper, as the next member of that stack's row, and
+// is exactly a top-bar button in size and style. Anchored to
+// GetTopBarButtonRect's own numbers rather than to literals, so it follows
+// Helper if that block ever moves or is resized.
+//
+// It lived above the battery readout first. That put it half inside the chat
+// panel and a long way from anything it belongs with; here it reads as part of
+// the same status block, which is what it is.
+AndroidUiRect GetVoiceMicButtonRect()
+{
+    const AndroidUiRect helper = GetTopBarButtonRect(kTopBarSlotHelper);
+
+    return {
+        helper.x + helper.w + kTopBarButtonGap,
+        helper.y,
+        helper.w,
+        helper.h
+    };
+}
+
+// Hidden entirely when the server has voice off, or the player has opted out.
+// A button that does nothing is worse than no button: it takes up room in a
+// crowded HUD and invites taps that go nowhere.
+bool VoiceChatPttButtonVisible()
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    return gVoiceClient.IsEnabled() && gVoiceClient.IsPlayerEnabled();
+}
+
+bool HitTestVoicePttButton(float uiX, float uiY)
+{
+    if (!VoiceChatPttButtonVisible())
+    {
+        return false;
+    }
+
+    const AndroidUiRect rect = GetVoiceMicButtonRect();
+
+    // Padded a little, as the other touch targets are: missing the mic button by
+    // three pixels is worse than the slight overlap, and there is nothing
+    // immediately right of it to overlap with.
+    const float pad = 4.0f;
+
+    return (uiX >= (rect.x - pad) && uiX <= (rect.x + rect.w + pad)
+         && uiY >= (rect.y - pad) && uiY <= (rect.y + rect.h + pad));
+}
+
+// Always a toggle on this platform. Hold-to-talk was tried and removed: holding
+// a button on a phone parks a thumb on the HUD that is also needed to steer, and
+// the setting that offers the choice is PC-only for that reason.
+//
+// It starts OFF every session and is never persisted: the safe state for a
+// microphone is closed, and a toggle that remembered "on" would have players
+// broadcasting from the moment they log in without touching anything.
+void ToggleVoiceTouchTalking()
+{
+    g_VoiceTouchTalking = !g_VoiceTouchTalking;
+}
+
+// The mic must not stay live when voice goes away underneath it - logging out,
+// changing map, the server switching voice off, or the player opting out in the
+// options window. Called every frame from the pad's draw.
+//
+// There is no lost-finger-up case to police any more: a toggle does not care
+// whether the finger is still down.
+void ReleaseVoicePttIfFingerGone()
+{
+    if (VoiceChatPttButtonVisible() == false)
+    {
+        g_voicePttFingerId = static_cast<SDL_FingerID>(-1);
+        g_VoiceTouchTalking = false;
+    }
+}
+void RenderVoicePttButton()
+{
+    if (VoiceChatPttButtonVisible() == false)
+    {
+        return;
+    }
+
+    const AndroidUiRect rect = GetVoiceMicButtonRect();
+    const bool talking = gVoiceAudio.IsTalking();
+
+    // The GL state has to be set up here, not inherited. DrawVirtualRectFilled
+    // and DrawVirtualCircle are raw glBegin/glVertex2f with no texture
+    // coordinates, so running them with a font atlas still bound - which is
+    // what the previous control leaves behind - samples one transparent texel
+    // and the whole button draws nothing at all. That is exactly why this was
+    // invisible for two rounds of looking for it.
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // The top bar's own plate, so this reads as one of that row rather than as
+    // something bolted on: black fill, thin light outline, more opaque when
+    // active. Red while live - the toggle means no finger is held, so the
+    // button is the only thing saying the microphone is open.
+    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
+                          talking ? 0.42f : 0.0f,
+                          talking ? 0.04f : 0.0f,
+                          talking ? 0.04f : 0.0f,
+                          talking ? 0.82f : 0.45f);
+
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                           talking ? 1.00f : 0.85f,
+                           talking ? 0.42f : 0.85f,
+                           talking ? 0.38f : 0.90f,
+                           talking ? 0.95f : 0.35f, 1.0f);
+
+    // ---- the microphone glyph -------------------------------------------
+    //
+    // Drawn from primitives rather than a texture, which would have to be
+    // authored, shipped and UV-mapped - and UV crop rects in this client break
+    // silently when art is redrawn.
+    //
+    // Proportions are expressed against the button's own height, so the glyph
+    // scales with the plate instead of being pinned to one size. Laid out as a
+    // capsule head inside a U-shaped cradle, on a stem, on a base - the modern
+    // shape rather than the older "pill on a stick".
+    {
+        const float cx = rect.x + (rect.w * 0.5f);
+        const float cy = rect.y + (rect.h * 0.5f);
+
+        // 1.0 == the button's height. Every number below is a fraction of it.
+        const float u = rect.h / 34.0f;
+
+        const float gr = 1.0f;
+        const float gg = talking ? 0.88f : 1.0f;
+        const float gb = talking ? 0.88f : 1.0f;
+
+        // Capsule head: a rect with a circle capping each end.
+        const float headR = 4.0f * u;
+        const float headTopY = cy - (9.0f * u);
+        const float headBotY = cy - (3.0f * u);
+
+        DrawVirtualRectFilled(cx - headR, headTopY, headR * 2.0f, headBotY - headTopY,
+                              gr, gg, gb, 1.0f);
+        DrawVirtualCircle(cx, headTopY, headR, gr, gg, gb, 1.0f, true);
+        DrawVirtualCircle(cx, headBotY, headR, gr, gg, gb, 1.0f, true);
+
+        // Cradle: two uprights and a floor, with the upright tops rounded off.
+        // This is what makes the glyph read as a microphone rather than a pin.
+        const float cradleBarW = 2.0f * u;
+        const float cradleOff = 7.0f * u;
+        const float cradleTopY = cy - (2.0f * u);
+        const float cradleBotY = cy + (4.0f * u);
+
+        DrawVirtualRectFilled(cx - cradleOff - (cradleBarW * 0.5f), cradleTopY,
+                              cradleBarW, cradleBotY - cradleTopY, gr, gg, gb, 1.0f);
+        DrawVirtualRectFilled(cx + cradleOff - (cradleBarW * 0.5f), cradleTopY,
+                              cradleBarW, cradleBotY - cradleTopY, gr, gg, gb, 1.0f);
+        DrawVirtualRectFilled(cx - cradleOff - (cradleBarW * 0.5f), cradleBotY,
+                              (cradleOff * 2.0f) + cradleBarW, cradleBarW, gr, gg, gb, 1.0f);
+
+        DrawVirtualCircle(cx - cradleOff, cradleTopY, cradleBarW * 0.5f, gr, gg, gb, 1.0f, true);
+        DrawVirtualCircle(cx + cradleOff, cradleTopY, cradleBarW * 0.5f, gr, gg, gb, 1.0f, true);
+
+        // Stem and base.
+        const float stemW = 2.0f * u;
+        const float stemTopY = cradleBotY + cradleBarW;
+        const float stemBotY = cy + (9.0f * u);
+
+        DrawVirtualRectFilled(cx - (stemW * 0.5f), stemTopY, stemW, stemBotY - stemTopY,
+                              gr, gg, gb, 1.0f);
+
+        const float baseW = 11.0f * u;
+
+        DrawVirtualRectFilled(cx - (baseW * 0.5f), stemBotY, baseW, 2.0f * u,
+                              gr, gg, gb, 1.0f);
+
+        // While live, a level-reactive bar under the plate. With a toggle there
+        // is no held finger to feel, so this is the only feedback that the
+        // microphone is hearing anything rather than merely being open.
+        if (talking)
+        {
+            const int level = gVoiceAudio.GetCaptureLevel();
+            const float barH = 2.5f * u;
+            const float barW = (rect.w - (4.0f * u)) * ((float)level / 255.0f);
+
+            DrawVirtualRectFilled(rect.x + (2.0f * u), rect.y + rect.h + (1.0f * u),
+                                  rect.w - (4.0f * u), barH, 0.1f, 0.1f, 0.1f, 0.55f);
+
+            if (barW > 0.0f)
+            {
+                DrawVirtualRectFilled(rect.x + (2.0f * u), rect.y + rect.h + (1.0f * u),
+                                      barW, barH,
+                                      (level > 220) ? 1.0f : 0.35f,
+                                      (level > 220) ? 0.35f : 1.0f,
+                                      0.35f, 0.95f);
+            }
+        }
+    }
+
+    // Restore what the pass changed, so the next control is not handed a state
+    // it did not set up - which is the exact fault this function had.
+    EndBitmap();
+}
+
 void CancelAndroidGroundAim(const char* reason)
 {
     if (!g_androidGroundAim.armed && !g_androidGroundAim.pendingCast)
@@ -14390,6 +14616,20 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // The mic button. Always a toggle here: this tap flips it, and the matching
+    // release is swallowed in HandleVirtualFingerUp so letting go does not read
+    // as a second tap. Hold-to-talk was tried on this platform and removed -
+    // holding a button parks a thumb on the HUD that is also needed to steer.
+    if (VoiceChatPttButtonVisible() && HitTestVoicePttButton(uiX, uiY))
+    {
+        g_voicePttFingerId = touch.fingerId;
+
+        ToggleVoiceTouchTalking();
+
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
     // Ahead of the attack button: GetVirtualButtonHitRadius pads that circle by
     // 8, so testing it first would let it claim taps meant for this one.
     if (IsAndroidAimAvailable() && HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
@@ -14666,6 +14906,19 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
 
 bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 {
+    // Before everything, including the pinch tracker: this is the release of the
+    // tap that already toggled the mic on finger-DOWN. It is swallowed so it
+    // cannot reach anything else, and the state deliberately does NOT change -
+    // flipping again here would turn the mic on and straight back off within a
+    // single tap.
+    if (g_voicePttFingerId != static_cast<SDL_FingerID>(-1)
+        && g_voicePttFingerId == touch.fingerId)
+    {
+        g_voicePttFingerId = static_cast<SDL_FingerID>(-1);
+
+        return true;
+    }
+
     // Unregisters the finger either way; only swallows the event when it ended
     // a live pinch, so ordinary releases still reach the handlers below.
     if (HandleAndroidPinchFingerUp(touch))
@@ -19086,6 +19339,13 @@ void RenderVirtualPad()
     RenderPkToggle();
     RenderTargetSelectButton();
     RenderSkillPageButton();
+
+    // Checked on the way to drawing rather than from a separate update hook,
+    // because this is the one place guaranteed to run every frame the pad is
+    // up. See ReleaseVoicePttIfFingerGone - a lost finger-up event would
+    // otherwise leave the microphone open indefinitely.
+    ReleaseVoicePttIfFingerGone();
+    RenderVoicePttButton();
     RenderAndroidTeleportRangeRing();
     RenderAndroidGroundAim();
     RenderAndroidTradePicker();

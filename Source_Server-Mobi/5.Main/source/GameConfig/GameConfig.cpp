@@ -51,6 +51,14 @@ void GameConfig::Load()
 
     m_renderTextType = ReadInt(CfgSectionGraphics, CfgKeyRenderTextType, CfgDefaultRenderTextType);
 
+    m_voiceEnabled    = ReadBool(CfgSectionVoice, CfgKeyVoiceEnabled, CfgDefaultVoiceEnabled);
+    m_voiceMuteOthers = ReadBool(CfgSectionVoice, CfgKeyVoiceMuteOthers, CfgDefaultVoiceMuteOthers);
+    m_voiceVolume     = ReadInt(CfgSectionVoice, CfgKeyVoiceVolume, CfgDefaultVoiceVolume);
+    m_voicePttKey     = ReadInt(CfgSectionVoice, CfgKeyVoicePttKey, CfgDefaultVoicePttKey);
+    m_voiceMicBoost   = ReadInt(CfgSectionVoice, CfgKeyVoiceMicBoost, CfgDefaultVoiceMicBoost);
+    m_voiceNoiseGate  = ReadBool(CfgSectionVoice, CfgKeyVoiceNoiseGate, CfgDefaultVoiceNoiseGate);
+    m_voiceTalkMode   = ReadInt(CfgSectionVoice, CfgKeyVoiceTalkMode, CfgDefaultVoiceTalkMode);
+
     m_rememberMe        = ReadBool(CfgSectionLogin, CfgKeyRememberMe, CfgDefaultRememberMe);
     m_languageSelection = ReadString(CfgSectionLogin, CfgKeyLanguage, CfgDefaultLanguage);
     m_encryptedUsername = ReadString(CfgSectionLogin, CfgKeyEncryptedUsername, CfgDefaultEncryptedUsername);
@@ -75,6 +83,14 @@ void GameConfig::Save()
     WriteBool(CfgSectionAudio, CfgKeySoundEnabled, m_soundEnabled);
     WriteBool(CfgSectionAudio, CfgKeyMusicEnabled, m_musicEnabled);
     WriteInt(CfgSectionAudio, CfgKeyVolumeLevel, m_volumeLevel);
+
+    WriteBool(CfgSectionVoice, CfgKeyVoiceEnabled, m_voiceEnabled);
+    WriteBool(CfgSectionVoice, CfgKeyVoiceMuteOthers, m_voiceMuteOthers);
+    WriteInt(CfgSectionVoice, CfgKeyVoiceVolume, m_voiceVolume);
+    WriteInt(CfgSectionVoice, CfgKeyVoicePttKey, m_voicePttKey);
+    WriteInt(CfgSectionVoice, CfgKeyVoiceMicBoost, m_voiceMicBoost);
+    WriteBool(CfgSectionVoice, CfgKeyVoiceNoiseGate, m_voiceNoiseGate);
+    WriteInt(CfgSectionVoice, CfgKeyVoiceTalkMode, m_voiceTalkMode);
 
     WriteBool(CfgSectionLogin, CfgKeyRememberMe, m_rememberMe);
     WriteString(CfgSectionLogin, CfgKeyLanguage, m_languageSelection);
@@ -114,6 +130,39 @@ void GameConfig::SetMusicEnabled(bool enabled)
 void GameConfig::SetVolumeLevel(int level)
 {
     m_volumeLevel = level;
+}
+
+void GameConfig::SetVoiceEnabled(bool enabled)
+{
+    m_voiceEnabled = enabled;
+}
+
+void GameConfig::SetVoiceMuteOthers(bool mute)
+{
+    m_voiceMuteOthers = mute;
+}
+
+void GameConfig::SetVoiceVolume(int volume)
+{
+    // Clamped here rather than at every call site: this value scales audio in
+    // an integer mix, and a number outside 0-100 would either go silent or
+    // clip everything.
+    if (volume < 0)
+    {
+        volume = 0;
+    }
+
+    if (volume > 100)
+    {
+        volume = 100;
+    }
+
+    m_voiceVolume = volume;
+}
+
+void GameConfig::SetVoicePttKey(int virtualKey)
+{
+    m_voicePttKey = virtualKey;
 }
 
 void GameConfig::SetRenderTextType(int type)
@@ -326,7 +375,15 @@ GameConfig& GameConfig::GetInstance() {
 GameConfig::GameConfig()
     : m_windowWidth(800), m_windowHeight(600), m_windowMode(true),
       m_colorDepth(32), m_soundEnabled(true), m_musicEnabled(true),
-      m_volumeLevel(10), m_renderTextType(0), m_rememberMe(false),
+      m_volumeLevel(10), m_renderTextType(0),
+      m_voiceEnabled(CfgDefaults::CfgDefaultVoiceEnabled),
+      m_voiceMuteOthers(CfgDefaults::CfgDefaultVoiceMuteOthers),
+      m_voiceVolume(CfgDefaults::CfgDefaultVoiceVolume),
+      m_voicePttKey(CfgDefaults::CfgDefaultVoicePttKey),
+      m_voiceMicBoost(CfgDefaults::CfgDefaultVoiceMicBoost),
+      m_voiceNoiseGate(CfgDefaults::CfgDefaultVoiceNoiseGate),
+      m_voiceTalkMode(CfgDefaults::CfgDefaultVoiceTalkMode),
+      m_rememberMe(false),
       m_languageSelection(L"Eng"), m_serverIP(CfgDefaults::CfgDefaultServerIP),
       m_serverPort(CfgDefaults::CfgDefaultServerPort)
 {
@@ -341,6 +398,13 @@ void GameConfig::SetColorDepth(int depth)             { m_colorDepth = depth; }
 void GameConfig::SetSoundEnabled(bool enabled)        { m_soundEnabled = enabled; }
 void GameConfig::SetMusicEnabled(bool enabled)        { m_musicEnabled = enabled; }
 void GameConfig::SetVolumeLevel(int level)            { m_volumeLevel = level; }
+void GameConfig::SetVoiceEnabled(bool enabled)        { m_voiceEnabled = enabled; }
+void GameConfig::SetVoiceMuteOthers(bool mute)        { m_voiceMuteOthers = mute; }
+void GameConfig::SetVoiceVolume(int volume)           { m_voiceVolume = (volume < 0) ? 0 : ((volume > 100) ? 100 : volume); }
+void GameConfig::SetVoicePttKey(int virtualKey)       { m_voicePttKey = virtualKey; }
+void GameConfig::SetVoiceMicBoost(int percent)        { m_voiceMicBoost = (percent < 100) ? 100 : ((percent > 600) ? 600 : percent); }
+void GameConfig::SetVoiceNoiseGate(bool enabled)      { m_voiceNoiseGate = enabled; }
+void GameConfig::SetVoiceTalkMode(int mode)           { m_voiceTalkMode = (mode == CfgDefaults::CfgVoiceTalkModeToggle) ? CfgDefaults::CfgVoiceTalkModeToggle : CfgDefaults::CfgVoiceTalkModeHold; }
 void GameConfig::SetRenderTextType(int type)          { m_renderTextType = type; }
 void GameConfig::SetRememberMe(bool remember)         { m_rememberMe = remember; }
 void GameConfig::SetLanguageSelection(const std::wstring& lang) { m_languageSelection = lang; }
