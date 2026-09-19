@@ -402,8 +402,31 @@ android {
         //     window, and real messages on the two refusal cases
         // NOTE: the mix-info packet gained 4 bytes - needs the 2026-09-18
         // GameServer build or the ingredient list misparses.
-        versionCode 16
-        versionName "1.0.16"
+        // 17 (2026-09-19): proximity voice chat. Off unless the server enables
+        // it (CustomConfig.ini VoiceChatEnable, 0 by default), so this ships
+        // inert until a GameServer with the voice feed is deployed. Carries:
+        //   - UDP voice client, IMA ADPCM at 8kHz, per-speaker jitter buffers
+        //     and distance attenuation computed server-side
+        //   - capture/playback over OpenSL ES, NOT SDL: SDL's audio is
+        //     unreachable in this app (SDL_main is #if 0'd and the SDLActivity
+        //     subclass never launches), so its Java bootstrap never runs
+        //   - echo cancellation via the VOICE_COMMUNICATION recording preset,
+        //     which is what stops the microphone picking up the game's own
+        //     audio out of the speaker. The default GENERIC preset is for
+        //     recording music and bypasses the device's AEC entirely.
+        //   - noise gate with a learned floor, and automatic input levelling
+        //     before encoding - 4 bits per sample leaves no room for a quiet
+        //     signal
+        //   - RECORD_AUDIO declared, asked for at the first attempt to talk
+        //     rather than at startup; the request is async so that first press
+        //     falls back to a test tone
+        //   - mic button beside Helper, toggle not hold, starting muted every
+        //     session and never persisted
+        // NOTE: no audio has been heard through this yet. The codec, the relay
+        // and the PC audio format have tests under 7.VoiceServer\Test, but
+        // nothing has run end to end inside the client.
+        versionCode 17
+        versionName "1.0.17"
 
         externalNativeBuild {
             cmake {
