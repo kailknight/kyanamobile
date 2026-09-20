@@ -18,6 +18,98 @@ CB_OffTrade::CB_OffTrade()
 	this->ShopActive = 0;
 	this->TypeShop = -1;
 	this->ClickTickCount = GetTickCount();
+
+	for (int slot = 0; slot < MAX_CUSTOMITEM; slot++)
+	{
+		this->m_CustomItemEnabled[slot] = 0;
+		this->m_CustomItemIndex[slot] = -1;
+		this->m_CustomItemButton[slot][0] = '\0';
+	}
+}
+
+void CB_OffTrade::CustomStoreItemInfoRecv(PMSG_CUSTOMSTORE_ITEM_INFO_RECV* Data)
+{
+	for (int slot = 0; slot < MAX_CUSTOMITEM; slot++)
+	{
+		this->m_CustomItemEnabled[slot] = Data->Slot[slot].Enabled;
+		this->m_CustomItemIndex[slot] = Data->Slot[slot].ItemIndex;
+
+		// Copied one short of the buffer and terminated by hand: the label came off
+		// the wire and is about to be drawn as a C string, so nothing may assume the
+		// sender terminated it.
+		strncpy(this->m_CustomItemButton[slot], Data->Slot[slot].Button, sizeof(this->m_CustomItemButton[slot]) - 1);
+		this->m_CustomItemButton[slot][sizeof(this->m_CustomItemButton[slot]) - 1] = '\0';
+	}
+}
+
+int CB_OffTrade::GetCustomItemSlot(int type)
+{
+	const int slot = type - eOFF_CUSTOMITEM;
+
+	if (slot < 0 || slot >= MAX_CUSTOMITEM)
+	{
+		return -1;
+	}
+
+	return slot;
+}
+
+const char* CB_OffTrade::GetCustomItemName(int slot)
+{
+	if (slot < 0 || slot >= MAX_CUSTOMITEM)
+	{
+		return NULL;
+	}
+
+	if (this->m_CustomItemEnabled[slot] == 0)
+	{
+		return NULL;
+	}
+
+	// The index comes off the wire, so it is range-checked before it is used as a
+	// subscript. ItemAttribute is also read before the item table has loaded on
+	// some paths, hence the NULL guard.
+	if (this->m_CustomItemIndex[slot] < 0 || this->m_CustomItemIndex[slot] >= MAX_ITEM)
+	{
+		return NULL;
+	}
+
+	if (ItemAttribute == NULL)
+	{
+		return NULL;
+	}
+
+	const char* name = ItemAttribute[this->m_CustomItemIndex[slot]].Name;
+
+	// An empty name means this client's item table has no such item.
+	if (name[0] == '\0')
+	{
+		return NULL;
+	}
+
+	return name;
+}
+
+const char* CB_OffTrade::GetCustomItemButton(int slot)
+{
+	if (slot < 0 || slot >= MAX_CUSTOMITEM)
+	{
+		return NULL;
+	}
+
+	if (this->m_CustomItemEnabled[slot] == 0)
+	{
+		return NULL;
+	}
+
+	// An unlabelled slot draws no button rather than a blank one. The server logs a
+	// warning at startup for exactly this case, so it is visible there too.
+	if (this->m_CustomItemButton[slot][0] == '\0')
+	{
+		return NULL;
+	}
+
+	return this->m_CustomItemButton[slot];
 }
 
 
@@ -50,51 +142,92 @@ void CB_OffTrade::DrawButton(float X, float Y)
 	}
 	else
 	{
+		// Rows sit 8px higher than they used to, and 26px apart rather than 27.
+		// Three rows now have to fit between the text block above (which ends
+		// around Y+310) and the Exit/Open/Close buttons at Y+391: at the old Y+320
+		// start with a 27px step the third row would have run into them.
+		const float rowTop = 312.0f;
+		const float rowStep = 26.0f;
 
-		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + 320, 38, 23, 38, 23, 3, state))
+		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + rowTop, 38, 23, 38, 23, 3, state))
 		{
 			CGSendOffTrade(0);
 		}
-		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + 320 + 5, 0xFFC738FF, 0x0, 39, 0, 3, "Bless");
+		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + rowTop + 5, 0xFFC738FF, 0x0, 39, 0, 3, "Bless");
 
 		bStartX += 40;
-		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + 320, 38, 23, 38, 23, 3, state))
+		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + rowTop, 38, 23, 38, 23, 3, state))
 		{
 			CGSendOffTrade(1);
 		}
-		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + 320 + 5, 0xFFC738FF, 0x0, 39, 0, 3, "Soul");
+		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + rowTop + 5, 0xFFC738FF, 0x0, 39, 0, 3, "Soul");
 
 		bStartX += 40;
-		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + 320, 38, 23, 38, 23, 3, state))
+		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + rowTop, 38, 23, 38, 23, 3, state))
 		{
 			CGSendOffTrade(2);
 		}
-		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + 320 + 5, 0xFFC738FF, 0x0, 39, 0, 3, "Chaos");
+		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + rowTop + 5, 0xFFC738FF, 0x0, 39, 0, 3, "Chaos");
 
 		//=======================
 		bStartX = X;
-		bStartY += 27;
-		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + 320, 38, 23, 38, 23, 3, state))
+		bStartY += rowStep;
+		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + rowTop, 38, 23, 38, 23, 3, state))
 		{
 			CGSendOffTrade(3);
 		}
-		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + 320 + 5, 0xFFC738FF, 0x0, 39, 0, 3, "WC");
+		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + rowTop + 5, 0xFFC738FF, 0x0, 39, 0, 3, "WC");
 
 
 		bStartX += 40;
-		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + 320, 38, 23, 38, 23, 3, state))
+		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + rowTop, 38, 23, 38, 23, 3, state))
 		{
 			CGSendOffTrade(4);
 		}
-		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + 320 + 5, 0xFFC738FF, 0x0, 39, 0, 3, "WP");
+		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + rowTop + 5, 0xFFC738FF, 0x0, 39, 0, 3, "WP");
 
 
 		bStartX += 40;
-		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + 320, 38, 23, 38, 23, 3, state))
+		if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, bStartX + 30, bStartY + rowTop, 38, 23, 38, 23, 3, state))
 		{
 			CGSendOffTrade(5);
 		}
-		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + 320 + 5, 0xFFC738FF, 0x0, 39, 0, 3, "GP");
+		TextDraw((HFONT)g_hFontBold, bStartX + 30, bStartY + rowTop + 5, 0xFFC738FF, 0x0, 39, 0, 3, "GP");
+
+		//=======================
+		// A third row for the server's custom exchange items - same grid, same
+		// button size, up to three of them.
+		//
+		// They are PACKED left to right rather than drawn at the column matching
+		// their slot: with only slot 2 configured, a lone button in the middle of
+		// the row reads as a layout bug rather than as a deliberate single option.
+		bStartX = X;
+		bStartY += rowStep;
+
+		int column = 0;
+
+		for (int slot = 0; slot < MAX_CUSTOMITEM; slot++)
+		{
+			const char* customButton = GetCustomItemButton(slot);
+
+			// No label means the slot is off, or the ini forgot its button text. Either
+			// way there is nothing to draw, and drawing an unlabelled button would give
+			// the player something to press with no idea what it costs.
+			if (customButton == NULL)
+			{
+				continue;
+			}
+
+			const float buttonX = bStartX + 30 + (column * 40);
+
+			if (UIController.BButton(gInterface.Data[IMG_31617].ModelID, buttonX, bStartY + rowTop, 38, 23, 38, 23, 3, state))
+			{
+				CGSendOffTrade(eOFF_CUSTOMITEM + slot);
+			}
+			TextDraw((HFONT)g_hFontBold, buttonX, bStartY + rowTop + 5, 0xFFC738FF, 0x0, 39, 0, 3, (char*)customButton);
+
+			column++;
+		}
 	}
 }
 
@@ -153,6 +286,16 @@ void CB_OffTrade::ShowPrice(int TextNum, char* Price)
 		{
 			sprintf(TextList[TextNum], gCustomMessage.GetMessage(57), Price);
 		}
+		else if (GetCustomItemSlot(this->TypeShop) != -1)
+		{
+			// Built here rather than from a message file entry, because the currency
+			// is whatever item the server names - a fixed line would go stale. The
+			// full item name is used, not the short button label: there is room for
+			// it here, and it is what tells the buyer exactly what to go and find.
+			const char* customName = GetCustomItemName(GetCustomItemSlot(this->TypeShop));
+
+			sprintf(TextList[TextNum], "%s %s", Price, ((customName!=NULL)?customName:"Item"));
+		}
 		else
 		{
 			sprintf(TextList[TextNum], gCustomMessage.GetMessage(49), Price);
@@ -192,6 +335,19 @@ void CB_OffTrade::ShowMessNotice()
 		else if (this->TypeShop == 5)
 		{
 			g_pChatListBox->AddText("", "Not enough Zen", SEASON3B::TYPE_ERROR_MESSAGE);
+		}
+		else if (GetCustomItemSlot(this->TypeShop) != -1)
+		{
+			const char* customName = GetCustomItemName(GetCustomItemSlot(this->TypeShop));
+
+			char szNotEnough[128];
+
+			// A buffer rather than a ternary of two literals: on Android a ternary
+			// whose arms are both string literals is const char*, and passing that
+			// where char* is wanted is a hard error rather than a warning.
+			sprintf(szNotEnough, "Not enough %s", ((customName!=NULL)?customName:"of that item"));
+
+			g_pChatListBox->AddText("", szNotEnough, SEASON3B::TYPE_ERROR_MESSAGE);
 		}
 		else
 		{
@@ -234,6 +390,12 @@ void CB_OffTrade::RenderTextNotice(float X, float Y)
 		else if (this->TypeShop == 5)
 		{
 			sprintf(Text, "Can only trade using GobinP");
+		}
+		else if (GetCustomItemSlot(this->TypeShop) != -1)
+		{
+			const char* customName = GetCustomItemName(GetCustomItemSlot(this->TypeShop));
+
+			sprintf(Text, "Can only trade using %s", ((customName!=NULL)?customName:"a special item"));
 		}
 		else
 		{

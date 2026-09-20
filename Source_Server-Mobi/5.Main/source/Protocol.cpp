@@ -293,6 +293,9 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				case 0xEC:
 					if (gCB_OffTrade) gCB_OffTrade->PShopActiveRecv((CB_OffTrade::PMSG_SHOPACTIVE_RECV*)lpMsg);
 					return 1;
+				case 0xF5:
+					if (gCB_OffTrade) gCB_OffTrade->CustomStoreItemInfoRecv((CB_OffTrade::PMSG_CUSTOMSTORE_ITEM_INFO_RECV*)lpMsg);
+					return 1;
 #endif
 				case 0xED:
 					//GCBuyConfirmRecv((PMSG_ITEM_BUY_RECV*)lpMsg);
@@ -497,6 +500,21 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 			case 0x8D: // Spin wheel Rewards box - the prizes being held
 			{
 				gVongQuay.RecvClaimList(lpMsg);
+			}
+			break;
+			case 0x8F: // Slot machine - open, with the machine's config
+			{
+				if(g_pSlotMachine) g_pSlotMachine->RecvOpen(lpMsg);
+			}
+			break;
+			case 0x91: // Slot machine - the finished spin result
+			{
+				if(g_pSlotMachine) g_pSlotMachine->RecvResult(lpMsg);
+			}
+			break;
+			case 0x93: // Slot machine reward box - the winnings being held
+			{
+				if(g_pSlotMachine) g_pSlotMachine->RecvClaimList(lpMsg);
 			}
 			break;
 #if(CB_BXHDMG)

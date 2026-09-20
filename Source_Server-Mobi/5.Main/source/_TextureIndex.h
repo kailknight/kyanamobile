@@ -733,6 +733,13 @@ enum
 	BITMAP_ANDROID_IGS_STORAGE_PAGE_LEFT,
 	BITMAP_ANDROID_IGS_STORAGE_PAGE_RIGHT,
 #endif
+	// Slot machine art (Data\Custom\SlotMachine\*.ozt). Appended at the END of the
+	// sequential run on purpose: everything above keeps its existing value, and
+	// there are raw numeric literals in the tree (RenderBitmap(32344, ...)) that a
+	// mid-range insert would silently repoint. NewUISlotMachine.h static_asserts
+	// that this block stays under BITMAP_EFFECT_TEXTURE_END.
+	BITMAP_SLOTMACHINE_BEGIN,
+	BITMAP_SLOTMACHINE_END = BITMAP_SLOTMACHINE_BEGIN + 12,
 	BITMAP_EFFECT_TEXTURE_END = 33000,
 	BITMAP_NONAMED_TEXTURES_BEGIN = 33001,
 	BITMAP_NONAMED_TEXTURES_NEW_LOAD=  111000,

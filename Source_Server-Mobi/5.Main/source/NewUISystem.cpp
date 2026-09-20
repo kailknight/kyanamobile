@@ -104,6 +104,10 @@ SEASON3B::CNewUISystem::CNewUISystem()
 #endif //PBG_ADD_GENSRANKING
 	m_pNewUnitedMarketPlaceWindow = NULL;
 	m_pNewUIMuHelper = NULL;
+	// Must be NULLed here, not just assigned in LoadMainSceneInterface: Release()
+	// runs SAFE_DELETE over every member, and a client that exits before ever
+	// loading the main scene would otherwise delete an uninitialised pointer.
+	m_pNewUISlotMachine = NULL;
 }
 
 SEASON3B::CNewUISystem::~CNewUISystem() 
@@ -560,6 +564,15 @@ bool SEASON3B::CNewUISystem::LoadMainSceneInterface()
 	if (m_pNewUIMuHelper->Create(m_pNewUIMng, (640 - 190) + DisplayWinCDepthBox, 0) == false)
 		return false;
 	ANDROID_UI_STAGE("helper ok");
+
+	// Built HERE and not in CNewUISystem::Create(): g_pNewItemMng is created at the
+	// top of this same function, so it is still NULL during Create() and the guard
+	// in the window's own Create would fail the whole UI init. Centred, because the
+	// machine is a modal panel rather than a docked one.
+	m_pNewUISlotMachine = new CNewUISlotMachine;
+	if (m_pNewUISlotMachine->Create(m_pNewUIMng, (640 - 400) / 2, (480 - 400) / 2) == false)
+		return false;
+	ANDROID_UI_STAGE("slotmachine ok");
 #undef ANDROID_UI_STAGE
 	return true;
 }
@@ -653,6 +666,7 @@ void SEASON3B::CNewUISystem::UnloadMainSceneInterface()
 	SAFE_DELETE(m_pNewGensRanking);
 	SAFE_DELETE(m_pNewUnitedMarketPlaceWindow);
 	SAFE_DELETE(m_pNewUIMuHelper);
+	SAFE_DELETE(m_pNewUISlotMachine);
 #ifdef LEM_FIX_LUCKYITEM_UICLASS_SAFEDELETE
 	SAFE_DELETE( m_pNewUILuckyItemWnd );
 #endif // LEM_FIX_LUCKYITEM_UICLASS_SAFEDELETE
@@ -1078,6 +1092,14 @@ void SEASON3B::CNewUISystem::Show(DWORD dwKey)
 		else if( dwKey == SEASON3B::INTERFACE_UNITEDMARKETPLACE_NPC_JULIA )
 		{
 			m_pNewUnitedMarketPlaceWindow->OpeningProcess();
+		}
+		else if( dwKey == SEASON3B::INTERFACE_SLOTMACHINE )
+		{
+			// HideAllGroupA so the machine is not opened underneath the inventory -
+			// it is a modal panel, and unlike the mix windows it needs no inventory
+			// beside it, since the stake is chosen from its own list.
+			HideAllGroupA();
+			m_pNewUISlotMachine->OpeningProcess();
 		}
 #ifdef LEM_ADD_LUCKYITEM
 		else if( dwKey == SEASON3B::INTERFACE_LUCKYITEMWND )
@@ -1513,6 +1535,13 @@ void SEASON3B::CNewUISystem::Hide(DWORD dwKey)
 			}
 		}
 #endif // LEM_ADD_LUCKYITEM
+
+		// Gated on IsVisible so closing an already-closed machine cannot send a
+		// second exit packet to the server.
+		if(dwKey == SEASON3B::INTERFACE_SLOTMACHINE && IsVisible(SEASON3B::INTERFACE_SLOTMACHINE))
+		{
+			m_pNewUISlotMachine->ClosingProcess();
+		}
 
 		m_pNewUIMng->ShowInterface(dwKey, false);
 
@@ -2594,6 +2623,11 @@ CNewUIUnitedMarketPlaceWindow* SEASON3B::CNewUISystem::GetUI_pNewUnitedMarketPla
 CNewUIMuHelper* CNewUISystem::Get_pNewUIMuHelper() const
 {
 	return m_pNewUIMuHelper;
+}
+
+CNewUISlotMachine* SEASON3B::CNewUISystem::Get_pNewUISlotMachine() const
+{
+	return m_pNewUISlotMachine;
 }
 #ifdef LEM_ADD_LUCKYITEM
 CNewUILuckyItemWnd* SEASON3B::CNewUISystem::Get_pNewUILuckyItemWnd() const

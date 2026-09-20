@@ -88,6 +88,17 @@ namespace SEASON3B
 		unicode::t_string		m_TitleText;
 		CNewUIButton*			m_Button;
 		int						m_SourceIndex;
+
+		// Touch only: which slot the last tap landed on, or -1.
+		//
+		// A mouse hovers, so on PC one click can safely open the buy dialog -
+		// the player has already seen the tooltip under the cursor. A finger
+		// cannot hover: the first touch IS the click, so a single tap was both
+		// the look and the buy, and there was no way to read a price before
+		// committing to it. The first tap now only points at the slot, which is
+		// what makes the tooltip appear, and the second tap on that same slot
+		// opens the dialog.
+		int						m_TappedSquareIndex;
 	};
 
 	inline

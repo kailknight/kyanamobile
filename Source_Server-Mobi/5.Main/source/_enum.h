@@ -103,6 +103,10 @@ namespace SEASON3B
 		INTERFACE_ExpandInventory,
 		INTERFACE_ExpandWarehouse,
 		INTERFACE_MuHelper,
+		// Inserted BEFORE INTERFACE_END on purpose: HideAll() iterates
+		// INTERFACE_BEGIN+1 .. INTERFACE_END, so an id past the end would never be
+		// closed by Escape.
+		INTERFACE_SLOTMACHINE,
 		INTERFACE_BCUSTOMMENU,
 		INTERFACE_HOTKEY,
 		INTERFACE_3DRENDERING_CAMERA_BEGIN,

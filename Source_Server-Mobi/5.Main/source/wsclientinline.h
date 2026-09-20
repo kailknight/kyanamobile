@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ClientBuild.h"
 #include "dsplaysound.h"
 #include "zzzscene.h"
 #include "zzzinterface.h"
@@ -230,8 +231,38 @@ __forceinline void SendCheck( void)
 //extern BYTE Version[SIZE_PROTOCOLVERSION];
 //extern BYTE Serial[SIZE_PROTOCOLSERIAL+1];
 
+// What build this client is, packet 0xD3:0x7D. See ClientBuild.h.
+//
+// Sent on the same stream immediately before the login packet, which is what
+// guarantees the server has it by the time CGConnectAccountRecv applies the
+// outdated-client gate - no connect-time hook and no timer needed.
+//
+// Sent on BOTH platforms, even though only Android carries a real version.
+// Saying nothing is what marks a client as older than this feature, so PC has to
+// speak up or it would be mistaken for an outdated APK. See ClientBuild.h.
+__forceinline void SendClientBuild()
+{
+	CStreamPacketEngine spe;
+	spe.Init( 0xC1, 0xD3);
+	spe << ( BYTE)0x7D;
+	spe << ( BYTE)MU_CLIENT_PLATFORM;
+	spe << ( DWORD)MU_GetClientBuildNumber();
+
+	// UNENCRYPTED, and it has to be. The GameServer's packet whitelist
+	// (Data\Hack\HackPacketCheck.txt) lists head 211 (0xD3) with Encrypt = 0,
+	// and CHackPacketCheck::CheckPacketHack calls CloseClient on any mismatch -
+	// before dispatch, so the packet never reaches a handler.
+	//
+	// Sent with Send(TRUE) this disconnected the client the instant OK was
+	// pressed, which looked like a login fault rather than an encryption one.
+	// Every other 0xD3 packet the client sends goes through BDataSend, which
+	// also ends in a plain Send(). Do not "fix" this to encrypted.
+	spe.Send();
+}
+
 #define SendRequestLogIn( p_lpszID, p_lpszPassword)\
 {\
+	SendClientBuild();\
 	LogIn = 1;\
 	strcpy(LogInID, ( p_lpszID));\
 	CurrentProtocolState = REQUEST_LOG_IN;\

@@ -459,6 +459,7 @@
     <ClCompile Include="source\NewUIItemMng.cpp" />
     <ClCompile Include="source\NewUIKanturuEvent.cpp" />
     <ClCompile Include="source\NewUILuckyItemWnd.cpp" />
+    <ClCompile Include="source\NewUISlotMachine.cpp" />
     <ClCompile Include="source\NewUIMainFrameWindow.cpp" />
     <ClCompile Include="source\NewUIManager.cpp" />
     <ClCompile Include="source\NewUIMasterLevel.cpp" />
@@ -573,6 +574,7 @@
     <ClCompile Include="source\Utilities\Log\muConsoleDebug.cpp" />
     <ClCompile Include="source\Utilities\Log\WindowsConsole.cpp" />
     <ClCompile Include="source\Utilities\Memory\MemoryLock.cpp" />
+    <ClCompile Include="source\ClientBuild.cpp" />
     <ClCompile Include="source\VoiceAudio.cpp" />
     <ClCompile Include="source\VoiceAudioOpenSL.cpp" />
     <ClCompile Include="source\VoiceAudioWin.cpp" />
@@ -944,6 +946,7 @@
     <ClInclude Include="source\NewUIItemMng.h" />
     <ClInclude Include="source\NewUIKanturuEvent.h" />
     <ClInclude Include="source\NewUILuckyItemWnd.h" />
+    <ClInclude Include="source\NewUISlotMachine.h" />
     <ClInclude Include="source\NewUIMainFrameWindow.h" />
     <ClInclude Include="source\NewUIManager.h" />
     <ClInclude Include="source\NewUIMasterLevel.h" />
@@ -1065,6 +1068,7 @@
     <ClInclude Include="source\Utilities\Log\WindowsConsole.h" />
     <ClInclude Include="source\Utilities\Memory\HashTable.h" />
     <ClInclude Include="source\Utilities\Memory\MemoryLock.h" />
+    <ClInclude Include="source\ClientBuild.h" />
     <ClInclude Include="source\VoiceAudio.h" />
     <ClInclude Include="source\VoiceClient.h" />
     <ClInclude Include="source\VoiceCodec.h" />

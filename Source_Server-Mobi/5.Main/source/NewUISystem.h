@@ -88,6 +88,7 @@
 #include "NewUIMuHelper.h"
 #ifdef LEM_ADD_LUCKYITEM
 #include "NewUILuckyItemWnd.h"
+#include "NewUISlotMachine.h"
 #endif // LEM_ADD_LUCKYITEM
 namespace SEASON3B
 {
@@ -249,6 +250,7 @@ namespace SEASON3B
 		CNewUILuckyItemWnd*			m_pNewUILuckyItemWnd;
 #endif // LEM_ADD_LUCKYITEM
 		CNewUIMuHelper* m_pNewUIMuHelper;
+		CNewUISlotMachine*			m_pNewUISlotMachine;
 	public:
 		CNewUIChatInputBox* GetUI_NewChatInputBox() const;
 		CNewUIChatLogWindow* GetUI_NewChatLogWindow() const;
@@ -334,6 +336,7 @@ namespace SEASON3B
 		//CNewUIUnitedMarketPlaceWindow*	GetUI_pNewUnitedMarketPlaceFrame() const;
 #ifdef LEM_ADD_LUCKYITEM
 		CNewUILuckyItemWnd*	Get_pNewUILuckyItemWnd() const;
+		CNewUISlotMachine*	Get_pNewUISlotMachine() const;
 #endif // LEM_ADD_LUCKYITEM
 		CNewUIMuHelper* Get_pNewUIMuHelper() const;
 	};
@@ -424,6 +427,7 @@ namespace SEASON3B
 #define g_pNewUIGensRanking SEASON3B::CNewUISystem::GetInstance()->GetUI_NewGensRanking()
 #ifdef LEM_ADD_LUCKYITEM
 #define g_pLuckyItemWnd	SEASON3B::CNewUISystem::GetInstance()->Get_pNewUILuckyItemWnd()
+#define g_pSlotMachine	SEASON3B::CNewUISystem::GetInstance()->Get_pNewUISlotMachine()
 #endif // LEM_ADD_LUCKYITEM
 #define g_pNewUIMuHelper SEASON3B::CNewUISystem::GetInstance()->Get_pNewUIMuHelper();
 #endif // _NEWUISYSTEM_H_

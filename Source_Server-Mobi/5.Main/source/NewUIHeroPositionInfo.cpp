@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "NewUIHeroPositionInfo.h"
+#include "ClientBuild.h"
 #include "CBInterface.h"
 #include "MapManager.h"
 #include "NewUISystem.h"
@@ -1136,6 +1137,27 @@ void ShowInfoTitleWindow() {
     windowName += " || GP: ";
     windowName += std::string(
         gInterface.NumberFormat(CharacterAttribute->PrintPlayer.Coin3));
+
+    // FPS and the build stamp. Both here rather than on screen because the
+    // title bar is the one place they cost no screen space and are readable in
+    // a screenshot - which is how a player reports which build they are on.
+    //
+    // FPS is rounded to whole frames: this title is rebuilt at most every 100ms
+    // and only pushed when the string changed, so a decimal place would differ
+    // on nearly every pass and turn that into a SetWindowText ten times a
+    // second for no useful extra information.
+    {
+      // The build NUMBER is printed next to the stamp on purpose. It is the
+      // value the server compares against MinClientBuildPC, and deriving it
+      // from the stamp by hand means reordering DDMMYY.HHMM into YYMMDDHH -
+      // which is exactly the kind of thing that gets done wrong once and then
+      // looks like the gate is broken.
+      char szBuild[128];
+      sprintf(szBuild, " || FPS: %d || %s (build %u)",
+                (int)(FPS_AVG + 0.5), MU_GetClientBuildStamp(),
+                MU_GetClientBuildNumber());
+      windowName += szBuild;
+    }
 
     // Mouse position and Map ID - only for Admin
     if (nameLen >= 5 && strncmp(CharacterAttribute->Name, "Admin", 5) == 0) {

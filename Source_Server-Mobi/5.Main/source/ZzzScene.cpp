@@ -22,6 +22,7 @@
 #endif
 #include "ZzzScene.h"
 #include "VoiceClient.h"
+#include "ClientBuild.h"
 #include "VoiceAudio.h"
 #include "ZzzEffect.h"
 #include "ZzzAI.h"
@@ -3177,46 +3178,11 @@ void MainScene(HDC hDC)
 		{
 			BeginBitmap();
 
-			// Build stamp: v.1.0.DDMMYY.hhmm off the compile timestamp, not a
-			// maintained counter - there is no build pipeline bumping a version
-			// number, and this auto-updates on every rebuild so it is
-			// trustworthy: it says whether a fresh install actually replaced
-			// the running binary. Computed once - __DATE__/__TIME__ are
-			// compile-time constants - and cached rather than reformatted
-			// every frame.
-			//
-			// CAVEAT: __DATE__/__TIME__ are baked in when THIS FILE is
-			// compiled, so an incremental build that only touches other
-			// translation units leaves the stamp unchanged even though the
-			// build really is new. It proves "at least this new", never "the
-			// build is stale" - do not read an unchanged stamp as the app
-			// running old code. CMakeLists.txt force-recompiles this file
-			// every build to keep it honest.
-			static char s_szBuildStamp[32] = { 0 };
-			if (s_szBuildStamp[0] == '\0')
-			{
-				static const char* const s_months[] = {
-					"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-					"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-				};
-				char szMonth[4] = { 0 };
-				int nDay = 0, nYear = 0, nHour = 0, nMinute = 0, nSecond = 0;
-				sscanf(__DATE__, "%3s %d %d", szMonth, &nDay, &nYear);
-				sscanf(__TIME__, "%d:%d:%d", &nHour, &nMinute, &nSecond);
-
-				int nMonth = 1;
-				for (int i = 0; i < 12; ++i)
-				{
-					if (_stricmp(szMonth, s_months[i]) == 0)
-					{
-						nMonth = i + 1;
-						break;
-					}
-				}
-
-				sprintf(s_szBuildStamp, "v.1.0.%02d%02d%02d.%02d%02d",
-					nDay, nMonth, nYear % 100, nHour, nMinute);
-			}
+			// Build stamp: v.1.0.DDMMYY.hhmm, from ClientBuild.cpp. Says whether a
+			// fresh install actually replaced the running binary, which is the
+			// question it exists to answer - see that file for how each platform
+			// keeps it from going stale.
+			const char* s_szBuildStamp = MU_GetClientBuildStamp();
 
 			// Battery / server ping, refreshed every 2s rather than every frame -
 			// a JNI round trip for battery and a getsockopt for ping are cheap

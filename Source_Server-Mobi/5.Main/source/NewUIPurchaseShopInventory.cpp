@@ -34,6 +34,7 @@ SEASON3B::CNewUIPurchaseShopInventory::CNewUIPurchaseShopInventory() : m_pNewUIM
 {
 	m_Pos.x = m_Pos.y = 0;
 	m_ShopCharacterIndex = -1;
+	m_TappedSquareIndex = -1;
 }
 
 SEASON3B::CNewUIPurchaseShopInventory::~CNewUIPurchaseShopInventory()
@@ -200,9 +201,40 @@ bool SEASON3B::CNewUIPurchaseShopInventory::PurchaseShopInventoryProcess()
 		int iCurSquareIndex = m_pNewInventoryCtrl->FindItemptIndex(MouseX, MouseY);
 		if( iCurSquareIndex != -1 )
 		{
+#if defined(__ANDROID__) || defined(MU_IOS)
+			// Touch: the first tap on a slot only points at it, which is what
+			// makes the tooltip and price appear. Only a second tap on that
+			// same slot opens the buy dialog.
+			//
+			// Without this a single tap was the whole purchase - there was no
+			// way to read a price before paying it, because a finger cannot
+			// hover the way a mouse does. See m_TappedSquareIndex.
+			if(m_TappedSquareIndex != iCurSquareIndex)
+			{
+				m_TappedSquareIndex = iCurSquareIndex;
+
+				// Still selects it, so anything keyed off the source index
+				// (the price line, the highlight) updates on this first tap.
+				ChangeSourceIndex(iCurSquareIndex);
+				return true;
+			}
+
+			// Second tap on the same slot: fall through and buy, and forget the
+			// selection so re-opening the shop starts from "look" again rather
+			// than one tap from spending.
+			m_TappedSquareIndex = -1;
+#endif
 			ChangeSourceIndex(iCurSquareIndex);
 			CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CPersonalShopItemBuyMsgBoxLayout));
 		}
+#if defined(__ANDROID__) || defined(MU_IOS)
+		else
+		{
+			// Tapped a gap or outside the grid - drops the selection, so the
+			// next tap on an item is a look and not a purchase.
+			m_TappedSquareIndex = -1;
+		}
+#endif
 
 		return true;
 	}
@@ -302,6 +334,11 @@ void SEASON3B::CNewUIPurchaseShopInventory::ClosingProcess()
  	}
 
 	m_ShopCharacterIndex = -1;
+
+	// Closing forgets which slot was tapped, so re-opening any shop starts from
+	// "look" rather than leaving the player one tap away from a purchase they
+	// set up in a different shop.
+	m_TappedSquareIndex = -1;
 
 	g_pMyInventory->ChangeMyShopButtonStateOpen();
 }
