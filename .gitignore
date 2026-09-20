@@ -31,3 +31,32 @@
 *.dll
 *.apk
 *.aab
+
+# --- Server source: GameServer and DataServer are tracked too -------------
+# Added deliberately - these carry the server half of features whose client
+# half is in 5.Main (slot machine, custom store, cash shop), and they had no
+# version control of any kind before this.
+#
+# Their CONFIG and DATA are still out: those live in Working Project and the
+# MuServer trees, both ignored by the /* rule at the top, and the configs are
+# environment-specific (DB DSNs, live server addresses) rather than source.
+!/Source_Server-Mobi/4.GameServer/
+!/Source_Server-Mobi/2.DataServer/
+
+# ...but only their source. IDE state, build intermediates and any binary
+# that lands inside those trees stay out.
+/Source_Server-Mobi/4.GameServer/.vs/
+/Source_Server-Mobi/2.DataServer/.vs/
+/Source_Server-Mobi/4.GameServer/**/Debug/
+/Source_Server-Mobi/4.GameServer/**/Release/
+/Source_Server-Mobi/2.DataServer/**/Debug/
+/Source_Server-Mobi/2.DataServer/**/Release/
+/Source_Server-Mobi/4.GameServer/**/*.suo
+/Source_Server-Mobi/2.DataServer/**/*.suo
+/Source_Server-Mobi/4.GameServer/**/*.user
+/Source_Server-Mobi/2.DataServer/**/*.user
+# .aps is the resource editor's binary cache, regenerated from the .rc.
+# .prerename is a stray editor backup, not source.
+/Source_Server-Mobi/4.GameServer/**/*.aps
+/Source_Server-Mobi/2.DataServer/**/*.aps
+/Source_Server-Mobi/4.GameServer/**/*.prerename
