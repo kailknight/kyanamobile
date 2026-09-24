@@ -504,6 +504,7 @@ public:
 	bool SkillMagicCircle(int aIndex,int bIndex,CSkill* lpSkill);
 	bool SkillShieldRecover(int aIndex,int bIndex,CSkill* lpSkill);
 	bool SkillFiveShot(int aIndex,int bIndex,CSkill* lpSkill,BYTE angle,bool combo);
+	bool SkillTripleShot(int aIndex,int bIndex,CSkill* lpSkill,BYTE angle,bool combo);
 	bool SkillSwordSlash(int aIndex,int bIndex,CSkill* lpSkill,BYTE angle,bool combo);
 	bool SkillLightningStorm(int aIndex,int bIndex,CSkill* lpSkill,bool combo);
 	bool SkillBirds(int aIndex,int bIndex,CSkill* lpSkill,BYTE angle,bool combo);

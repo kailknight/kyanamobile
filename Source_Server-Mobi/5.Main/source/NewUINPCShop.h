@@ -59,7 +59,20 @@ namespace SEASON3B
 		DWORD m_dwStandbyItemKey;
 
 		bool m_bSellingItem;
-		
+
+		// Shop pages (server: CustomShopPage in CustomConfig.ini). m_iPageCount stays 0
+		// for an ordinary one-screen shop, which is what keeps every other shop looking
+		// and behaving exactly as before - no arrows, no label, no lock.
+		int m_iPage;
+		int m_iPageCount;
+
+		// A page was asked for and the server has not answered yet. While set, buying is
+		// locked: the buy packet carries only a slot number, and the SERVER decides which
+		// page that slot is on. A click in the gap between asking and the new list arriving
+		// would buy from the new page while the player is still looking at the old one.
+		bool m_bPagePending;
+		DWORD m_dwPageRequestMs;
+
 	public:
 		CNewUINPCShop();
 		virtual ~CNewUINPCShop();
@@ -80,7 +93,11 @@ namespace SEASON3B
 		int GetTaxRate();
 
 		bool InsertItem(int iIndex, BYTE* pbyItemPacket);
-		
+
+		// C1:D3:B7 - the item list that follows is this page of that many. Empties the
+		// grid; the ordinary C2:31 list that comes next refills it.
+		void RecvPageInfo(BYTE* lpMsg);
+
 		void OpenningProcess();
 
 		void ClosingProcess();
@@ -111,6 +128,13 @@ namespace SEASON3B
 
 		bool InventoryProcess();
 		bool BtnProcess();
+
+		// Page arrows (in the header, so they never collide with the repair row or the
+		// repair-money bar at the bottom) and the "Page 2 / 5" label above the grid.
+		bool PageButtonProcess();
+		void RequestPage(int iPage);
+		void RenderPageBar();
+		bool PageButtonRect(bool bNext, int* px, int* py, int* pw, int* ph);
 
 		void RenderFrame();
 		void RenderTexts();

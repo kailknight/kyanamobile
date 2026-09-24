@@ -818,9 +818,22 @@ bool SEASON3B::CNewUIChatLogWindow::UpdateMouseEvent()
 					m_iPointedMessageIndex = i;
 
 					std::string strID = pMsgText->GetID();
-					if (SEASON3B::IsPress(VK_RBUTTON) && strID.empty() == false)
+					if (SEASON3B::IsPress(VK_RBUTTON) && strID.empty() == false
+						&& (Hero == NULL || strID != Hero->ID))
 					{
 						g_pChatInputBox->SetWhsprID(strID.c_str());
+
+						// Setting the name alone did nothing visible while the
+						// input box was closed, so the right click looked
+						// broken. Open it ready to type, as the mobile tap does.
+						if (!g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX))
+						{
+							g_pNewUISystem->Show(SEASON3B::INTERFACE_CHATINPUTBOX);
+						}
+						if (g_pChatInputBox->m_pChatInputBox != NULL)
+						{
+							g_pChatInputBox->m_pChatInputBox->GiveFocus(TRUE);
+						}
 					}
 				}
 			}

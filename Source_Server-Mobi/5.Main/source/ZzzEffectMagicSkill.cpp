@@ -288,12 +288,12 @@ void CreateArrows(CHARACTER *c,OBJECT *o,OBJECT *to,WORD SkillIndex,WORD Skill,W
     {
 	    if ( Skill==1 )
 	    {
-			if ( c->Weapon[0].Type==MODEL_BOW+18 
-				|| c->Weapon[0].Type==MODEL_BOW+19 
-				|| c->Weapon[1].Type == MODEL_BOW+22
-				|| c->Weapon[1].Type == MODEL_BOW+23
-				|| c->Weapon[1].Type == MODEL_BOW+24
-				)
+			// Triple Shot Mastery: "One more arrow will be fired with Triple
+			// Shot skill." The server (SkillTripleShot) hits along the same
+			// four lines for this id only. This used to also fire 4 for
+			// BOW+18/19 (right hand) and BOW+22/23/24 (left hand) on any skill
+			// level, which the server never matched - the 4th arrow did nothing.
+			if ( SKKey==MASTER_SKILL_ADD_TRIPLE_SHOT_ENHANCED )
 			{	
 				o->Angle[2] += 5.f;//15.f;//7.5f;
 				CreateArrow(c,o,to,SkillIndex,Skill,SKKey);

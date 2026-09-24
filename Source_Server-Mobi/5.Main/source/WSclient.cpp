@@ -4073,6 +4073,22 @@ BOOL ReceiveMagic(BYTE *ReceiveBuffer,int Size, BOOL bEncrypted)
 		OBJECT *so = &sc->Object;
 		OBJECT *to = &tc->Object;
 
+		// Triple Shot's damage is resolved server side (SkillTripleShot) and every
+		// hit comes back as one of these. The volley was already drawn from the
+		// 0x1E reply, so treating a hit as a fresh cast re-armed AttackTime with a
+		// target set and fired a second volley - 3 arrows plus the stray one from
+		// the fall-through into AT_SKILL_PIERCING in MoveCharacter. (Five Shot
+		// gets away with it only because MoveCharacter never draws arrows for
+		// AT_SKILL_MULTI_SHOT.) The damage packet still shows the number.
+		if ( so->Type == MODEL_PLAYER
+			&& ( MagicNumber == AT_SKILL_CROSSBOW
+				|| MagicNumber == MASTER_SKILL_ADD_TRIPLE_SHOT_IMPROVED
+				|| MagicNumber == MASTER_SKILL_ADD_TRIPLE_SHOT_ENHANCED
+				|| ( AT_SKILL_MANY_ARROW_UP <= MagicNumber && MagicNumber <= AT_SKILL_MANY_ARROW_UP+4 ) ) )
+		{
+			return ( TRUE);
+		}
+
 		if ( MagicNumber!=AT_SKILL_COMBO )
 		{
 			if(sc!=Hero && MagicNumber!=AT_SKILL_TELEPORT && MagicNumber!=AT_SKILL_TELEPORT_B && to->Visible)
@@ -5167,6 +5183,19 @@ BOOL ReceiveMagic(BYTE *ReceiveBuffer,int Size, BOOL bEncrypted)
 	return ( TRUE);
 }
 
+extern int g_iLimitAttackTimeSet;
+
+
+// The arrow release in MoveCharacter only spawns arrows while CurrentAction is
+// still one of these, so a release that lands after the bow swing ended is lost.
+static bool IsBowAttackAction(int Action)
+{
+	return Action == PLAYER_ATTACK_BOW || Action == PLAYER_ATTACK_CROSSBOW
+		|| Action == PLAYER_ATTACK_FLY_BOW || Action == PLAYER_ATTACK_FLY_CROSSBOW
+		|| Action == PLAYER_FENRIR_ATTACK_BOW || Action == PLAYER_FENRIR_ATTACK_CROSSBOW
+		|| Action == PLAYER_ATTACK_RIDE_BOW || Action == PLAYER_ATTACK_RIDE_CROSSBOW;
+}
+
 BOOL ReceiveMagicContinue(BYTE *ReceiveBuffer,int Size, BOOL bEncrypted)
 {
 //#ifndef NEW_PROTOCOL_SYSTEM
@@ -5184,7 +5213,8 @@ BOOL ReceiveMagicContinue(BYTE *ReceiveBuffer,int Size, BOOL bEncrypted)
 	
 	CHARACTER *sc = &CharactersClient[FindCharacterIndex(Key)];
 	OBJECT *so = &sc->Object;
-	
+
+
 	sc->Skill = MagicNumber;
 
 	
@@ -5668,6 +5698,47 @@ BOOL ReceiveMagicContinue(BYTE *ReceiveBuffer,int Size, BOOL bEncrypted)
 	if(so->AnimationFrame == 0.f && sc->AttackTime == 1)
 	{
 		sc->AttackTime = 15;
+	}
+
+	// The hero's bow skills. Their arrows are what send the hit (CheckClientArrow
+	// -> AttackCharacterRange), and MoveCharacter only spawns them once AttackTime
+	// reaches g_iLimitAttackTimeSet (15 ticks after this reply) AND the hero is
+	// still in a bow attack action. The hero's swing started locally at send
+	// time, so with attack speed around 200 the swing is over before tick 15:
+	// the hero goes idle, ExecuteSkill recasts, the next reply resets AttackTime
+	// to 1, and the release never happens - no arrow, no damage on anything.
+	// Penetration fails the same way: its charge only freezes the swing while
+	// AttackTime > 0, so if the reply lands after the swing ended there is no
+	// pose to hold - the gather effect plays at tick 3 and nothing is fired.
+	if(sc == Hero && so->Type == MODEL_PLAYER)
+	{
+		switch(MagicNumber)
+		{
+		case AT_SKILL_MANY_ARROW_UP:
+		case AT_SKILL_MANY_ARROW_UP+1:
+		case AT_SKILL_MANY_ARROW_UP+2:
+		case AT_SKILL_MANY_ARROW_UP+3:
+		case AT_SKILL_MANY_ARROW_UP+4:
+		case AT_SKILL_CROSSBOW:
+		case MASTER_SKILL_ADD_TRIPLE_SHOT_IMPROVED:
+		case MASTER_SKILL_ADD_TRIPLE_SHOT_ENHANCED:
+			// Release on the next frame, inside the swing.
+			if(!IsBowAttackAction(so->CurrentAction))
+				SetPlayerAttack(sc);
+			sc->AttackTime = g_iLimitAttackTimeSet;
+			break;
+		case AT_SKILL_PIERCING:
+		case MASTER_SKILL_ADD_PENETRATION_IMPROVED:
+			// Keep the charge (AttackStage holds the swing at frame 5 until the
+			// release), restarting the swing if it already finished.
+			if(!IsBowAttackAction(so->CurrentAction))
+			{
+				SetPlayerAttack(sc);
+				so->AnimationFrame = 0;
+			}
+			sc->AttackTime = 1;
+			break;
+		}
 	}
 
 	g_ConsoleDebug->Write(MCD_RECEIVE, "0x1E [ReceiveMagicContinue(%d)]", MagicNumber);

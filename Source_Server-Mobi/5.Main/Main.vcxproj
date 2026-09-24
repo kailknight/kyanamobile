@@ -263,6 +263,7 @@
     <ClCompile Include="source\CSChaosCastle.cpp" />
     <ClCompile Include="source\CSEventMatch.cpp" />
     <ClCompile Include="source\CSItemOption.cpp" />
+    <ClCompile Include="source\CItemOptionBEx.cpp" />
     <ClCompile Include="source\CSMapServer.cpp" />
     <ClCompile Include="source\CSParts.cpp" />
     <ClCompile Include="source\CSPetSystem.cpp" />
@@ -579,6 +580,7 @@
     <ClCompile Include="source\VoiceAudioOpenSL.cpp" />
     <ClCompile Include="source\VoiceAudioWin.cpp" />
     <ClCompile Include="source\VoiceClient.cpp" />
+    <ClCompile Include="source\QuickToggles.cpp" />
     <ClCompile Include="source\VoiceSettings.cpp" />
     <ClCompile Include="source\VoiceCodec.cpp">
       <!-- Byte-identical mirror of Source_Server-Mobi\7.VoiceServer\VoiceCodec.cpp.
@@ -717,6 +719,7 @@
     <ClInclude Include="source\CSChaosCastle.h" />
     <ClInclude Include="source\CSEventMatch.h" />
     <ClInclude Include="source\CSItemOption.h" />
+    <ClInclude Include="source\CItemOptionBEx.h" />
     <ClInclude Include="source\CSMapServer.h" />
     <ClInclude Include="source\CSParts.h" />
     <ClInclude Include="source\CSPetSystem.h" />
@@ -1071,6 +1074,7 @@
     <ClInclude Include="source\ClientBuild.h" />
     <ClInclude Include="source\VoiceAudio.h" />
     <ClInclude Include="source\VoiceClient.h" />
+    <ClInclude Include="source\QuickToggles.h" />
     <ClInclude Include="source\VoiceCodec.h" />
     <ClInclude Include="source\VoiceProtocol.h" />
     <ClInclude Include="source\VongQuay.h" />

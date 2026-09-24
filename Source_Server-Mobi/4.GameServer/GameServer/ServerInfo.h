@@ -1341,6 +1341,20 @@ public:
 	// - it was unconditional before, and it is off by owner request, so the
 	// default holds even on a server whose ini predates the key.
 	int m_ShowResetLimitOnLogin;
+	// PotionDelayMS (CustomConfig.ini): the least time, in milliseconds,
+	// between two potions from the same character - hotkey, auto potion and
+	// MU Helper alike, since they all arrive as the same item-use request.
+	// A potion asked for sooner is refused and left in the inventory. 0 = no
+	// limit (the default, so an ini without the key behaves as before).
+	int m_PotionDelayMS;
+	// AutoPotion_AL0..AL3 (CustomConfig.ini): 1 lets players at that account
+	// level open the auto potion settings (hold Q) and pick their own HP
+	// threshold; 0 locks them to AutoPotionThreshold. Defaults: 0 for AL0,
+	// 1 for the VIP levels - the rule the client used to hard-code.
+	int m_AutoPotionConfigure[MAX_ACCOUNT_LEVEL];
+	// AutoPotionThreshold (CustomConfig.ini): HP % the auto potion drinks at
+	// for locked players, and the starting value for everyone else. 10-90.
+	int m_AutoPotionThreshold;
 };
 
 extern CServerInfo gServerInfo;

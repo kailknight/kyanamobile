@@ -2,6 +2,7 @@
 #include "Protocol.h"
 #include "WSclient.h"
 #include "NewUISystem.h"
+#include "CItemOptionBEx.h"
 #include "BuffIcon.h"
 #include "PetProtocol.h"
 #include "Reconnect.h"
@@ -66,6 +67,7 @@
 #include "VongQuay.h"
 #include "RedeemCodeWindow.h"
 #include "VoiceClient.h"
+#include "QuickToggles.h"
 
 extern int g_iLimitAttackTimeSet;
 bool StatusAutoReset = false;
@@ -517,6 +519,19 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				if(g_pSlotMachine) g_pSlotMachine->RecvClaimList(lpMsg);
 			}
 			break;
+			case 0xB7: // NPC shop page - the item list that follows is this page of that many
+			{
+				if(g_pNPCShop) g_pNPCShop->RecvPageInfo(lpMsg);
+			}
+			break;
+			case 0xB6: // Extra item options (the server's ItemOptionBEx.txt), for the tooltip
+			{
+				// A plain global, not a UI window, so it is safe to receive at any
+				// point after login - including during the scene change, when this
+				// packet actually arrives and no window exists yet.
+				g_ItemOptionBEx.Recv(lpMsg);
+			}
+			break;
 #if(CB_BXHDMG)
 			case 0x2D: //Recv List
 			{
@@ -685,6 +700,16 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				gCB_DangKyInGame->RecvKQRegInGame((XULY_CGPACKET*)lpMsg);
 				break;
 #endif
+			case 0x7E: // Account level + auto potion rules - GCAccountLevelSend
+				if (size >= 7)
+				{
+					gAutoPotion.SetServerRules(lpMsg[4], lpMsg[5], lpMsg[6]);
+				}
+				else if (size >= 5)
+				{
+					gAutoPotion.SetServerRules(lpMsg[4], -1, -1); // older GameServer
+				}
+				break;
 
 #if(CUSTOM_BRANKINGNEW)
 			case 0x40: //

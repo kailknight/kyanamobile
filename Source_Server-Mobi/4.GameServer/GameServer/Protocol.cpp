@@ -100,6 +100,7 @@
 #include "CB_BotTrader.h"
 #include "CustomVongQuay.h"
 #include "SlotMachine.h"
+#include "ShopManager.h"
 #include "FakeOnline.h"
 #include "RedeemCode.h"
 
@@ -1604,6 +1605,12 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			}
 			break;
 #endif
+
+			case 0xB8: //NPC shop - turn to another page (CustomShopPage)
+			{
+				gShopManager.CGShopPageRecv((PMSG_SHOP_PAGE_RECV*)lpMsg,lpObj->Index);
+			}
+			break;
 
 			case 0x2E:
 			{
@@ -6536,4 +6543,41 @@ void GCAutoMove(AUTOMOVE_REQ* lpMsg, int aIndex)
 	lpObj->IsAutoMoveRunning = lpMsg->TYPE;
 	//LogAdd(LOG_RED,"Set Move IsAutoMoveRunning %d",lpObj->IsAutoMoveRunning);
 
+}
+
+static int GetClampedAccountLevel(int aIndex)
+{
+	const int level = gObj[aIndex].AccountLevel;
+	return (level < 0) ? 0 : ((level >= MAX_ACCOUNT_LEVEL) ? (MAX_ACCOUNT_LEVEL - 1) : level);
+}
+
+// Everything GCAccountLevelSend tells the client, packed into one number so
+// gObjSecondProc can spot any change - VIP starting or ending, or the auto
+// potion keys changing on a config reload.
+int GetAutoPotionClientState(int aIndex)
+{
+	const int level = GetClampedAccountLevel(aIndex);
+	const int configure = (gServerInfo.m_AutoPotionConfigure[level] != 0) ? 1 : 0;
+
+	return level | (configure << 8) | (gServerInfo.m_AutoPotionThreshold << 16);
+}
+
+void GCAccountLevelSend(int aIndex) // OK
+{
+	if (OBJECT_RANGE(aIndex) == 0)
+	{
+		return;
+	}
+
+	const int level = GetClampedAccountLevel(aIndex);
+
+	PMSG_ACCOUNT_LEVEL_SEND pMsg;
+
+	pMsg.header.set(0xD3, 0x7E, sizeof(pMsg));
+
+	pMsg.AccountLevel = (BYTE)level;
+	pMsg.AutoPotionConfigure = (BYTE)((gServerInfo.m_AutoPotionConfigure[level] != 0) ? 1 : 0);
+	pMsg.AutoPotionThreshold = (BYTE)gServerInfo.m_AutoPotionThreshold;
+
+	DataSend(aIndex, (BYTE*)&pMsg, pMsg.header.size);
 }

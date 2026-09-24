@@ -647,7 +647,15 @@ void CServerInfo::ReadItemInfo() // OK
 
 	g380ItemOption.Load(gPath.GetFullPath("Item\\380ItemOption.txt"));
 
-	gItemOption.LoadBEX(gPath.GetFullPath("Item\\ItemOptionBEx.xml"));
+	// ItemOptionBEx.txt first. The .xml is only read if the .txt is not there, so the
+	// new GameServer.exe and the new data file can go up on the live server in either
+	// order without every BEx bonus silently vanishing in between.
+	if(gItemOption.LoadBExTxt(gPath.GetFullPath("Item\\ItemOptionBEx.txt")) == 0)
+	{
+		gItemOption.LoadBEX(gPath.GetFullPath("Item\\ItemOptionBEx.xml"));
+
+		LogAdd(LOG_RED,"[ItemOptionBEx] ItemOptionBEx.txt not found - loaded ItemOptionBEx.xml instead");
+	}
 
 	g380ItemType.Load(gPath.GetFullPath("Item\\380ItemType.txt"));
 
@@ -710,6 +718,12 @@ void CServerInfo::ReadItemInfo() // OK
 	gSocketItemType.Load(gPath.GetFullPath("Item\\SocketItemType.txt"));
 
 	#endif
+
+	// Push the reloaded BEx table to everyone already online, so a Reload Item after
+	// editing ItemOptionBEx.txt updates open tooltips without a relog. Last, so it
+	// sends the table exactly as loaded. At startup nobody is connected and this is a
+	// no-op - gObjInit() has run by then (GameMain.cpp), so the loop is safe.
+	gItemOption.GCItemOptionBExSendToAll();
 
 	LogAdd(LOG_BLUE,"[ServerInfo] Item loaded successfully");
 }
@@ -4992,4 +5006,30 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	// owner asked for it gone - that way it stays off even if this key never
 	// reaches a deployed ini (several of them are missing other keys already).
 	this->m_ShowResetLimitOnLogin = GetPrivateProfileInt(section, "ShowResetLimitOnLogin", 0, path);
+
+	// PotionDelayMS (CustomConfig.ini): see the header. Negative reads as 0.
+	this->m_PotionDelayMS = GetPrivateProfileInt(section, "PotionDelayMS", 0, path);
+
+	if (this->m_PotionDelayMS < 0)
+	{
+		this->m_PotionDelayMS = 0;
+	}
+
+	// AutoPotion_AL* / AutoPotionThreshold (CustomConfig.ini): see the header.
+	// Sent to each client with its account level (GCAccountLevelSend).
+	this->m_AutoPotionConfigure[0] = GetPrivateProfileInt(section, "AutoPotion_AL0", 0, path);
+	this->m_AutoPotionConfigure[1] = GetPrivateProfileInt(section, "AutoPotion_AL1", 1, path);
+	this->m_AutoPotionConfigure[2] = GetPrivateProfileInt(section, "AutoPotion_AL2", 1, path);
+	this->m_AutoPotionConfigure[3] = GetPrivateProfileInt(section, "AutoPotion_AL3", 1, path);
+
+	this->m_AutoPotionThreshold = GetPrivateProfileInt(section, "AutoPotionThreshold", 30, path);
+
+	if (this->m_AutoPotionThreshold < 10)
+	{
+		this->m_AutoPotionThreshold = 10;
+	}
+	else if (this->m_AutoPotionThreshold > 90)
+	{
+		this->m_AutoPotionThreshold = 90;
+	}
 }

@@ -424,7 +424,7 @@ void CItemOption::LoadBEX(char* FilePath) // OK
 }
 
 
-bool CheckItemSlotEx(LPOBJ lpObj, int IndexItem, int Level, int Exc)
+bool CheckItemSlotEx(LPOBJ lpObj, int IndexItem, int Level, int Exc, int SetLevel)
 {
 	int CountSlot = 0;
 	for (int n = 2; n < 7; n++)
@@ -439,7 +439,9 @@ bool CheckItemSlotEx(LPOBJ lpObj, int IndexItem, int Level, int Exc)
 			{
 				if ((Exc == 1 && lpObj->Inventory[n].IsExcItem()) || Exc == -1)
 				{
-					if ((Level <= lpObj->Inventory[n].m_Level) || Level == -1)
+					// Set bonuses need EVERY piece at the same level as the piece carrying the row
+					// (SetLevel): four +15 pieces and one +13 give nothing. Requested 2026-09-21.
+					if (lpObj->Inventory[n].m_Level == SetLevel && ((Level <= lpObj->Inventory[n].m_Level) || Level == -1))
 					{
 						CountSlot++;
 					}
@@ -481,7 +483,7 @@ void CItemOption::InsertOptionBEX(LPOBJ lpObj, CItem* lpItem, bool flag) // OK
 			{
 				
 				int GetIndexItemSet = (lpItem->m_Index % 512);
-				if (CheckItemSlotEx(lpObj, GetIndexItemSet, it->ItemLevelMin, it->ItemExc))
+				if (CheckItemSlotEx(lpObj, GetIndexItemSet, it->ItemLevelMin, it->ItemExc, lpItem->m_Level))
 				{
 					gItemOption.CBInsertOption(lpObj, it->OptionIndex, it->OptionValue);
 				}

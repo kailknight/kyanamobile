@@ -15,6 +15,7 @@
 #include "TrayMode.h"
 #include "CBInterface.h"
 #include "Input.h"
+#include "QuickToggles.h"
 
 using namespace SEASON3B;
 extern float g_fScreenRate_x;
@@ -1009,31 +1010,14 @@ bool CNewUIBCustomMenuInfo::UseHotKey()
 }
 
 
-DWORD SleepTimeHP = 0;
 bool CNewUIBCustomMenuInfo::Render() //Work()
 {
 	gInterface.Work();
-	//==AutoHP
-	if (this->AutoHP)
-	{
-		BYTE RateHP = 100;
-		if (CharacterAttribute->PrintPlayer.ViewMaxHP > 0)
-		{
-			RateHP = (BYTE)((CharacterAttribute->PrintPlayer.ViewCurHP * 100) / (CharacterAttribute->PrintPlayer.ViewMaxHP));
-		}
-		if (RateHP <= gProtect.m_MainInfo.RateHP)
-		{
-			if (GetTickCount() > SleepTimeHP)
-			{
-				int Index = g_pMyInventory->FindHPItemIndex();
-				if (Index != -1)
-				{
-					SendRequestUse(Index, 0);
-				}
-				SleepTimeHP = GetTickCount() + gProtect.m_MainInfo.DelayAutoHP;
-			}
-		}
-	}
+	// AutoHP is now the auto potion in QuickToggles.cpp: same flag and delay,
+	// but the threshold is the VIP setting (or 30%) instead of MainInfo RateHP.
+	gAutoPotion.Update();
+	gAutoPotion.Render();
+	UpdatePkModeHotkey();
 	return true;
 }
 

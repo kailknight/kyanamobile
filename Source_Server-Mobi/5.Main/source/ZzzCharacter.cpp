@@ -3605,6 +3605,29 @@ bool AttackStage(CHARACTER* c, OBJECT* o)
 		    PlayBuffer(SOUND_PIERCING,o);
         }
         g_iLimitAttackTime = 5;
+
+        // Release early instead of holding the charge for the full
+        // g_iLimitAttackTimeSet (15) ticks, with the charge scaled by attack
+        // speed through the bow swing's PlaySpeed (0.3 + speed*0.004, speed
+        // capped at 400 for Penetration by BCalculateAttackSpeed): ~15 ticks at
+        // 0 speed, 5 at 200, ~3 at the 400 cap. MoveCharacter increments
+        // AttackTime right after this and fires the arrow on the same frame.
+        {
+            float fChargeTicks = 5.5f;
+            if( o->Type==MODEL_PLAYER && o->CurrentAction < Models[MODEL_PLAYER].NumActions )
+            {
+                float fPlaySpeed = Models[MODEL_PLAYER].Actions[o->CurrentAction].PlaySpeed;
+                if( fPlaySpeed > 0.f )
+                    fChargeTicks = 5.5f / fPlaySpeed;
+            }
+            if( fChargeTicks < 2.f )
+                fChargeTicks = 2.f;
+
+            if( c->AttackTime >= fChargeTicks && c->AttackTime < g_iLimitAttackTimeSet )
+            {
+                c->AttackTime = (float)g_iLimitAttackTimeSet;
+            }
+        }
         break;
 
 	case AT_SKILL_BLOOD_ATT_UP:

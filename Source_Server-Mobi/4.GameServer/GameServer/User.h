@@ -999,6 +999,8 @@ struct OBJECTSTRUCT
 	DWORD ComboTime;
 	DWORD HelperDelayTime;
 	DWORD HelperTotalTime;
+	DWORD HelperPvpNoticeTime; // last "no PvP while MU Helper is on" notice
+	int SentAutoPotionState; // GetAutoPotionClientState last sent (-1 = not yet)
 	DWORD PcPointPointTime;
 	DWORD HPAutoRecuperationTime;
 	DWORD MPAutoRecuperationTime;

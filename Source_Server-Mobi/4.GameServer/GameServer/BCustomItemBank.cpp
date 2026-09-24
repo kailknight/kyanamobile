@@ -944,6 +944,44 @@ bool BCustomItemBank::CongTruBank(int aIndex, int ItemIndex, int ItemLevel, int 
 	return 0;
 }
 
+bool BCustomItemBank::CanAddBank(int aIndex, int ItemIndex, int ItemLevel, int Value)
+{
+	// Mirrors CongTruBank's Value > 0 path check for check - keep them in step.
+	if (OBJECT_RANGE(aIndex) == 0 || Value <= 0 || !this->Enable)
+	{
+		return 0;
+	}
+
+	LPOBJ lpObj = &gObj[aIndex];
+
+	if (lpObj->Type != OBJECT_USER || lpObj->Map == 107 || lpObj->Map == 109 || gObjIsConnected(aIndex) == false)
+	{
+		return 0;
+	}
+
+	if (lpObj->IsBot >= 1 || lpObj->m_OfflineMode != 0 || lpObj->IsFakeOnline != 0)
+	{
+		return 0;
+	}
+
+	const int mSlot = this->CheckInfoListItemBank(ItemIndex, ItemLevel);
+
+	if (mSlot == -1 || lpObj->AccountLevel < 0 || lpObj->AccountLevel >= MAX_ACCOUNT_LEVEL)
+	{
+		return 0;
+	}
+
+	for (int n = 0; n < 100; n++)
+	{
+		if (lpObj->BankJewelData[n].ItemIndex == ItemIndex && lpObj->BankJewelData[n].ItemLevel == ItemLevel)
+		{
+			return (Value + lpObj->BankJewelData[n].ItemCount) <= this->mListItemBank[mSlot].MaxCountType[lpObj->AccountLevel];
+		}
+	}
+
+	return 0;
+}
+
 int BCustomItemBank::GetSlotIsItem(int ItemIndex, int ItemLevel)
 {
 	int GetSlot = 0;

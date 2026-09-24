@@ -3029,13 +3029,13 @@ namespace TextCache
 	// be read. With the cache only the misses touch the DIB, so leftovers can
 	// be arbitrarily old, and WriteText copies them in past the end of a
 	// shorter string. Clear the exact region WriteText is about to read.
-	void ClearFontDibRegion(BYTE* fontBuffer, int widthPixels, int heightRows)
+	// dibWidth/dibHeight are the size the DIB was allocated at - see
+	// CUIRenderTextOriginal::WriteText for why not the current screen rate.
+	void ClearFontDibRegion(BYTE* fontBuffer, int dibWidth, int dibHeight, int widthPixels, int heightRows)
 	{
 		if (fontBuffer == NULL || widthPixels <= 0 || heightRows <= 0)
 			return;
 
-		const int dibWidth = static_cast<int>(640 * g_fScreenRate_x);
-		const int dibHeight = static_cast<int>(480 * g_fScreenRate_y);
 		const int pitch = ((dibWidth * 24 + 31) & ~31) >> 3;
 		if (widthPixels > dibWidth)
 			widthPixels = dibWidth;
@@ -3103,6 +3103,7 @@ CUIRenderTextOriginal::CUIRenderTextOriginal()
 	m_hFontDC = NULL;
 	m_hBitmap = NULL;
 	m_pFontBuffer = NULL;
+	m_iDibWidth = m_iDibHeight = 0;
 	m_dwTextColor = m_dwBackColor = 0;
 	m_hCurFont = NULL;
 }
@@ -3114,8 +3115,10 @@ bool CUIRenderTextOriginal::Create(HDC hDC)
     DIB_INFO = (BITMAPINFO*)new BYTE[ sizeof(BITMAPINFOHEADER) + sizeof(PALETTEENTRY) * 256 ];
     memset( DIB_INFO, 0x00, sizeof(BITMAPINFOHEADER) );
     DIB_INFO->bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-    DIB_INFO->bmiHeader.biWidth       = 640*g_fScreenRate_x;		//. 640
-	DIB_INFO->bmiHeader.biHeight      = -(480*g_fScreenRate_y);		//. 480
+	m_iDibWidth = static_cast<int>(640 * g_fScreenRate_x);
+	m_iDibHeight = static_cast<int>(480 * g_fScreenRate_y);
+    DIB_INFO->bmiHeader.biWidth       = m_iDibWidth;		//. 640
+	DIB_INFO->bmiHeader.biHeight      = -m_iDibHeight;		//. 480
     DIB_INFO->bmiHeader.biPlanes      = 1;
     DIB_INFO->bmiHeader.biBitCount    = 24;
     DIB_INFO->bmiHeader.biCompression = BI_RGB;
@@ -3180,7 +3183,12 @@ void CUIRenderTextOriginal::WriteText(int iOffset, int iWidth, int iHeight)
 {
 	const int LIMIT_WIDTH = 256, LIMIT_HEIGHT = 32;
 	
-	SIZE FontDCSize = { 640*g_fScreenRate_x, 480*g_fScreenRate_y };
+	// The DIB's real size, not 640x480 * the current rate. On Android the
+	// drawable can change size after this DIB is created (the emulator settles
+	// at 1024x576 after starting at 1280x720), and a pitch recomputed from the
+	// new rate read every glyph row from the wrong place - all text on screen
+	// came out as rows of scattered dots.
+	SIZE FontDCSize = { m_iDibWidth, m_iDibHeight };
 	int iPitch = ((FontDCSize.cx*24+31)&~31)>>3;
 
 	BITMAP_t * pBitmapFont = &Bitmaps[BITMAP_FONT];
@@ -3530,7 +3538,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 		// cached and fresh pixels.
 		++g_ProfTextCacheMisses;
 		const unsigned long long profTextOutStart = TextProfNow();
-		TextCache::ClearFontDibRegion(m_pFontBuffer,
+		TextCache::ClearFontDibRegion(m_pFontBuffer, m_iDibWidth, m_iDibHeight,
 			iRealRenderWidth + (iClipMove / 3) + 1, RealRenderingSize.cy);
 		::SetBkColor(m_hFontDC, RGB(0, 0, 0));
 		::SetTextColor(m_hFontDC, RGB(255,255,255));
@@ -3610,7 +3618,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 		const unsigned long long profTextOutStart = TextProfNow();
 		// Cached strings no longer refresh the DIB, so a string on this path
 		// can follow arbitrarily old contents. See ClearFontDibRegion.
-		TextCache::ClearFontDibRegion(m_pFontBuffer,
+		TextCache::ClearFontDibRegion(m_pFontBuffer, m_iDibWidth, m_iDibHeight,
 			iRealRenderWidth + (iClipMove / 3) + 1, RealRenderingSize.cy);
 #endif
 		::SetBkColor(m_hFontDC, RGB(0, 0, 0));

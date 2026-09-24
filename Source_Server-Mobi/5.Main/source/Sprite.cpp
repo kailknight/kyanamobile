@@ -287,6 +287,30 @@ void CSprite::Render()
 	if (!m_bShow)
 		return;
 
+	// Every stored Y is flipped against m_fScrHeight (SetPosition), which is the
+	// screen height captured when this sprite was CREATED - but the vertices below
+	// are drawn in a projection of the CURRENT height. If the surface changes size
+	// after a window is built, every sprite lands off by the difference while
+	// anything positioned per frame (text, the hit test) stays put. On Samsung
+	// phones (S22 Ultra, A12, A57) the drawable shrinks shortly after the login
+	// scene is created, so the server list and login window art jumped up - the
+	// login panel off the top of the screen - and left their own labels and tap
+	// areas behind: nobody could log in.
+	//
+	// Re-flipping here moves the art without changing any logical position:
+	// GetYPos() and PtInSprite() both read (m_fScrHeight - fY), which a uniform
+	// shift of both leaves identical. A no-op when the size never changes (PC).
+	const float fScrHeightNow = (float)WindowHeight / m_fScaleY;
+	if (fScrHeightNow != m_fScrHeight)
+	{
+		const float fDelta = fScrHeightNow - m_fScrHeight;
+
+		for (int i = LT; i < POS_MAX; ++i)
+			m_aScrCoord[i].fY += fDelta;
+
+		m_fScrHeight = fScrHeightNow;
+	}
+
 	if (-1 < m_nTexID)
 	{
 		if (!TextureEnable) 

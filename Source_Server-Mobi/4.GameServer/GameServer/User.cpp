@@ -955,6 +955,8 @@ void gObjCharZeroSet(int aIndex) // OK
 	lpObj->ComboTime = 0;
 	lpObj->HelperDelayTime = 0;
 	lpObj->HelperTotalTime = 0;
+	lpObj->HelperPvpNoticeTime = 0;
+	lpObj->SentAutoPotionState = -1;
 	lpObj->PcPointPointTime = GetTickCount();
 	lpObj->HPAutoRecuperationTime = 0;
 	lpObj->MPAutoRecuperationTime = 0;
@@ -3538,6 +3540,19 @@ void gObjSecondProc()
 			{
 				lpObj->CacheSendOnlogin = true;
 				SendThongTinSauKhiVaoGame(lpObj->Index);
+			}
+			// Account level and auto potion rules to the client. Compared every
+			// second instead of sent from each place they can change, so login,
+			// a VIP purchase or expiry and a config reload are all covered.
+			if (lpObj->Type == OBJECT_USER && lpObj->IsFakeOnline == 0 && lpObj->IsBot == 0 && lpObj->m_OfflineMode == 0)
+			{
+				const int autoPotionState = GetAutoPotionClientState(lpObj->Index);
+
+				if (lpObj->SentAutoPotionState != autoPotionState)
+				{
+					lpObj->SentAutoPotionState = autoPotionState;
+					GCAccountLevelSend(lpObj->Index);
+				}
 			}
 			gObjSkillUseProc(lpObj);
 

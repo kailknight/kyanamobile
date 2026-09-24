@@ -15,6 +15,7 @@
 #include "Util.h"
 #include "Viewport.h"
 #include "NewUIMyInventory.h"
+#include "BCustomItemBank.h"
 
 CPersonalShop gPersonalShop;
 //////////////////////////////////////////////////////////////////////
@@ -99,6 +100,45 @@ bool CPersonalShop::CheckPersonalShopSearchItem(int aIndex,int ItemIndex) // OK
 	return 0;
 }
 
+// The single jewel each price type is paid in - the item the jewel bank
+// stores it as (CustomItemBank.xml ItemIndex 7181 / 7182 / 6159).
+static int GetPShopBankJewelItem(int type)
+{
+	switch(type)
+	{
+		case 0: return GET_ITEM(14,13);
+		case 1: return GET_ITEM(14,14);
+		case 2: return GET_ITEM(12,15);
+	}
+
+	return -1;
+}
+
+// Jewels the buyer can be charged from the jewel bank right now. Has to agree
+// with BCustomItemBank::CongTruBank, which refuses maps 107/109: counting the
+// bank where it cannot be charged would hand over the item for free.
+static int GetPShopUsableBankJewelCount(LPOBJ lpObj,int type)
+{
+	#if(JEWELBANKVER2)
+
+	const int item = GetPShopBankJewelItem(type);
+
+	if(item < 0 || lpObj->Map == 107 || lpObj->Map == 109)
+	{
+		return 0;
+	}
+
+	return gBCustomItemBank.CheckCountItemBank(lpObj->Index,item,0);
+
+	#else
+
+	return 0;
+
+	#endif
+}
+
+// table needs PSHOP_REQUIRE_TABLE_SIZE entries: [0..3] are inventory singles
+// and 10/20/30 bundles, [4] is what is left over and taken from the jewel bank.
 void CPersonalShop::GetRequireJewelCount(LPOBJ lpObj,int* count,int* table,int type,int value) // OK
 {
 	int require[4] = {0,0,0,0};
@@ -125,7 +165,12 @@ void CPersonalShop::GetRequireJewelCount(LPOBJ lpObj,int* count,int* table,int t
 			break;
 	}
 
-	(*count) = require[0]+(require[1]*10)+(require[2]*20)+(require[3]*30);
+	// Only the inventory used to count, so a buyer with the jewels sitting in
+	// the jewel bank was told they could not afford the item. The inventory is
+	// still spent first; the bank covers whatever it cannot.
+	const int bank = GetPShopUsableBankJewelCount(lpObj,type);
+
+	(*count) = require[0]+(require[1]*10)+(require[2]*20)+(require[3]*30)+bank;
 
 	if(require[3] > 0)
 	{
@@ -155,12 +200,22 @@ void CPersonalShop::GetRequireJewelCount(LPOBJ lpObj,int* count,int* table,int t
 		value -= require[0];
 	}
 
+	int fromBank = 0;
+
+	if(value > 0 && bank > 0)
+	{
+		fromBank = ((value>bank)?bank:value);
+
+		value -= fromBank;
+	}
+
 	if(value == 0)
 	{
 		table[0] = require[0];
 		table[1] = require[1];
 		table[2] = require[2];
 		table[3] = require[3];
+		table[4] = fromBank;
 	}
 }
 
@@ -281,6 +336,16 @@ void CPersonalShop::SetRequireJewelCount(LPOBJ lpObj,int* table,int type) // OK
 			gItemManager.DeleteInventoryItemCount(lpObj,GET_ITEM(12,141),2,table[3]);
 			break;
 	}
+
+	#if(JEWELBANKVER2)
+
+	// The part GetRequireJewelCount allotted to the jewel bank.
+	if(table[4] > 0)
+	{
+		gBCustomItemBank.CongTruBank(lpObj->Index,GetPShopBankJewelItem(type),0,-table[4],0);
+	}
+
+	#endif
 }
 
 void CPersonalShop::SetPaymentJewelCount(LPOBJ lpObj,int* table,int type) // OK
@@ -348,6 +413,67 @@ void CPersonalShop::SetPaymentJewelCount(LPOBJ lpObj,int* table,int type) // OK
 				break;
 		}
 	}
+}
+
+// Single jewels a payment table is worth (bundles of 10/20/30 unpacked).
+static int GetPaymentJewelValue(const int* table)
+{
+	return table[0]+(table[1]*10)+(table[2]*20)+(table[3]*30);
+}
+
+bool CPersonalShop::CanPayJewelsToBank(LPOBJ lpObj,int tables[3][4]) // OK
+{
+	#if(JEWELBANKVER2)
+
+	bool anything = false;
+
+	for(int type=0;type < 3;type++)
+	{
+		const int value = GetPaymentJewelValue(tables[type]);
+
+		if(value <= 0)
+		{
+			continue;
+		}
+
+		if(gBCustomItemBank.CanAddBank(lpObj->Index,GetPShopBankJewelItem(type),0,value) == 0)
+		{
+			return 0;
+		}
+
+		anything = true;
+	}
+
+	return anything;
+
+	#else
+
+	return 0;
+
+	#endif
+}
+
+void CPersonalShop::PaySellerJewels(LPOBJ lpObj,int* table,int type,bool toBank) // OK
+{
+	#if(JEWELBANKVER2)
+
+	const int value = GetPaymentJewelValue(table);
+
+	if(toBank && value > 0)
+	{
+		// CanPayJewelsToBank said yes before anything moved, so this does not
+		// fail - but if it ever did, pay in items rather than not at all.
+		if(gBCustomItemBank.CongTruBank(lpObj->Index,GetPShopBankJewelItem(type),0,+(value),0) != 0)
+		{
+			return;
+		}
+
+		gLog.Output(LOG_TRADE,"[SellPesonalShopItem][%s][%s] - bank deposit of %d refused, paid as items",lpObj->Account,lpObj->Name,value);
+	}
+
+	#endif
+
+	this->SetPaymentJewelCount(lpObj,table,type);
 }
 
 void CPersonalShop::CGPShopSetItemPriceRecv(PMSG_PSHOP_SET_ITEM_PRICE_RECV* lpMsg,int aIndex) // OK
@@ -655,7 +781,7 @@ void CPersonalShop::CGPShopBuyItemRecv(PMSG_PSHOP_BUY_ITEM_RECV* lpMsg,int aInde
 
 	int PaymentJewelCount[3] = {0};
 
-	int RequireJewelTable[3][4] = {0};
+	int RequireJewelTable[3][PSHOP_REQUIRE_TABLE_SIZE] = {0};
 
 	int PaymentJewelTable[3][4] = {0};
 
@@ -689,28 +815,37 @@ void CPersonalShop::CGPShopBuyItemRecv(PMSG_PSHOP_BUY_ITEM_RECV* lpMsg,int aInde
 		return;
 	}
 
-	if(lpTarget->Inventory[lpMsg->slot].m_PShopJoBValue > 0 && RequireJewelTable[0][0] == 0 && RequireJewelTable[0][1] == 0 && RequireJewelTable[0][2] == 0 && RequireJewelTable[0][3] == 0)
+	if(lpTarget->Inventory[lpMsg->slot].m_PShopJoBValue > 0 && RequireJewelTable[0][0] == 0 && RequireJewelTable[0][1] == 0 && RequireJewelTable[0][2] == 0 && RequireJewelTable[0][3] == 0 && RequireJewelTable[0][4] == 0)
 	{
 		this->GCPShopBuyItemSend(aIndex,bIndex,0,14);
 		return;
 	}
 
-	if(lpTarget->Inventory[lpMsg->slot].m_PShopJoSValue > 0 && RequireJewelTable[1][0] == 0 && RequireJewelTable[1][1] == 0 && RequireJewelTable[1][2] == 0 && RequireJewelTable[1][3] == 0)
+	if(lpTarget->Inventory[lpMsg->slot].m_PShopJoSValue > 0 && RequireJewelTable[1][0] == 0 && RequireJewelTable[1][1] == 0 && RequireJewelTable[1][2] == 0 && RequireJewelTable[1][3] == 0 && RequireJewelTable[1][4] == 0)
 	{
 		this->GCPShopBuyItemSend(aIndex,bIndex,0,15);
 		return;
 	}
 
-	if(lpTarget->Inventory[lpMsg->slot].m_PShopJoCValue > 0 && RequireJewelTable[2][0] == 0 && RequireJewelTable[2][1] == 0 && RequireJewelTable[2][2] == 0 && RequireJewelTable[2][3] == 0)
+	if(lpTarget->Inventory[lpMsg->slot].m_PShopJoCValue > 0 && RequireJewelTable[2][0] == 0 && RequireJewelTable[2][1] == 0 && RequireJewelTable[2][2] == 0 && RequireJewelTable[2][3] == 0 && RequireJewelTable[2][4] == 0)
 	{
 		this->GCPShopBuyItemSend(aIndex,bIndex,0,16);
 		return;
 	}
 
+	// A seller with no room for the jewels is paid into their jewel bank
+	// instead, when it can take them; only otherwise is the sale refused.
+	bool payToSellerBank = false;
+
 	if(gItemManager.GetInventoryEmptySlotCount(lpTarget) < (PaymentJewelCount[0]+PaymentJewelCount[1]+PaymentJewelCount[2]))
 	{
-		this->GCPShopBuyItemSend(aIndex,bIndex,0,17);
-		return;
+		payToSellerBank = this->CanPayJewelsToBank(lpTarget,PaymentJewelTable);
+
+		if(payToSellerBank == false)
+		{
+			this->GCPShopBuyItemSend(aIndex,bIndex,0,17);
+			return;
+		}
 	}
 
 	if(lpTarget->Inventory[lpMsg->slot].m_Index != lpMsg->ItemIndex || lpTarget->Inventory[lpMsg->slot].m_PShopValue != lpMsg->value || lpTarget->Inventory[lpMsg->slot].m_PShopJoBValue != lpMsg->JoBValue || lpTarget->Inventory[lpMsg->slot].m_PShopJoSValue != lpMsg->JoSValue || lpTarget->Inventory[lpMsg->slot].m_PShopJoCValue != lpMsg->JoCValue)
@@ -779,11 +914,11 @@ void CPersonalShop::CGPShopBuyItemRecv(PMSG_PSHOP_BUY_ITEM_RECV* lpMsg,int aInde
 
 	#if(GAMESERVER_UPDATE>=802)
 
-	this->SetPaymentJewelCount(lpTarget,PaymentJewelTable[0],0);
+	this->PaySellerJewels(lpTarget,PaymentJewelTable[0],0,payToSellerBank);
 
-	this->SetPaymentJewelCount(lpTarget,PaymentJewelTable[1],1);
+	this->PaySellerJewels(lpTarget,PaymentJewelTable[1],1,payToSellerBank);
 
-	this->SetPaymentJewelCount(lpTarget,PaymentJewelTable[2],2);
+	this->PaySellerJewels(lpTarget,PaymentJewelTable[2],2,payToSellerBank);
 
 	this->GDPShopItemValueDeleteSaveSend(bIndex,lpMsg->slot);
 

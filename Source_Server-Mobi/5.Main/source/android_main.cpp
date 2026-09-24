@@ -16,6 +16,7 @@
 
 #include "stdafx.h"
 #include "CB_DangKyInGame.h"
+#include "QuickToggles.h"
 #ifdef min
 #undef min
 #endif
@@ -1507,6 +1508,16 @@ constexpr float kPkToggleY = 289.0f;
 constexpr float kPkToggleW = 40.0f;
 constexpr float kPkToggleH = 22.0f;
 
+// AutoPots (auto potion) toggle - same box style again, beside skill slot 3
+// (kVirtualSkillCenters[2], the left button in the ring, whose left edge is at
+// 514 - 19 = 495), to its left and vertically centred on it. A little wider
+// than PK/Combo for its longer label. Tap flips auto potion, hold opens its
+// settings (QuickToggles.cpp) - the same tap-vs-hold shape as combo.
+constexpr float kAutoPotsToggleW = 46.0f;
+constexpr float kAutoPotsToggleH = 22.0f;
+constexpr float kAutoPotsToggleX = 495.0f - 3.0f - kAutoPotsToggleW;
+constexpr float kAutoPotsToggleY = 350.0f - (kAutoPotsToggleH / 2.0f);
+
 constexpr int kAndroidTradePickerMaxEntries = MAX_CHARACTERS_CLIENT;
 constexpr int kAndroidTradePickerVisibleRows = 6;
 constexpr float kAndroidTradePickerX = 280.0f;
@@ -2570,6 +2581,8 @@ struct AndroidComboTogglePressState
     float downY = 0.0f;
 };
 AndroidComboTogglePressState g_androidComboTogglePress{};
+// The AutoPots button press, resolved on finger-up the same way.
+AndroidComboTogglePressState g_androidAutoPotsPress{};
 
 // What the last combo press actually did. Shown next to the toggle because
 // logcat does not come through on these devices, so an on-screen readout is the
@@ -6138,6 +6151,11 @@ AndroidUiRect GetPkToggleRect()
     return { kPkToggleX, kPkToggleY, kPkToggleW, kPkToggleH };
 }
 
+AndroidUiRect GetAutoPotsToggleRect()
+{
+    return { kAutoPotsToggleX, kAutoPotsToggleY, kAutoPotsToggleW, kAutoPotsToggleH };
+}
+
 AndroidUiRect GetComboSettingsRect()
 {
     return {
@@ -9088,6 +9106,18 @@ bool HitTestVirtualPkToggle(float uiX, float uiY)
     return HitTestAndroidUiRect(uiX, uiY, GetPkToggleRect());
 }
 
+// Paired with RenderAutoPotsToggle. No class gate; tap vs hold is decided on
+// finger-up (g_androidAutoPotsPress), like combo.
+bool HitTestAutoPotsToggle(float uiX, float uiY)
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    return HitTestAndroidUiRect(uiX, uiY, GetAutoPotsToggleRect());
+}
+
 // Modal, so it gets first look at a tap while open - called near the top of
 // HandleVirtualFingerDown, same priority as the target/trade pickers. The
 // buttons act immediately on down rather than deciding on release, since
@@ -9892,6 +9922,14 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidScreenOwningWindows[] = {
     SEASON3B::INTERFACE_GOLD_BOWMAN,
     SEASON3B::INTERFACE_GOLD_BOWMAN_LENA,
     SEASON3B::INTERFACE_GENSRANKING,
+
+    // The slot machine, reached from its own NPC. 400x400 of the 640x480 UI
+    // space and draggable, so it can be anywhere on the canvas - there is no
+    // corner the overlay could safely keep. Its stake buttons and the SPIN
+    // button are small targets packed into the lower half, exactly where the
+    // attack wheel and potion slots sit, so leaving it out would have let
+    // those eat the taps that are meant to place a bet.
+    SEASON3B::INTERFACE_SLOTMACHINE,
 };
 
 // The subset of the list above that the movement joystick is allowed to stay
@@ -10095,6 +10133,10 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidChatFriendlyWindows[] = {
 // uses: one non-friendly window is enough to take chat away even if a friendly
 // one is up beside it. That is what keeps STORAGE + ExpandWarehouse safe - the
 // pair is common, and the Ext panel is the one that would be sat on.
+// Defined below, next to the chat block's own geometry constants - it needs
+// kAndroidChatBlockShiftedOffsetX, which is declared after this function.
+bool IsSlotMachineClearOfChatBlock();
+
 bool IsAndroidChatFriendlyWindowOpen()
 {
     // Raw CBInterface popups (Features menu and friends) are not INTERFACE_
@@ -10119,6 +10161,20 @@ bool IsAndroidChatFriendlyWindowOpen()
         }
 
         anyOpen = true;
+
+        // The slot machine is the only DRAGGABLE window in this whole check, so
+        // list membership cannot answer for it. Every other entry sits at fixed
+        // coordinates and was vetted once by hand against the chat block; this one
+        // is wherever the player last dropped it, so it is measured per frame.
+        if (window == SEASON3B::INTERFACE_SLOTMACHINE)
+        {
+            if (IsSlotMachineClearOfChatBlock())
+            {
+                continue;
+            }
+
+            return false;
+        }
 
         bool friendly = false;
         for (const SEASON3B::INTERFACE_LIST allowed : kAndroidChatFriendlyWindows)
@@ -10161,6 +10217,48 @@ constexpr float kAndroidChatBlockShiftedOffsetX = -200.0f;
 float GetAndroidChatBlockOffsetX()
 {
     return IsAndroidChatFriendlyWindowOpen() ? kAndroidChatBlockShiftedOffsetX : 0.0f;
+}
+
+// True when the slot machine window is not sitting on the chat block.
+//
+// Tested against the SHIFTED block (x 7..240), not where the block is right now.
+// That looks circular - the shift depends on friendliness, friendliness depends
+// on the shift - but it resolves: if the window clears the shifted rect we return
+// true, the block moves there, and the two do not overlap. If it does not clear
+// it we return false, the block stays put at 207..440, and chat hides exactly as
+// it did before this window existed. Both answers are self-consistent; testing
+// against the CURRENT position instead would oscillate frame to frame.
+//
+// The window is 400 wide in a 640 space, so the only placements that clear the
+// block are hard right (x >= 240) or high enough that its bottom edge is above
+// the tab strip at y 352 - which at 400 tall means it cannot, since y maxes at
+// 80. Right-hand placement is therefore the practical answer, and the default
+// position is set accordingly when the window opens.
+bool IsSlotMachineClearOfChatBlock()
+{
+    if (g_pNewUISystem == nullptr || g_pSlotMachine == nullptr)
+    {
+        return false;
+    }
+
+    int wx = 0, wy = 0, ww = 0, wh = 0;
+    g_pSlotMachine->GetRect(&wx, &wy, &ww, &wh);
+
+    // The block's own rect, mirroring the four draw sites that derive from
+    // kChatLogX / kChatTabsX so the test cannot drift from what is drawn.
+    const float blockL = kChatLogX - 8.0f + kAndroidChatBlockShiftedOffsetX;
+    const float blockR = blockL + ((kChatTabW + kChatTabGap) * static_cast<float>(kChatTabCount)) + 16.0f;
+    const float blockT = kChatTabsY;
+    const float blockB = kChatLogBottomY;
+
+    const float winL = static_cast<float>(wx);
+    const float winR = static_cast<float>(wx + ww);
+    const float winT = static_cast<float>(wy);
+    const float winB = static_cast<float>(wy + wh);
+
+    const bool overlaps = !(winR <= blockL || winL >= blockR || winB <= blockT || winT >= blockB);
+
+    return !overlaps;
 }
 
 // True when the joystick should stay drawn and tappable despite a window being
@@ -12297,6 +12395,7 @@ bool GetAndroidTutorialStepRect(int step, AndroidUiRect& outRect)
         }
         rect = UnionAndroidUiRect(rect, GetComboToggleRect());
         rect = UnionAndroidUiRect(rect, GetPkToggleRect());
+        rect = UnionAndroidUiRect(rect, GetAutoPotsToggleRect());
         outRect = InflateAndroidUiRect(rect, 8.0f);
         return true;
     }
@@ -14673,6 +14772,16 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    if (HitTestAutoPotsToggle(uiX, uiY))
+    {
+        // Only recorded here; HandleVirtualFingerUp decides tap vs hold.
+        g_androidAutoPotsPress.fingerId = touch.fingerId;
+        g_androidAutoPotsPress.downMs = MU_MobileGetTicks();
+        g_androidAutoPotsPress.downX = uiX;
+        g_androidAutoPotsPress.downY = uiY;
+        return true;
+    }
+
     if (!kShowVirtualAttackButton && !kShowVirtualSkillButtons)
     {
         return HandleVirtualJoystickFingerDown(touch);
@@ -14872,6 +14981,21 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         if (((dx * dx) + (dy * dy)) > (kComboTogglePressMoveCancelUi * kComboTogglePressMoveCancelUi))
         {
             g_androidComboTogglePress = AndroidComboTogglePressState{};
+        }
+        return true;
+    }
+
+    // And for the AutoPots press.
+    if (g_androidAutoPotsPress.fingerId == touch.fingerId)
+    {
+        float moveX = 0.0f;
+        float moveY = 0.0f;
+        TouchToVirtualUi(touch, moveX, moveY);
+        const float dx = moveX - g_androidAutoPotsPress.downX;
+        const float dy = moveY - g_androidAutoPotsPress.downY;
+        if (((dx * dx) + (dy * dy)) > (kComboTogglePressMoveCancelUi * kComboTogglePressMoveCancelUi))
+        {
+            g_androidAutoPotsPress = AndroidComboTogglePressState{};
         }
         return true;
     }
@@ -15093,6 +15217,25 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
             SaveVirtualSkillSlots();
             PlayBuffer(SOUND_CLICK01);
             LOGI("VirtualPad: auto-combo %s", g_virtualComboEnabled ? "on" : "off");
+        }
+        return true;
+    }
+
+    // AutoPots: a quick tap flips auto potion, a hold opens its settings (or
+    // says this account may not change them).
+    if (g_androidAutoPotsPress.fingerId == touch.fingerId)
+    {
+        const uint32_t heldMs = MU_MobileGetTicks() - g_androidAutoPotsPress.downMs;
+        g_androidAutoPotsPress = AndroidComboTogglePressState{};
+
+        if (heldMs >= kComboSettingsLongPressMs)
+        {
+            gAutoPotion.OpenSettings();
+        }
+        else
+        {
+            gAutoPotion.SetEnabled(!gAutoPotion.IsEnabled());
+            PlayBuffer(SOUND_CLICK01);
         }
         return true;
     }
@@ -17380,6 +17523,38 @@ void RenderPkToggle()
     EndBitmap();
 }
 
+// AutoPots (auto potion) toggle, every class. Paired with HitTestAutoPotsToggle.
+void RenderAutoPotsToggle()
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const bool active = gAutoPotion.IsEnabled();
+    const AndroidUiRect rect = GetAutoPotsToggleRect();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRightPanelButtonBox(rect, active);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font,
+             static_cast<int>(rect.x),
+             static_cast<int>(rect.y + 6.0f),
+             active ? 0xFF80FFB0 : 0xFFFFFFFF,
+             0x0,
+             static_cast<int>(rect.w),
+             0, 3,
+             "%s", "AutoPots");
+
+    EndBitmap();
+}
+
 // Long-press-the-toggle settings surface for the combo step pacing - see
 // HandleAndroidComboSettingsFingerDown for the input side. Styled like
 // RenderAndroidSkillPickerList's popup (dim backdrop, drop-shadowed box,
@@ -19337,6 +19512,7 @@ void RenderVirtualPad()
     }
     RenderComboToggle();
     RenderPkToggle();
+    RenderAutoPotsToggle();
     RenderTargetSelectButton();
     RenderSkillPageButton();
 
@@ -21251,15 +21427,70 @@ bool IsAggressiveMobilePerfModeEnabled()
 static float g_RenderScaleX = 0.75f;
 static float g_RenderScaleY = 0.75f;
 
+// Below this physical height the surface is rendered 1:1 instead of scaled.
+// 0.75 of a 720p phone is 540 lines, which is short enough to break the UI
+// layout outright (see ComputeAndroidUiFontSize below), and the perf it buys is
+// not needed by this class of surface anyway: 1544x720 native is 1.1MP, FEWER
+// pixels than the 1860x837 (1.6MP) the UI is tuned on. It also stops a 720p
+// screen being upscaled from 540, which was costing sharpness for nothing.
+//
+// Reported 2026-09-22 on Galaxy S22 Ultra (its HD+ mode is exactly 1544x720),
+// A12 (720p native) and A5x - the login window came out unusable, so no one
+// could get past it. 1080p and up keep the 0.75 scale: 810 lines still lays out.
+static constexpr int kAndroidNoDownscaleHeight = 800;
+
 // Render size for a given physical surface. Aspect is preserved for free because
 // both axes take the same fraction.
 static void ComputeAndroidRenderSize(int screenW, int screenH, int& renderW, int& renderH)
 {
-    renderW = static_cast<int>(screenW * g_RenderScaleX);
-    renderH = static_cast<int>(screenH * g_RenderScaleY);
+    float scaleX = g_RenderScaleX;
+    float scaleY = g_RenderScaleY;
+
+    if (screenH <= kAndroidNoDownscaleHeight)
+    {
+        scaleX = 1.0f;
+        scaleY = 1.0f;
+    }
+
+    renderW = static_cast<int>(screenW * scaleX);
+    renderH = static_cast<int>(screenH * scaleY);
 
     if (renderW < 1) renderW = 1;
     if (renderH < 1) renderH = 1;
+}
+
+// UI font size for the current render target.
+//
+// The UI is tuned on 1860x837 (font 14, g_fScreenRate_x 2.906, _y 1.744).
+// Controls are sized in logical 640x480 units, so what has to stay constant is
+// the font measured in those units: fontSize/rate_x = 4.82 horizontally and
+// fontSize/rate_y = 8.03 vertically. The old formula
+//
+//     fontSize = ceil(12 + (WindowHeight - 480) / 200)
+//
+// is only weakly tied to the render size while both rates are strictly
+// proportional to it, so on a short surface the font came out far too big for
+// the controls holding it - 540 lines gave font 13 at rate_x 1.81, a ratio of
+// 7.19 against the tuned 4.82. Past about +35% the login window breaks: labels
+// overflow their boxes and the centring in UIControls.cpp -
+// (m_iWidth - TextSize.cx / g_fScreenRate_x) / 2 - goes negative, so
+// AndroidTextOut's dstX < 0 guard silently drops the leading glyphs.
+//
+// Scaling by min(rate_x, rate_y) holds BOTH ratios at or below the tuned value
+// whatever the aspect, and reproduces the current font on every surface that
+// already lays out correctly (837 -> 14, 810 -> 14, 900 -> 15), so this only
+// changes the short surfaces that are broken today (720p native -> 12).
+static int ComputeAndroidUiFontSize()
+{
+    constexpr float kTunedFontPerRate = 14.0f / 1.744f;
+
+    const float rate = std::min(g_fScreenRate_x, g_fScreenRate_y);
+
+    int fontSize = static_cast<int>(std::lround(kTunedFontPerRate * rate));
+
+    if (fontSize < 10) fontSize = 10;
+
+    return fontSize;
 }
 
 // TEMP profiling: worst frame in a rolling window, with its bucket breakdown
@@ -21432,6 +21663,12 @@ static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reaso
         return;
     }
 
+    // Rare by design (see SyncAndroidDrawableSizeFromSokol), and the only way to
+    // see one on a player's phone, where logcat is empty.
+    MU_AppendExitTrace("engine resize (%s) %ux%u -> %dx%d surface=%dx%d scene=%d init=%d",
+        reason ? reason : "?", WindowWidth, WindowHeight, screenW, screenH,
+        sapp_width(), sapp_height(), (int)SceneFlag, g_AndroidGameInitialized ? 1 : 0);
+
     g_DrawableWidth = screenW;
     g_DrawableHeight = screenH;
     UpdateAndroidScreenMetrics(screenW, screenH);
@@ -21457,6 +21694,23 @@ static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reaso
         screenH);
 }
 
+// True when two sizes have the same shape, give or take system bars and
+// rounding. A change within this is a resolution change (Samsung's game
+// resolution scaling, a navigation bar appearing) that the present blit can
+// absorb; anything beyond it (rotation, floating/split-screen window) is a new
+// layout that the engine has to be told about.
+static bool IsSameAndroidSurfaceShape(int w0, int h0, int w1, int h1)
+{
+    if ((w0 <= 0) || (h0 <= 0) || (w1 <= 0) || (h1 <= 0))
+    {
+        return false;
+    }
+
+    const float aspect0 = static_cast<float>(w0) / static_cast<float>(h0);
+    const float aspect1 = static_cast<float>(w1) / static_cast<float>(h1);
+    return std::fabs(aspect1 - aspect0) <= (aspect0 * 0.10f);
+}
+
 static void SyncAndroidDrawableSizeFromSokol(const char* reason)
 {
     const int screenW = sapp_width();
@@ -21465,6 +21719,9 @@ static void SyncAndroidDrawableSizeFromSokol(const char* reason)
     {
         return;
     }
+
+    const bool nativeChanged =
+        (screenW != g_NativePresentWidth) || (screenH != g_NativePresentHeight);
 
     // Physical size drives the upscale blit and touch normalisation.
     g_NativePresentWidth = screenW;
@@ -21476,7 +21733,66 @@ static void SyncAndroidDrawableSizeFromSokol(const char* reason)
     int renderH = screenH;
     ComputeAndroidRenderSize(screenW, screenH, renderW, renderH);
 
+    // Once the game is up, the engine size is locked. Far too much is sized
+    // once at creation and never revisited - sprites bake WindowHeight,
+    // the font DIB bakes its pitch, every window is positioned against the
+    // screen it was built on, the fonts are sized from g_fScreenRate - and
+    // Samsung devices resize the surface after startup. Every such resize
+    // left the login screen broken in a new way: server-list art drawn up over
+    // the logo with its labels left behind, text as scattered dots.
+    //
+    // The render backend already scales an offscreen frame of any size onto
+    // the physical surface, and touch is normalised against the physical size,
+    // so keeping the engine size and just re-pointing the blit is correct and
+    // fixes the whole class at once. Only a real change of shape goes through.
+    if (g_AndroidGameInitialized &&
+        (WindowWidth > 0) && (WindowHeight > 0) &&
+        IsSameAndroidSurfaceShape(static_cast<int>(WindowWidth), static_cast<int>(WindowHeight), renderW, renderH))
+    {
+        if (nativeChanged && g_RenderBackend)
+        {
+            MU_AppendExitTrace("surface %s -> %dx%d, engine kept at %ux%u",
+                (reason && reason[0]) ? reason : "?", screenW, screenH, WindowWidth, WindowHeight);
+            // Re-evaluates whether the frame needs the offscreen target now
+            // that the two sizes may differ (or match again).
+            g_RenderBackend->OnDrawableSizeChanged(static_cast<int>(WindowWidth), static_cast<int>(WindowHeight));
+        }
+        return;
+    }
+
     ApplyAndroidDrawableSize(renderW, renderH, reason);
+}
+
+// A surface that is still settling - immersive mode applied a moment late,
+// Samsung's resolution scaling kicking in after the first frame - must not be
+// what the login scene is built against, since the size is locked afterwards.
+// Wait until sokol reports the same size for a few frames in a row, but never
+// longer than a second, before running the one-time game init.
+static bool IsAndroidSurfaceSettled()
+{
+    static int s_lastW = 0;
+    static int s_lastH = 0;
+    static int s_stableFrames = 0;
+    static int s_waitedFrames = 0;
+    constexpr int kStableFramesNeeded = 10;
+    constexpr int kMaxWaitFrames = 60;
+
+    const int w = sapp_width();
+    const int h = sapp_height();
+    if ((w == s_lastW) && (h == s_lastH))
+    {
+        ++s_stableFrames;
+    }
+    else
+    {
+        s_lastW = w;
+        s_lastH = h;
+        s_stableFrames = 0;
+    }
+
+    ++s_waitedFrames;
+    return (w > 1) && (h > 1) &&
+        ((s_stableFrames >= kStableFramesNeeded) || (s_waitedFrames >= kMaxWaitFrames));
 }
 
 static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
@@ -21880,9 +22196,10 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
     // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Window resize 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
     case SDL_WINDOWEVENT:
         if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-            screenW = (ev.window.data1 > 0) ? ev.window.data1 : g_DrawableWidth;
-            screenH = (ev.window.data2 > 0) ? ev.window.data2 : g_DrawableHeight;
-            ApplyAndroidDrawableSize(screenW, screenH, "event");
+            // Same scaled, size-locked path as every frame. This used to apply
+            // the raw physical size, which then held for the rest of the frame
+            // until the next frame's sync scaled it back down again.
+            SyncAndroidDrawableSizeFromSokol("event");
         }
         break;
 
@@ -22269,13 +22586,13 @@ static void QueueSappEventAsSDL(const sapp_event* event)
 
     case SAPP_EVENTTYPE_RESIZED:
         {
-            g_DrawableWidth = (event->framebuffer_width > 0) ? event->framebuffer_width : g_DrawableWidth;
-            g_DrawableHeight = (event->framebuffer_height > 0) ? event->framebuffer_height : g_DrawableHeight;
+            // g_DrawableWidth/Height is the ENGINE size; the physical size in
+            // this event is read from sokol by the sync the handler runs.
             SDL_Event sdlEvent {};
             sdlEvent.type = SDL_WINDOWEVENT;
             sdlEvent.window.event = SDL_WINDOWEVENT_SIZE_CHANGED;
-            sdlEvent.window.data1 = g_DrawableWidth;
-            sdlEvent.window.data2 = g_DrawableHeight;
+            sdlEvent.window.data1 = event->framebuffer_width;
+            sdlEvent.window.data2 = event->framebuffer_height;
             QueueSyntheticSDLEvent(sdlEvent);
         }
         break;
@@ -22449,8 +22766,11 @@ Java_com_muonline_client_MuMainNativeActivity_nativeOnWindowFocusChanged(
 
 static void ProcessAndroidEventQueue()
 {
-    int screenW = g_DrawableWidth;
-    int screenH = g_DrawableHeight;
+    // Pointer events arrive in physical pixels, like touches (see the
+    // SAPP_EVENTTYPE_TOUCHES_* conversion), so normalise against the physical
+    // surface rather than the engine size.
+    int screenW = (g_NativePresentWidth > 0) ? g_NativePresentWidth : g_DrawableWidth;
+    int screenH = (g_NativePresentHeight > 0) ? g_NativePresentHeight : g_DrawableHeight;
     std::vector<SDL_Event> events = DrainSyntheticSDLEvents();
     for (const SDL_Event& event : events)
     {
@@ -22460,8 +22780,6 @@ static void ProcessAndroidEventQueue()
             break;
         }
     }
-    g_DrawableWidth = screenW;
-    g_DrawableHeight = screenH;
 }
 
 static void ShutdownAndroidGame();
@@ -22507,9 +22825,24 @@ static bool InitializeAndroidGame()
         backendEnv ? backendEnv : "(null)",
         RenderBackendTypeToString(requestedBackend));
 
-    int screenW = (g_DrawableWidth > 0) ? g_DrawableWidth : 1280;
-    int screenH = (g_DrawableHeight > 0) ? g_DrawableHeight : 720;
+    // Build against the real surface at the same scale every later frame uses.
+    // This used to take g_DrawableWidth/Height, which was a hard-coded
+    // 1280x720 guess or the unscaled physical size, so the first frame's sync
+    // resized the engine straight after the login scene was built on it.
+    int screenW = 1280;
+    int screenH = 720;
+    if ((sapp_width() > 1) && (sapp_height() > 1))
+    {
+        g_NativePresentWidth = sapp_width();
+        g_NativePresentHeight = sapp_height();
+        RenderBackend_SetNativePresentSize(g_NativePresentWidth, g_NativePresentHeight);
+        ComputeAndroidRenderSize(g_NativePresentWidth, g_NativePresentHeight, screenW, screenH);
+    }
+    g_DrawableWidth = screenW;
+    g_DrawableHeight = screenH;
     UpdateAndroidScreenMetrics(screenW, screenH);
+    MU_AppendExitTrace("startup: surface %dx%d, engine %dx%d",
+        g_NativePresentWidth, g_NativePresentHeight, screenW, screenH);
     LOGI(
         "Screen size (drawable): %dx%d (scale: %.2f x %.2f)",
         screenW,
@@ -22570,8 +22903,7 @@ static bool InitializeAndroidGame()
         preferDirectVertexArrays ? 1 : 0);
 
     {
-        int fontSize = static_cast<int>(std::ceil(12.0f + (static_cast<float>(WindowHeight) - 480.0f) / 200.0f));
-        if (fontSize < 10) fontSize = 10;
+        int fontSize = ComputeAndroidUiFontSize();
         AndroidGDI_Init(fontSize);
         g_hFont = AndroidCreateFont(fontSize, 400);
         g_hFontBold = AndroidCreateFont(fontSize, 600);
@@ -22754,6 +23086,13 @@ static void RunAndroidGameFrame()
 {
     if (!g_AndroidGameInitialized)
     {
+        if (!IsAndroidSurfaceSettled())
+        {
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            return;
+        }
+
         if (!InitializeAndroidGame())
         {
             if (!g_AndroidQuitRequested)
@@ -23800,8 +24139,7 @@ int SDL_main(int argc, char* argv[])
 
     // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Init Android GDI (SDL2_ttf text rendering)
     {
-        int fontSize = (int)std::ceil(12.0f + ((float)WindowHeight - 480.0f) / 200.0f);
-        if (fontSize < 10) fontSize = 10;
+        int fontSize = ComputeAndroidUiFontSize();
         AndroidGDI_Init(fontSize);
 
         // Create Windows-like font handles for the game

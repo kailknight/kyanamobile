@@ -36,6 +36,7 @@
 #include "CBInterface.h"
 #include "CustomEventTime.h"
 #include "CustomRanking.h"
+#include "QuickToggles.h"
 #if defined(__ANDROID__) || defined(MU_IOS)
 #include "Platform/UIAtlas.h"
 #endif
@@ -1902,8 +1903,18 @@ bool SEASON3B::CNewUIItemHotKey::UpdateKeyEvent()
 {
 	int iIndex = -1;
 
+	if (SEASON3B::IsRepeat('Q') == true)
+	{
+		gAutoPotion.OnQHeld(); // held long enough opens the auto potion settings
+	}
+
 	if (SEASON3B::IsPress('Q') == true)
 	{
+		// The third quick press toggles auto potion instead of drinking.
+		if (gAutoPotion.OnQPress())
+		{
+			return false;
+		}
 		iIndex = GetHotKeyItemIndex(HOTKEY_Q);
 	}
 	else if (SEASON3B::IsPress('W') == true)

@@ -2188,3 +2188,18 @@ struct AUTOMOVE_REQ
 };
 void GCAutoMove(AUTOMOVE_REQ* lpMsg, int aIndex);
 //==================
+
+// 0xD3:0x7E, server -> client: the player's account level and the auto
+// potion rules for it (CustomConfig.ini AutoPotion_AL* / AutoPotionThreshold).
+// Sent by gObjSecondProc whenever any of it differs from what the client was
+// last told - on entering the game, when VIP starts or ends, and after a
+// config reload.
+struct PMSG_ACCOUNT_LEVEL_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:7E
+	BYTE AccountLevel;
+	BYTE AutoPotionConfigure; // 1 = may change the threshold (hold Q)
+	BYTE AutoPotionThreshold; // HP %, fixed for AutoPotionConfigure 0
+};
+int GetAutoPotionClientState(int aIndex);
+void GCAccountLevelSend(int aIndex);

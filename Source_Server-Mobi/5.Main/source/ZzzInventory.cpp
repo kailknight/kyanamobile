@@ -24,6 +24,7 @@
 #include "PersonalShopTitleImp.h"
 #include "GOBoid.h"
 #include "CSItemOption.h"
+#include "CItemOptionBEx.h"
 #include "CSChaosCastle.h"
 #include "GMHellas.h"
 #include "npcBreeder.h"
@@ -3390,6 +3391,10 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 		TextNum = g_csItemOption.BuildSetPartsList(ip, TextNum);
 
 		TextNum = g_SocketItemMgr.AttachToolTipForSocketItem(ip, TextNum);
+
+		// Server-side extra options (ItemOptionBEx.txt), sent at login. Before the
+		// sizing pass below, so the tooltip grows to fit them.
+		TextNum = g_ItemOptionBEx.AttachToolTip(ip, TextNum);
 
 		SIZE TextSize = { 0, 0 };
 		float fRateY = g_fScreenRate_y;

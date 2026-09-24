@@ -310,6 +310,20 @@ void CNewUISlotMachine::CenterWindow()
 	m_Pos.x = (int)((sw - (float)WINDOW_WIDTH) / 2.0f);
 	m_Pos.y = (int)((sh - (float)WINDOW_HEIGHT) / 2.0f);
 
+#if defined(__ANDROID__)
+	// Right-aligned on Android instead of centred, so the window clears the chat
+	// block the mobile UI relocates to x 7..240 while a chat-friendly window is up
+	// (android_main.cpp: kAndroidChatBlockShiftedOffsetX and
+	// IsSlotMachineClearOfChatBlock).
+	//
+	// Centred puts the left edge at 120, straight across that block, and the chat
+	// log then hides itself - which on a gambling window means the server's
+	// notices, including the partial-claim line and the win announcements, have
+	// nowhere to appear. The window stays draggable; moving it back over the block
+	// simply takes the chat away again, which the per-frame test handles.
+	m_Pos.x = (int)(sw - (float)WINDOW_WIDTH);
+#endif
+
 	ClampToScreen();
 }
 
@@ -569,6 +583,21 @@ void CNewUISlotMachine::RecvClaimList(BYTE* lpMsg)
 
 	m_ClaimCount = ((pRecv->count > SLOTUI_CLAIM_SIZE) ? SLOTUI_CLAIM_SIZE : pRecv->count);
 	m_ClaimFree = pRecv->free;
+
+	// The claim's own refusal code, shown in this window's status line.
+	//
+	// This was being read off the wire and thrown away, so the only account a
+	// player got of a failed claim was the server's GCNoticeSend line in the chat
+	// log. On Android that log is hidden while this window is up - the window is
+	// 400 wide and centred, so it sits across the left column the chat block
+	// relocates into, which is what disqualifies it from
+	// kAndroidChatFriendlyWindows. The result was a CLAIM ALL that silently did
+	// nothing: no prize, no message, nowhere to look.
+	//
+	// Codes 6/8/9 (box full, no inventory space, no bank slot either) are the ones
+	// that actually reach here; 0 clears the line so a good claim does not leave a
+	// stale refusal on screen.
+	m_LastResultCode = pRecv->result;
 
 	BYTE* p = (lpMsg + sizeof(PMSG_SLOT_CLAIM_LIST_RECV));
 

@@ -264,11 +264,14 @@ bool SEASON3B::CNewUIChatInputBox::UpdateMouseEvent()
 
 	auto const releaseMouse = SEASON3B::IsRelease(VK_LBUTTON);
 
-	if (SelectedCharacter >= 0 && (IsVisible() && releaseMouse))
+	// Right click picks a whisper target too. Only while this box is open:
+	// with it closed, right click on a player is the skill button.
+	if (SelectedCharacter >= 0 && IsVisible() && (releaseMouse || SEASON3B::IsRelease(VK_RBUTTON)))
 	{
 		auto const character = &CharactersClient[SelectedCharacter];
 
 		if (character->Object.Kind == KIND_PLAYER
+			&& character != Hero
 			&& !gMapManager.InChaosCastle()
 			&& !(::IsStrifeMap(gMapManager.WorldActive)
 				&& Hero->m_byGensInfluence != character->m_byGensInfluence))

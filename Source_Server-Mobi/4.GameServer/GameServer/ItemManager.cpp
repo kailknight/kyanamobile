@@ -4396,7 +4396,9 @@ void CItemManager::CGItemBuyRecv(PMSG_ITEM_BUY_RECV* lpMsg,int aIndex,int ok) //
 
 	CItem item;
 
-	if(gShopManager.GetItemByIndex(lpObj->TargetShopNumber,&item,lpMsg->slot) == 0)
+	// The slot is only meaningful within the page the player is on. The buy packet carries
+	// nothing but the slot, so the server's own record of the page decides which item it is.
+	if(gShopManager.GetItemByIndex(lpObj->TargetShopNumber,&item,lpMsg->slot,gShopManager.GetPage(aIndex)) == 0)
 	{
 		DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
 		return;

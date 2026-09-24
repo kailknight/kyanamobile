@@ -28,14 +28,15 @@ CShop::~CShop() // OK
 
 void CShop::Init() // OK
 {
-	for(int n=0;n < SHOP_SIZE;n++)
-	{
-		this->m_Item[n].Clear();
-		this->m_InventoryMap[n] = -1;
-	}
+	// One empty page, always - page 0 must exist so every single-page path works with
+	// no special case. Load() calls this again on every reload, so the pages a previous,
+	// larger copy of the file grew are released here rather than left behind.
+	std::vector<SHOP_PAGE>().swap(this->m_Pages);
+
+	this->m_Pages.resize(1);
 }
 
-void CShop::Load(char* path) // OK
+void CShop::Load(char* path,int maxPages) // OK
 {
 	CMemScript* lpMemScript = new CMemScript;
 
@@ -53,6 +54,18 @@ void CShop::Load(char* path) // OK
 	}
 
 	this->Init();
+
+	if(maxPages < 1)
+	{
+		maxPages = 1;
+	}
+
+	if(maxPages > SHOP_MAX_PAGE)
+	{
+		maxPages = SHOP_MAX_PAGE;
+	}
+
+	int dropped = 0;
 
 	try
 	{
@@ -98,7 +111,10 @@ void CShop::Load(char* path) // OK
 
 			int Socket5 = lpMemScript->GetAsNumber();
 
-			this->InsertItemNew(ItemIndex,ItemLevel,ItemDurability,ItemOption1,ItemOption2,ItemOption3,ItemNewOption,AncOption,JOH,OpEx,Socket1,Socket2,Socket3,Socket4,Socket5,0);
+			if(this->InsertItemNew(ItemIndex,ItemLevel,ItemDurability,ItemOption1,ItemOption2,ItemOption3,ItemNewOption,AncOption,JOH,OpEx,Socket1,Socket2,Socket3,Socket4,Socket5,0,maxPages) == 0)
+			{
+				dropped++;
+			}
 
 
 			//this->InsertItem(ItemIndex,ItemLevel,ItemDurability,ItemOption1,ItemOption2,ItemOption3,ItemNewOption,0);
@@ -110,10 +126,26 @@ void CShop::Load(char* path) // OK
 	}
 
 	delete lpMemScript;
+
+	// Until now an item that did not fit was dropped without a word, so a shop file that had
+	// grown past one screen quietly lost its tail and nothing anywhere said so.
+	if(dropped > 0)
+	{
+		LogAdd(LOG_RED,"[Shop] %s: %d item(s) did not fit and were dropped - the shop is full at %d page(s) of 120 cells (CustomShopPage / CustomShopMaxPage in CustomConfig.ini)",path,dropped,this->GetPageCount());
+	}
+	else if(this->GetPageCount() > 1)
+	{
+		LogAdd(LOG_BLUE,"[Shop] %s: %d items over %d pages",path,(int)this->GetItemCount(),this->GetPageCount());
+	}
 }
 
-void CShop::ShopItemSet(int slot,BYTE type) // OK
+void CShop::ShopItemSet(int page,int slot,BYTE type) // OK
 {
+	if(page < 0 || page >= (int)this->m_Pages.size())
+	{
+		return;
+	}
+
 	if(SHOP_INVENTORY_RANGE(slot) == 0)
 	{
 		return;
@@ -121,7 +153,7 @@ void CShop::ShopItemSet(int slot,BYTE type) // OK
 
 	ITEM_INFO ItemInfo;
 
-	if(gItemManager.GetInfo(this->m_Item[slot].m_Index,&ItemInfo) == 0)
+	if(gItemManager.GetInfo(this->m_Pages[page].Item[slot].m_Index,&ItemInfo) == 0)
 	{
 		return;
 	}
@@ -138,13 +170,18 @@ void CShop::ShopItemSet(int slot,BYTE type) // OK
 	{
 		for(int sx=0;sx < ItemInfo.Width;sx++)
 		{
-			this->m_InventoryMap[(((sy+y)*8)+(sx+x))] = type;
+			this->m_Pages[page].Map[(((sy+y)*8)+(sx+x))] = type;
 		}
 	}
 }
 
-BYTE CShop::ShopRectCheck(int x,int y,int width,int height) // OK
+BYTE CShop::ShopRectCheck(int page,int x,int y,int width,int height) // OK
 {
+	if(page < 0 || page >= (int)this->m_Pages.size())
+	{
+		return 0xFF;
+	}
+
 	if((x+width) > 8 || (y+height) > 15)
 	{
 		return 0xFF;
@@ -154,7 +191,7 @@ BYTE CShop::ShopRectCheck(int x,int y,int width,int height) // OK
 	{
 		for(int sx=0;sx < width;sx++)
 		{
-			if(this->m_InventoryMap[(((sy+y)*8)+(sx+x))] != 0xFF)
+			if(this->m_Pages[page].Map[(((sy+y)*8)+(sx+x))] != 0xFF)
 			{
 				return 0xFF;
 			}
@@ -166,6 +203,8 @@ BYTE CShop::ShopRectCheck(int x,int y,int width,int height) // OK
 
 void CShop::InsertItem(int ItemIndex,int ItemLevel,int ItemDurability,int ItemOption1,int ItemOption2,int ItemOption3,int ItemNewOption,int ItemValue) // OK
 {
+	// The older 8-column loader path. Nothing calls it any more (Load uses InsertItemNew),
+	// so it keeps its original single-screen behaviour on page 0.
 	ITEM_INFO ItemInfo;
 
 	if(gItemManager.GetInfo(ItemIndex,&ItemInfo) == 0)
@@ -177,17 +216,17 @@ void CShop::InsertItem(int ItemIndex,int ItemLevel,int ItemDurability,int ItemOp
 	{
 		for(int x=0;x < 8;x++)
 		{
-			if(this->m_InventoryMap[((y*8)+x)] == 0xFF)
+			if(this->m_Pages[0].Map[((y*8)+x)] == 0xFF)
 			{
-				BYTE slot = this->ShopRectCheck(x,y,ItemInfo.Width,ItemInfo.Height);
+				BYTE slot = this->ShopRectCheck(0,x,y,ItemInfo.Width,ItemInfo.Height);
 
 				if(slot != 0xFF)
 				{
-					this->m_Item[slot].m_Level = ItemLevel;
-					this->m_Item[slot].m_Durability = (float)((ItemDurability==0)?gItemManager.GetItemDurability(ItemIndex,ItemLevel,ItemNewOption,0):ItemDurability);
-					this->m_Item[slot].Convert(ItemIndex,ItemOption1,ItemOption2,ItemOption3,ItemNewOption,0,0,0,0,0xFF);
-					this->m_Item[slot].m_PcPointValue = ItemValue;
-					this->ShopItemSet(slot,1);
+					this->m_Pages[0].Item[slot].m_Level = ItemLevel;
+					this->m_Pages[0].Item[slot].m_Durability = (float)((ItemDurability==0)?gItemManager.GetItemDurability(ItemIndex,ItemLevel,ItemNewOption,0):ItemDurability);
+					this->m_Pages[0].Item[slot].Convert(ItemIndex,ItemOption1,ItemOption2,ItemOption3,ItemNewOption,0,0,0,0,0xFF);
+					this->m_Pages[0].Item[slot].m_PcPointValue = ItemValue;
+					this->ShopItemSet(0,slot,1);
 					return;
 				}
 			}
@@ -195,65 +234,109 @@ void CShop::InsertItem(int ItemIndex,int ItemLevel,int ItemDurability,int ItemOp
 	}
 }
 
-void CShop::InsertItemNew(int ItemIndex,int ItemLevel,int ItemDurability,int ItemOption1,int ItemOption2,int ItemOption3,int ItemNewOption,int Anc, int JOH, int OpEx, int Socket1, int Socket2, int Socket3, int Socket4, int Socket5, int ItemValue) // OK
+bool CShop::InsertItemNew(int ItemIndex,int ItemLevel,int ItemDurability,int ItemOption1,int ItemOption2,int ItemOption3,int ItemNewOption,int Anc, int JOH, int OpEx, int Socket1, int Socket2, int Socket3, int Socket4, int Socket5, int ItemValue,int maxPages) // OK
 {
 	ITEM_INFO ItemInfo;
 
 	if(gItemManager.GetInfo(ItemIndex,&ItemInfo) == 0)
 	{
-		return;
+		// An item id the server does not know. It was always skipped; now it is said so.
+		// Returns true because "does not exist" is not "did not fit" - the caller counts
+		// only the second as a full shop.
+		LogAdd(LOG_RED,"[Shop] item %d is not in Item.txt - skipped",ItemIndex);
+		return 1;
 	}
 
-	for(int y=0;y < 15;y++)
+	// Two tries: the LAST page, then - if it is full and the shop is allowed another - a
+	// fresh one. Never back-fills an earlier page's gaps: that would let a small item jump
+	// ahead of larger ones written before it, and the order of the file is exactly what
+	// the shop owner lays the pages out by.
+	bool added = 0;
+
+	for(int attempt=0;attempt < 2;attempt++)
 	{
-		for(int x=0;x < 8;x++)
+		int page = (int)this->m_Pages.size()-1;
+
+		for(int y=0;y < 15;y++)
 		{
-			if(this->m_InventoryMap[((y*8)+x)] == 0xFF)
+			for(int x=0;x < 8;x++)
 			{
-				BYTE slot = this->ShopRectCheck(x,y,ItemInfo.Width,ItemInfo.Height);
-
-				if(slot != 0xFF)
+				if(this->m_Pages[page].Map[((y*8)+x)] == 0xFF)
 				{
-					this->m_Item[slot].m_Level = ItemLevel;
-					this->m_Item[slot].m_Durability = (float)((ItemDurability==0)?gItemManager.GetItemDurability(ItemIndex,ItemLevel,ItemNewOption,0):ItemDurability);
+					BYTE slot = this->ShopRectCheck(page,x,y,ItemInfo.Width,ItemInfo.Height);
 
-
-					BYTE ItemSocketOption[MAX_SOCKET_OPTION] = {0xFF,0xFF,0xFF,0xFF,0xFF};
-
-					int qtd;
-
-					if (gSocketItemType.CheckSocketItemType(ItemIndex) == 1)
+					if(slot != 0xFF)
 					{
-						qtd = gSocketItemType.GetSocketItemMaxSocket(ItemIndex);
+						CItem* lpItem = &this->m_Pages[page].Item[slot];
 
-						ItemSocketOption[0] = (BYTE)((qtd > 0)?((Socket1 != 255)?Socket1:255):255);
-						ItemSocketOption[1] = (BYTE)((qtd > 1)?((Socket2 != 255)?Socket2:255):255);
-						ItemSocketOption[2] = (BYTE)((qtd > 2)?((Socket3 != 255)?Socket3:255):255);
-						ItemSocketOption[3] = (BYTE)((qtd > 3)?((Socket4 != 255)?Socket4:255):255);
-						ItemSocketOption[4] = (BYTE)((qtd > 4)?((Socket5 != 255)?Socket5:255):255);
-						//this->m_Item[slot].m_SocketOptionBonus = gSocketItemOption.GetSocketItemBonusOption(this->m_Item);
+						lpItem->m_Level = ItemLevel;
+						lpItem->m_Durability = (float)((ItemDurability==0)?gItemManager.GetItemDurability(ItemIndex,ItemLevel,ItemNewOption,0):ItemDurability);
+
+
+						BYTE ItemSocketOption[MAX_SOCKET_OPTION] = {0xFF,0xFF,0xFF,0xFF,0xFF};
+
+						int qtd;
+
+						if (gSocketItemType.CheckSocketItemType(ItemIndex) == 1)
+						{
+							qtd = gSocketItemType.GetSocketItemMaxSocket(ItemIndex);
+
+							ItemSocketOption[0] = (BYTE)((qtd > 0)?((Socket1 != 255)?Socket1:255):255);
+							ItemSocketOption[1] = (BYTE)((qtd > 1)?((Socket2 != 255)?Socket2:255):255);
+							ItemSocketOption[2] = (BYTE)((qtd > 2)?((Socket3 != 255)?Socket3:255):255);
+							ItemSocketOption[3] = (BYTE)((qtd > 3)?((Socket4 != 255)?Socket4:255):255);
+							ItemSocketOption[4] = (BYTE)((qtd > 4)?((Socket5 != 255)?Socket5:255):255);
+							//this->m_Item[slot].m_SocketOptionBonus = gSocketItemOption.GetSocketItemBonusOption(this->m_Item);
+						}
+
+
+						lpItem->Convert(ItemIndex,ItemOption1,ItemOption2,ItemOption3,ItemNewOption,Anc,JOH,OpEx,ItemSocketOption,0xFF);
+
+						lpItem->m_PcPointValue = ItemValue;
+
+						this->ShopItemSet(page,slot,1);
+						return 1;
 					}
-
-
-					this->m_Item[slot].Convert(ItemIndex,ItemOption1,ItemOption2,ItemOption3,ItemNewOption,Anc,JOH,OpEx,ItemSocketOption,0xFF);
-					
-					this->m_Item[slot].m_PcPointValue = ItemValue;
-
-					this->ShopItemSet(slot,1);
-					return;
 				}
 			}
 		}
+
+		// Full. Grow a page and go round again - unless the shop is already at its limit.
+		if(attempt == 0)
+		{
+			if((int)this->m_Pages.size() >= maxPages)
+			{
+				return 0;
+			}
+
+			this->m_Pages.resize(this->m_Pages.size()+1);
+
+			added = 1;
+		}
 	}
+
+	// Did not fit even an empty page (an item wider than 8 or taller than 15). The page
+	// added for it is empty and would only be an empty screen to flip to, so it goes.
+	if(added != 0)
+	{
+		this->m_Pages.pop_back();
+	}
+
+	return 0;
 }
 
-bool CShop::GetItem(CItem* lpItem,int slot) // OK
+bool CShop::GetItem(CItem* lpItem,int slot,int page) // OK
 {
+	if(page < 0 || page >= (int)this->m_Pages.size())
+	{
+		return 0;
+	}
+
 	if(SHOP_INVENTORY_RANGE(slot) != 0)
 	{
-		if(this->m_Item[slot].IsItem() != 0)
+		if(this->m_Pages[page].Item[slot].IsItem() != 0)
 		{
-			(*lpItem) = this->m_Item[slot];
+			(*lpItem) = this->m_Pages[page].Item[slot];
 			return 1;
 		}
 	}
@@ -265,19 +348,48 @@ long CShop::GetItemCount() // OK
 {
 	int count = 0;
 
-	for(int n=0;n < SHOP_SIZE;n++)
+	for(int page=0;page < (int)this->m_Pages.size();page++)
 	{
-		if(this->m_Item[n].IsItem() != 0)
+		for(int n=0;n < SHOP_SIZE;n++)
 		{
-			count++;
+			if(this->m_Pages[page].Item[n].IsItem() != 0)
+			{
+				count++;
+			}
 		}
 	}
 
 	return count;
 }
 
-bool CShop::GCShopItemListSend(int aIndex) // OK
+int CShop::GetPageCount() // OK
 {
+	return (int)this->m_Pages.size();
+}
+
+bool CShop::GCShopItemListSend(int aIndex,int page) // OK
+{
+	if(page < 0 || page >= (int)this->m_Pages.size())
+	{
+		page = 0;
+	}
+
+	// Multi-page shops announce which page this list is BEFORE the list itself, so the
+	// client can empty its grid and set its "page 2/5" label first. A single-page shop
+	// sends nothing extra and is byte-for-byte what it always was.
+	if(this->m_Pages.size() > 1)
+	{
+		PMSG_SHOP_PAGE_SEND pPage;
+
+		pPage.header.set(0xD3,0xB7,sizeof(pPage));
+
+		pPage.page = (BYTE)page;
+
+		pPage.pages = (BYTE)this->m_Pages.size();
+
+		DataSend(aIndex,(BYTE*)&pPage,pPage.header.size);
+	}
+
 	BYTE send[2048];
 
 	PMSG_SHOP_ITEM_LIST_SEND pMsg;
@@ -294,11 +406,11 @@ bool CShop::GCShopItemListSend(int aIndex) // OK
 
 	for(int n=0;n < SHOP_SIZE;n++)
 	{
-		if(this->m_Item[n].IsItem() != 0)
+		if(this->m_Pages[page].Item[n].IsItem() != 0)
 		{
 			info.slot = n;
 
-			gItemManager.ItemByteConvert(info.ItemInfo,this->m_Item[n]);
+			gItemManager.ItemByteConvert(info.ItemInfo,this->m_Pages[page].Item[n]);
 
 			memcpy(&send[size],&info,sizeof(info));
 			size += sizeof(info);
@@ -314,11 +426,11 @@ bool CShop::GCShopItemListSend(int aIndex) // OK
 
 	DataSend(aIndex,send,size);
 
-	this->GCItemValueSend(aIndex);
+	this->GCItemValueSend(aIndex,page);
 	return 1;
 }
 
-void CShop::GCItemValueSend(int Index)
+void CShop::GCItemValueSend(int Index,int page)
 {
 #if (GAMESERVER_CLIENTE_UPDATE >= 9)
 
@@ -328,6 +440,15 @@ void CShop::GCItemValueSend(int Index)
 	}
 
 	LPOBJ lpObj = &gObj[Index];
+
+	if(page < 0 || page >= (int)this->m_Pages.size())
+	{
+		page = 0;
+	}
+
+	// The page whose prices this packet carries. The client keys a price by item type, level
+	// and excellent bits - not by slot - so it does not matter that the slots differ per page.
+	SHOP_PAGE& pg = this->m_Pages[page];
 
 	if((GetTickCount()-lpObj->ShopValueSendDelay) < (DWORD)1200)
 	{
@@ -348,41 +469,41 @@ void CShop::GCItemValueSend(int Index)
 
 	for(int n=0;n < SHOP_SIZE;n++)
 	{
-		if(this->m_Item[n].IsItem() != 0)
+		if(pg.Item[n].IsItem() != 0)
 		{
-			info.index = this->m_Item[n].m_Index;
+			info.index = pg.Item[n].m_Index;
 
-			info.level = this->m_Item[n].m_Level;
+			info.level = pg.Item[n].m_Level;
 
-			info.newopt = this->m_Item[n].m_NewOption;
+			info.newopt = pg.Item[n].m_NewOption;
 
 			info.type = 0;
 
-			info.value = this->m_Item[n].m_BuyMoney;
+			info.value = pg.Item[n].m_BuyMoney;
 
 			info.buysell = 0;
 
-			if (this->m_Item[n].Coin1 > 0)
+			if (pg.Item[n].Coin1 > 0)
 			{
 				info.type = 1;
-				info.value = this->m_Item[n].Coin1;
+				info.value = pg.Item[n].Coin1;
 			}
-			if (this->m_Item[n].Coin2 > 0)
+			if (pg.Item[n].Coin2 > 0)
 			{
 				info.type = 2;
-				info.value = this->m_Item[n].Coin2;
+				info.value = pg.Item[n].Coin2;
 			}
-			if (this->m_Item[n].Coin3 > 0)
+			if (pg.Item[n].Coin3 > 0)
 			{
 				info.type = 3;
-				info.value = this->m_Item[n].Coin3;
+				info.value = pg.Item[n].Coin3;
 			}
 
 			info.sellvalue = 0;
 
-			if (this->m_Item[n].Sell>0)
+			if (pg.Item[n].Sell>0)
 			{
-				info.sellvalue = this->m_Item[n].m_SellMoney;
+				info.sellvalue = pg.Item[n].m_SellMoney;
 			}
 
 			pMsg.count++;

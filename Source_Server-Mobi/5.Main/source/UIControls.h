@@ -739,6 +739,10 @@ class CUIRenderTextOriginal : public IUIRenderText
 	HDC	m_hFontDC;
 	HBITMAP m_hBitmap;
 	BYTE* m_pFontBuffer;
+	// Size the DIB was actually allocated at. g_fScreenRate_x/y move whenever
+	// the drawable is resized, but this buffer does not, so its pitch has to
+	// come from here rather than be re-derived from the current rate.
+	int m_iDibWidth, m_iDibHeight;
 	int m_TypeShadow;
 	DWORD m_dwTextColor, m_dwBackColor;
 	// The selected font is only reachable through the DC, but the text cache

@@ -3499,6 +3499,25 @@ bool CheckArrow()
 	return true;
 }
 
+// Pins the server's idea of where the hero stands to the tile the client shows,
+// the same one-step move Five Shot sends before its cast. A walk interrupted by
+// an attack leaves the server still walking to the path's end, and the server
+// resolves bow skills (Triple Shot's cone, Penetration's radius check) from its
+// own position, so without this they miss until something resyncs it.
+static void SyncHeroTileForBowSkill(CHARACTER *c, OBJECT *o)
+{
+	BYTE PathX[1];
+	BYTE PathY[1];
+	PathX[0] = ( c->PositionX);
+	PathY[0] = ( c->PositionY);
+
+	#ifdef NEW_PROTOCOL_SYSTEM
+		gProtocolSend.SendCharacterMoveNew(c->Key,o->Angle[2],1,&PathX[0],&PathY[0],TargetX,TargetY);
+	#else
+		SendCharacterMove(c->Key,o->Angle[2],1,&PathX[0],&PathY[0],TargetX,TargetY);
+	#endif
+}
+
 bool SkillElf(CHARACTER *c,ITEM *p)
 {
 	OBJECT *o = &c->Object;
@@ -3566,6 +3585,7 @@ bool SkillElf(CHARACTER *c,ITEM *p)
 					{
 						TKey = getTargetCharacterKey ( c, g_MovementSkill.m_iTarget );
 					}
+					SyncHeroTileForBowSkill(c, o);
 					SendRequestMagicContinue(Spe_Num,( c->PositionX),
 						( c->PositionY),(BYTE)(o->Angle[2]/360.f*256.f), 0, 0, TKey, 0 );
 					SetPlayerAttack(c);
@@ -5268,6 +5288,7 @@ void AttackElf(CHARACTER *c, int Skill, float Distance)
 					{
 						TKey = getTargetCharacterKey ( c, g_MovementSkill.m_iTarget );
 					}
+					SyncHeroTileForBowSkill(c, o);
 					SendRequestMagicContinue(Skill,( c->PositionX),
 						( c->PositionY),(BYTE)(o->Angle[2]/360.f*256.f), 0, 0,TKey,0);
 					SetPlayerAttack(c);
@@ -7766,6 +7787,17 @@ int ExecuteSkill(CHARACTER* c, int Skill, float Distance)
 				}
 				if (ClassIndex == CLASS_ELF)
 				{
+					// SkillElf sends g_MovementSkill.m_iTarget as the cast's target
+					// key but never set it, so Triple Shot carried whatever target
+					// the last AttackElf skill (Five Shot etc.) had left there. The
+					// server only lets an area skill hit a player whose key matches
+					// that target, so Triple Shot could not hit a player until
+					// another skill had been cast on them. Same setup as the
+					// knight branch above.
+					g_MovementSkill.m_bMagic = TRUE;
+					g_MovementSkill.m_iSkill = Hero->CurrentSkill;
+					g_MovementSkill.m_iTarget = CheckAttack() ? SelectedCharacter : -1;
+
 					if (SkillElf(c, &CharacterMachine->Equipment[i]))
 					{
 						return (int)ExecuteSkillComplete(c);

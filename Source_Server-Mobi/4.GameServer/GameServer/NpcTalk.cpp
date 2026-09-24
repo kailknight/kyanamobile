@@ -1663,6 +1663,9 @@ void CNpcTalk::CGNpcTalkRecv(PMSG_NPC_TALK_RECV* lpMsg,int aIndex) // OK
 
 	lpObj->TargetShopNumber = lpNpc->ShopNumber;
 
+	// A fresh open is always page 1 - see CShopManager::OpenShop.
+	gShopManager.OpenShop(aIndex);
+
 	//if (gShopManager.GCShopItemListSendByMonsterClass(lpNpc->Class,lpNpc->Map,lpNpc->X,lpNpc->Y,aIndex) == 0)
 	//{
 		gShopManager.GCShopItemListSendByIndex(lpNpc->ShopNumber,aIndex);

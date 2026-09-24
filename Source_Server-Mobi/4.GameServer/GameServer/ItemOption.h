@@ -105,6 +105,12 @@ public:
 	void CBInsertOption(LPOBJ lpObj, int SpecialIndex, int SpecialValue);
 	void CItemOption::LoadBEX(char* FilePath);
 	void CItemOption::InsertOptionBEX(LPOBJ lpObj, CItem* lpItem, bool flag); // OK
+
+	// ItemOptionBEx.txt and the client sync. Defined in ItemOptionBEx.cpp, not
+	// ItemOption.cpp - see the note at the top of that file.
+	bool LoadBExTxt(char* path);
+	void GCItemOptionBExSend(int aIndex);
+	void GCItemOptionBExSendToAll();
 private:
 	std::map<int, std::vector<ITEM_OPTION_INFO>> m_ItemOptionInfo;
 	std::vector<ITEM_OPTION_BEX> m_ItemOptionInfoBEX;

@@ -73,6 +73,7 @@
 #include "MocNap.h"
 #include "BattleSurvivor.h"
 #include "FakeOnline.h"
+#include "ItemOption.h"
 
 void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 {
@@ -1503,6 +1504,11 @@ void DGCharacterInfoRecv(SDHP_CHARACTER_INFO_RECV* lpMsg) // OK
 	gMuRummy.GDReqCardInfo(lpObj);
 
 	#endif
+
+	// The extra item options (ItemOptionBEx.txt), for the client's item tooltip. The
+	// client keeps no copy of that file, so without this it has nothing to show.
+	// Outside every version block on purpose - it is not tied to any season.
+	gItemOption.GCItemOptionBExSend(lpObj->Index);
 
 	#if(GAMESERVER_UPDATE>=803)
 

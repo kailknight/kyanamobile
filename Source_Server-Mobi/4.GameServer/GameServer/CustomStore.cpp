@@ -682,7 +682,7 @@ bool CCustomStore::OnPShopBuyItemRecv(PMSG_PSHOP_BUY_ITEM_RECV* lpMsg,int aIndex
 
 	int PaymentJewelCount[3] = {0};
 
-	int RequireJewelTable[3][4] = {0};
+	int RequireJewelTable[3][PSHOP_REQUIRE_TABLE_SIZE] = {0};
 
 	int PaymentJewelTable[3][4] = {0};
 
@@ -716,28 +716,37 @@ bool CCustomStore::OnPShopBuyItemRecv(PMSG_PSHOP_BUY_ITEM_RECV* lpMsg,int aIndex
 		return 1;
 	}
 
-	if(PShopJoBValue > 0 && RequireJewelTable[0][0] == 0 && RequireJewelTable[0][1] == 0 && RequireJewelTable[0][2] == 0 && RequireJewelTable[0][3] == 0)
+	if(PShopJoBValue > 0 && RequireJewelTable[0][0] == 0 && RequireJewelTable[0][1] == 0 && RequireJewelTable[0][2] == 0 && RequireJewelTable[0][3] == 0 && RequireJewelTable[0][4] == 0)
 	{
 		gPersonalShop.GCPShopBuyItemSend(aIndex,bIndex,0,7);
 		return 1;
 	}
 
-	if(PShopJoSValue > 0 && RequireJewelTable[1][0] == 0 && RequireJewelTable[1][1] == 0 && RequireJewelTable[1][2] == 0 && RequireJewelTable[1][3] == 0)
+	if(PShopJoSValue > 0 && RequireJewelTable[1][0] == 0 && RequireJewelTable[1][1] == 0 && RequireJewelTable[1][2] == 0 && RequireJewelTable[1][3] == 0 && RequireJewelTable[1][4] == 0)
 	{
 		gPersonalShop.GCPShopBuyItemSend(aIndex,bIndex,0,7);
 		return 1;
 	}
 
-	if(PShopJoCValue > 0 && RequireJewelTable[2][0] == 0 && RequireJewelTable[2][1] == 0 && RequireJewelTable[2][2] == 0 && RequireJewelTable[2][3] == 0)
+	if(PShopJoCValue > 0 && RequireJewelTable[2][0] == 0 && RequireJewelTable[2][1] == 0 && RequireJewelTable[2][2] == 0 && RequireJewelTable[2][3] == 0 && RequireJewelTable[2][4] == 0)
 	{
 		gPersonalShop.GCPShopBuyItemSend(aIndex,bIndex,0,7);
 		return 1;
 	}
+
+	// No room for the jewels: into the seller's jewel bank if it can take
+	// them, otherwise the sale is refused (see CPersonalShop::CanPayJewelsToBank).
+	bool payToSellerBank = false;
 
 	if(gItemManager.GetInventoryEmptySlotCount(lpTarget) < (PaymentJewelCount[0]+PaymentJewelCount[1]+PaymentJewelCount[2]))
 	{
-		gPersonalShop.GCPShopBuyItemSend(aIndex,bIndex,0,7);
-		return 1;
+		payToSellerBank = gPersonalShop.CanPayJewelsToBank(lpTarget,PaymentJewelTable);
+
+		if(payToSellerBank == false)
+		{
+			gPersonalShop.GCPShopBuyItemSend(aIndex,bIndex,0,7);
+			return 1;
+		}
 	}
 
 	lpTarget->PShopTransaction = 1;
@@ -762,11 +771,11 @@ bool CCustomStore::OnPShopBuyItemRecv(PMSG_PSHOP_BUY_ITEM_RECV* lpMsg,int aIndex
 
 	GDCharacterInfoSaveSend(aIndex);
 
-	gPersonalShop.SetPaymentJewelCount(lpTarget,PaymentJewelTable[0],0);
+	gPersonalShop.PaySellerJewels(lpTarget,PaymentJewelTable[0],0,payToSellerBank);
 
-	gPersonalShop.SetPaymentJewelCount(lpTarget,PaymentJewelTable[1],1);
+	gPersonalShop.PaySellerJewels(lpTarget,PaymentJewelTable[1],1,payToSellerBank);
 
-	gPersonalShop.SetPaymentJewelCount(lpTarget,PaymentJewelTable[2],2);
+	gPersonalShop.PaySellerJewels(lpTarget,PaymentJewelTable[2],2,payToSellerBank);
 
 	gPersonalShop.GCPShopSellItemSend(bIndex,aIndex,lpMsg->slot);
 
@@ -878,10 +887,24 @@ bool CCustomStore::OnPShopBuyItemWithCustomItem(LPOBJ lpObj,LPOBJ lpTarget,int i
 	// The slot the sold item vacates is deliberately NOT counted: it is freed
 	// after this point, and counting it would make the last item in a full
 	// inventory sellable for exactly one more unit than the seller can hold.
+	//
+	// When the seller cannot hold it, the whole payment goes into their jewel
+	// bank instead, if the bank takes this item and has room under the
+	// account's cap. Only if it cannot is the sale refused. Decided here, before
+	// anything moves.
+	bool payToSellerBank = false;
+
 	if(gItemManager.GetInventoryEmptySlotCount(lpTarget) < price)
 	{
-		gPersonalShop.GCPShopBuyItemSend(aIndex,bIndex,0,7);
-		return 1;
+#if(JEWELBANKVER2)
+		payToSellerBank = gBCustomItemBank.CanAddBank(bIndex,itemIndex,level,price);
+#endif
+
+		if(payToSellerBank == false)
+		{
+			gPersonalShop.GCPShopBuyItemSend(aIndex,bIndex,0,7);
+			return 1;
+		}
 	}
 
 	lpTarget->PShopTransaction = 1;
@@ -936,7 +959,18 @@ bool CCustomStore::OnPShopBuyItemWithCustomItem(LPOBJ lpObj,LPOBJ lpTarget,int i
 
 	GDCharacterInfoSaveSend(aIndex);
 
-	for(int n=0;n < price;n++)
+#if(JEWELBANKVER2)
+	// Checked by CanAddBank above and nothing has touched the seller's bank
+	// since, so this does not fail - but if it ever did, pay in items rather
+	// than not at all.
+	if(payToSellerBank && gBCustomItemBank.CongTruBank(bIndex,itemIndex,level,+(price),0) == 0)
+	{
+		gLog.Output(LOG_TRADE,"[SellPesonalShopItem-CustomItem][%s][%s] - bank deposit of %d refused, paid as items",lpTarget->Account,lpTarget->Name,price);
+		payToSellerBank = false;
+	}
+#endif
+
+	for(int n=0;payToSellerBank == false && n < price;n++)
 	{
 		GDCreateItemSend(bIndex,0xEB,0,0,itemIndex,(BYTE)level,0,0,0,0,-1,0,0,0,0,0,0xFF,0);
 	}

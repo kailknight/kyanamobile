@@ -1165,6 +1165,14 @@ void CSkillManager::UseDurationSkillAttack(int aIndex,int bIndex,CSkill* lpSkill
 
 	if(lpObj->Type != OBJECT_USER || (this->CheckSkillMana(lpObj,lpSkill->m_index) != 0 && this->CheckSkillBP(lpObj,lpSkill->m_index) != 0))
 	{
+		// Triple Shot's client sends its facing in dir (Angle/360*256) and 0 in
+		// angle. SkillTripleShot wants Five Shot's convention, which is the
+		// facing turned 180 degrees.
+		if(lpSkill->m_skill == SKILL_TRIPLE_SHOT)
+		{
+			angle = (BYTE)(dir+128);
+		}
+
 		if(this->RunningSkill(aIndex,bIndex,lpSkill,x,y,angle,combo) != 0 && lpObj->Type == OBJECT_USER)
 		{
 			lpObj->Mana -= ((this->GetSkillMana(lpSkill->m_index)*lpObj->MPConsumptionRate)/100);
@@ -1209,7 +1217,7 @@ bool CSkillManager::RunningSkill(int aIndex,int bIndex,CSkill* lpSkill,BYTE x,BY
 		case SKILL_DEFENSE:
 			return this->SkillDefense(aIndex,bIndex,lpSkill);
 		case SKILL_TRIPLE_SHOT:
-			return this->MultiSkillAttack(aIndex,bIndex,lpSkill,combo);
+			return this->SkillTripleShot(aIndex,bIndex,lpSkill,angle,combo);
 		case SKILL_HEAL:
 			return this->SkillHeal(aIndex,bIndex,lpSkill);
 		case SKILL_GREATER_DEFENSE:
@@ -4349,6 +4357,132 @@ bool CSkillManager::SkillFiveShot(int aIndex,int bIndex,CSkill* lpSkill,BYTE ang
 			{
 				gAttack.Attack(lpObj,&gObj[index],lpSkill,1,0,0,0,combo);
 			}
+		}
+
+		if(combo != 0)
+		{
+			this->GCSkillAttackSend(lpObj,SKILL_COMBO,index,1);
+		}
+
+		if(CHECK_SKILL_ATTACK_COUNT(count) == 0)
+		{
+			break;
+		}
+	}
+
+	return 1;
+}
+
+// Triple Shot used to be client driven: the cast only armed MultiSkillIndex and
+// the damage came from CGMultiSkillAttackRecv, one packet per arrow the client
+// saw touch something. That packet re-runs CheckSkillDelay, and Triple Shot
+// ships with a 300ms delay, so an arrow landing within 300ms of its own cast -
+// and the second and third arrow of every volley - was dropped. Its Radio of 3
+// also cut off anything past three tiles. Resolve it here instead, the way
+// Five Shot does: same cone, three arrows at 0 and +-15 degrees (four with
+// Triple Shot Mastery).
+bool CSkillManager::SkillTripleShot(int aIndex,int bIndex,CSkill* lpSkill,BYTE angle,bool combo) // OK
+{
+	LPOBJ lpObj = &gObj[aIndex];
+
+	int SkillFrustrumX[4],SkillFrustrumY[4];
+
+	this->GetSkillFrustrum(SkillFrustrumX,SkillFrustrumY,angle,lpObj->X,lpObj->Y,6.0f,7.0f,2.0f,0.0f);
+
+	vec3_t Angle;
+
+	Vector(0.0f,6.0f,0.0f,Angle);
+
+	// Triple Shot Mastery adds one arrow (client draws the four at +-5 and
+	// +-15 degrees). Base and Strengthener fire 3.
+	int ArrowCount = 3;
+
+	vec3_t p[4];
+
+	if(lpSkill->m_index == MASTER_SKILL_ADD_TRIPLE_SHOT_ENHANCED)
+	{
+		ArrowCount = 4;
+		Vector(0.0f,0.0f,15.0f,p[0]);
+		Vector(0.0f,0.0f,5.0f,p[1]);
+		Vector(0.0f,0.0f,355.0f,p[2]);
+		Vector(0.0f,0.0f,345.0f,p[3]);
+	}
+	else
+	{
+		Vector(0.0f,0.0f,15.0f,p[0]);
+		Vector(0.0f,0.0f,0.0f,p[1]);
+		Vector(0.0f,0.0f,345.0f,p[2]);
+	}
+
+	float Matrix[3][4];
+
+	vec3_t vFrustrum[4],vFrustrum2[4];
+
+	for(int n=0;n < ArrowCount;n++)
+	{
+		AngleMatrix(p[n],Matrix);
+		VectorRotate(Angle,Matrix,vFrustrum[n]);
+	}
+
+	vec3_t Facing;
+
+	Vector(0.0f,0.0f,(vec_t)((angle*360)/255),Facing);
+
+	AngleMatrix(Facing,Matrix);
+
+	int ArrowFrustrumX[4],ArrowFrustrumY[4];
+
+	for(int n=0;n < ArrowCount;n++)
+	{
+		VectorRotate(vFrustrum[n],Matrix,vFrustrum2[n]);
+
+		ArrowFrustrumX[n] = (int)vFrustrum2[n][0]+lpObj->X;
+
+		ArrowFrustrumY[n] = (int)vFrustrum2[n][1]+lpObj->Y;
+	}
+
+	int count = 0;
+
+	for(int n=0;n < MAX_VIEWPORT;n++)
+	{
+		if(lpObj->VpPlayer2[n].state == VIEWPORT_NONE)
+		{
+			continue;
+		}
+
+		int index = lpObj->VpPlayer2[n].index;
+
+		if(this->CheckSkillTarget(lpObj,index,bIndex,lpObj->VpPlayer2[n].type) == 0)
+		{
+			continue;
+		}
+
+		if(sqrt(pow(((float)lpObj->X-(float)gObj[index].X),2)+pow(((float)lpObj->Y-(float)gObj[index].Y),2)) > 6.0f)
+		{
+			continue;
+		}
+
+		if(this->CheckSkillFrustrum(SkillFrustrumX,SkillFrustrumY,gObj[index].X,gObj[index].Y) == 0)
+		{
+			continue;
+		}
+
+		bool hit = false;
+
+		for(int i=0;i < ArrowCount;i++)
+		{
+			int cross = ((ArrowFrustrumX[i]-lpObj->X)*(gObj[index].Y-lpObj->Y))-((ArrowFrustrumY[i]-lpObj->Y)*(gObj[index].X-lpObj->X));
+
+			if(cross > -5 && cross < 5)
+			{
+				gAttack.Attack(lpObj,&gObj[index],lpSkill,1,0,0,0,combo);
+				hit = true;
+			}
+		}
+
+		if(hit == false)
+		{
+			continue;
 		}
 
 		if(combo != 0)

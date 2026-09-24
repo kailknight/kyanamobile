@@ -203,6 +203,15 @@ namespace SEASON3B
 
 		void SetPos(int x, int y);
 
+		// Where the window currently is, in 640x480 UI space.
+		//
+		// Needed because this window is DRAGGABLE, unlike every other entry in
+		// android_main's kAndroidChatFriendlyWindows - those all sit at fixed
+		// coordinates, so their clearance from the chat block could be decided once
+		// by hand. This one moves, so the same question has to be asked per frame
+		// against wherever the player has put it.
+		void GetRect(int* x, int* y, int* w, int* h);
+
 		// CNewUIObj
 		bool UpdateMouseEvent();
 		bool UpdateKeyEvent();
@@ -349,6 +358,15 @@ namespace SEASON3B
 	void CNewUISlotMachine::SetPos(int x, int y)
 	{
 		m_Pos.x = x; m_Pos.y = y;
+	}
+
+	inline
+	void CNewUISlotMachine::GetRect(int* x, int* y, int* w, int* h)
+	{
+		if(x != NULL) *x = m_Pos.x;
+		if(y != NULL) *y = m_Pos.y;
+		if(w != NULL) *w = WINDOW_WIDTH;
+		if(h != NULL) *h = WINDOW_HEIGHT;
 	}
 
 	inline

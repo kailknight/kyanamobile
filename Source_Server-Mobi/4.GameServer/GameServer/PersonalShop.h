@@ -7,6 +7,10 @@
 #include "ItemManager.h"
 #include "Protocol.h"
 
+// Entries in a GetRequireJewelCount table: inventory singles, 10/20/30
+// bundles, then the part charged to the jewel bank.
+#define PSHOP_REQUIRE_TABLE_SIZE 5
+
 #if(GAMESERVER_UPDATE>=802)
 #define MAX_PERSONAL_SHOP_MONEY 999999999
 #else
@@ -299,6 +303,12 @@ public:
 	void GetPaymentJewelCount(LPOBJ lpObj,int* count,int* table,int type,int value);
 	void SetRequireJewelCount(LPOBJ lpObj,int* table,int type);
 	void SetPaymentJewelCount(LPOBJ lpObj,int* table,int type);
+	// Seller's inventory cannot hold the jewel payment: can their jewel bank
+	// take all of it (every type being paid)? tables = the three payment tables.
+	bool CanPayJewelsToBank(LPOBJ lpObj,int tables[3][4]);
+	// Pay one jewel type, into the bank when toBank (falling back to items if
+	// the bank refuses after all), otherwise as items like SetPaymentJewelCount.
+	void PaySellerJewels(LPOBJ lpObj,int* table,int type,bool toBank);
 	void CGPShopSetItemPriceRecv(PMSG_PSHOP_SET_ITEM_PRICE_RECV* lpMsg,int aIndex);
 	void CGPShopOpenRecv(PMSG_PSHOP_OPEN_RECV* lpMsg,int aIndex);
 	void CGPShopCloseRecv(int aIndex);

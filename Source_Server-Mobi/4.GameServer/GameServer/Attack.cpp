@@ -129,6 +129,22 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 		{
 			return 0;
 		}
+
+		// MU Helper is for hunting. Nothing stopped a player from fighting
+		// other players while it ran (a BK's skills landed on players as usual),
+		// so the helper doubled as a PvP assist. Refused here, on the server,
+		// so it holds for the PC client, the mobile client and anything else.
+		// HelperDelayTime is non-zero exactly while the helper is on - see
+		// CHelper::CGHelperStartRecv / DisableHelper.
+		if(lpObj->HelperDelayTime != 0)
+		{
+			if((GetTickCount()-lpObj->HelperPvpNoticeTime) >= 5000)
+			{
+				lpObj->HelperPvpNoticeTime = GetTickCount();
+				gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"You cannot attack players while MU Helper is on.");
+			}
+			return 0;
+		}
 	}
 
 	if(gMap[lpObj->Map].CheckAttr(lpObj->X,lpObj->Y,1) != 0 || gMap[lpTarget->Map].CheckAttr(lpTarget->X,lpTarget->Y,1) != 0)

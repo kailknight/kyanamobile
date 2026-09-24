@@ -48,11 +48,21 @@ public:
 
 	void RecvKQRegInGame(XULY_CGPACKET* lpMsg);
 	void Clear();
-	
+
 protected:
+	// Reports a request the server never answered. Called every frame the
+	// window is up.
+	void CheckRegisterTimeout();
+
 	CUITextInputBox* CInputData[TYPE_INPUT_DKTK::eMaxINPUT];
 	DWORD TimeSendRegTK;
 	bool OpenDKTK;
+	// A request is out and its reply has not arrived. Repeat submits are
+	// ignored rather than answered with an error box, which used to land on
+	// top of the real result - on mobile, Enter on the last field submits and
+	// players then tapped Register as well.
+	bool m_RegPending;
+	DWORD m_RegSentTick;
 };
 
 extern CB_DangKyInGame* gCB_DangKyInGame;

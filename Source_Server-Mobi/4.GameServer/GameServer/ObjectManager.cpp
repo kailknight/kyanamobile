@@ -2384,6 +2384,12 @@ bool CObjectManager::CharacterUsePotion(LPOBJ lpObj,CItem* lpItem) // OK
 		return 0;
 	}
 
+	// PotionDelayMS (CustomConfig.ini). Returning 0 leaves the potion unused.
+	if(gServerInfo.m_PotionDelayMS > 0 && (GetTickCount()-lpObj->PotionTime) < ((DWORD)gServerInfo.m_PotionDelayMS))
+	{
+		return 0;
+	}
+
 	lpObj->PotionTime = GetTickCount();
 
 	int HPValue = 0;

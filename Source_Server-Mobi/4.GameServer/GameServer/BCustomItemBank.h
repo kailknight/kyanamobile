@@ -73,6 +73,10 @@ public:
 	void BCustomItemBank::GSSendDSSaveDataUser(int aIndex);
 	void BCustomItemBank::UserSendClientInfo(int aIndex);
 	bool BCustomItemBank::CongTruBank(int aIndex, int ItemIndex, int ItemLevel, int Vaule, bool Notice = 1);
+	// Would CongTruBank(aIndex, ItemIndex, ItemLevel, +Value) succeed? Same
+	// checks, no side effects - for callers that must know before anything
+	// moves (personal shop payouts).
+	bool CanAddBank(int aIndex, int ItemIndex, int ItemLevel, int Value);
 	int BCustomItemBank::CheckCountItemBank(int aIndex, int ItemIndex, int ItemLevel);
 	bool ClientSendRutOrGui(REQUEST_RUTGUIBANK* lpMsg, int aIndex);
 	int BCustomItemBank::GetInventoryItemCountBank(LPOBJ lpObj, int index, int level);

@@ -724,6 +724,7 @@
     <ClCompile Include="ItemManager.cpp" />
     <ClCompile Include="ItemMove.cpp" />
     <ClCompile Include="ItemOption.cpp" />
+    <ClCompile Include="ItemOptionBEx.cpp" />
     <ClCompile Include="ItemOptionRate.cpp" />
     <ClCompile Include="ItemStack.cpp" />
     <ClCompile Include="ItemValue.cpp" />

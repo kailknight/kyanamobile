@@ -163,6 +163,8 @@ CB_DangKyInGame::CB_DangKyInGame()
 
 	TimeSendRegTK = GetTickCount();
 	OpenDKTK = false;
+	m_RegPending = false;
+	m_RegSentTick = 0;
 }
 
 CB_DangKyInGame::~CB_DangKyInGame()
@@ -180,6 +182,18 @@ void CB_DangKyInGame::Clear()
 
 	TimeSendRegTK = GetTickCount();
 	OpenDKTK = false;
+	m_RegPending = false;
+}
+
+void CB_DangKyInGame::CheckRegisterTimeout()
+{
+	const DWORD kRegisterReplyTimeoutMs = 10000;
+
+	if (m_RegPending && (GetTickCount() - m_RegSentTick) > kRegisterReplyTimeoutMs)
+	{
+		m_RegPending = false;
+		gInterface.OpenMessageBox("Register", "No response from the server.\nPlease try again.");
+	}
 }
 
 void CB_DangKyInGame::OpenOnOff()
@@ -221,6 +235,7 @@ bool CB_DangKyInGame::RenderWindow(int X, int Y)
 	}
 
 	OpenDKTK = true;
+	CheckRegisterTimeout();
 
 #if defined(__ANDROID__) || defined(MU_IOS)
 	// Mobile gets its own overlay instead of the CUITextInputBox form below.
@@ -436,33 +451,40 @@ bool CB_DangKyInGame::SubmitRegistration(const char* accountText, const char* pa
 	}
 	std::memcpy(szSDT, kDefaultRegisterPhone, min(sizeof(szSDT) - 1, std::strlen(kDefaultRegisterPhone)));
 
+	// The first request is still on its way; its reply (or the timeout) will
+	// report. Answering the duplicate with an error box is what players saw.
+	if (m_RegPending)
+	{
+		return false;
+	}
+
 	if (TimeSendRegTK > GetTickCount())
 	{
-		gInterface.OpenMessageBox("Error", "Thao tac cham lai");
+		gInterface.OpenMessageBox("Error", "Please wait a moment before trying again.");
 		return false;
 	}
 
 	if (strlen(szID) < 1)
 	{
-		gInterface.OpenMessageBox("Error", "Vui long nhap tai khoan");
+		gInterface.OpenMessageBox("Error", "Please enter an account name.");
 		return false;
 	}
 
 	if (strlen(szPass) < 1)
 	{
-		gInterface.OpenMessageBox("Error", "Vui long nhap mat khau");
+		gInterface.OpenMessageBox("Error", "Please enter a password.");
 		return false;
 	}
 
 	if (strlen(szSno) < 7)
 	{
-		gInterface.OpenMessageBox("Error", "Vui long nhap 7 so bao mat");
+		gInterface.OpenMessageBox("Error", "Please enter the 7-digit PIN.");
 		return false;
 	}
 
 	if (!CheckChuoiKyTuDacBiet(szID) || !CheckChuoiKyTuDacBiet(szPass))
 	{
-		gInterface.OpenMessageBox("Error", "Tai khoan hoac mat khau co ky tu khong hop le");
+		gInterface.OpenMessageBox("Error", "The account or password contains characters that are not allowed.");
 		return false;
 	}
 
@@ -482,7 +504,9 @@ bool CB_DangKyInGame::SubmitRegistration(const char* accountText, const char* pa
 
 	DataSend((LPBYTE)&pMsg, pMsg.header.size);
 
-	TimeSendRegTK = GetTickCount() + 5000;
+	TimeSendRegTK = GetTickCount() + 3000;
+	m_RegPending = true;
+	m_RegSentTick = GetTickCount();
 
 	return true;
 }
@@ -493,6 +517,8 @@ void CB_DangKyInGame::RecvKQRegInGame(XULY_CGPACKET* lpMsg)
 	{
 		return;
 	}
+
+	m_RegPending = false;
 
 	char szID[MAX_ID_SIZE + 1] = { 0 };
 	char szPass[MAX_PASSWORD_SIZE + 1] = { 0 };
@@ -539,14 +565,16 @@ void CB_DangKyInGame::RecvKQRegInGame(XULY_CGPACKET* lpMsg)
 		break;
 
 	case CB_DangKyInGame::eTaiKhoanDaTonTai:
-		gInterface.OpenMessageBox("Ket Qua", "ID %s da ton tai", szID);
+		gInterface.OpenMessageBox("Register", "Account %s already exists.", szID);
 		break;
 
 	case CB_DangKyInGame::eDuLieuNhapKhongDung:
-		gInterface.OpenMessageBox("Ket Qua", "Thong tin nhap khong hop le");
+		gInterface.OpenMessageBox("Register", "The details entered are not valid.");
 		break;
 
 	default:
+		// Silence here used to leave players tapping Register again.
+		gInterface.OpenMessageBox("Register", "Registration failed (code %d).", (int)lpMsg->ThaoTac);
 		break;
 	}
 }
