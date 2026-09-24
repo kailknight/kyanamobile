@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cstdio>
 #include <vector>
+#include <unordered_map>
 #include <algorithm>
 
 #define LOG_TAG "GL_Compat"
@@ -266,6 +267,8 @@ static StreamRingSlot s_streamRing[kStreamRingSize];
 static int            s_streamIdx = 0;
 static GLsizeiptr     s_streamOffset = 0;
 static bool           s_streamRingAvailable = false;
+
+bool GL_IsStreamRingActive() { return s_streamRingAvailable; }
 
 #ifndef GL_MAP_PERSISTENT_BIT_EXT
 #define GL_MAP_PERSISTENT_BIT_EXT 0x0040
@@ -2997,6 +3000,65 @@ static GLsizeiptr s_skinEboCapacity = 0;
 
 using SkinVertex = GLSkinVertex; // layout owned by gl_compat.h - callers build it directly
 
+// Redundant-state elimination for the skinned path. Each skinned draw used to
+// issue ~35 GL calls - every uniform, all four attribute pointers, enables,
+// binds and unbinds - almost all of it identical to the draw before. Cheap on
+// a flagship driver, but the emulator ships every call over its GL pipe and a
+// low-end CPU (Samsung A12 class) pays driver overhead per call, and those are
+// where FPS collapsed.
+//
+// Bone count last uploaded, -1 = nothing yet (GL_UpdateSkinningBones).
+static int s_skinLastBoneCount = -1;
+
+// A/B switch: false routes every skinned draw through DrawSkinnedMeshUncached
+// (the pre-2026-09-24 path) so the two can be compared on a device without
+// swapping builds. Kept for measurement, like the text-cache switches.
+static bool s_skinStateCacheEnabled = true;
+
+// Uniform values last set on s_skinProg. Uniforms belong to the program
+// object and only GL_DrawSkinnedMesh sets this program's, so the cache stays
+// true until the program is recreated.
+struct SkinUniformCache {
+    bool valid = false;
+    float mvp[16];
+    float lightDir[3];
+    int vertexLight;
+    float texOffset[2];
+    int chromeMode;
+    float bodyLight[3];
+    float alpha;
+    int useTexture;
+    float glow[3];
+    int hasChrome;
+    float chromeLight[3];
+    int hasOverlay2;
+    float overlay2Light[3];
+};
+static SkinUniformCache s_skinUniforms;
+static bool s_skinUboBound = false;
+
+// One vertex array object per mesh, keyed by the mesh's VBO name: the four
+// attribute pointers and the element buffer are recorded once, so a draw is
+// bind VAO / draw / bind VAO 0. gl_compat's other paths all use VAO 0, whose
+// attribute and element-buffer state is untouched by this.
+static std::unordered_map<GLuint, GLuint> s_skinVaos;
+
+static void ResetSkinStateCaches() {
+    s_skinLastBoneCount = -1;
+    s_skinUniforms.valid = false;
+    s_skinUboBound = false;
+}
+
+static inline bool SkinFloatsDiffer(const float* a, const float* b, int n) {
+    return memcmp(a, b, sizeof(float) * n) != 0;
+}
+
+void GL_SetSkinStateCache(bool enabled) {
+    s_skinStateCacheEnabled = enabled;
+    ResetSkinStateCaches();
+}
+bool GL_GetSkinStateCache() { return s_skinStateCacheEnabled; }
+
 void GL_GetCurrentMVP(float mvp[16]) {
     GetMVP(mvp);
 }
@@ -3026,6 +3088,13 @@ bool GL_SkinInit() {
     glGenBuffers(1, &s_skinVbo);
     glGenBuffers(1, &s_skinEbo);
 
+    // Sampler units never change - set once here instead of on every draw.
+    glUseProgram(s_skinProg);
+    glUniform1i(8, 0);
+    glUniform1i(13, 1);
+    glUniform1i(16, 2);
+    ResetSkinStateCaches();
+
     GL_InvalidateCachedGLState();
     LOGI("GL_SkinInit: OK (prog=%u, boneUbo=%u)", s_skinProg, s_skinBoneUbo);
     return true;
@@ -3038,6 +3107,11 @@ void GL_SkinShutdown() {
     if (s_skinEbo)     { glDeleteBuffers(1, &s_skinEbo); s_skinEbo = 0; }
     s_skinVboCapacity = 0;
     s_skinEboCapacity = 0;
+    for (const auto& entry : s_skinVaos) {
+        glDeleteVertexArrays(1, &entry.second);
+    }
+    s_skinVaos.clear();
+    ResetSkinStateCaches();
 }
 
 bool GL_SkinIsReady() {
@@ -3074,6 +3148,21 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
     // pose into it). Cheap enough to do unconditionally - 200 bones is 9.6KB,
     // and this buffer is already fully rewritten once per skinned draw.
     static float s_boneUpload[kMaxSkinBones][3][4];
+
+    // Every mesh of a character is drawn with that character's bones, and
+    // the caller uploads before each mesh - so most calls repeat exactly the
+    // bones already in the buffer. Skipping those is pure redundancy: the
+    // GPU already has this data, and not writing also means not touching a
+    // buffer queued draws may still be reading. Any change still rewrites the
+    // whole buffer below, identity tail included. This was ~300-660
+    // orphan+uploads of 9.6KB a frame; slow drivers and the emulator's GL
+    // pipe paid for every one.
+    if (s_skinStateCacheEnabled && boneCount == s_skinLastBoneCount &&
+        memcmp(s_boneUpload, boneMatrix3x4, sizeof(float) * 3 * 4 * boneCount) == 0) {
+        return;
+    }
+    s_skinLastBoneCount = boneCount;
+
     memcpy(s_boneUpload, boneMatrix3x4, sizeof(float) * 3 * 4 * boneCount);
     for (int i = boneCount; i < kMaxSkinBones; ++i) {
         memset(s_boneUpload[i], 0, sizeof(s_boneUpload[i]));
@@ -3099,21 +3188,29 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
 // with view*projection, since vertices here are bone-local rest-pose, not
 // pre-baked to world space like gl_compat's other draw paths.
 void GL_DeleteSkinnedMeshBuffers(unsigned int* vboInOut, unsigned int* eboInOut) {
+    if (vboInOut && *vboInOut) {
+        // Its VAO goes with it - the VBO name can be handed out again.
+        const auto vao = s_skinVaos.find(*vboInOut);
+        if (vao != s_skinVaos.end()) {
+            glDeleteVertexArrays(1, &vao->second);
+            s_skinVaos.erase(vao);
+        }
+    }
     if (vboInOut && *vboInOut) { glDeleteBuffers(1, vboInOut); *vboInOut = 0; }
     if (eboInOut && *eboInOut) { glDeleteBuffers(1, eboInOut); *eboInOut = 0; }
 }
 
-void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
-                        const uint16_t* indices, int indexCount,
-                        unsigned int* vboInOut, unsigned int* eboInOut,
-                        const float mvp[16], const float lightDir[3],
-                        const float bodyLight[3], float alpha,
-                        GLuint textureId, const GLSkinDrawState& state) {
-    if (!GL_SkinIsReady() || !vertices || vertexCount <= 0 || !indices || indexCount <= 0 ||
-        !vboInOut || !eboInOut) {
-        return;
-    }
-
+// The pre-2026-09-24 draw path, kept verbatim behind GL_SetSkinStateCache(false)
+// so the redundant-state elimination above can be A/B'd on a device without
+// swapping builds (same convention as g_TextSectionCacheEnabled). Every uniform,
+// attribute pointer and bind is re-issued per draw, and the whole cached-state
+// shadow is invalidated afterwards.
+static void DrawSkinnedMeshUncached(const void* vertices, int vertexCount,
+                                    const uint16_t* indices, int indexCount,
+                                    unsigned int* vboInOut, unsigned int* eboInOut,
+                                    const float mvp[16], const float lightDir[3],
+                                    const float bodyLight[3], float alpha,
+                                    GLuint textureId, const GLSkinDrawState& state) {
     UseProgramCached(s_skinProg);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_skinBoneUbo);
 
@@ -3145,8 +3242,6 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     glBindTexture(GL_TEXTURE_2D, textureId);
     glUniform1i(8, 0);
 
-    // Rest-pose geometry is immutable: upload once, then only bind. Animation
-    // is entirely in the bone-matrix UBO, so nothing here changes per frame.
     const bool firstUpload = (*vboInOut == 0);
     if (firstUpload) {
         glGenBuffers(1, vboInOut);
@@ -3168,14 +3263,7 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     glEnableVertexAttribArray(7);
     glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, boneIndex));
 
-    // Indices live in their own immutable element buffer, uploaded once with
-    // the vertices. Never pass the caller's pointer to glDrawElements: mobile
-    // GLES drivers read client-side pointers asynchronously (this file already
-    // documents SEGV_ACCERR from exactly that on Mali - see
-    // GL_SetPreferDirectVertexArrays), so a pointer into a caller-owned
-    // std::vector is a use-after-free the moment that cache is rebuilt or its
-    // model unloaded while a frame is still in flight.
-    if (firstUpload) {
+    if (*eboInOut == 0) {
         glGenBuffers(1, eboInOut);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER,
@@ -3183,6 +3271,166 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
                      indices, GL_STATIC_DRAW);
     } else {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
+    }
+
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    glDisableVertexAttribArray(4);
+    glDisableVertexAttribArray(5);
+    glDisableVertexAttribArray(6);
+    glDisableVertexAttribArray(7);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, 0);
+
+    GL_InvalidateCachedGLState();
+
+    ++s_drawCallCount; ++s_drawSite[6];
+    s_totalVertices += vertexCount;
+}
+
+void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
+                        const uint16_t* indices, int indexCount,
+                        unsigned int* vboInOut, unsigned int* eboInOut,
+                        const float mvp[16], const float lightDir[3],
+                        const float bodyLight[3], float alpha,
+                        GLuint textureId, const GLSkinDrawState& state) {
+    if (!GL_SkinIsReady() || !vertices || vertexCount <= 0 || !indices || indexCount <= 0 ||
+        !vboInOut || !eboInOut) {
+        return;
+    }
+
+    if (!s_skinStateCacheEnabled) {
+        DrawSkinnedMeshUncached(vertices, vertexCount, indices, indexCount,
+                               vboInOut, eboInOut, mvp, lightDir, bodyLight,
+                               alpha, textureId, state);
+        return;
+    }
+
+    UseProgramCached(s_skinProg);
+    // Indexed binding point 0 is used by nothing else, and orphaning the UBO
+    // in GL_UpdateSkinningBones keeps the same buffer name, so bind it once.
+    if (!s_skinUboBound) {
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_skinBoneUbo);
+        s_skinUboBound = true;
+    }
+
+    // Uniforms: only what differs from the last skinned draw. Samplers are
+    // fixed at GL_SkinInit.
+    SkinUniformCache& u = s_skinUniforms;
+    const bool all = !u.valid;
+    const int vertexLight = state.useVertexLight ? 1 : 0;
+    const int chromeMode = state.chromeMode ? 1 : 0;
+    const int useTexture = state.useTexture ? 1 : 0;
+    const int hasChrome = state.hasChromeOverlay ? 1 : 0;
+    const int hasOverlay2 = state.hasOverlay2 ? 1 : 0;
+    const float texOffset[2] = { state.texOffsetU, state.texOffsetV };
+
+    if (all || SkinFloatsDiffer(u.mvp, mvp, 16)) {
+        glUniformMatrix4fv(0, 1, GL_FALSE, mvp);   // mat4 occupies locations 0-3
+        memcpy(u.mvp, mvp, sizeof(u.mvp));
+    }
+    if (all || SkinFloatsDiffer(u.lightDir, lightDir, 3)) {
+        glUniform3fv(4, 1, lightDir);
+        memcpy(u.lightDir, lightDir, sizeof(u.lightDir));
+    }
+    if (all || u.vertexLight != vertexLight) { glUniform1i(5, vertexLight); u.vertexLight = vertexLight; }
+    if (all || SkinFloatsDiffer(u.texOffset, texOffset, 2)) {
+        glUniform2f(6, texOffset[0], texOffset[1]);
+        memcpy(u.texOffset, texOffset, sizeof(u.texOffset));
+    }
+    if (all || u.chromeMode != chromeMode) { glUniform1i(7, chromeMode); u.chromeMode = chromeMode; }
+    if (all || SkinFloatsDiffer(u.bodyLight, bodyLight, 3)) {
+        glUniform3fv(9, 1, bodyLight);
+        memcpy(u.bodyLight, bodyLight, sizeof(u.bodyLight));
+    }
+    if (all || u.alpha != alpha) { glUniform1f(10, alpha); u.alpha = alpha; }
+    if (all || u.useTexture != useTexture) { glUniform1i(11, useTexture); u.useTexture = useTexture; }
+    if (all || SkinFloatsDiffer(u.glow, state.glowColor, 3)) {
+        glUniform3fv(12, 1, state.glowColor);
+        memcpy(u.glow, state.glowColor, sizeof(u.glow));
+    }
+    if (all || u.hasChrome != hasChrome) { glUniform1i(15, hasChrome); u.hasChrome = hasChrome; }
+    if (all || u.hasOverlay2 != hasOverlay2) { glUniform1i(18, hasOverlay2); u.hasOverlay2 = hasOverlay2; }
+    // The overlay colours only matter while their overlay is on; an unused
+    // one is not refreshed, so compare against a stale value only then.
+    if (state.hasChromeOverlay) {
+        if (all || SkinFloatsDiffer(u.chromeLight, state.chromeBodyLight, 3)) {
+            glUniform3fv(14, 1, state.chromeBodyLight);
+            memcpy(u.chromeLight, state.chromeBodyLight, sizeof(u.chromeLight));
+        }
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, state.chromeTextureId);
+    }
+    if (state.hasOverlay2) {
+        if (all || SkinFloatsDiffer(u.overlay2Light, state.overlay2BodyLight, 3)) {
+            glUniform3fv(17, 1, state.overlay2BodyLight);
+            memcpy(u.overlay2Light, state.overlay2BodyLight, sizeof(u.overlay2Light));
+        }
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, state.overlay2TextureId);
+    }
+    if (all) {
+        // First pass after a reset: make sure an overlay colour that was never
+        // written is not mistaken for a cached one next time.
+        if (!state.hasChromeOverlay) { memset(u.chromeLight, 0xFF, sizeof(u.chromeLight)); }
+        if (!state.hasOverlay2) { memset(u.overlay2Light, 0xFF, sizeof(u.overlay2Light)); }
+    }
+    u.valid = true;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureId);
+
+    // Rest-pose geometry is immutable: upload once, then only bind. Animation
+    // is entirely in the bone-matrix UBO, so nothing here changes per frame.
+    const bool firstUpload = (*vboInOut == 0);
+    if (firstUpload) {
+        glGenBuffers(1, vboInOut);
+        glBindBuffer(GL_ARRAY_BUFFER, *vboInOut);
+        glBufferData(GL_ARRAY_BUFFER,
+                     static_cast<GLsizeiptr>(vertexCount) * sizeof(SkinVertex),
+                     vertices, GL_STATIC_DRAW);
+        s_boundArrayBuffer = *vboInOut;
+    }
+
+    // The mesh's VAO holds its four attribute pointers and its element
+    // buffer, so after the first draw this is a single bind.
+    GLuint& vao = s_skinVaos[*vboInOut];
+    if (vao == 0) {
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+
+        glBindBuffer(GL_ARRAY_BUFFER, *vboInOut);
+        s_boundArrayBuffer = *vboInOut;
+
+        const GLsizei stride = sizeof(SkinVertex);
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restPos));
+        glEnableVertexAttribArray(5);
+        glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restNormal));
+        glEnableVertexAttribArray(6);
+        glVertexAttribPointer(6, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, uv));
+        glEnableVertexAttribArray(7);
+        glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, boneIndex));
+
+        // Indices live in their own immutable element buffer, uploaded once
+        // with the vertices. Never pass the caller's pointer to
+        // glDrawElements: mobile GLES drivers read client-side pointers
+        // asynchronously (this file already documents SEGV_ACCERR from exactly
+        // that on Mali - see GL_SetPreferDirectVertexArrays), so a pointer
+        // into a caller-owned std::vector is a use-after-free the moment that
+        // cache is rebuilt or its model unloaded while a frame is in flight.
+        if (*eboInOut == 0) {
+            glGenBuffers(1, eboInOut);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                         static_cast<GLsizeiptr>(indexCount) * sizeof(uint16_t),
+                         indices, GL_STATIC_DRAW);
+        } else {
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
+        }
+    } else {
+        glBindVertexArray(vao);
     }
     // Does the mesh ahead use a different texture than the one before it?
     // This decides whether the 689 skinned draws a frame can be merged at all:
@@ -3212,19 +3460,18 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     // geometry reaches the rasteriser wound correctly, and whatever drops that
     // body mesh is on a different path - it is not this one.
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-    glDisableVertexAttribArray(4);
-    glDisableVertexAttribArray(5);
-    glDisableVertexAttribArray(6);
-    glDisableVertexAttribArray(7);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, 0);
+    // Back to VAO 0, which every other gl_compat path uses - its attribute
+    // arrays and element buffer are exactly as they were before this draw.
+    glBindVertexArray(0);
 
-    // Everything above bypassed gl_compat's own cached-state tracking (own
-    // program/attrib locations, raw texture/buffer binds) - tell it to
-    // re-sync instead of trusting stale cached values on the next call.
-    GL_InvalidateCachedGLState();
+    // Only the texture bindings moved outside gl_compat's tracking. This used
+    // to be a full GL_InvalidateCachedGLState(), which also forgot the cap,
+    // blend, depth and colour-mask state this draw never touches, so the next
+    // ordinary draw after every character mesh re-sent all of it. The program
+    // went through UseProgramCached and the array buffer was recorded above.
+    s_boundTexture = 0;
+    CachTexture = 0x7FFFFFFF; // ZzzOpenglUtil's shadow - see GL_InvalidateCachedGLState
 
     ++s_drawCallCount; ++s_drawSite[6];
     s_totalVertices += vertexCount;

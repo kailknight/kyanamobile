@@ -136,6 +136,17 @@ bool GL_GetPreferDirectVertexArrays();
 // Eliminates ~105 unnecessary driver-level malloc calls per frame on emulator.
 void GL_SetSkipVBOOrphan(bool skip);
 
+// A/B switch for the skinned-mesh redundant-state elimination (cached uniforms,
+// per-mesh VAOs, bone upload skipped when unchanged). false = the older path
+// that re-issues everything per draw. Measurement aid; default true.
+void GL_SetSkinStateCache(bool enabled);
+bool GL_GetSkinStateCache();
+
+// True when the persistent-mapped streaming ring is in use (needs
+// GL_EXT_buffer_storage + ES 3.2 base-vertex draws). False means every
+// streamed draw takes the per-draw glBufferData orphan (or client arrays).
+bool GL_IsStreamRingActive();
+
 // TEMP profiling: reads GL_DEPTH_BITS / GL_STENCIL_BITS for whichever
 // framebuffer is currently bound, so the real depth-stencil format can be
 // confirmed rather than assumed.

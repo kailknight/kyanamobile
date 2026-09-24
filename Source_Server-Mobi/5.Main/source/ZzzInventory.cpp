@@ -12633,8 +12633,21 @@ void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t 
     RenderPartObject(o,Type,NULL,Light,alpha,ItemLevel,Option1,ExtOption,true,true,true);
 }
 
+// Measurement switch (mu_gl_ab.txt "itemIcons=0"): skips every 3D item icon.
+// Opening the inventory costs ~5x the frame time on weak hardware and on the
+// emulator; each icon is a full model render - bone transform, a CHARACTER on
+// the stack and a mesh draw - repeated every frame for something that never
+// changes. This isolates that cost from the rest of the window so the fix is
+// aimed at what is actually expensive, not at a guess.
+bool g_AndroidItemIconsEnabled = true;
+
 void RenderItem3D(float sx,float sy,float Width,float Height,int Type,int Level,int Option1,int ExtOption,bool PickUp,float ScaleMul)
 {
+	if (!g_AndroidItemIconsEnabled)
+	{
+		return;
+	}
+
 	bool Success = false;
 	if((g_pPickedItem == NULL || PickUp) 
 		&& SEASON3B::CheckMouseIn(sx, sy, Width, Height))

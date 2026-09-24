@@ -22886,7 +22886,7 @@ static bool InitializeAndroidGame()
         }
     }
 
-    const bool preferDirectVertexArrays = IsLikelyAndroidEmulator();
+    bool preferDirectVertexArrays = IsLikelyAndroidEmulator();
     g_adaptivePerf.isEmulator = preferDirectVertexArrays;
     GL_SetPreferDirectVertexArrays(preferDirectVertexArrays);
     // TEMP A/B: orphaning the streaming VBO per draw is a large win on Adreno
@@ -22901,6 +22901,53 @@ static bool InitializeAndroidGame()
         "GL compat VA policy: preferDirect=%d (emulator=%d)",
         preferDirectVertexArrays ? 1 : 0,
         preferDirectVertexArrays ? 1 : 0);
+
+    // TEMP A/B for the slow-device FPS work (emulator / Samsung A12): an
+    // optional mu_gl_ab.txt in the data folder overrides the draw-path policy
+    // for this session, so variants can be compared without a rebuild each.
+    // Nothing is drawn; absent file = normal behaviour. Keys, one per line:
+    //   preferDirect=0|1  skipOrphan=0|1  skinCache=0|1  itemIcons=0|1
+    if (FILE* ab = fopen("mu_gl_ab.txt", "r"))
+    {
+        char line[64];
+        while (fgets(line, sizeof(line), ab) != nullptr)
+        {
+            int value = 0;
+            if (sscanf(line, "preferDirect=%d", &value) == 1)
+            {
+                preferDirectVertexArrays = (value != 0);
+                GL_SetPreferDirectVertexArrays(preferDirectVertexArrays);
+            }
+            else if (sscanf(line, "skipOrphan=%d", &value) == 1)
+            {
+                GL_SetSkipVBOOrphan(value != 0);
+            }
+            else if (sscanf(line, "skinCache=%d", &value) == 1)
+            {
+                GL_SetSkinStateCache(value != 0);
+            }
+            else if (sscanf(line, "itemIcons=%d", &value) == 1)
+            {
+                extern bool g_AndroidItemIconsEnabled; // ZzzInventory.cpp
+                g_AndroidItemIconsEnabled = (value != 0);
+            }
+        }
+        fclose(ab);
+        MU_AppendExitTrace("gl A/B file applied: preferDirect=%d skinCache=%d",
+            preferDirectVertexArrays ? 1 : 0, GL_GetSkinStateCache() ? 1 : 0);
+    }
+
+    // Which draw path this device actually gets - into mu_exit_trace.txt,
+    // since logcat is empty on the test phones and a slow device (A12, the
+    // emulator) is only diagnosable if we know whether the streaming ring is on.
+    {
+        const char* glRenderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const char* glVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        MU_AppendExitTrace("gpu: %s | %s | ring=%d preferDirect=%d skipOrphan=%d emulator=%d",
+            glRenderer ? glRenderer : "?", glVersion ? glVersion : "?",
+            GL_IsStreamRingActive() ? 1 : 0, preferDirectVertexArrays ? 1 : 0,
+            (preferDirectVertexArrays || g_ForceSkipVBOOrphan) ? 1 : 0, g_adaptivePerf.isEmulator ? 1 : 0);
+    }
 
     {
         int fontSize = ComputeAndroidUiFontSize();
