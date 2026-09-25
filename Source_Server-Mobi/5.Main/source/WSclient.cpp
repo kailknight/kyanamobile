@@ -3251,7 +3251,7 @@ void ReceiveAttackDamage( BYTE *ReceiveBuffer )
 		if(ShieldDamage > 0)
 		{
 			vec3_t nPosShieldDamage;
-			Vector(0.8f,1.f,0.f,Light);
+			Vector(1.f,0.9f,0.2f,Light);
 			nPosShieldDamage[0] = o->Position[0]; nPosShieldDamage[1] = o->Position[1];
 			nPosShieldDamage[2] = o->Position[2] + 25.f;
 			CreatePoint(nPosShieldDamage, ShieldDamage, Light);
@@ -3338,29 +3338,31 @@ void ReceiveAttackDamage( BYTE *ReceiveBuffer )
 				break;
 			case 2:	//	DT_EXCELLENT
 				scale = 50.f;
-				Vector(0.f,1.f,0.6f,Light);
+				Vector(0.1f,1.f,0.1f,Light);
 				break;
 			case 3:	//	DT_CRITICAL
 				scale = 50.f;
-				Vector(0.f,0.6f,1.f,Light);
+				Vector(0.2f,0.45f,1.f,Light);
 				break;
 			case 4:	//	DT_MIRROR
-				Vector(1.f,0.f,1.f,Light);
+				Vector(1.f,0.35f,1.f,Light);
 				break;
 			case 5: //	DT_POSION
-				Vector(0.f,1.f,0.f,Light);
-				break;
 			case 6:	//	DT_DOT
-				Vector(0.7f,0.4f,1.0f,Light);
+				Vector(0.6f,1.f,0.5f,Light);
 				break;
 			default :
 				Vector ( 1.f, 1.f, 1.f, Light );
 				break;
 			}
-			
+
 			if ( bComboEnable )
 			{
 				scale = 50.f;
+			}
+			else if ( bDoubleEnable )
+			{
+				Vector(1.f,1.f,1.f,Light);
 			}
 		}
 		//====
@@ -3427,7 +3429,7 @@ void ReceiveAttackDamage( BYTE *ReceiveBuffer )
 		if(ShieldDamage > 0)
 		{
 			vec3_t nPosShieldDamage;
-			Vector(0.8f,1.f,0.f,Light);
+			Vector(1.f,0.9f,0.2f,Light);
 			nPosShieldDamage[0] = o->Position[0]; nPosShieldDamage[1] = o->Position[1];
 			nPosShieldDamage[2] = o->Position[2] + 25.f;
 			CreatePoint(nPosShieldDamage, ShieldDamage, Light);

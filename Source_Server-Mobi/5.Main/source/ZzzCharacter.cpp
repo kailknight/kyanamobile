@@ -3470,7 +3470,11 @@ bool AttackStage(CHARACTER* c, OBJECT* o)
 					PlayBuffer(SOUND_SKILL_SWORD2);
 			}
 
-			if ( 2 <= c->AttackTime && c->AttackTime <= 8)
+			// AttackTime steps by FPS_ANIMATION_FACTOR each frame, so at 60 FPS it
+			// spends ~2.4x as many frames in these ranges as the 25 FPS the effect
+			// was made for, and every frame spawned a full batch. Keep the batches
+			// at the reference rate.
+			if ( 2 <= c->AttackTime && c->AttackTime <= 8 && rand_fps_check(1) )
 			{	// ±â ¸ðÀ¸±â
 				for ( int j = 0; j < 3; ++j)
 				{
@@ -3508,8 +3512,11 @@ bool AttackStage(CHARACTER* c, OBJECT* o)
 				Position[1] += -fDistance * cosf( o->Angle[2]*Q_PI/180.0f);
 				//Position[2] += 110.0f;
 				vec3_t Light = { 1.0f, 1.0f, 1.0f};
-				CreateEffect( MODEL_SPEAR, Position, o->Angle, Light, 1, o);
-				CreateEffect( MODEL_SPEAR, Position, o->Angle, Light, 1, o);
+				if ( rand_fps_check(1) )
+				{
+					CreateEffect( MODEL_SPEAR, Position, o->Angle, Light, 1, o);
+					CreateEffect( MODEL_SPEAR, Position, o->Angle, Light, 1, o);
+				}
 
 				if(c->TargetCharacter != -1)
 				{

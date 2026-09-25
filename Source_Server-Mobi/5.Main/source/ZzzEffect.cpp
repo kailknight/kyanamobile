@@ -7512,11 +7512,14 @@ void MoveEffect(OBJECT * o, int iIndex)
 		}
 		break;
 	case MODEL_SPEAR:
-		if (1 == o->SubType)
+		// One flare per reference frame, not per rendered frame - Death Stab
+		// spawns these two at a time, so the per-frame version filled the joint
+		// pool at phone frame rates.
+		if (1 == o->SubType && rand_fps_check(1))
 		{
 			CreateJoint(BITMAP_FLARE, o->Position, o->Position, o->Angle, 12, o, 100.0f);
 		}
-		else if (0 == o->SubType)
+		else if (0 == o->SubType && rand_fps_check(1))
 		{
 			CreateJoint(BITMAP_FLARE, o->Position, o->Position, o->Angle, 4, o, 50.0f);
 		}

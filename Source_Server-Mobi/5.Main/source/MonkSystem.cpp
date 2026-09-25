@@ -999,13 +999,15 @@ void CMonkSystem::RenderRepeatedly(int _Key, OBJECT *pObj)
 			}
 			break;
 		case 1:	scale = 50.f;	Vector(0.0f,1.f,1.f,Light);	break;
-		case 2:	scale = 50.f;	Vector(0.f,1.f,0.6f,Light);	break;
-		case 3:	scale = 50.f;	Vector(0.f,0.6f,1.f,Light);	break;
-		case 4:	Vector(1.f,0.f,1.f,Light);break;
-		case 5:	Vector(0.f,1.f,0.f,Light);break;
-		case 6:	Vector(0.7f,0.4f,1.0f,Light);break;
+		case 2:	scale = 50.f;	Vector(0.1f,1.f,0.1f,Light);	break;
+		case 3:	scale = 50.f;	Vector(0.2f,0.45f,1.f,Light);	break;
+		case 4:	Vector(1.f,0.35f,1.f,Light);break;
+		case 5:	Vector(0.6f,1.f,0.5f,Light);break;
+		case 6:	Vector(0.6f,1.f,0.5f,Light);break;
 		default:Vector(1.f, 1.f, 1.f, Light);break;
 		}
+		if(m_arrRepeatedly[_index].m_Double)
+			Vector(1.f,1.f,1.f,Light);
 
 		if(!Damage)
 		{
