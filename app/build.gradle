@@ -78,6 +78,14 @@ def muPerfLogs = (project.findProperty("muPerfLogs") ?: "false")
     .toString()
     .toBoolean()
 
+// -PmuDiag=true turns on the developer diagnostics in a RELEASE build: the
+// drift log (one line every 10 s: fps, frame buckets, draw counts) and the
+// other file probes, with no on-screen overlay. For measuring a build that is
+// otherwise identical to what ships. Never enable for a build you hand out.
+def muDiag = (project.findProperty("muDiag") ?: "false")
+    .toString()
+    .toBoolean()
+
 def muEnableBgfx = (project.findProperty("muEnableBgfx") ?: "false")
     .toString()
     .toBoolean()
@@ -87,7 +95,8 @@ def muNativeCppFlags = "-std=c++20 -D__ANDROID__ -DANDROID " +
                        "-Wno-error -Wno-unknown-pragmas " +
                        "-fexceptions -frtti" +
                        (muEnableLogs ? " -DMU_ANDROID_VERBOSE_NET_LOG" : " -DMU_ANDROID_DISABLE_LOG") +
-                       (muPerfLogs ? " -DMU_ANDROID_PERF_LOG" : "")
+                       (muPerfLogs ? " -DMU_ANDROID_PERF_LOG" : "") +
+                       (muDiag ? " -DMU_DEV_DIAGNOSTICS=1" : "")
 
 def missingRequestedAbis = requestedRequiredAbis.findAll { abi ->
     !abiPresence.containsKey(abi) || !abiPresence[abi].hasAllRequiredLibs
@@ -425,8 +434,69 @@ android {
         // NOTE: no audio has been heard through this yet. The codec, the relay
         // and the PC audio format have tests under 7.VoiceServer\Test, but
         // nothing has run end to end inside the client.
-        versionCode 17
-        versionName "1.0.17"
+        // 19 (2026-09-22): Elf bow skills. 18 was skipped - a "1.0.18" debug
+        // APK was only a renamed 17 build. Carries:
+        //   - Triple Shot fires and hits at high attack speed, no longer needs
+        //     Five Shot cast first, and hits players (target key was stale)
+        //   - Triple Shot: 3 arrows, 4 only with Triple Shot Mastery; the old
+        //     4-arrow rule for BOW+18/19/22/23/24 is gone
+        //   - Penetration charges, releases, and its charge scales with
+        //     attack speed
+        // NOTE: Triple Shot damage is now resolved by the GameServer
+        // (SkillTripleShot) - needs the 2026-09-22 GameServer build or it
+        // stops hitting.
+        // 20 (2026-09-24). Built from the uncommitted working tree - nothing
+        // since 19 is committed. Carries, on top of 19:
+        //   - Samsung / resized-surface login screen: the engine size is now
+        //     locked once the game starts (a later surface change only rescales
+        //     the final blit), startup waits for the surface to settle, and
+        //     resize events no longer apply the unscaled physical size; plus the
+        //     font-DIB pitch fix (text was rows of dots), CSprite re-anchoring,
+        //     proportional UI font and 1:1 rendering on surfaces <= 800px tall
+        //   - fast typing no longer drops letters (the IME bridge restarted the
+        //     keyboard connection after every character) and composing keyboards
+        //     no longer double text
+        //   - registration: repeat taps while a request is out are ignored
+        //     instead of showing "Thao tac cham lai"; no-reply and unknown
+        //     results are reported; messages in English
+        //   - AutoPots button beside skill slot 3: tap = auto potion on/off,
+        //     hold = settings (threshold rules from the server)
+        // NOTE: auto potion rules come in 0xD3:0x7E - needs the 2026-09-24
+        // GameServer, otherwise the old "VIP may change it, else 30%" applies.
+        // 21 (2026-09-24). Mobile performance for low-end devices. Carries,
+        // on top of 20:
+        //   - character/monster drawing re-sends far less GL state per draw:
+        //     uniforms only when they change, one VAO per mesh instead of
+        //     re-specifying attribute pointers, bone matrices uploaded only
+        //     when they actually differ, and a character draw no longer
+        //     invalidates cached state it never touched. No visual change.
+        //   - measurement switches that do nothing unless a mu_gl_ab.txt is
+        //     placed in the app's data folder by hand (draw-path A/B), plus the
+        //     GPU name and chosen draw path recorded at startup.
+        // Measured on the emulator: 23-26 players cost 15-22 ms of a 38 ms
+        // frame in character rendering with the GPU idle, so this targets the
+        // CPU-side cost that dominates weak devices.
+        // KNOWN, NOT YET FIXED: opening the inventory costs ~5x the frame time
+        // (emulator 23 -> 4.2 FPS) because every item icon re-renders a 3D
+        // model each frame. Suspected cause of the ~8 FPS Samsung A12 reports,
+        // whose screenshots were taken with that window open.
+        // 22 (2026-09-25). Carries, on top of 21:
+        //   - Mali GPUs (Helio G99 / Mali-G57): other players no longer explode
+        //     into screen-sized triangles over black terrain; per-mesh VAOs are
+        //     Adreno-only now
+        //   - other players' effects are lighter on mobile (hero, target and
+        //     selected character stay full)
+        //   - PK mode: aims at a player first and keeps that target; Wizard AOE
+        //     skills hit players; with PK mode off an AIM-locked player is no
+        //     longer attacked
+        //   - Death Stab no longer drops FPS (effects spawned per rendered
+        //     frame instead of at the 25 FPS reference rate)
+        //   - damage numbers: orange normal, red incoming, blue critical, green
+        //     excellent, cyan ignore defense, pink reflect, yellow SD, light
+        //     green poison/DOT, white double damage
+        // Death Stab and damage colours are from the uncommitted working tree.
+        versionCode 22
+        versionName "1.0.22"
 
         externalNativeBuild {
             cmake {
@@ -434,7 +504,14 @@ android {
                 cppFlags muNativeCppFlags
                 arguments "-DANDROID_STL=c++_static",
                           "-DANDROID_PLATFORM=android-21",
-                          "-DMU_ENABLE_BGFX=" + (muEnableBgfx ? "ON" : "OFF")
+                          "-DMU_ENABLE_BGFX=" + (muEnableBgfx ? "ON" : "OFF"),
+                          // Handed to native code so the build number the client
+                          // reports to the GameServer (ClientBuild.h, packet
+                          // 0xD3:0x7D) IS this APK's versionCode, rather than a
+                          // constant somebody has to remember to bump twice.
+                          // The outdated-client gate compares against it, so a
+                          // drift between the two would block the wrong builds.
+                          "-DMU_ANDROID_VERSION_CODE=" + defaultConfig.versionCode
             }
         }
 
