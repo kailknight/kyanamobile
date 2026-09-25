@@ -5048,7 +5048,7 @@ void MoveCharacter(CHARACTER *c,OBJECT *o)
     if ( c->AttackTime>=g_iLimitAttackTimeSet || g_iLimitAttackTimeSet == 0x02)
 	{
 		c->AttackTime = 0;
-		o->PKKey = getTargetCharacterKey ( c, SelectedCharacter );
+		o->PKKey = GetHeroSkillTargetKey ( c, SelectedCharacter );
 
 		switch ( ( c->Skill ) )
 		{

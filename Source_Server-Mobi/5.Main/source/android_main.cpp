@@ -5995,6 +5995,7 @@ void SetAndroidTargetLock(int characterIndex)
 
 // Defined below, alongside the other targeting predicates.
 bool IsVirtualPkTargetingEnabled();
+bool IsCharacterInSafeZone(int characterIndex);
 
 int GetAndroidTargetPickerRowCount()
 {
@@ -6267,6 +6268,12 @@ bool IsAndroidTargetPickerCandidate(int characterIndex)
         return false;
     }
 
+    // Locking one would be dropped straight away (UpdateAndroidPkTargetState).
+    if (IsCharacterInSafeZone(characterIndex))
+    {
+        return false;
+    }
+
     const int dx = c->PositionX - Hero->PositionX;
     const int dy = c->PositionY - Hero->PositionY;
     const int dist2 = (dx * dx) + (dy * dy);
@@ -6369,6 +6376,15 @@ bool IsVirtualPkTargetingEnabled()
     return g_pBCustomMenuInfo != nullptr && g_pBCustomMenuInfo->AutoCtrlPK;
 }
 
+// Read off the tile rather than CHARACTER::SafeZone, which MoveCharacter only
+// refreshes while the character is on screen.
+bool IsCharacterInSafeZone(int characterIndex)
+{
+    const CHARACTER* c = &CharactersClient[characterIndex];
+    const int wall = TerrainWall[TERRAIN_INDEX_REPEAT(c->PositionX, c->PositionY)];
+    return (wall & TW_SAFEZONE) == TW_SAFEZONE;
+}
+
 int FindNearestTargetByKind(int objectKind, bool requireAttackable, bool requireVisible, bool limitToAcquireRange)
 {
     if (!IsVirtualPadAvailable() || CharactersClient == nullptr)
@@ -6398,6 +6414,13 @@ int FindNearestTargetByKind(int objectKind, bool requireAttackable, bool require
         }
 
         if (requireAttackable && !IsTargetAttackable(i))
+        {
+            continue;
+        }
+
+        // A player in a safe zone cannot be hit, and PK mode would only pick
+        // them to drop them again the next frame.
+        if (requireAttackable && objectKind == KIND_PLAYER && IsCharacterInSafeZone(i))
         {
             continue;
         }
@@ -6489,6 +6512,221 @@ int GetHeroCharacterIndex()
     return static_cast<int>(Hero - &CharactersClient[0]);
 }
 
+// PK mode's current player. Without it every cast re-picked the nearest player
+// (or kept a leftover monster), so the target hopped around mid-fight. It is
+// taken from the first player auto-acquired and then only replaced by an AIM
+// lock or by tapping another player; it goes when that player does, when PK
+// mode is switched off, on a map change or on entering a safe zone.
+struct AndroidPkStickyTarget
+{
+    bool  active = false;
+    SHORT key = 0;
+    int   cachedIndex = -1;
+};
+AndroidPkStickyTarget g_androidPkSticky{};
+
+void ClearAndroidPkStickyTarget(const char* reason)
+{
+    if (!g_androidPkSticky.active)
+    {
+        return;
+    }
+
+    LOGI("PkSticky: cleared (%s) key=%d", reason != nullptr ? reason : "?", static_cast<int>(g_androidPkSticky.key));
+    g_androidPkSticky = AndroidPkStickyTarget{};
+}
+
+void SetAndroidPkStickyTarget(int characterIndex)
+{
+    if (!IsValidAutoCombatTarget(characterIndex)
+        || CharactersClient[characterIndex].Object.Kind != KIND_PLAYER
+        || characterIndex == GetHeroCharacterIndex())
+    {
+        return;
+    }
+
+    if (g_androidPkSticky.active && g_androidPkSticky.key == CharactersClient[characterIndex].Key)
+    {
+        g_androidPkSticky.cachedIndex = characterIndex;
+        return;
+    }
+
+    g_androidPkSticky.active = true;
+    g_androidPkSticky.key = CharactersClient[characterIndex].Key;
+    g_androidPkSticky.cachedIndex = characterIndex;
+    LOGI("PkSticky: set key=%d index=%d", static_cast<int>(g_androidPkSticky.key), characterIndex);
+}
+
+int ResolveAndroidPkStickyTarget()
+{
+    if (!g_androidPkSticky.active)
+    {
+        return -1;
+    }
+
+    if (!IsVirtualPkTargetingEnabled())
+    {
+        ClearAndroidPkStickyTarget("pk-off");
+        return -1;
+    }
+
+    if (IsAndroidMuHelperRunning())
+    {
+        ClearAndroidPkStickyTarget("mu-helper-running");
+        return -1;
+    }
+
+    int index = g_androidPkSticky.cachedIndex;
+    if (index < 0
+        || index >= MAX_CHARACTERS_CLIENT
+        || CharactersClient[index].Key != g_androidPkSticky.key)
+    {
+        index = FindCharacterIndex(g_androidPkSticky.key);
+    }
+
+    if (index < 0
+        || index >= MAX_CHARACTERS_CLIENT
+        || !IsValidAutoCombatTarget(index)
+        || CharactersClient[index].Object.Kind != KIND_PLAYER)
+    {
+        ClearAndroidPkStickyTarget("target-gone");
+        return -1;
+    }
+
+    g_androidPkSticky.cachedIndex = index;
+    return index;
+}
+
+// SelectObjects reports a tap that landed on a player. In PK mode that is the
+// "change target" gesture, so it replaces both the sticky target and any AIM
+// lock (an AIM lock on someone else would otherwise keep winning).
+void NoteAndroidTappedCharacter(int characterIndex)
+{
+    if (!IsVirtualPadAvailable()
+        || !IsVirtualPkTargetingEnabled()
+        || CharactersClient == nullptr
+        || characterIndex < 0
+        || characterIndex >= MAX_CHARACTERS_CLIENT
+        || CharactersClient[characterIndex].Object.Kind != KIND_PLAYER
+        || characterIndex == GetHeroCharacterIndex()
+        || !IsTargetAttackable(characterIndex)
+        || IsCharacterInSafeZone(characterIndex))
+    {
+        return;
+    }
+
+    SetAndroidPkStickyTarget(characterIndex);
+
+    const int locked = ResolveAndroidLockedTargetIndex();
+    if (locked >= 0 && locked != characterIndex)
+    {
+        SetAndroidTargetLock(characterIndex);
+    }
+}
+
+// PK mode's player pick for the auto-acquire paths: the sticky target if there
+// is one, else the nearest attackable player, which then becomes sticky.
+// Returns -1 when there is no attackable player at all.
+int AcquireAndroidPkPlayerTarget(bool limitToAcquireRange)
+{
+    const int sticky = ResolveAndroidPkStickyTarget();
+    if (sticky >= 0)
+    {
+        return sticky;
+    }
+
+    // Always within auto-acquire range, whatever the caller asked for: the
+    // per-frame check below drops a target that far out, so picking one would
+    // only have it dropped and re-picked again.
+    (void)limitToAcquireRange;
+    int picked = FindNearestTargetByKind(KIND_PLAYER, true, true, true);
+    if (picked < 0)
+    {
+        picked = FindNearestAttackablePlayerTarget(true);
+    }
+
+    if (picked >= 0)
+    {
+        SetAndroidPkStickyTarget(picked);
+    }
+    return picked;
+}
+
+// A little past the 10 tiles a target is picked within, so one standing right
+// at the edge does not flip between dropped and re-picked every step.
+constexpr float kPkTargetDropDistance = kVirtualAutoAcquireMaxDistance + 2.0f;
+
+bool IsBeyondPkTargetDropRange(int characterIndex)
+{
+    const CHARACTER* c = &CharactersClient[characterIndex];
+    const float dx = static_cast<float>(c->PositionX - Hero->PositionX);
+    const float dy = static_cast<float>(c->PositionY - Hero->PositionY);
+    return (dx * dx) + (dy * dy) > (kPkTargetDropDistance * kPkTargetDropDistance);
+}
+
+// Runs every frame, so a target is let go the moment it dies, warps away or
+// walks out of range or into a safe zone - not just the next time a skill is
+// pressed, which left a dead or far-off player selected. The next cast then
+// picks a new target. The hero dying clears everything, AIM lock included.
+void UpdateAndroidPkTargetState()
+{
+    if (!IsVirtualPadAvailable() || CharactersClient == nullptr)
+    {
+        return;
+    }
+
+    const bool hadSticky = g_androidPkSticky.active;
+    const int stickyIndex = g_androidPkSticky.cachedIndex;
+    const bool hadLock = g_androidTargetLock.active;
+    const int lockIndex = g_androidTargetLock.cachedIndex;
+
+    if (Hero->Dead > 0)
+    {
+        ClearAndroidPkStickyTarget("hero-dead");
+        ClearAndroidTargetLock("hero-dead");
+    }
+    else
+    {
+        const int sticky = ResolveAndroidPkStickyTarget();
+        if (sticky >= 0 && IsBeyondPkTargetDropRange(sticky))
+        {
+            ClearAndroidPkStickyTarget("out-of-range");
+        }
+        else if (sticky >= 0 && IsCharacterInSafeZone(sticky))
+        {
+            ClearAndroidPkStickyTarget("target-safe-zone");
+        }
+
+        const int locked = ResolveAndroidLockedTargetIndex();
+        if (locked >= 0 && IsBeyondPkTargetDropRange(locked))
+        {
+            ClearAndroidTargetLock("out-of-range");
+        }
+        else if (locked >= 0
+            && CharactersClient[locked].Object.Kind == KIND_PLAYER
+            && IsCharacterInSafeZone(locked))
+        {
+            ClearAndroidTargetLock("target-safe-zone");
+        }
+    }
+
+    if ((hadSticky && !g_androidPkSticky.active && SelectedCharacter == stickyIndex)
+        || (hadLock && !g_androidTargetLock.active && SelectedCharacter == lockIndex))
+    {
+        SelectedCharacter = -1;
+    }
+}
+
+// The AIM lock as an attack target. The picker lists every player so a buff can
+// be aimed at a friend, but with PK mode off most of them cannot be hit - an
+// attack must skip such a lock and fall through to monsters, or the hero turns
+// and casts at a player CheckAttack would never let the PC client touch.
+int ResolveAndroidOffensiveLockIndex()
+{
+    const int locked = ResolveAndroidLockedTargetIndex();
+    return (locked >= 0 && IsTargetAttackable(locked)) ? locked : -1;
+}
+
 void EnsureCombatTarget()
 {
     if (!IsVirtualPadAvailable())
@@ -6499,7 +6737,7 @@ void EnsureCombatTarget()
     // An explicit lock outranks proximity. This has to come before the
     // IsTargetAttackable early-out, or a stale SelectedCharacter that happens
     // to still be valid would win over the player's actual choice.
-    const int lockedTarget = ResolveAndroidLockedTargetIndex();
+    const int lockedTarget = ResolveAndroidOffensiveLockIndex();
     if (lockedTarget >= 0)
     {
         SelectedCharacter = lockedTarget;
@@ -6537,11 +6775,24 @@ void EnsureOffensiveSkillTarget()
 
     // After the hero-self sanitize above, but before the IsTargetAttackable
     // early-out below, for the same reason as in EnsureCombatTarget.
-    const int lockedTarget = ResolveAndroidLockedTargetIndex();
+    const int lockedTarget = ResolveAndroidOffensiveLockIndex();
     if (lockedTarget >= 0)
     {
         SelectedCharacter = lockedTarget;
         return;
+    }
+
+    // PK mode aims at players first - ahead of the keep-current check below, or
+    // a monster left over in SelectedCharacter would outrank them. An area
+    // spell cast at the player still hits monsters around them.
+    if (IsVirtualPkTargetingEnabled())
+    {
+        const int pkTarget = AcquireAndroidPkPlayerTarget(false);
+        if (pkTarget >= 0)
+        {
+            SelectedCharacter = pkTarget;
+            return;
+        }
     }
 
     if (IsTargetAttackable(SelectedCharacter))
@@ -6558,43 +6809,15 @@ void EnsureOffensiveSkillTarget()
         // out - EnsureCombatTarget's own IsTargetAttackable check has no
         // distance term of its own, so it would just re-adopt this same
         // still-alive-but-too-far target if this did not clear it first.
-        // Deliberately not applied above to a locked target (see the early
-        // return for lockedTarget) - an explicit AIM lock is a deliberate
-        // choice, the same reasoning EnsureNormalAttackTarget already uses to
-        // stay unlimited for a manually-picked ATK target.
+        // A locked target skips this check (see the early return for
+        // lockedTarget); UpdateAndroidPkTargetState drops it a little further
+        // out instead.
         SelectedCharacter = -1;
     }
 
-    if (IsVirtualPkTargetingEnabled())
-    {
-        const int nearestVisibleAttackablePlayer = FindNearestVisiblePlayerTarget(true);
-        if (nearestVisibleAttackablePlayer >= 0)
-        {
-            SelectedCharacter = nearestVisibleAttackablePlayer;
-            return;
-        }
-
-        const int nearestVisiblePlayer = FindNearestVisiblePlayerTarget(false);
-        if (nearestVisiblePlayer >= 0)
-        {
-            SelectedCharacter = nearestVisiblePlayer;
-            return;
-        }
-
-        const int nearestAttackablePlayer = FindNearestAttackablePlayerTarget(false);
-        if (nearestAttackablePlayer >= 0)
-        {
-            SelectedCharacter = nearestAttackablePlayer;
-            return;
-        }
-
-        const int nearestPlayer = FindNearestPlayerTarget(false);
-        if (nearestPlayer >= 0)
-        {
-            SelectedCharacter = nearestPlayer;
-            return;
-        }
-    }
+    // PK mode has already had its pick of attackable players in range above;
+    // with none, fall through to monsters rather than a far-off player or one
+    // it cannot hit.
 
     const int nearestVisibleAttackableMonster = FindNearestVisibleMonsterTarget(true);
     if (nearestVisibleAttackableMonster >= 0)
@@ -6717,14 +6940,24 @@ void EnsureNormalAttackTarget()
         SelectedCharacter = -1;
     }
 
-    // Deliberately not range-limited the way the auto-acquire path below is: if
-    // the player picked this target on purpose, walking a little too far away
-    // should not silently swap them onto whatever is nearest.
-    const int lockedTarget = ResolveAndroidLockedTargetIndex();
+    // A lock is kept here without the 10-tile check below; it is dropped only
+    // past kPkTargetDropDistance, by UpdateAndroidPkTargetState.
+    const int lockedTarget = ResolveAndroidOffensiveLockIndex();
     if (lockedTarget >= 0)
     {
         SelectedCharacter = lockedTarget;
         return;
+    }
+
+    // Same player-first, sticky pick as EnsureOffensiveSkillTarget.
+    if (IsVirtualPkTargetingEnabled())
+    {
+        const int pkTarget = AcquireAndroidPkPlayerTarget(true);
+        if (pkTarget >= 0)
+        {
+            SelectedCharacter = pkTarget;
+            return;
+        }
     }
 
     if (IsTargetAttackable(SelectedCharacter)
@@ -6736,32 +6969,8 @@ void EnsureNormalAttackTarget()
     const uint32_t nowMs = MU_MobileGetTicks();
     static uint32_t s_lastAutoTargetLogMs = 0;
 
-    if (IsVirtualPkTargetingEnabled())
-    {
-        const int nearestAttackablePlayer = FindNearestAttackablePlayerTarget(true);
-        if (nearestAttackablePlayer >= 0)
-        {
-            if (SelectedCharacter != nearestAttackablePlayer && (nowMs - s_lastAutoTargetLogMs) > 240)
-            {
-                s_lastAutoTargetLogMs = nowMs;
-                LOGI("VirtualPad: normal target -> player-attackable=%d", nearestAttackablePlayer);
-            }
-            SelectedCharacter = nearestAttackablePlayer;
-            return;
-        }
-
-        const int nearestPlayer = FindNearestPlayerTarget(true);
-        if (nearestPlayer >= 0)
-        {
-            if (SelectedCharacter != nearestPlayer && (nowMs - s_lastAutoTargetLogMs) > 240)
-            {
-                s_lastAutoTargetLogMs = nowMs;
-                LOGI("VirtualPad: normal target -> fallback-player=%d", nearestPlayer);
-            }
-            SelectedCharacter = nearestPlayer;
-            return;
-        }
-    }
+    // PK mode has already had its pick of attackable players in range above;
+    // with none, fall through to monsters rather than a player it cannot hit.
 
     const int nearestAttackable = FindNearestAttackableMonsterTarget(true);
     if (nearestAttackable >= 0)
@@ -11761,6 +11970,7 @@ bool HandleAndroidTargetPickerFingerUp(const SDL_TouchFingerEvent& touch)
         if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTargetPickerRowRect(row)))
         {
             SetAndroidTargetLock(g_androidTargetPicker.entries[entryIndex].characterIndex);
+            SetAndroidPkStickyTarget(g_androidTargetPicker.entries[entryIndex].characterIndex);
             HideAndroidTargetPicker();
             PlayBuffer(SOUND_CLICK01);
         }
@@ -11777,6 +11987,7 @@ bool HandleTargetSelectButtonTap()
     if (IsAndroidTargetLockActive())
     {
         ClearAndroidTargetLock("button-toggle");
+        ClearAndroidPkStickyTarget("button-toggle");
         HideAndroidTargetPicker();
         PlayBuffer(SOUND_CLICK01);
         return true;
@@ -15946,6 +16157,7 @@ void UpdateVirtualPadHolds()
     UpdateAndroidMessageBoxClick();
     UpdateAndroidTradeAutoMove();
     UpdateAndroidPendingBuffCast();
+    UpdateAndroidPkTargetState();
 
     if (!IsVirtualPadAvailable())
     {
@@ -17647,6 +17859,7 @@ void RenderTargetSelectButton()
         if (IsAndroidTargetLockActive())
         {
             ClearAndroidTargetLock("entered-safe-zone");
+            ClearAndroidPkStickyTarget("entered-safe-zone");
         }
         HideAndroidTargetPicker();
         return;
@@ -19903,6 +20116,13 @@ bool AndroidIsVirtualPadAvailable()
     return IsVirtualPadAvailable();
 }
 
+// SelectObjects (ZzzInterface.cpp) reports a tap on a player through this, for
+// the same anonymous-namespace reason.
+void AndroidNoteTappedCharacter(int characterIndex)
+{
+    NoteAndroidTappedCharacter(characterIndex);
+}
+
 // Called on map change and disconnect. The lock does clear itself once its
 // target can no longer be resolved, but character Keys are reused between maps,
 // so without an explicit reset a lock could survive a teleport and land on
@@ -19910,6 +20130,7 @@ bool AndroidIsVirtualPadAvailable()
 void AndroidClearTargetLock()
 {
     ClearAndroidTargetLock("map-change");
+    ClearAndroidPkStickyTarget("map-change");
     CancelAndroidGroundAim("map-change");
 }
 

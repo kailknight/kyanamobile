@@ -130,6 +130,8 @@ void SetCharacterPos ( CHARACTER* c, BYTE posX, BYTE posY, vec3_t position );
 bool CheckAttack();
 bool CheckAttack_Fenrir(CHARACTER* c);
 int	 getTargetCharacterKey ( CHARACTER* c, int selected );
+void RememberHeroSkillTarget ( CHARACTER* c );
+int	 GetHeroSkillTargetKey ( CHARACTER* c, int selected );
 
 void MoveTournamentInterface();
 void MoveBattleSoccerEffect(CHARACTER* c);

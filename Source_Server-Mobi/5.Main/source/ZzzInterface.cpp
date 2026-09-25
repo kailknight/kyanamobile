@@ -94,6 +94,7 @@ extern vec3_t MousePosition, MouseTarget;
 #ifdef __ANDROID__
 extern bool IsAndroidVirtualJoystickHoldingMovement();
 extern bool AndroidIsVirtualPadAvailable();
+extern void AndroidNoteTappedCharacter(int characterIndex);
 #endif
 
 extern void RegisterBuff( eBuffState buff, OBJECT* o, const int bufftime = 0 );
@@ -2239,8 +2240,35 @@ int	getTargetCharacterKey ( CHARACTER* c, int selected )
 	{
 		return -1;
 	}
-	
+
 	return -1;
+}
+
+// An area spell's effect only damages a player whose key it carries, and that
+// key is read from SelectedCharacter when the cast animation ends, not when the
+// cast is sent. SelectObjects resets the selection every frame (and auto-attack
+// drops any player from it), so by then it is usually -1 and the spell skips
+// the player it was aimed at while still hitting monsters. Remember the aimed
+// key at cast time and fall back to it for a short while.
+static int   s_HeroSkillTargetKey  = -1;
+static DWORD s_HeroSkillTargetTick = 0;
+
+void RememberHeroSkillTarget( CHARACTER* c )
+{
+	s_HeroSkillTargetKey  = getTargetCharacterKey( c, SelectedCharacter );
+	s_HeroSkillTargetTick = GetTickCount();
+}
+
+int GetHeroSkillTargetKey( CHARACTER* c, int selected )
+{
+	int key = getTargetCharacterKey( c, selected );
+
+	if ( key == -1 && c == Hero && s_HeroSkillTargetKey != -1 && GetTickCount() - s_HeroSkillTargetTick < 3000 )
+	{
+		key = s_HeroSkillTargetKey;
+	}
+
+	return key;
 }
 
 void LetHeroStop( CHARACTER * c, BOOL bSetMovementFalse)
@@ -6390,6 +6418,8 @@ void AttackWizard(CHARACTER *c, int Skill, float Distance)
     }
     bool Success = CheckTarget(c);
 
+	RememberHeroSkillTarget(c);
+
 	switch(Skill)
 	{
 	case AT_SKILL_BLAST_HELL_BEGIN:
@@ -8805,6 +8835,14 @@ void SelectObjects()
 						{
 							SelectedOperate = SelectOperate();
 						}
+#ifdef __ANDROID__
+						// The pointer stays parked at the last touch, so only the
+						// frame the finger went down counts as tapping this player.
+						else if(MouseLButtonPush)
+						{
+							AndroidNoteTappedCharacter(SelectedCharacter);
+						}
+#endif
 					}
 				}
 			}
