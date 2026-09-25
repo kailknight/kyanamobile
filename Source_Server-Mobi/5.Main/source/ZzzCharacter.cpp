@@ -9732,6 +9732,33 @@ void RenderEye(OBJECT *o,int Left,int Right,float fSize = 1.0f)
 }
 
 
+// True while RenderCharactersClient draws a player it put in the crowd's
+// "lite" tier: no shadow (below) and no additive shine passes
+// (RenderPartObjectBodyColor/2 in ZzzObject.cpp). Always false on PC.
+bool g_CharacterLiteRender = false;
+
+// True while RenderCharactersClient draws any player that is not the hero and
+// not a priority character (target/selected) - mobile only. Such a player
+// keeps its normal look but with lighter effects: no separate additive shine
+// passes (ZzzObject.cpp), every other particle spawn (ZzzEffectParticle.cpp)
+// and 2 cloth-physics passes instead of 5 (below). Measured 25 Sep in a
+// Lorencia crowd: cloth 3.5-5.7 ms, particles 3-5 ms a frame.
+bool g_CharacterThinEffects = false;
+#if defined(__ANDROID__) || defined(MU_IOS)
+#define MU_MOBILE_THIN_EFFECTS true
+#else
+#define MU_MOBILE_THIN_EFFECTS false
+#endif
+
+// Where RenderCharacter's post phase goes (the ~1.1 ms per character measured
+// 25 Sep), summed over the drift-log window: supplemental visuals, body parts,
+// cloak/cloth, back items/weapons/wings, per-type effects switch. Timing only.
+unsigned long long g_ProfCharPostPhase[6] = {};
+#define MU_POST_PHASE(n) \
+    { const Uint64 postNow_ = static_cast<Uint64>(MU_MobilePerfNow()); \
+      g_ProfCharPostPhase[n] += static_cast<unsigned long long>(postNow_ - postMark); \
+      postMark = postNow_; }
+
 void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
 {
 
@@ -9868,7 +9895,9 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
         }
     }
 
-    if (ShouldRenderCharacterShadowPass() && o->Alpha>=0.5f && c->HideShadow==false )
+    // Crowd LOD: players beyond the nearest few skip their shadow - see
+    // RenderCharactersClient.
+    if (ShouldRenderCharacterShadowPass() && o->Alpha>=0.5f && c->HideShadow==false && !g_CharacterLiteRender )
     {
         const Uint64 shadowTicksStart = static_cast<Uint64>(MU_MobilePerfNow());
         if ( gMapManager.WorldActive !=WD_10HEAVEN && (o->Type==MODEL_PLAYER) && (!(MODEL_HELPER+2<=c->Helper.Type && c->Helper.Type<=MODEL_HELPER+3) || c->SafeZone ) 
@@ -9975,6 +10004,7 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
 		}
 	}
     const Uint64 postTicksStart = static_cast<Uint64>(MU_MobilePerfNow());
+    Uint64 postMark = postTicksStart; // MU_POST_PHASE sub-timing
 	//===Set Monter Gold Monter Vang
     if (ShouldRenderCharacterSupplementalVisuals())
     {
@@ -10579,6 +10609,7 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
 		RequestTerrainLight ( o->Position[0], o->Position[1], Light );
 	}
 
+	MU_POST_PHASE(0); // supplemental visuals and setup
 	VectorAdd(Light, o->Light, c->Light);
 	if ( o->Type == MODEL_MONSTER01+55)
 	{
@@ -11021,6 +11052,7 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
         }
 	}
 
+	MU_POST_PHASE(1); // body and armour parts
 	if ( bCloak )
 	{
 		if ( !c->Object.m_pCloth)
@@ -11341,7 +11373,9 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
 					continue;
 				}
 				else
-                if ( !pCloth[i].Move2( Flag, 5)) //=FPS 60 Fix Giat Cape
+                // Thin effects: 2 physics passes for other players (still anchored to
+                // the body every frame, it just settles more slowly), 5 otherwise.
+                if ( !pCloth[i].Move2( Flag, g_CharacterThinEffects ? 2 : 5)) //=FPS 60 Fix Giat Cape
                 {
                     DeleteCloth( c, o);
                 }
@@ -11353,6 +11387,7 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
         } // if( !g_isCharacterBuff(o, eBuff_Cloaking) )
 	} //if ( bCloak )
 
+	MU_POST_PHASE(5); // capes and cloth (the bCloak block)
 	float Luminosity = (float)(rand()%30+70)*0.01f;
 	if(c->PK >= PVP_MURDERER2)
 	{
@@ -11392,6 +11427,7 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
 			g_CMonkSystem.ModelLinkObject(c, i5);
 		}
 	}
+	MU_POST_PHASE(2); // PK colour, +15 weapon grade effects
 	bool Bind = false;
 	Bind = RenderCharacterBackItem(c, o, Translate);
 	
@@ -11837,6 +11873,7 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
 			}
 		}
 	}
+	MU_POST_PHASE(3); // back items, weapons, wings
 	switch ( o->Type )
 	{
 	case MODEL_PLAYER:
@@ -12758,6 +12795,7 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
 			if( TheMapProcess().RenderMonsterVisual( c, o, b ) == true ) break;
         }
 	}
+    MU_POST_PHASE(4); // per-type effects switch
     g_characterPerfSnapshot.renderPostTicks += static_cast<unsigned long long>(MU_MobilePerfNow() - postTicksStart);
 
     const Uint64 attachmentTicksStart = static_cast<Uint64>(MU_MobilePerfNow());
@@ -12820,6 +12858,49 @@ void RenderCharactersClient()
         {
             ++g_characterVisibleMonsterRenderCount;
         }
+    }
+
+    // Crowd LOD. Measured 25 Sep on a Helio G99 (Redmi Note 14): each visible
+    // character costs ~1.1 ms, so 20 players in view took 22-25 ms of a 45 ms
+    // frame (20 FPS) against 7-10 ms with 10 in view (40 FPS). Most of that is
+    // re-rendering: every excellent/high-level piece adds a whole-body shine
+    // pass, and every player a shadow pass. With more players in view than
+    // kCrowdFullPlayers, only the nearest ones keep those; the rest keep their
+    // normal look minus shine and shadow. The hero, the target and whatever is
+    // selected are never demoted (IsPriorityCharacter). Mobile only.
+    static bool s_crowdLite[MAX_CHARACTERS_CLIENT];
+    {
+        for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+        {
+            s_crowdLite[i] = false;
+        }
+#if defined(__ANDROID__) || defined(MU_IOS)
+        extern int g_CrowdLodFullLast;
+        extern int g_CrowdLodLiteLast;
+        constexpr int kCrowdFullPlayers = 8;
+        std::pair<float, int> players[MAX_CHARACTERS_CLIENT];
+        int playerCount = 0;
+        for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+        {
+            CHARACTER* pc = &CharactersClient[i];
+            OBJECT* po = &pc->Object;
+            if (!po->Live || !po->Visible || po->Type != MODEL_PLAYER || IsPriorityCharacter(i, pc))
+            {
+                continue;
+            }
+            players[playerCount++] = std::make_pair(GetCharacterDistanceSq2D(po), i);
+        }
+        if (playerCount > kCrowdFullPlayers)
+        {
+            std::nth_element(players, players + kCrowdFullPlayers, players + playerCount);
+            for (int k = kCrowdFullPlayers; k < playerCount; ++k)
+            {
+                s_crowdLite[players[k].second] = true;
+            }
+        }
+        g_CrowdLodFullLast = (std::min)(playerCount, kCrowdFullPlayers);
+        g_CrowdLodLiteLast = (std::max)(0, playerCount - kCrowdFullPlayers);
+#endif
     }
 
 	for ( int i=0; i<MAX_CHARACTERS_CLIENT; ++i )
@@ -12947,7 +13028,11 @@ void RenderCharactersClient()
             }
 
             ++g_characterPerfSnapshot.renderRendered;
+            g_CharacterLiteRender = s_crowdLite[i];
+            g_CharacterThinEffects = MU_MOBILE_THIN_EFFECTS && o->Type == MODEL_PLAYER && !isPriority;
             RenderCharacterEntry(i, c, o, bucket, isPriority);
+            g_CharacterLiteRender = false;
+            g_CharacterThinEffects = false;
 		}
 	}
 
@@ -13015,7 +13100,11 @@ void RenderCharactersClient()
             ++g_characterPerfSnapshot.renderRendered;
             const CharacterDistanceBucket bucket = ClassifyCharacterDistance(distSq, adaptiveThresholds);
             const bool isPriority = IsPriorityCharacter(idx, c);
+            g_CharacterLiteRender = s_crowdLite[idx];
+            g_CharacterThinEffects = MU_MOBILE_THIN_EFFECTS && o->Type == MODEL_PLAYER && !isPriority;
             RenderCharacterEntry(idx, c, o, bucket, isPriority);
+            g_CharacterLiteRender = false;
+            g_CharacterThinEffects = false;
         }
 
         g_characterPerfSnapshot.renderDeferred += deferredFar;

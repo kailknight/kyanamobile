@@ -140,6 +140,10 @@ void GL_SetSkipVBOOrphan(bool skip);
 // per-mesh VAOs, bone upload skipped when unchanged). false = the older path
 // that re-issues everything per draw. Measurement aid; default true.
 void GL_SetSkinStateCache(bool enabled);
+// Bitmask of the cached path's parts (1 uniforms, 2 VAOs, 4 bone skip, 8 narrow
+// reset), for bisecting a driver fault. Default 15.
+void GL_SetSkinStateOptions(int opts);
+int GL_GetSkinStateOptions();
 bool GL_GetSkinStateCache();
 
 // True when the persistent-mapped streaming ring is in use (needs

@@ -491,6 +491,19 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 	{
 		return false;
 	}
+
+	// Other players' gear effects (set by RenderCharactersClient while it draws
+	// a player that is not the hero or the target): spawn every other particle.
+	// Particles live for many frames, so this thins the cloud rather than
+	// making it flicker. Particles were 3-5 ms a frame in a Lorencia crowd.
+	{
+		extern bool g_CharacterThinEffects;
+		static unsigned int s_thinParticleCounter = 0;
+		if (g_CharacterThinEffects && ((++s_thinParticleCounter & 1u) != 0u))
+		{
+			return false;
+		}
+	}
 #endif
 
 	for (int i = 0; i < MAX_PARTICLES; i++)

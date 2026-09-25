@@ -21525,6 +21525,13 @@ bool g_ShowPerfOverlay = false;
 bool g_ShowFpsOnly = true;
 int g_DriftFrames = 0;
 double g_DriftSceneMsSum = 0.0;
+// Character sub-phase ms (move, render, shadow, monster-obj, attach, post) and
+// rendered-character count, summed over the drift window.
+double g_DriftChrMs[7] = {};
+// Crowd LOD split of the last frame (ZzzCharacter.cpp): characters drawn at
+// full quality vs simplified.
+int g_CrowdLodFullLast = 0;
+int g_CrowdLodLiteLast = 0;
 double g_DriftWorstMs = 0.0;
 int g_DriftHitches = 0;
 double g_DriftStartSec = 0.0;
@@ -22907,6 +22914,23 @@ static bool InitializeAndroidGame()
     // for this session, so variants can be compared without a rebuild each.
     // Nothing is drawn; absent file = normal behaviour. Keys, one per line:
     //   preferDirect=0|1  skipOrphan=0|1  skinCache=0|1  itemIcons=0|1
+    // Per-mesh VAOs for skinned draws only where they are proven. On Mali
+    // (G57 MC2, r32p1 - Redmi Note 14) they broke rendering outright: other
+    // players exploded into screen-sized triangles over black terrain, while
+    // the other three parts of the skinned-draw caching were fine - found by
+    // switching the parts off one at a time (skinOpts). Adreno is verified
+    // (and the emulator reports Adreno); Mali, PowerVR - the Samsung A12's
+    // GPU - and anything else take the per-draw attribute setup instead.
+    // mu_gl_ab.txt below can still override this.
+    {
+        const char* skinRenderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const bool vaoProven = (skinRenderer != nullptr) && (std::strstr(skinRenderer, "Adreno") != nullptr);
+        if (!vaoProven)
+        {
+            GL_SetSkinStateOptions(1 | 4 | 8); // all but per-mesh VAOs
+        }
+    }
+
     if (FILE* ab = fopen("mu_gl_ab.txt", "r"))
     {
         char line[64];
@@ -22926,6 +22950,11 @@ static bool InitializeAndroidGame()
             {
                 GL_SetSkinStateCache(value != 0);
             }
+            else if (sscanf(line, "skinOpts=%d", &value) == 1)
+            {
+                GL_SetSkinStateOptions(value);
+                MU_AppendExitTrace("gl A/B skinOpts=%d", value);
+            }
             else if (sscanf(line, "itemIcons=%d", &value) == 1)
             {
                 extern bool g_AndroidItemIconsEnabled; // ZzzInventory.cpp
@@ -22943,10 +22972,11 @@ static bool InitializeAndroidGame()
     {
         const char* glRenderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         const char* glVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-        MU_AppendExitTrace("gpu: %s | %s | ring=%d preferDirect=%d skipOrphan=%d emulator=%d",
+        MU_AppendExitTrace("gpu: %s | %s | ring=%d preferDirect=%d skipOrphan=%d emulator=%d skinOpts=%d",
             glRenderer ? glRenderer : "?", glVersion ? glVersion : "?",
             GL_IsStreamRingActive() ? 1 : 0, preferDirectVertexArrays ? 1 : 0,
-            (preferDirectVertexArrays || g_ForceSkipVBOOrphan) ? 1 : 0, g_adaptivePerf.isEmulator ? 1 : 0);
+            (preferDirectVertexArrays || g_ForceSkipVBOOrphan) ? 1 : 0, g_adaptivePerf.isEmulator ? 1 : 0,
+            GL_GetSkinStateOptions());
     }
 
     {
@@ -23520,6 +23550,20 @@ static void RunAndroidGameFrame()
             {
                 g_DriftFrames++;
                 g_DriftSceneMsSum += frameMs;
+
+                // Character sub-phases, window-averaged into the chrP line
+                // below: what the ~1.1 ms per visible character (Helio G99,
+                // measured 25 Sep) is actually spent on.
+                {
+                    const double toMs = 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
+                    g_DriftChrMs[0] += static_cast<double>(g_ProfCharMoveTicks) * toMs;
+                    g_DriftChrMs[1] += static_cast<double>(g_ProfCharRenderTicks) * toMs;
+                    g_DriftChrMs[2] += static_cast<double>(g_ProfCharShadowTicks) * toMs;
+                    g_DriftChrMs[3] += static_cast<double>(g_ProfCharMonsterObjTicks) * toMs;
+                    g_DriftChrMs[4] += static_cast<double>(g_ProfCharAttachTicks) * toMs;
+                    g_DriftChrMs[5] += static_cast<double>(g_ProfCharPostTicks) * toMs;
+                    g_DriftChrMs[6] += static_cast<double>(g_ProfCharRendered);
+                }
                 if (frameMs > g_DriftWorstMs) g_DriftWorstMs = frameMs;
                 if ((g_DriftFrames > 30) && (frameMs > (g_DriftSceneMsSum / g_DriftFrames) * 2.0))
                 {
@@ -23631,9 +23675,24 @@ static void RunAndroidGameFrame()
                             g_ProfFlushCauses[7],
                             g_ProfFlushCauses[9], g_ProfFlushCauses[10], g_ProfFlushCauses[11],
                             g_ProfFlushCauses[0]);
+                        {
+                            const double n = (g_DriftFrames > 0) ? static_cast<double>(g_DriftFrames) : 1.0;
+                            extern unsigned long long g_ProfCharPostPhase[6];
+                            const double toMs = 1000.0 / static_cast<double>(MU_MobilePerfFrequency());
+                            fprintf(f, "  chrP[move%.1f rend%.1f sh%.1f mob%.1f att%.1f post%.1f] chrAvgN%.1f lod[full%d lite%d]"
+                                " postP[sup%.1f body%.1f cape%.1f grade%.1f link%.1f fx%.1f]\n",
+                                g_DriftChrMs[0] / n, g_DriftChrMs[1] / n, g_DriftChrMs[2] / n,
+                                g_DriftChrMs[3] / n, g_DriftChrMs[4] / n, g_DriftChrMs[5] / n,
+                                g_DriftChrMs[6] / n, g_CrowdLodFullLast, g_CrowdLodLiteLast,
+                                g_ProfCharPostPhase[0] * toMs / n, g_ProfCharPostPhase[1] * toMs / n,
+                                g_ProfCharPostPhase[5] * toMs / n, g_ProfCharPostPhase[2] * toMs / n, g_ProfCharPostPhase[3] * toMs / n,
+                                g_ProfCharPostPhase[4] * toMs / n);
+                            for (int pp = 0; pp < 6; ++pp) g_ProfCharPostPhase[pp] = 0;
+                        }
                         fclose(f);
                     }
 #endif
+                    for (int c = 0; c < 7; ++c) g_DriftChrMs[c] = 0.0;
 
 
 #if MU_DEV_DIAGNOSTICS

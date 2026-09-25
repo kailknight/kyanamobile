@@ -3015,6 +3015,16 @@ static int s_skinLastBoneCount = -1;
 // swapping builds. Kept for measurement, like the text-cache switches.
 static bool s_skinStateCacheEnabled = true;
 
+// Which parts of the cached path are on, for bisecting a driver-specific
+// fault without a rebuild (mu_gl_ab.txt skinOpts=N). All on by default.
+enum {
+    kSkinOptUniforms    = 1,  // skip uniforms equal to the last draw
+    kSkinOptVao         = 2,  // per-mesh VAO instead of per-draw attrib setup
+    kSkinOptBoneSkip    = 4,  // skip bone uploads identical to the last
+    kSkinOptNarrowReset = 8,  // no full cached-state invalidate after the draw
+};
+static int s_skinOpts = kSkinOptUniforms | kSkinOptVao | kSkinOptBoneSkip | kSkinOptNarrowReset;
+
 // Uniform values last set on s_skinProg. Uniforms belong to the program
 // object and only GL_DrawSkinnedMesh sets this program's, so the cache stays
 // true until the program is recreated.
@@ -3058,6 +3068,11 @@ void GL_SetSkinStateCache(bool enabled) {
     ResetSkinStateCaches();
 }
 bool GL_GetSkinStateCache() { return s_skinStateCacheEnabled; }
+void GL_SetSkinStateOptions(int opts) {
+    s_skinOpts = opts;
+    ResetSkinStateCaches();
+}
+int GL_GetSkinStateOptions() { return s_skinOpts; }
 
 void GL_GetCurrentMVP(float mvp[16]) {
     GetMVP(mvp);
@@ -3157,7 +3172,7 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
     // whole buffer below, identity tail included. This was ~300-660
     // orphan+uploads of 9.6KB a frame; slow drivers and the emulator's GL
     // pipe paid for every one.
-    if (s_skinStateCacheEnabled && boneCount == s_skinLastBoneCount &&
+    if (s_skinStateCacheEnabled && (s_skinOpts & kSkinOptBoneSkip) && boneCount == s_skinLastBoneCount &&
         memcmp(s_boneUpload, boneMatrix3x4, sizeof(float) * 3 * 4 * boneCount) == 0) {
         return;
     }
@@ -3180,6 +3195,15 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_boneUpload), nullptr, GL_DYNAMIC_DRAW);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(s_boneUpload), s_boneUpload);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+    // Re-attach the buffer to its uniform-block binding point before the next
+    // draw. By the spec the indexed binding follows the buffer object through
+    // an orphan, but Mali (G57, r32p1 driver - Redmi Note 14) keeps it on the
+    // OLD storage: with the bind done only once, every character after the
+    // first read garbage bones and exploded into screen-sized triangles over
+    // black terrain. Adreno and the emulator follow the spec. Only happens when
+    // the bones actually change - once per character, not once per mesh.
+    s_skinUboBound = false;
 }
 
 // Draws one skinned mesh from caller-supplied vertex/index data using the
@@ -3318,7 +3342,7 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     // Uniforms: only what differs from the last skinned draw. Samplers are
     // fixed at GL_SkinInit.
     SkinUniformCache& u = s_skinUniforms;
-    const bool all = !u.valid;
+    const bool all = !u.valid || !(s_skinOpts & kSkinOptUniforms);
     const int vertexLight = state.useVertexLight ? 1 : 0;
     const int chromeMode = state.chromeMode ? 1 : 0;
     const int useTexture = state.useTexture ? 1 : 0;
@@ -3393,10 +3417,37 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
         s_boundArrayBuffer = *vboInOut;
     }
 
+    const bool useVao = (s_skinOpts & kSkinOptVao) != 0;
+    if (!useVao) {
+        // The pre-VAO attribute setup, on VAO 0 - see DrawSkinnedMeshUncached.
+        glBindBuffer(GL_ARRAY_BUFFER, *vboInOut);
+        const GLsizei stride = sizeof(SkinVertex);
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restPos));
+        glEnableVertexAttribArray(5);
+        glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, restNormal));
+        glEnableVertexAttribArray(6);
+        glVertexAttribPointer(6, 2, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, uv));
+        glEnableVertexAttribArray(7);
+        glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(SkinVertex, boneIndex));
+        if (*eboInOut == 0) {
+            glGenBuffers(1, eboInOut);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                         static_cast<GLsizeiptr>(indexCount) * sizeof(uint16_t),
+                         indices, GL_STATIC_DRAW);
+        } else {
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, *eboInOut);
+        }
+    }
+
     // The mesh's VAO holds its four attribute pointers and its element
     // buffer, so after the first draw this is a single bind.
-    GLuint& vao = s_skinVaos[*vboInOut];
-    if (vao == 0) {
+    GLuint dummyVao = 0;
+    GLuint& vao = useVao ? s_skinVaos[*vboInOut] : dummyVao;
+    if (!useVao) {
+        // attributes already set up on VAO 0 above
+    } else if (vao == 0) {
         glGenVertexArrays(1, &vao);
         glBindVertexArray(vao);
 
@@ -3461,17 +3512,34 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     // body mesh is on a different path - it is not this one.
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, nullptr);
 
-    // Back to VAO 0, which every other gl_compat path uses - its attribute
-    // arrays and element buffer are exactly as they were before this draw.
-    glBindVertexArray(0);
+    if (useVao) {
+        // Back to VAO 0, which every other gl_compat path uses - its attribute
+        // arrays and element buffer are exactly as they were before this draw.
+        glBindVertexArray(0);
+    } else {
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glDisableVertexAttribArray(4);
+        glDisableVertexAttribArray(5);
+        glDisableVertexAttribArray(6);
+        glDisableVertexAttribArray(7);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        s_boundArrayBuffer = 0;
+        s_boundElementArrayBuffer = 0;
+    }
 
-    // Only the texture bindings moved outside gl_compat's tracking. This used
-    // to be a full GL_InvalidateCachedGLState(), which also forgot the cap,
-    // blend, depth and colour-mask state this draw never touches, so the next
-    // ordinary draw after every character mesh re-sent all of it. The program
-    // went through UseProgramCached and the array buffer was recorded above.
-    s_boundTexture = 0;
-    CachTexture = 0x7FFFFFFF; // ZzzOpenglUtil's shadow - see GL_InvalidateCachedGLState
+    if (!(s_skinOpts & kSkinOptNarrowReset)) {
+        // The old full reset, as before 2026-09-24.
+        GL_InvalidateCachedGLState();
+    } else {
+        // Only the texture bindings moved outside gl_compat's tracking. This
+        // used to be a full GL_InvalidateCachedGLState(), which also forgot the
+        // cap, blend, depth and colour-mask state this draw never touches, so
+        // the next ordinary draw after every character mesh re-sent all of it.
+        // The program went through UseProgramCached and the array buffer was
+        // recorded above.
+        s_boundTexture = 0;
+        CachTexture = 0x7FFFFFFF; // ZzzOpenglUtil's shadow - see GL_InvalidateCachedGLState
+    }
 
     ++s_drawCallCount; ++s_drawSite[6];
     s_totalVertices += vertexCount;

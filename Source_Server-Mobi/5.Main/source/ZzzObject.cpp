@@ -11265,8 +11265,18 @@ void RenderPartObjectBody(BMD *b,OBJECT *o,int Type,float Alpha,int RenderType)
 	}
 }
 
+extern bool g_CharacterThinEffects;
+
 void RenderPartObjectBodyColor(BMD *b,OBJECT *o,int Type,float Alpha,int RenderType,float Bright,int Texture, int iMonsterIndex)
 {
+	// Thin effects (ZzzCharacter.cpp RenderCharactersClient): any other player -
+	// not the hero or the target - keeps its base look and folded-in glow but
+	// drops the separate additive shine passes, each a full re-render of the body.
+	if (g_CharacterThinEffects && (RenderType & RENDER_BRIGHT))
+	{
+		return;
+	}
+
 	int MonsterGolden = gCustomMonsterGlow.CheckCustomByMonsterbrightness(iMonsterIndex);
 #ifdef PBG_ADD_NEWCHAR_MONK_ITEM
 	if(Type >= MODEL_HELM_MONK && Type <= MODEL_BOOTS_MONK + MODEL_ITEM_COMMONCNT_RAGEFIGHTER)
@@ -11450,6 +11460,12 @@ void RenderPartObjectBodyColor(BMD *b,OBJECT *o,int Type,float Alpha,int RenderT
 
 void RenderPartObjectBodyColor2(BMD *b,OBJECT *o,int Type,float Alpha,int RenderType,float Bright,int Texture)
 {
+	// Crowd LOD - see RenderPartObjectBodyColor.
+	if (g_CharacterThinEffects && (RenderType & RENDER_BRIGHT))
+	{
+		return;
+	}
+
 	if (!g_pNewUISystem->GetUI_NewOptionWindow()->OnOffGrap[g_pNewUISystem->GetUI_NewOptionWindow()->eEffectDynamic]) return;
 #ifdef PBG_ADD_NEWCHAR_MONK_ITEM
 	if(Type >= MODEL_HELM_MONK && Type <= MODEL_BOOTS_MONK + MODEL_ITEM_COMMONCNT_RAGEFIGHTER)
