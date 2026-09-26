@@ -32,14 +32,14 @@ void CStatsAdvance::Send(LPOBJ lpObj)
 	pMsg.StatInfo.Level = lpObj->Level;
 	pMsg.StatInfo.Reset = lpObj->Reset;
 	// What combat actually uses (CAttack::GetReflectDamage): items plus the
-	// reflect buff, then the Custom.ini LimitDamageReflect cap. DamageReflect
+	// reflect buff, then the Character.ini MaxDamageReflect cap. DamageReflect
 	// alone left the Summoner buff out, so a +40% buff never showed here.
 	{
 		int reflect = lpObj->DamageReflect+lpObj->EffectOption.AddDamageReflect;
 
-		if(gServerInfo.m_LimitDamageReflect > 0 && reflect > gServerInfo.m_LimitDamageReflect)
+		if(gServerInfo.m_MaxDamageReflect > 0 && reflect > gServerInfo.m_MaxDamageReflect)
 		{
-			reflect = gServerInfo.m_LimitDamageReflect;
+			reflect = gServerInfo.m_MaxDamageReflect;
 		}
 
 		pMsg.StatInfo.TotalDamageReflect = reflect;

@@ -1751,9 +1751,31 @@ void CServerInfo::ReadCharacterInfo(char* section,char* path) // OK
 
 	this->m_GeneralDamageRatePvM = GetPrivateProfileInt(section,"GeneralDamageRatePvM",0,path);
 
-	this->m_ReflectDamageRatePvP = GetPrivateProfileInt(section,"ReflectDamageRatePvP",0,path);
+	// Chance, in %, that a hit on a player is reflected at all (see
+	// CAttack::GetReflectDamage). 100 when absent, so reflect keeps firing on
+	// every hit as it did before these were chances.
+	this->m_ReflectDamageRatePvP = GetPrivateProfileInt(section,"ReflectDamageRatePvP",100,path);
 
-	this->m_ReflectDamageRatePvM = GetPrivateProfileInt(section,"ReflectDamageRatePvM",0,path);
+	this->m_ReflectDamageRatePvM = GetPrivateProfileInt(section,"ReflectDamageRatePvM",100,path);
+
+	// Caps the reflect % (items + buff, and full reflect). Replaces
+	// Custom.ini LimitDamageReflect. 0 = no cap.
+	this->m_MaxDamageReflect = GetPrivateProfileInt(section,"MaxDamageReflect",0,path);
+
+	// How much of a reflected hit the attacker takes, by the attacker's class.
+	this->m_ReflectDamageTakenRate[0] = GetPrivateProfileInt(section,"DWReflectDamageRate",100,path);
+
+	this->m_ReflectDamageTakenRate[1] = GetPrivateProfileInt(section,"DKReflectDamageRate",100,path);
+
+	this->m_ReflectDamageTakenRate[2] = GetPrivateProfileInt(section,"FEReflectDamageRate",100,path);
+
+	this->m_ReflectDamageTakenRate[3] = GetPrivateProfileInt(section,"MGReflectDamageRate",100,path);
+
+	this->m_ReflectDamageTakenRate[4] = GetPrivateProfileInt(section,"DLReflectDamageRate",100,path);
+
+	this->m_ReflectDamageTakenRate[5] = GetPrivateProfileInt(section,"SUReflectDamageRate",100,path);
+
+	this->m_ReflectDamageTakenRate[6] = GetPrivateProfileInt(section,"RFReflectDamageRate",100,path);
 
 	this->m_DamageRatePvP[0] = GetPrivateProfileInt(section,"DWDamageRatePvP",0,path);
 
@@ -4087,9 +4109,6 @@ void CServerInfo::ReadCustomInfo(char* section,char* path) // OK
 	this->m_GioiHanSatThuongHoanHao = this->GetProfileIntEx(section, "LimitExcellentDamage", "GioiHanSatThuongHoanHao", 100, path);
 	this->m_GioiHanLoaiBoPhongThu = this->GetProfileIntEx(section, "LimitIgnoreDefense", "GioiHanLoaiBoPhongThu", 100, path);
 	this->m_GioiHanGiamSatThuong = this->GetProfileIntEx(section, "LimitDamageReduction", "GioiHanGiamSatThuong", 100, path);
-
-	// Default 0 = no cap, so a Custom.ini without the key behaves as before.
-	this->m_LimitDamageReflect = GetPrivateProfileInt(section, "LimitDamageReflect", 0, path);
 
 	// 0 keeps the original subtraction when the key is absent.
 	this->m_DamageCalcSystem = GetPrivateProfileInt(section, "DamageCalcSystem", 0, path);

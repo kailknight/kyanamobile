@@ -1004,7 +1004,7 @@ bool CDarkSpirit::Attack(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,bool send,BY
 
 		if(effect != 4 && lpTarget->Type == OBJECT_USER)
 		{
-			__int64 ReflectDamage = gAttack.GetReflectDamage(lpTarget,damage);
+			__int64 ReflectDamage = gAttack.GetReflectDamage(lpObj,lpTarget,damage);
 
 			if(ReflectDamage > 0)
 			{

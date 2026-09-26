@@ -387,8 +387,10 @@ public:
 	int m_CastleSiegeDamageRate3;
 	int m_GeneralDamageRatePvP;
 	int m_GeneralDamageRatePvM;
-	int m_ReflectDamageRatePvP;
-	int m_ReflectDamageRatePvM;
+	int m_ReflectDamageRatePvP;	// % chance a player reflects a player's hit
+	int m_ReflectDamageRatePvM;	// % chance a player reflects a monster's hit
+	int m_MaxDamageReflect;		// max % of a hit reflected back, 0 = no cap
+	int m_ReflectDamageTakenRate[MAX_CLASS];	// % of reflected damage a player of this class takes
 	int m_DamageRatePvP[MAX_CLASS];
 	int m_DamageRatePvM[MAX_CLASS];
 	int m_DamageRateTo[MAX_CLASS][MAX_CLASS];
@@ -1074,7 +1076,6 @@ public:
 	int m_GioiHanSatThuongHoanHao;
 	int m_GioiHanLoaiBoPhongThu;
 	int m_GioiHanGiamSatThuong;
-	int m_LimitDamageReflect;	// max % of a hit reflected back, 0 = no cap
 	int m_DamageCalcSystem;		// 0 = damage - defense, 1 = damage * K / (K + defense)
 	int m_DefenseConstant;		// K for DamageCalcSystem 1
 	int m_DarkLordAreaSkillPvP;	// 1 = DL area skills hit attackable players outside duel too

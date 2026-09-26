@@ -756,11 +756,17 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 		if(skill != SKILL_EXPLOSION)
 		{
 			effect = 0x04;
-			damage = (damage*((lpObj->Type==OBJECT_USER&&lpTarget->Type==OBJECT_USER)?gServerInfo.m_ReflectDamageRatePvP:gServerInfo.m_ReflectDamageRatePvM))/100;
+			// The one taking the reflect (the original attacker) takes only its
+			// class's share of it - Character.ini <Class>ReflectDamageRate.
+			// Monsters take it in full.
+			if(lpTarget->Type == OBJECT_USER)
+			{
+				damage = (damage*gServerInfo.m_ReflectDamageTakenRate[lpTarget->Class])/100;
+			}
 
 			// Reflect fades out the longer the pairing has been fighting, so a
 			// drawn-out duel cannot be won by standing still behind reflect.
-			// Applied after the flat PvP/PvM reflect rate so it scales whatever
+			// Applied after the per-class reflect rate so it scales whatever
 			// that produced, and only between two players - PvM reflect is
 			// untouched. GetPvPReflectPercent returns 100 for every case that
 			// does not qualify, which makes this a no-op by default.
@@ -1143,7 +1149,7 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 
 		if(effect != 4 && lpTarget->Type == OBJECT_USER)
 		{
-			__int64 ReflectDamage = this->GetReflectDamage(lpTarget,damage);
+			__int64 ReflectDamage = this->GetReflectDamage(lpObj,lpTarget,damage);
 
 			if(ReflectDamage > 0)
 			{
@@ -3369,8 +3375,12 @@ int CAttack::GetAttackDamageElemental(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill
 	How much of a hit lpTarget sends back. Reflect % is the plain sum of every
 	source (excellent option, sockets, wings, pets, the reflect buff) with no
 	ceiling of its own, and full reflect sends back 100% on a proc - so
-	Custom.ini LimitDamageReflect caps both. 0 = no cap. Shared by the normal
+	Character.ini MaxDamageReflect caps both. 0 = no cap. Shared by the normal
 	and Dark Spirit attack paths so they cannot disagree.
+
+	The reflect % only fires on Character.ini ReflectDamageRatePvP (lpObj a
+	player) or ReflectDamageRatePvM (lpObj a monster) percent of hits. Full
+	reflect keeps its own item chance and is not gated by it.
 */
 /*
 	Defense against one hit.
@@ -3401,7 +3411,7 @@ int CAttack::ApplyTargetDefense(LPOBJ lpObj,__int64 damage,int defense) // OK
 	return (int)((damage < 0) ? 0 : damage);
 }
 
-__int64 CAttack::GetReflectDamage(LPOBJ lpTarget, __int64 damage) // OK
+__int64 CAttack::GetReflectDamage(LPOBJ lpObj, LPOBJ lpTarget, __int64 damage) // OK
 {
 	int rate = 0;
 
@@ -3411,12 +3421,17 @@ __int64 CAttack::GetReflectDamage(LPOBJ lpTarget, __int64 damage) // OK
 	}
 	else
 	{
-		rate = lpTarget->DamageReflect+lpTarget->EffectOption.AddDamageReflect;
+		const int chance = ((lpObj->Type == OBJECT_USER) ? gServerInfo.m_ReflectDamageRatePvP : gServerInfo.m_ReflectDamageRatePvM);
+
+		if((GetLargeRand()%100) < chance)
+		{
+			rate = lpTarget->DamageReflect+lpTarget->EffectOption.AddDamageReflect;
+		}
 	}
 
-	if(gServerInfo.m_LimitDamageReflect > 0 && rate > gServerInfo.m_LimitDamageReflect)
+	if(gServerInfo.m_MaxDamageReflect > 0 && rate > gServerInfo.m_MaxDamageReflect)
 	{
-		rate = gServerInfo.m_LimitDamageReflect;
+		rate = gServerInfo.m_MaxDamageReflect;
 	}
 
 	return ((rate > 0) ? ((damage*rate)/100) : 0);
