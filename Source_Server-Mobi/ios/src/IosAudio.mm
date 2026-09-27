@@ -13,11 +13,14 @@
 #import <UIKit/UIKit.h>
 
 #include "IosAudio.h"
+#include "IosVoice.h"
+#include "IosVoiceEngine.h"
 
 #include <strings.h>
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <mutex>
@@ -67,7 +70,25 @@ float g_volume = 1.0f;
 bool g_enabled = true;
 bool g_initialised = false;
 bool g_inBackground = false;
+// Kept apart from g_inBackground: an interruption whose end is never reported
+// must not leave audio off for good, so Pump recovers from this one.
+bool g_interrupted = false;
+int64_t g_interruptedMs = 0;
 bool g_musicWasPlaying = false;
+
+// The engine is the app's only one and carries proximity voice as well (see
+// IosVoiceEngine.h). It is rebuilt, never reconfigured in place, whenever the
+// voice route changes or something stops it: voice processing can only be set
+// before an engine starts, and an engine whose input node has been used keeps
+// trying to open the microphone under the playback-only Ambient session.
+dispatch_queue_t g_buildQueue = nullptr;
+std::atomic<bool> g_rebuildQueued{ false };
+bool g_rebuilding = false;       // g_lock; the build queue is starting/stopping the engine
+bool g_engineRunning = false;    // g_lock; tracked here so the game thread never queries the engine
+bool g_restartQueued = false;    // g_lock
+bool g_voicePlayback = false;    // g_lock
+bool g_voiceCapture = false;     // g_lock
+int64_t g_lastBuildMs = 0;       // g_lock
 
 int64_t NowMs()
 {
@@ -75,15 +96,22 @@ int64_t NowMs()
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
+// Into the same file log as voice (Documents/mu_voice_log.txt).
 void Log(const char* fmt, const char* a = "", int b = 0)
 {
     static int s_lines = 0;
     if (s_lines++ < 40)
     {
-        fprintf(stderr, "I/MuAudio: ");
-        fprintf(stderr, fmt, a, b);
-        fputc('\n', stderr);
+        char line[512];
+        snprintf(line, sizeof(line), fmt, a, b);
+        IosVoiceEngine_Log("audio: %s", line);
     }
+}
+
+// g_lock held.
+bool Suspended()
+{
+    return g_inBackground || g_interrupted;
 }
 
 bool FileExists(const std::string& path)
@@ -204,24 +232,29 @@ AVAudioPCMBuffer* DecodeToCanonical(const std::string& path)
     return out;
 }
 
+void RequestRebuild();
+void RequestRestart();
+
+// g_lock held. Whether effects can be started right now. Never starts the
+// engine itself: a start with voice processing takes a second or more, and
+// this is called from the game thread, which froze for that long - taps were
+// lost while the microphone came up. A stopped engine is restarted on the
+// build queue instead and effects are dropped until it is back.
 bool EnsureEngineRunning()
 {
-    if (g_engine == nil)
+    if (g_engine == nil || g_rebuilding || g_rebuildQueued.load())
     {
         return false;
     }
-    if (g_engine.isRunning)
+    if (g_engineRunning)
     {
         return true;
     }
-    NSError* error = nil;
-    [[AVAudioSession sharedInstance] setActive:YES error:nil];
-    if (![g_engine startAndReturnError:&error])
+    if (!Suspended())
     {
-        Log("engine start failed: %s", error.localizedDescription.UTF8String);
-        return false;
+        RequestRestart();
     }
-    return true;
+    return false;
 }
 
 // Loops die with the engine. Forgetting them is enough: the scene update
@@ -279,12 +312,30 @@ void StartVoice(int soundId, Sound& sound, bool looped)
             g_loopVoice.erase(loop);
         }
     }
-    [voice.node stop];
-    [voice.node scheduleBuffer:sound.buffer
-                        atTime:nil
-                       options:looped ? AVAudioPlayerNodeBufferLoops : 0
-             completionHandler:nil];
-    [voice.node play];
+    // g_engineRunning is only a hint: iOS stops a voice-processing engine by
+    // itself about 100ms after it starts, and the observer that clears the
+    // flag needs g_lock, which is held here. Playing a node on a stopped
+    // engine throws, so the failure is caught rather than crashing the game.
+    @try
+    {
+        [voice.node stop];
+        [voice.node scheduleBuffer:sound.buffer
+                            atTime:nil
+                           options:looped ? AVAudioPlayerNodeBufferLoops : 0
+                 completionHandler:nil];
+        [voice.node play];
+    }
+    @catch (NSException* exception)
+    {
+        IosVoiceEngine_Log("effect start failed (%s) - restarting the engine", exception.reason.UTF8String);
+        g_engineRunning = false;
+        ForgetActiveVoices();
+        if (!Suspended())
+        {
+            RequestRestart();
+        }
+        return;
+    }
 
     voice.soundId = soundId;
     voice.looped = looped;
@@ -300,10 +351,32 @@ void StartVoice(int soundId, Sound& sound, bool looped)
     }
 }
 
+// g_lock held. Stops the effect voices, unless the engine is changing hands:
+// node calls then contend with the build queue stopping or starting it.
+void StopVoiceNodesLocked()
+{
+    if (g_engineRunning && !g_rebuilding)
+    {
+        @try
+        {
+            for (Voice& voice : g_voices)
+            {
+                [voice.node stop];
+            }
+        }
+        @catch (NSException*)
+        {
+            g_engineRunning = false;
+        }
+    }
+}
+
+// g_lock held. The mixer is left alone while the build queue is starting or
+// stopping the engine; every path that clears g_rebuilding applies it again.
 void ApplyVolume()
 {
     const float volume = g_enabled ? g_volume : 0.0f;
-    if (g_engine != nil)
+    if (g_engine != nil && !g_rebuilding)
     {
         g_engine.mainMixerNode.outputVolume = volume;
     }
@@ -313,33 +386,274 @@ void ApplyVolume()
     }
 }
 
-void OnWillResignActive()
+// Builds and starts a complete engine for the given voice route. Runs on the
+// build queue without g_lock: the session switch can wait a good fraction of a
+// second for the microphone, and effects must not block on that.
+AVAudioEngine* BuildEngine(bool voicePlayback, bool voiceCapture, NSMutableArray<AVAudioPlayerNode*>* nodes,
+                           bool* startedOut)
 {
-    std::lock_guard<std::recursive_mutex> lock(g_lock);
-    g_inBackground = true;
-    g_musicWasPlaying = (g_music != nil) && g_music.isPlaying;
-    [g_music pause];
-    if (g_engine != nil)
+    bool refused = false;
+    if (!IosVoiceEngine_PrepareSession(voiceCapture) && voiceCapture)
     {
-        for (Voice& voice : g_voices)
-        {
-            [voice.node stop];
-        }
-        [g_engine pause];
+        // Recording refused (another app hosting a call, typically). The
+        // effects and other players' voices still get an engine.
+        IosVoiceEngine_Log("recording refused by iOS - building without the microphone");
+        voiceCapture = false;
+        refused = true;
+        IosVoiceEngine_PrepareSession(false);
     }
-    ForgetActiveVoices();
+    if (!voiceCapture)
+    {
+        // Kept as "unavailable" rather than idle when refused, so the voice
+        // readout can say why nobody hears the player.
+        IosVoiceEngine_CaptureDetached(refused);
+    }
+
+    AVAudioEngine* engine = [[AVAudioEngine alloc] init];
+    if (voiceCapture)
+    {
+        IosVoiceEngine_EnableVoiceProcessing(engine);
+    }
+
+    for (int i = 0; i < kVoiceCount; ++i)
+    {
+        AVAudioPlayerNode* node = [[AVAudioPlayerNode alloc] init];
+        [engine attachNode:node];
+        [engine connect:node to:engine.mainMixerNode format:g_format];
+        [nodes addObject:node];
+    }
+    if (voicePlayback || voiceCapture)
+    {
+        IosVoiceEngine_AttachPlayback(engine);
+    }
+    if (voiceCapture && !IosVoiceEngine_AttachCapture(engine))
+    {
+        IosVoiceEngine_Log("microphone unavailable - speaker only");
+    }
+
+    [engine prepare];
+
+    // Not started from the background: iOS refuses or silences recording
+    // begun there. OnDidBecomeActive starts it instead.
+    bool suspended;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_lock);
+        suspended = Suspended();
+    }
+    NSError* error = nil;
+    const int64_t startMs = NowMs();
+    const bool started = !suspended && [engine startAndReturnError:&error];
+    IosVoiceEngine_Log("engine built voice=%d mic=%d started=%d in %lldms%s%s%s", voicePlayback ? 1 : 0,
+                       voiceCapture ? 1 : 0, started ? 1 : 0, (long long)(NowMs() - startMs),
+                       suspended ? " (app inactive)" : "", error ? " " : "",
+                       error ? error.localizedDescription.UTF8String : "");
+    *startedOut = started;
+    return engine;
 }
 
-void OnDidBecomeActive()
+// Build queue only. Every start and stop of an engine happens here, outside
+// g_lock; g_rebuilding keeps the game thread off the engine meanwhile.
+void RebuildNow()
 {
+    bool playback;
+    bool capture;
+    AVAudioEngine* retired = nil;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_lock);
+        g_rebuildQueued.store(false);
+        g_rebuilding = true;
+        g_engineRunning = false;
+        playback = g_voicePlayback;
+        capture = g_voiceCapture;
+        retired = g_engine;
+        // The only owners left are `retired` and its own node list, so the
+        // release below really frees it - here, before the new one is built.
+        g_engine = nil;
+        for (Voice& voice : g_voices)
+        {
+            voice.node = nil;
+        }
+        ForgetActiveVoices();
+    }
+
+    // The old engine is stopped and released before the new one is built:
+    // two engines never hold the audio hardware at once, and an old
+    // voice-processing engine torn down after the new one started disturbed
+    // it. Released only once everything autoreleased while stopping it has
+    // drained - freeing an AVAudioEngine with such references pending crashed.
+    @autoreleasepool
+    {
+        [retired stop];
+    }
+    retired = nil;
+
+    NSMutableArray<AVAudioPlayerNode*>* nodes = [NSMutableArray arrayWithCapacity:kVoiceCount];
+    bool started = false;
+    AVAudioEngine* engine = BuildEngine(playback, capture, nodes, &started);
+
     std::lock_guard<std::recursive_mutex> lock(g_lock);
-    g_inBackground = false;
+    g_engine = engine;
+    for (int i = 0; i < kVoiceCount; ++i)
+    {
+        g_voices[i].node = nodes[i];
+    }
+    ForgetActiveVoices();
+    g_engineRunning = started;
+    g_lastBuildMs = NowMs();
+    g_rebuilding = false;
+    ApplyVolume();
+
+    // The route changed again while this one was building.
+    if (playback != g_voicePlayback || capture != g_voiceCapture)
+    {
+        RequestRebuild();
+    }
+}
+
+void RequestRebuild()
+{
+    if (g_buildQueue == nullptr || g_rebuildQueued.exchange(true))
+    {
+        return;
+    }
+    dispatch_async(g_buildQueue, ^{
+        @autoreleasepool
+        {
+            RebuildNow();
+        }
+    });
+}
+
+// Build queue only: restarts the current engine after something stopped it,
+// or rebuilds when that cannot work.
+void RestartNow()
+{
+    AVAudioEngine* engine;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_lock);
+        g_restartQueued = false;
+        if (g_engine == nil || g_engineRunning || g_rebuilding || g_rebuildQueued.load() || Suspended())
+        {
+            return;
+        }
+        // A new input format (Bluetooth HFP, say) leaves the tap and its
+        // converter stale; only a rebuild recreates them.
+        if (g_voiceCapture && !IosVoiceEngine_CaptureFormatMatches(g_engine))
+        {
+            IosVoiceEngine_Log("microphone format moved - rebuilding");
+            RequestRebuild();
+            return;
+        }
+        g_rebuilding = true;
+        engine = g_engine;
+    }
+
+    NSError* error = nil;
+    const int64_t startMs = NowMs();
+    const bool started = [engine startAndReturnError:&error];
+
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    g_rebuilding = false;
+    if (engine != g_engine)
+    {
+        return;
+    }
+    g_engineRunning = started;
+    ApplyVolume();
+    if (started)
+    {
+        IosVoiceEngine_Log("engine restarted in %lldms", (long long)(NowMs() - startMs));
+        return;
+    }
+    IosVoiceEngine_Log("engine restart failed (%s) - rebuilding", error.localizedDescription.UTF8String);
+    RequestRebuild();
+}
+
+void RequestRestart()
+{
+    if (g_buildQueue == nullptr || g_restartQueued)
+    {
+        return;
+    }
+    g_restartQueued = true;
+    dispatch_async(g_buildQueue, ^{
+        @autoreleasepool
+        {
+            RestartNow();
+        }
+    });
+}
+
+// Build queue only.
+void PauseNow()
+{
+    AVAudioEngine* engine;
+    {
+        std::lock_guard<std::recursive_mutex> lock(g_lock);
+        if (g_engine == nil || g_rebuilding || !Suspended())
+        {
+            return;
+        }
+        engine = g_engine;
+        g_rebuilding = true;
+        g_engineRunning = false;
+    }
+    [engine pause];
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    g_rebuilding = false;
+    ApplyVolume();
+}
+
+// g_lock held.
+void PauseAudioLocked()
+{
+    if (g_music != nil && g_music.isPlaying)
+    {
+        g_musicWasPlaying = true;
+    }
+    [g_music pause];
+    StopVoiceNodesLocked();
+    ForgetActiveVoices();
+    if (g_buildQueue != nullptr)
+    {
+        dispatch_async(g_buildQueue, ^{
+            @autoreleasepool
+            {
+                PauseNow();
+            }
+        });
+    }
+}
+
+// g_lock held.
+void ResumeAudioLocked()
+{
+    if (Suspended())
+    {
+        return;
+    }
     EnsureEngineRunning();
     if (g_musicWasPlaying && g_music != nil)
     {
         [g_music play];
     }
     g_musicWasPlaying = false;
+}
+
+void OnWillResignActive()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    g_inBackground = true;
+    PauseAudioLocked();
+}
+
+void OnDidBecomeActive()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    g_inBackground = false;
+    // Coming back to the foreground ends whatever interruption was running.
+    g_interrupted = false;
+    ResumeAudioLocked();
 }
 
 void InstallObservers()
@@ -353,23 +667,58 @@ void InstallObservers()
     [center addObserverForName:AVAudioSessionInterruptionNotification object:nil queue:nil
                     usingBlock:^(NSNotification* note) {
         const NSUInteger type = [note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+        std::lock_guard<std::recursive_mutex> lock(g_lock);
         if (type == AVAudioSessionInterruptionTypeBegan)
         {
-            OnWillResignActive();
+            IosVoiceEngine_Log("audio interrupted");
+            g_interrupted = true;
+            g_interruptedMs = NowMs();
+            PauseAudioLocked();
         }
-        else if ([UIApplication sharedApplication].applicationState == UIApplicationStateActive)
+        else
         {
-            OnDidBecomeActive();
+            IosVoiceEngine_Log("audio interruption ended");
+            g_interrupted = false;
+            ResumeAudioLocked();
         }
     }];
-    // Route changes (headphones in/out) stop the engine; nodes stay attached.
-    [center addObserverForName:AVAudioEngineConfigurationChangeNotification object:g_engine queue:nil
-                    usingBlock:^(NSNotification*) {
-        std::lock_guard<std::recursive_mutex> lock(g_lock);
-        ForgetActiveVoices();
-        if (!g_inBackground)
+    [center addObserverForName:AVAudioSessionRouteChangeNotification object:nil queue:nil
+                    usingBlock:^(NSNotification* note) {
+        const NSUInteger reason = [note.userInfo[AVAudioSessionRouteChangeReasonKey] unsignedIntegerValue];
+        NSMutableString* inputs = [NSMutableString string];
+        for (AVAudioSessionPortDescription* port in [AVAudioSession sharedInstance].currentRoute.inputs)
         {
-            EnsureEngineRunning();
+            [inputs appendFormat:@"%@ ", port.portType];
+        }
+        IosVoiceEngine_Log("route change reason=%lu inputs=[%s]", (unsigned long)reason, inputs.UTF8String);
+    }];
+    // The media server restarted: every audio object is dead.
+    [center addObserverForName:AVAudioSessionMediaServicesWereResetNotification object:nil queue:nil
+                    usingBlock:^(NSNotification*) {
+        IosVoiceEngine_Log("media services were reset - rebuilding");
+        std::lock_guard<std::recursive_mutex> lock(g_lock);
+        g_music = nil;
+        g_musicWasPlaying = false;
+        RequestRebuild();
+    }];
+    // Route changes (headphones in/out) stop the engine. So does starting one
+    // with voice processing: it moves the hardware onto several microphones
+    // (the input goes from 1 to 4 channels) and posts a configuration change
+    // about 100ms after every start. Rebuilding in response restarted that
+    // cycle forever, so the same engine is restarted (on the build queue), and
+    // only an engine that will not restart is rebuilt.
+    [center addObserverForName:AVAudioEngineConfigurationChangeNotification object:nil queue:nil
+                    usingBlock:^(NSNotification* note) {
+        std::lock_guard<std::recursive_mutex> lock(g_lock);
+        if (note.object != g_engine || g_rebuilding)
+        {
+            return;
+        }
+        g_engineRunning = false;
+        ForgetActiveVoices();
+        if (!Suspended())
+        {
+            RequestRestart();
         }
     }];
 }
@@ -390,7 +739,7 @@ void IosAudio_LoadSound(int id, const char* path)
 void IosAudio_Play(int id, bool looped)
 {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
-    if (!g_enabled || !g_initialised || g_inBackground)
+    if (!g_enabled || !g_initialised || Suspended())
     {
         return;
     }
@@ -461,7 +810,7 @@ void IosAudio_Play(int id, bool looped)
         }
         target.buffer = buffer;
         target.durationMs = static_cast<int64_t>(buffer.frameLength * 1000.0 / g_format.sampleRate);
-        if (target.pendingPlay && g_enabled && !g_inBackground)
+        if (target.pendingPlay && g_enabled && !Suspended())
         {
             target.pendingPlay = false;
             IosAudio_Play(id, target.pendingLoop);
@@ -473,11 +822,15 @@ void IosAudio_Play(int id, bool looped)
 void IosAudio_Stop(int id)
 {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
+    const bool nodesUsable = g_engineRunning && !g_rebuilding;
     for (Voice& voice : g_voices)
     {
         if (voice.soundId == id)
         {
-            [voice.node stop];
+            if (nodesUsable)
+            {
+                [voice.node stop];
+            }
             voice.soundId = -1;
             voice.looped = false;
         }
@@ -494,10 +847,7 @@ void IosAudio_Stop(int id)
 void IosAudio_StopAll()
 {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
-    for (Voice& voice : g_voices)
-    {
-        [voice.node stop];
-    }
+    StopVoiceNodesLocked();
     ForgetActiveVoices();
     for (auto& entry : g_sounds)
     {
@@ -530,28 +880,30 @@ extern "C" void AndroidAudioInit()
         std::lock_guard<std::recursive_mutex> lock(g_lock);
         if (!g_initialised)
         {
-            // Ambient: follows the silent switch and mixes with other apps.
-            NSError* error = nil;
-            AVAudioSession* session = [AVAudioSession sharedInstance];
-            [session setCategory:AVAudioSessionCategoryAmbient error:&error];
-            [session setActive:YES error:&error];
-
             g_decodeQueue = dispatch_queue_create("mu.audio.decode", DISPATCH_QUEUE_SERIAL);
-            g_engine = [[AVAudioEngine alloc] init];
+            g_buildQueue = dispatch_queue_create("mu.audio.engine", DISPATCH_QUEUE_SERIAL);
             g_format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:kCanonicalRate channels:2];
-            for (Voice& voice : g_voices)
+
+            // Built here, synchronously, so the first sounds have an engine.
+            // Effects only, under the Ambient session: follows the silent
+            // switch and mixes with other apps.
+            NSMutableArray<AVAudioPlayerNode*>* nodes = [NSMutableArray arrayWithCapacity:kVoiceCount];
+            bool started = false;
+            g_engine = BuildEngine(false, false, nodes, &started);
+            g_engineRunning = started;
+            for (int i = 0; i < kVoiceCount; ++i)
             {
-                voice.node = [[AVAudioPlayerNode alloc] init];
-                [g_engine attachNode:voice.node];
-                [g_engine connect:voice.node to:g_engine.mainMixerNode format:g_format];
+                g_voices[i].node = nodes[i];
             }
-            [g_engine prepare];
-            g_initialised = EnsureEngineRunning();
+            g_lastBuildMs = NowMs();
+            g_initialised = true;
             InstallObservers();
             ApplyVolume();
-            Log("engine ready=%s voices=%d", g_initialised ? "yes" : "no", kVoiceCount);
+            Log("engine ready=%s voices=%d", g_engineRunning ? "yes" : "no", kVoiceCount);
         }
     }
+
+    IosVoice_SelfTestIfRequested();
 
     // Fills the table through LoadWaveFile, same order as on Android.
     OpenSounds();
@@ -600,7 +952,7 @@ extern "C" void AndroidAudioPlayMusic(const char* absolutePath, bool loop)
     player.volume = g_volume;
     [player prepareToPlay];
     g_music = player;
-    if (g_inBackground)
+    if (Suspended())
     {
         g_musicWasPlaying = true;
     }
@@ -631,4 +983,59 @@ extern "C" bool AndroidAudioIsMusicPlaying()
     // Paused for the background still counts: the event maps use this to
     // chain tracks and must not skip ahead while the app is away.
     return g_music.isPlaying || g_musicWasPlaying;
+}
+
+void IosAudio_SetVoiceRoute(bool playback, bool capture)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    if (!g_initialised || (playback == g_voicePlayback && capture == g_voiceCapture))
+    {
+        return;
+    }
+    g_voicePlayback = playback;
+    g_voiceCapture = capture;
+    RequestRebuild();
+}
+
+void IosAudio_Pump()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    // An interruption iOS never reported the end of, while the app is in the
+    // foreground: give it a few seconds, then take the audio back.
+    if (g_initialised && g_interrupted && !g_inBackground && NowMs() - g_interruptedMs > 3000)
+    {
+        IosVoiceEngine_Log("interruption never ended - resuming audio");
+        g_interrupted = false;
+        // Cleared only if it really plays: while an interruption is still
+        // active, play fails, and PlayMp3 would otherwise rebuild the player
+        // every frame.
+        if (g_musicWasPlaying && g_music != nil && [g_music play])
+        {
+            g_musicWasPlaying = false;
+        }
+        RequestRebuild();
+        return;
+    }
+    if (!g_initialised || Suspended() || g_rebuilding || g_rebuildQueued.load() || g_restartQueued
+        || g_engine == nil || g_engineRunning)
+    {
+        return;
+    }
+    // A call, Siri or a route change stopped it. Held off briefly after a
+    // build, so an engine that is still settling is not torn down again.
+    if (NowMs() - g_lastBuildMs < 1500)
+    {
+        return;
+    }
+    IosVoiceEngine_Log("engine found stopped - rebuilding");
+    RequestRebuild();
+}
+
+void IosAudio_RequestRebuild()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    if (g_initialised)
+    {
+        RequestRebuild();
+    }
 }

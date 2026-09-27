@@ -179,6 +179,11 @@ public:
 	void SetLoopbackTest(bool bOn);
 	bool GetLoopbackTest() const { return this->m_LoopbackTest; }
 
+	// Forgets the noise gate's learned floor. Called each time the microphone
+	// opens: a floor learned from the last press, or from speech that was
+	// already under way when the device came up, would shut out this one.
+	void ResetCaptureGate();
+
 private:
 	bool OpenSocket();
 	void CloseSocket();
@@ -187,7 +192,9 @@ private:
 	void PumpReceive();
 	void HandlePacket(const VBYTE* pBuffer, int iLength);
 	void HandleFrameIn(const VOICE_V2C_FRAME_MSG* lpMsg);
-	void SendFrameLocked(const short* pSamples);
+	// bBypassGate: the loopback tone is a fixed test signal, not speech, and
+	// the gate learning it as the floor would then shut out real speech.
+	void SendFrameLocked(const short* pSamples, bool bBypassGate = false);
 	void ExpireSpeakers(DWORD dwNow);
 	void ProcLoopbackTest(DWORD dwNow);
 
@@ -239,6 +246,11 @@ private:
 	float   m_NoiseFloor;
 	DWORD   m_GateHoldUntil;
 	bool    m_GateOpen;
+	// When the gate last opened from shut, and the quietest frame since: the
+	// floor only learns while the gate is shut, so a room loud enough to hold
+	// it open would otherwise never be learned at all.
+	DWORD   m_GateOpenedAt;
+	int     m_OpenMinPeak;
 
 	VOICE_SPEAKER m_Speaker[VOICE_MAX_SPEAKERS];
 

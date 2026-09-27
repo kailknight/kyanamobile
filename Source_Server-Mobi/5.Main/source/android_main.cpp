@@ -53,6 +53,13 @@ static void android_set_data_dir_early()
 }
 #elif defined(MU_IOS)
 #include "Platform/IosPlatform.h"
+#if defined(MU_IOS)
+#include "IosVoice.h"
+#include <atomic>
+// Touch counters for IosVoiceHeartbeat (defined near OnAndroidSappFrame).
+static std::atomic<int> g_IosSappTouchEvents{ 0 };
+static int g_IosFingerDowns = 0;
+#endif
 // iOS equivalent: game data lives in the app's Documents folder.
 __attribute__((constructor(101)))
 static void ios_set_data_dir_early()
@@ -5390,6 +5397,7 @@ bool IsAndroidPinchActive()
 int HitTestVirtualMirrorHotKeySlot(float uiX, float uiY);
 int HitTestVirtualAttackButton(float uiX, float uiY);
 int HitTestVirtualSkillButton(float uiX, float uiY);
+bool HitTestVoicePttButton(float uiX, float uiY);
 
 bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
 {
@@ -5425,7 +5433,10 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
     const bool fingerBOnExclusiveButton =
         HitTestVirtualMirrorHotKeySlot(bUiX, bUiY) >= 0
         || HitTestVirtualAttackButton(bUiX, bUiY) == kVirtualAttackButton
-        || HitTestVirtualSkillButton(bUiX, bUiY) >= kVirtualSkillButtonBase;
+        || HitTestVirtualSkillButton(bUiX, bUiY) >= kVirtualSkillButtonBase
+        // The mic button toggles on finger-down: a tap on it with a thumb
+        // already on the joystick must toggle, not start a pinch.
+        || HitTestVoicePttButton(bUiX, bUiY);
 
     if (g_androidPinch.fingerB == static_cast<SDL_FingerID>(-1)
         && touch.fingerId != g_androidPinch.fingerA
@@ -15300,6 +15311,22 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
     return HandleVirtualJoystickFingerMotion(touch);
 }
 
+// Releases the joystick or held pad button a finger owns, for the branches
+// below that claim a release those controls never get to see.
+static void ReleaseVirtualPadFinger(SDL_FingerID fingerId)
+{
+    if (IsVirtualJoystickCaptured(fingerId))
+    {
+        StopVirtualJoystickMovementAtCurrentTile();
+        ClearVirtualJoystick();
+    }
+    const int slot = FindActiveVirtualTouchSlot(fingerId);
+    if (slot >= 0)
+    {
+        ClearActiveVirtualTouchSlot(slot);
+    }
+}
+
 bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 {
     // Before everything, including the pinch tracker: this is the release of the
@@ -15312,6 +15339,14 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     {
         g_voicePttFingerId = static_cast<SDL_FingerID>(-1);
 
+        // The pinch tracker registered this finger on the way down (it sees
+        // every first finger) and has to hear it lift, or it keeps a phantom
+        // finger A and turns the next tap anywhere into finger B of a pinch -
+        // the camera zooms and the tap is lost. Android hid this by reusing
+        // finger id 0, so the next touch cleared the stale slot; iOS gives
+        // every touch a new id.
+        HandleAndroidPinchFingerUp(touch);
+
         return true;
     }
 
@@ -15319,6 +15354,12 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     // a live pinch, so ordinary releases still reach the handlers below.
     if (HandleAndroidPinchFingerUp(touch))
     {
+        // The lifting finger may own a held control from before the pinch -
+        // most often ATK, whose repeat otherwise never stops. Released here,
+        // since swallowing the event keeps it from the handlers that would.
+        ReleaseVirtualPadFinger(touch.fingerId);
+        FinishAndroidBagHoldFingerUp(touch.fingerId);
+        FinishAndroidEquipHoldFingerUp(touch.fingerId);
         return true;
     }
 
@@ -15326,6 +15367,9 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     // staged click keeps running after this - see the implementation.
     if (HandleAndroidMessageBoxFingerUp(touch))
     {
+        // A joystick or ATK finger held when the box opened lifts here too;
+        // without this the hero keeps walking or attacking behind it.
+        ReleaseVirtualPadFinger(touch.fingerId);
         return true;
     }
 
@@ -15334,6 +15378,7 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
     // handlers below - they would be resolving a press they never saw.
     if (HandleAndroidTutorialFingerUp(touch))
     {
+        ReleaseVirtualPadFinger(touch.fingerId);
         return true;
     }
 
@@ -22267,6 +22312,9 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
     // For now: second finger 鑺掗垾鐘偓?right-click
     case SDL_FINGERDOWN:
         g_seenFingerInput = true;
+#if defined(MU_IOS)
+        ++g_IosFingerDowns;
+#endif
         if (HandleVirtualPickerFingerDown(ev.tfinger))
         {
             break;
@@ -22357,10 +22405,26 @@ static void HandleSDLEvent(const SDL_Event& ev, int& screenW, int& screenH)
         g_seenFingerInput = true;
         if (HandleVirtualPickerFingerUp(ev.tfinger))
         {
+            // Same as the mic button's release: a finger the pinch tracker
+            // saw go down must be seen lifting, or it pinches the next tap.
+            HandleAndroidPinchFingerUp(ev.tfinger);
             break;
         }
         if (HandleVirtualFingerUp(ev.tfinger))
         {
+            // The release was consumed (a pinch it ended, a modal box, ...),
+            // but if it was the primary finger the press it started must still
+            // end - otherwise g_primaryTouchFinger stays taken and every later
+            // tap reads as a second finger, a right-click. iOS gives each touch
+            // a new id, so nothing else ever clears it there. No pop: the
+            // release belonged to the handler.
+            if (ev.tfinger.fingerId == g_primaryTouchFinger)
+            {
+                ClearAndroidLongPressRightClick(false);
+                MouseLButtonPush = false;
+                MouseLButton = false;
+                g_primaryTouchFinger = -1;
+            }
             break;
         }
         g_iNoMouseTime = 0;
@@ -24489,9 +24553,59 @@ static void OnAndroidSappInit()
     }
 }
 
+#if defined(MU_IOS)
+// Heartbeat while the microphone is open, into the voice log: frames run,
+// longest frame, and touches iOS delivered versus touches the game handled.
+// Tells a frozen main loop from one that runs but loses its input.
+static void IosVoiceHeartbeat(uint32_t frameMs)
+{
+    static uint32_t s_windowStart = 0;
+    static int s_frames = 0;
+    static uint32_t s_worstMs = 0;
+    static int s_lastState = IOS_VOICE_CAPTURE_IDLE;
+
+    const int state = IosVoice_CaptureState();
+    const uint32_t now = MU_MobileGetTicks();
+    if (state == IOS_VOICE_CAPTURE_IDLE && s_lastState == IOS_VOICE_CAPTURE_IDLE)
+    {
+        s_windowStart = now;
+        s_frames = 0;
+        s_worstMs = 0;
+        g_IosSappTouchEvents.store(0);
+        g_IosFingerDowns = 0;
+        return;
+    }
+    s_lastState = state;
+    ++s_frames;
+    s_worstMs = (frameMs > s_worstMs) ? frameMs : s_worstMs;
+    if (now - s_windowStart < 1000)
+    {
+        return;
+    }
+    // Only windows with a stall worth knowing about, so a long talk does not
+    // use up the log.
+    if (s_worstMs > 250)
+    {
+        IosVoice_Log("main: stall %d frames/s worst=%ums sokolTouchEvents=%d fingerDowns=%d micState=%d",
+            s_frames, s_worstMs, g_IosSappTouchEvents.load(), g_IosFingerDowns, state);
+    }
+    g_IosSappTouchEvents.store(0);
+    g_IosFingerDowns = 0;
+    s_windowStart = now;
+    s_frames = 0;
+    s_worstMs = 0;
+}
+#endif
+
 static void OnAndroidSappFrame()
 {
+#if defined(MU_IOS)
+    const uint32_t frameStart = MU_MobileGetTicks();
     RunAndroidGameFrame();
+    IosVoiceHeartbeat(MU_MobileGetTicks() - frameStart);
+#else
+    RunAndroidGameFrame();
+#endif
 }
 
 static void OnAndroidSappCleanup()
@@ -24501,6 +24615,12 @@ static void OnAndroidSappCleanup()
 
 static void OnAndroidSappEvent(const sapp_event* event)
 {
+#if defined(MU_IOS)
+    if (event->type >= SAPP_EVENTTYPE_TOUCHES_BEGAN && event->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED)
+    {
+        g_IosSappTouchEvents.fetch_add(1);
+    }
+#endif
     QueueSappEventAsSDL(event);
 }
 

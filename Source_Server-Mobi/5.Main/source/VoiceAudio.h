@@ -84,6 +84,9 @@ private:
 
 	void SetError(const char* szFormat, ...);
 
+	// Permission check, open, and the test-tone fallback, for one press.
+	void StartCapture();
+
 	bool  m_PlaybackOpen;
 	bool  m_CaptureOpen;
 	bool  m_Talking;
@@ -101,6 +104,11 @@ private:
 	// missing microphone does not also stop the player hearing anybody. These
 	// are two devices and they fail independently.
 	bool  m_PlaybackFailed;
+
+	// Set while the mobile permission prompt is outstanding, so Proc can open
+	// the microphone once it is granted rather than waiting for a new press.
+	bool  m_WaitingForPermission;
+	DWORD m_CaptureRetryTick;
 };
 
 extern CVoiceAudio gVoiceAudio;

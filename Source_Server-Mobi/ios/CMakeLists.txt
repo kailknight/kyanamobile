@@ -97,6 +97,7 @@ list(REMOVE_DUPLICATES GAME_SOURCES)
 
 set(IOS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosAudio.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/IosVoice.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPlatform.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreload.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreloadCore.cpp"
@@ -125,6 +126,11 @@ set(PRELOAD_BANNERS
 )
 set_source_files_properties(${PRELOAD_BANNERS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 
+# App icon: one 1024x1024 image (Working Project/Icons/Logo.png flattened onto
+# black, as iOS icons must be opaque); actool derives every device size from it.
+set(IOS_ASSET_CATALOG "${CMAKE_CURRENT_SOURCE_DIR}/assets/Assets.xcassets")
+set_source_files_properties(${IOS_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+
 # AAC copies of the Ogg music tracks, which AVAudioPlayer cannot decode.
 file(GLOB IOS_MUSIC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/Music/*.m4a")
 set_source_files_properties(${IOS_MUSIC} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/Music")
@@ -135,6 +141,7 @@ add_executable(WorldOfKira MACOSX_BUNDLE
     ${BUNDLED_ASSETS}
     ${PRELOAD_BANNERS}
     ${IOS_MUSIC}
+    ${IOS_ASSET_CATALOG}
 )
 
 list(LENGTH GAME_SOURCES GAME_SOURCE_COUNT)
@@ -226,6 +233,7 @@ set_target_properties(WorldOfKira PROPERTIES
     XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
     XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
     XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}"
     XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
     XCODE_ATTRIBUTE_GCC_ENABLE_CPP_EXCEPTIONS "YES"

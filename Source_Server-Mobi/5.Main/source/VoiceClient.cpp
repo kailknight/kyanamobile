@@ -100,6 +100,8 @@ void CVoiceClient::Init() // OK
 	this->m_NoiseFloor = 0.0f;
 	this->m_GateHoldUntil = 0;
 	this->m_GateOpen = false;
+	this->m_GateOpenedAt = 0;
+	this->m_OpenMinPeak = 32767;
 }
 
 void CVoiceClient::Release() // OK
@@ -276,7 +278,7 @@ void CVoiceClient::SendBye() // OK
 
 // Assumes the lock is held. The capture path and the loopback test both come
 // through here so there is only ever one copy of the encode-and-send sequence.
-void CVoiceClient::SendFrameLocked(const short* pSamples) // OK
+void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // OK
 {
 	// Frames are dropped outright until the service has acknowledged us. There
 	// is nothing to gain from buffering speech nobody can route yet.
@@ -303,7 +305,7 @@ void CVoiceClient::SendFrameLocked(const short* pSamples) // OK
 	//
 	// Runs BEFORE the gain, on the raw level. Gating after amplification would
 	// be gating a signal the gate itself caused to be loud.
-	if (VoiceSettingGetNoiseGate())
+	if (VoiceSettingGetNoiseGate() && bBypassGate == false)
 	{
 		const DWORD now = GetTickCount();
 
@@ -315,9 +317,16 @@ void CVoiceClient::SendFrameLocked(const short* pSamples) // OK
 		// the gate that speech is background.
 		if (this->m_GateOpen == false)
 		{
+			// Seeded low rather than from the first frame, which is often speech:
+			// the device takes a moment to come up and the player is usually
+			// already talking. Falls fast when the room goes quiet, rises slowly.
 			if (this->m_NoiseFloor <= 0.0f)
 			{
-				this->m_NoiseFloor = (float)peak;
+				this->m_NoiseFloor = (float)((peak < 500) ? peak : 500);
+			}
+			else if ((float)peak < this->m_NoiseFloor)
+			{
+				this->m_NoiseFloor += ((float)peak - this->m_NoiseFloor) * 0.5f;
 			}
 			else
 			{
@@ -338,6 +347,12 @@ void CVoiceClient::SendFrameLocked(const short* pSamples) // OK
 
 		if ((float)peak >= openAt)
 		{
+			if (this->m_GateOpen == false)
+			{
+				this->m_GateOpenedAt = now;
+				this->m_OpenMinPeak = 32767;
+			}
+
 			// Held open briefly after the level drops, so the quiet tail of a
 			// word is not chopped off - the classic giveaway of a gate set with
 			// no hold at all.
@@ -347,6 +362,24 @@ void CVoiceClient::SendFrameLocked(const short* pSamples) // OK
 		else if (this->m_GateOpen && (int)(now - this->m_GateHoldUntil) >= 0)
 		{
 			this->m_GateOpen = false;
+		}
+
+		// Open for over two seconds without a single 300ms gap: that is
+		// steady background, not speech, which pauses between words. Its
+		// quietest frame becomes the floor, so the gate can shut on it.
+		if (this->m_GateOpen)
+		{
+			if (peak < this->m_OpenMinPeak)
+			{
+				this->m_OpenMinPeak = peak;
+			}
+
+			if ((int)(now - this->m_GateOpenedAt) > 2000)
+			{
+				this->m_NoiseFloor = (this->m_OpenMinPeak < 4000) ? (float)this->m_OpenMinPeak : 4000.0f;
+				this->m_GateOpenedAt = now;
+				this->m_OpenMinPeak = 32767;
+			}
 		}
 
 		if (this->m_GateOpen == false)
@@ -957,6 +990,17 @@ void CVoiceClient::SetLoopbackTest(bool bOn) // OK
 	g_ConsoleDebug->Write(MCD_RECEIVE, "[Voice] loopback test %s", bOn ? "ON" : "OFF");
 }
 
+void CVoiceClient::ResetCaptureGate() // OK
+{
+	std::lock_guard<std::mutex> lock(this->m_Lock);
+
+	this->m_NoiseFloor = 0.0f;
+	this->m_GateHoldUntil = 0;
+	this->m_GateOpen = false;
+	this->m_GateOpenedAt = 0;
+	this->m_OpenMinPeak = 32767;
+}
+
 void CVoiceClient::ProcLoopbackTest(DWORD dwNow) // OK
 {
 	if (this->m_LoopbackTest == false)
@@ -1001,7 +1045,7 @@ void CVoiceClient::ProcLoopbackTest(DWORD dwNow) // OK
 
 		// Not SendCaptureFrame: this runs from Proc, which already holds the
 		// lock, and std::mutex is not recursive.
-		this->SendFrameLocked(samples);
+		this->SendFrameLocked(samples, true);
 	}
 }
 

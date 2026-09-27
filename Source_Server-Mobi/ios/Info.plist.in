@@ -45,6 +45,11 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 
+	<!-- Proximity voice (push to talk). iOS terminates an app that opens the
+	     microphone without this. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Voice chat lets nearby players hear you while you hold the talk button.</string>
+
 	<!-- data.zip is served over plain HTTP (Android sets usesCleartextTraffic
 	     for the same reason). Dev-build setting; narrow before App Store. -->
 	<key>NSAppTransportSecurity</key>

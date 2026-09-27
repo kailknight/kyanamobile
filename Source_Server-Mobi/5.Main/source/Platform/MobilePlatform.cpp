@@ -17,6 +17,7 @@
 #endif
 #if defined(MU_IOS)
 #include "IosPlatform.h"
+#include "IosVoice.h"
 #include <unistd.h>
 #endif
 
@@ -313,6 +314,8 @@ bool MU_MobileHasMicPermission()
         return false;
     }
     return (result != 0);
+#elif defined(MU_IOS)
+    return IosVoice_MicPermission() == 1;
 #else
     return true;
 #endif
@@ -347,6 +350,8 @@ void MU_MobileRequestMicPermission()
     {
         env->ExceptionClear();
     }
+#elif defined(MU_IOS)
+    IosVoice_RequestMicPermission();
 #endif
 }
 
