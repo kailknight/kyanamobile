@@ -4623,6 +4623,8 @@ void CServerInfo::ReadSkillInfo(char* section,char* path) // OK
 
 	this->m_SwordPowerMaxRate = GetPrivateProfileInt(section,"SwordPowerMaxRate",0,path);
 
+	this->m_SwordPowerMaxDefenseRate = GetPrivateProfileInt(section,"SwordPowerMaxDefenseRate",0,path);
+
 	this->m_SleepConstA = GetPrivateProfileInt(section,"SleepConstA",0,path);
 
 	this->m_SleepConstB = GetPrivateProfileInt(section,"SleepConstB",0,path);

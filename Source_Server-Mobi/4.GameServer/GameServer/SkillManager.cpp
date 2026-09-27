@@ -3659,6 +3659,19 @@ bool CSkillManager::SkillSwordPower(int aIndex,int bIndex,CSkill* lpSkill,bool c
 
 	int value4 = (((40-((lpObj->Energy+lpObj->AddEnergy)/gServerInfo.m_SwordPowerConstB))<10)?10:(40-((lpObj->Energy+lpObj->AddEnergy)/gServerInfo.m_SwordPowerConstB)));
 
+	// SwordPowerMaxDefenseRate > 0: the defense and MaxHP penalty grows with
+	// energy (Energy/SwordPowerConstB) up to this cap, instead of the stock
+	// formula above that shrinks to 10% as energy rises. 0 keeps stock.
+	if(gServerInfo.m_SwordPowerMaxDefenseRate > 0)
+	{
+		value3 = (lpObj->Energy+lpObj->AddEnergy)/gServerInfo.m_SwordPowerConstB;
+
+		value3 = ((value3>gServerInfo.m_SwordPowerMaxDefenseRate)?gServerInfo.m_SwordPowerMaxDefenseRate:value3);
+
+		// DivMaxHP of 100 would leave MaxHP at 0, so HP stops at 99.
+		value4 = ((value3>99)?99:value3);
+	}
+
 	int count = gServerInfo.m_SwordPowerTimeConstA+((lpObj->Energy+lpObj->AddEnergy)/gServerInfo.m_SwordPowerTimeConstB);
 
 	gEffectManager.AddEffect(lpObj,0,this->GetSkillEffect(lpSkill->m_index),count,value1,value2,value3,value4);

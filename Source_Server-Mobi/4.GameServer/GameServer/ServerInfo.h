@@ -832,6 +832,7 @@ public:
 	int m_SwordPowerTimeConstA;
 	int m_SwordPowerTimeConstB;
 	int m_SwordPowerMaxRate;
+	int m_SwordPowerMaxDefenseRate;
 	int m_SleepConstA;
 	int m_SleepConstB;
 	int m_SleepTimeConstA;
