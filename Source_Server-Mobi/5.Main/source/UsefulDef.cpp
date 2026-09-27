@@ -47,7 +47,15 @@ int DivideStringByPixel(LPTSTR alpszDst, int nDstRow, int nDstColumn, LPCTSTR lp
 	char szWorkToken[1024];
 	int nLine = 0;
 
-	char* pszToken = ::strtok(szWorkSrc, &szNewlineChar);
+	// strtok takes a zero-terminated SET of separators. This used to pass the
+	// address of the lone char, so whatever followed it on the stack counted
+	// too: on the iOS build that is szWorkToken, holding the previous word, so
+	// every letter of it became a break and was deleted - tooltip lines came
+	// out as "Du" / "ability:" and "r" / "qui" / "ed:". Android survived only
+	// because its stack layout happens to leave a zero there.
+	const char szDelimiters[2] = { szNewlineChar, '\0' };
+
+	char* pszToken = ::strtok(szWorkSrc, szDelimiters);
 
 	// Each chunk may only use the rows the earlier chunks left. Passing the full
 	// nDstRow to every chunk let a multi-chunk text write rows past the end of
@@ -64,7 +72,7 @@ int DivideStringByPixel(LPTSTR alpszDst, int nDstRow, int nDstColumn, LPCTSTR lp
 		{
 			nLine += ::CutText3(pszToken, alpszDst + nLine * nDstColumn, nPixelPerLine, nDstRow - nLine, nDstColumn);
 		}
-		pszToken = ::strtok(NULL, &szNewlineChar);
+		pszToken = ::strtok(NULL, szDelimiters);
 	}
 
 	return nLine;

@@ -9172,7 +9172,19 @@ int GetScreenWidth()
 	// icons" symptom the Expanded Inventory itself had, just moved one window
 	// further left. Must be tested before the two-panel case, since its
 	// condition is a superset of that one.
+	//
+	// The Expanded Vault is the other three-panel case: it opens to the left of
+	// the storage window, so storage + vault + inventory are all on screen. It
+	// was missing here, so the vault's item icons were scissored away while its
+	// slots stayed highlighted. (StorageExt::Render hides the vault whenever the
+	// Expanded Inventory is up, so the two never make four panels.)
 	if(g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
+		&& g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE)
+		&& g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_ExpandWarehouse))
+	{
+		iWidth = 640 - (190 * 3);
+	}
+	else if(g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY)
 		&& g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_ExpandInventory)
 		&& (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER)
 			|| g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
