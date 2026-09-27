@@ -11,7 +11,7 @@
 #include "stdafx.h"
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "HTTPConnecter.h"
-#include "GameShop\ShopListManager\interface\PathMethod\Path.h"
+#include "GameShop/ShopListManager/interface/PathMethod/Path.h"
 
 HTTPConnecter::HTTPConnecter(DownloadServerInfo* pServerInfo,DownloadFileInfo* pFileInfo) : IConnecter(pServerInfo,pFileInfo)
 {

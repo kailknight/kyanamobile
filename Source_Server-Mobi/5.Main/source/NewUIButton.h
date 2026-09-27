@@ -118,7 +118,7 @@ namespace SEASON3B
 	public:
 		CNewUIButton();
 		virtual ~CNewUIButton();
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 		void ChangeButtonImgState( bool imgregister, int imgindex,bool overflg = false, bool isimgwidth = false, bool bClickEffect = false );
 
 #else // KJH_ADD_INGAMESHOP_UI_SYSTEM || __ANDROID__
@@ -140,7 +140,7 @@ namespace SEASON3B
 		void ChangeText( unicode::t_string btname );
 		void SetFont( HFONT hFont );
 
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 		void ChangeButtonState( BUTTON_STATE eventstate, int iButtonState );
 		void MoveTextPos(int iX, int iY);
 		void MoveTextTipPos(int iX, int iY);
@@ -268,7 +268,7 @@ namespace SEASON3B
 		void ChangeText(unicode::t_string btname);
 		void ChangeTextBackColor(const DWORD bcolor);
 		void ChangeTextColor(const DWORD color);
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 		void ChangeButtonState( BUTTON_STATE eventstate, int iButtonState );
 		void ChangeButtonState( int iImgIndex, BUTTON_STATE eventstate, int iButtonState );
 		void SetFont(HFONT hFont);

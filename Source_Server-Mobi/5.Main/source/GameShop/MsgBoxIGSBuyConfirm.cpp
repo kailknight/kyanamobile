@@ -8,7 +8,7 @@
 #include "MsgBoxIGSCommon.h"	// IGSIsModernSkin, IGSFillRect, IGSRenderModernPanel
 #include "DSPlaySound.h"
 #include "wsclientinline.h"
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 #include <strsafe.h>
 #endif
 

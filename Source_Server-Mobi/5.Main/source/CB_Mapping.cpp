@@ -46,7 +46,7 @@ void CB_Mapping::Update()
 
 	if (CacheTime > GetTickCount() || this->CheckConnectDLL) return;
 
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	CBGAMEGUARD::PublicClass::SetOffsetMemory((size_t)&LogInID, 4);
 	CBGAMEGUARD::PublicClass::SetOffsetMemory((size_t)&CharacterAttribute, 5);
 	CBGAMEGUARD::PublicClass::SetOffsetMemory((size_t)&g_hWnd, 6);

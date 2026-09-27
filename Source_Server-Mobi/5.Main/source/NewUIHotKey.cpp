@@ -128,7 +128,7 @@ bool SEASON3B::CNewUIHotKey::UpdateKeyEvent()
 		gInterface.CloseAllWindowCustom();
 		if(g_MessageBox->IsEmpty())
 		{
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(MU_IOS)
 			SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CQuitGameMsgBoxLayout));
 #else
 			SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CSystemMenuMsgBoxLayout));

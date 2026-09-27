@@ -9,7 +9,7 @@
 #include "ZzzInventory.h"
 #include "wsclientinline.h"
 #ifdef KJH_PBG_ADD_INGAMESHOP_SYSTEM
-#include "GameShop\MsgBoxIGSCommon.h"
+#include "GameShop/MsgBoxIGSCommon.h"
 #endif // KJH_PBG_ADD_INGAMESHOP_SYSTEM
 extern int DisplayWinCDepthBox;
 extern int DisplayWin;

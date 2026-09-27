@@ -114,7 +114,7 @@ void CUIMng::CreateTitleSceneUI()
 	m_asprTitle[UIM_TS_BACK9].SetPosition(1024, 512+119);
 
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	m_asprTitle[UIM_TS_MU].Create(216, 138, BITMAP_TITLE+2, 0, NULL, 0, 0,
 		false, SPR_SIZING_DATUMS_LT, _fScaleXTemp, _fScaleXTemp);
 
@@ -127,7 +127,7 @@ void CUIMng::CreateTitleSceneUI()
 	m_asprTitle[UIM_TS_121518].Create(256, 206, BITMAP_TITLE+3, 0, NULL, 0, 0,
 		false, SPR_SIZING_DATUMS_LT, fScaleX, fScaleY);
 	m_asprTitle[UIM_TS_121518].SetPosition(544, 60);
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	m_asprTitle[UIM_TS_WEBZEN].Create(187, 151, BITMAP_TITLE+4, 0, NULL, 0, 0,
 		false, SPR_SIZING_DATUMS_LT, fScaleX, fScaleY);
 	m_asprTitle[UIM_TS_WEBZEN].SetPosition(307, 225);
@@ -170,7 +170,7 @@ void CUIMng::RenderTitleSceneUI(HDC hDC, DWORD dwNow, DWORD dwTotal)
 
 	for (int i = 0; i < UIM_TS_MAX; ++i)
 	{
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 		if(i==2 || i==4)
 			continue;
 #else
@@ -180,7 +180,7 @@ void CUIMng::RenderTitleSceneUI(HDC hDC, DWORD dwNow, DWORD dwTotal)
 		m_asprTitle[i].Render();
 	}
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	m_asprTitle[UIM_TS_MU].Render();
 #endif
 	m_pgbLoding->SetValue(dwNow, dwTotal);

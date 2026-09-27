@@ -15,6 +15,10 @@
 #include <jni.h>
 #include <unistd.h>
 #endif
+#if defined(MU_IOS)
+#include "IosPlatform.h"
+#include <unistd.h>
+#endif
 
 namespace
 {
@@ -24,7 +28,7 @@ bool g_textInputActive = false;
 
 bool MU_PathExists(const char* path)
 {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(MU_IOS)
     return (path != nullptr) && (path[0] != '\0') && (access(path, F_OK) == 0);
 #else
     (void)path;
@@ -275,6 +279,8 @@ int MU_MobileGetBatteryPercent()
         return -1;
     }
     return result;
+#elif defined(MU_IOS)
+    return MU_IosGetBatteryPercent();
 #else
     return -1;
 #endif
@@ -376,11 +382,11 @@ int MU_MobileGetWifiRssiDbm()
 #endif
 }
 
+#if defined(__ANDROID__)
 // Defined in android_link_stubs.cpp - see the note there on why the audio JNI
 // bridge attaches from here instead of a JNI_OnLoad.
 extern "C" void AndroidAudioAttachJni(JNIEnv*);
 
-#if defined(__ANDROID__)
 extern "C" JNIEXPORT void JNICALL
 Java_com_muonline_client_MuMainNativeActivity_nativeSetKeyboardBridge(
     JNIEnv* env,
@@ -441,7 +447,11 @@ void MU_MobileStartTextInput()
 #if defined(__ANDROID__)
     MU_CallKeyboardBridge("showKeyboardFromNative");
 #endif
+#if defined(MU_IOS)
+    MU_IosShowKeyboard(true);
+#else
     sapp_show_keyboard(true);
+#endif
 }
 
 void MU_MobileStopTextInput()
@@ -450,12 +460,22 @@ void MU_MobileStopTextInput()
 #if defined(__ANDROID__)
     MU_CallKeyboardBridge("hideKeyboardFromNative");
 #endif
+#if defined(MU_IOS)
+    MU_IosShowKeyboard(false);
+#else
     sapp_show_keyboard(false);
+#endif
 }
 
 bool MU_MobileIsTextInputActive()
 {
+#if defined(MU_IOS)
+    // Once the player dismisses the keyboard the flag is stale; reporting it
+    // inactive lets the next focus check bring the keyboard back.
+    return (g_textInputActive && MU_IosKeyboardHasFocus()) || sapp_keyboard_shown();
+#else
     return g_textInputActive || sapp_keyboard_shown();
+#endif
 }
 
 void MU_MobileSetTextInputRect(const SDL_Rect* rect)
@@ -472,6 +492,9 @@ void MU_MobileSetTextInputRect(const SDL_Rect* rect)
 
 std::string MU_MobileGetExternalDataPath()
 {
+#if defined(MU_IOS)
+    return MU_IosDataRoot();
+#endif
     return MU_GetFirstExistingPath({
         "/sdcard/Android/data/com.worldofkira/files",
         "/storage/emulated/0/Android/data/com.worldofkira/files"

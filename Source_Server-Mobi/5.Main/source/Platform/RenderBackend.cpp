@@ -1,5 +1,7 @@
 #if defined(__ANDROID__) || defined(MU_IOS)
 
+// The backend addresses the whole frame, not the engine's safe-area window.
+#define MU_GL_RAW_VIEWPORT 1
 #include "stdafx.h"
 
 #include "Platform/MobilePlatform.h"
@@ -38,6 +40,16 @@ namespace
 // Set by android_main.cpp once sokol reports the physical surface size.
 static int s_nativePresentWidth = 0;
 static int s_nativePresentHeight = 0;
+// Size of the offscreen frame when it differs from the engine's drawable: on
+// iOS the engine draws into the safe area of a full-screen frame (see
+// GL_SetFrameLayout). 0 = same as the engine's size, which is always Android.
+static int s_frameWidth = 0;
+static int s_frameHeight = 0;
+
+// The window's own framebuffer. 0 on Android (EGL window surface); on iOS it is
+// GLKView's, which is a real FBO id and is bound again at the start of every
+// frame - see BeginFrame.
+static GLuint s_defaultFramebuffer = 0;
 
 class OpenGLCompatBackend final : public IRenderBackend
 {
@@ -54,6 +66,9 @@ public:
 
     bool Initialize(int drawableWidth, int drawableHeight) override
     {
+        GLint bound = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &bound);
+        s_defaultFramebuffer = static_cast<GLuint>(bound);
         GL_Compat_Init();
         SetupRenderTarget(drawableWidth, drawableHeight);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -64,6 +79,24 @@ public:
     void OnDrawableSizeChanged(int drawableWidth, int drawableHeight) override
     {
         SetupRenderTarget(drawableWidth, drawableHeight);
+    }
+
+    void BeginFrame() override
+    {
+        GLint bound = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &bound);
+        if (m_fbo != 0 && static_cast<GLuint>(bound) == m_fbo)
+        {
+            return; // Still on our target from the last Present (Android).
+        }
+
+        s_defaultFramebuffer = static_cast<GLuint>(bound);
+        if (m_fbo != 0)
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+            glViewport(0, 0, m_renderWidth, m_renderHeight);
+            GL_InvalidateCachedGLState();
+        }
     }
 
     void Present() override
@@ -119,6 +152,12 @@ private:
             return;
         }
 
+        if (s_frameWidth > 0 && s_frameHeight > 0)
+        {
+            width = s_frameWidth;
+            height = s_frameHeight;
+        }
+
         const bool scaling =
             (s_nativePresentWidth > 0 && s_nativePresentHeight > 0) &&
             (s_nativePresentWidth != width || s_nativePresentHeight != height);
@@ -126,7 +165,7 @@ private:
         if (!scaling)
         {
             DestroyFBO();
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, s_defaultFramebuffer);
             glViewport(0, 0, width, height);
             GL_InvalidateCachedGLState();
             return;
@@ -163,7 +202,7 @@ private:
         {
             RENDER_LOGW("Render-scale FBO incomplete (0x%x) - rendering at native resolution", status);
             DestroyFBO();
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, s_defaultFramebuffer);
             glViewport(0, 0, width, height);
             GL_InvalidateCachedGLState();
             return;
@@ -185,7 +224,7 @@ private:
         }
 
         glBindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_defaultFramebuffer);
 
         // Scissor would clip the blit.
         glDisable(GL_SCISSOR_TEST);
@@ -261,6 +300,12 @@ void RenderBackend_SetNativePresentSize(int width, int height)
         s_nativePresentWidth = width;
         s_nativePresentHeight = height;
     }
+}
+
+void RenderBackend_SetFrameSize(int width, int height)
+{
+    s_frameWidth = (width > 0) ? width : 0;
+    s_frameHeight = (height > 0) ? height : 0;
 }
 
 RenderBackendType ParseRenderBackendType(const char* value)

@@ -7,7 +7,7 @@
 #if defined(__ANDROID__) || defined(MU_IOS)
 #include <SDL.h>
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #include "Platform/MobileTime.h"
 #include <unordered_map>
 extern int CachTexture;
@@ -2706,7 +2706,7 @@ void CUIRenderText::SetFont(HFONT hFont)
 		m_pRenderText->SetFont(hFont);
 }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 // TEMP profiling: every RenderText call re-rasterises the string with FreeType,
 // runs two scalar per-pixel copy loops over it and re-uploads it, every frame.
 // These say which of those four stages actually costs the ~11ms that the UI
@@ -3143,7 +3143,7 @@ bool CUIRenderTextOriginal::Create(HDC hDC)
 }
 void CUIRenderTextOriginal::Release()
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	TextCache::ReleaseTexture();
 #endif
 	if (m_hFontDC != NULL)
@@ -3275,7 +3275,7 @@ void CUIRenderTextOriginal::UploadText(int sx,int sy,int Width,int Height)
 		// (it does, ZzzOpenglUtil.cpp) - this file's own extern declaration of
 		// it is Android-only (see the includes above), matching the fact this
 		// class of bug is specific to gl_compat's mobile shadow-tracking path.
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 		CachTexture = BITMAP_FONT;
 #endif
 		UploadFontBitmapRegion(b, sourceWidth, sourceHeight);
@@ -3324,7 +3324,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 	
 	SIZE RealTextSize;
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	++g_ProfTextCalls;
 	++TextCache::s_frame;
 	const size_t textLen = strlen(pszText);
@@ -3360,7 +3360,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 		g_pMultiLanguage->_GetTextExtentPoint32(m_hFontDC, "0", 1, &RealTextSize);
 	else
 		g_pMultiLanguage->_GetTextExtentPoint32(m_hFontDC,pszText,lstrlen(pszText),&RealTextSize);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	}
 	g_ProfTextExtentTicks += TextProfNow() - profExtentStart;
 
@@ -3466,7 +3466,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 	int iRealRenderWidth = RealRenderingSize.cx;
 	int iNumberOfSections = ComputeSectionCount(iRealRenderWidth, LIMIT_WIDTH);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	// A string is cacheable when its composed pixels are a pure function of the
 	// key below. The excluded cases all depend on whatever the scratch DIB
 	// happened to hold from a previous call: an empty string and a leading 0x0a
@@ -3614,7 +3614,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 
 	if(pszText[0] != 0x0a)
 	{
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 		const unsigned long long profTextOutStart = TextProfNow();
 		// Cached strings no longer refresh the DIB, so a string on this path
 		// can follow arbitrarily old contents. See ClearFontDibRegion.
@@ -3624,7 +3624,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 		::SetBkColor(m_hFontDC, RGB(0, 0, 0));
 		::SetTextColor(m_hFontDC, RGB(255,255,255));
 		g_pMultiLanguage->_TextOut(m_hFontDC, 0, 0, pszText, lstrlen(pszText));
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 		g_ProfTextOutTicks += TextProfNow() - profTextOutStart;
 #endif
 	}
@@ -3633,7 +3633,7 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 	{
 		SIZE RealSectionLine = { (long)ComputeSectionSpan(iRealRenderWidth, LIMIT_WIDTH, i, iNumberOfSections), (long)RealRenderingSize.cy };
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 		const unsigned long long profWriteStart = TextProfNow();
 		WriteText(LIMIT_WIDTH*i*3+iClipMove, RealSectionLine.cx, RealSectionLine.cy);
 		const unsigned long long profUploadStart = TextProfNow();
@@ -4241,7 +4241,7 @@ void CUITextInputBox::UploadText(int sx,int sy,int Width,int Height)
 		// invalidating - RenderBitmap(BITMAP_FONT, ...) follows immediately.
 		// Guarded like the identical assignment further up this file: this
 		// file's extern of CachTexture is Android-only (see the includes).
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 		CachTexture = BITMAP_FONT;
 #endif
 		UploadFontBitmapRegion(b, sourceWidth, sourceHeight);

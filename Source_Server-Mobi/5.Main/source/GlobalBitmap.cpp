@@ -919,7 +919,11 @@ bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, 
 
 	glGenTextures(1, &(pNewBitmap->TextureNumber));
 	glBindTexture(GL_TEXTURE_2D, pNewBitmap->TextureNumber);
+	// The buffer is tightly packed RGB. GL's default 4-byte row alignment made
+	// it read past the end for 1- and 2-pixel-wide textures (and shear them).
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, Width, Height, 0, GL_RGB, GL_UNSIGNED_BYTE, pNewBitmap->Buffer);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, uiFilter);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, uiFilter);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, uiWrapMode);
@@ -1058,7 +1062,7 @@ bool CGlobalBitmap::OpenTga(GLuint uiBitmapIndex, const std::string& filename, G
 	fseek(fp,0,SEEK_SET);
 	if (Size <= 0)
 	{
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 		char szDebugOutput[512];
 		sprintf(szDebugOutput, "OpenTga invalid size=%d file=%s", Size, filename_ozt.c_str());
 		OutputDebugStringA(szDebugOutput);

@@ -4,7 +4,7 @@
 // Implements the libjpeg-turbo (turbojpeg) API used by GlobalBitmap.cpp.
 // =============================================================================
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 
 #define STB_IMAGE_IMPLEMENTATION
 // STBI_ONLY_JPEG removed — PNG support is needed for UI icon textures.
@@ -14,6 +14,8 @@
 #include "stb_image.h"
 
 #include "turbojpeg.h"
+
+#include <cstdio>
 
 // Dummy handle — non-null sentinel
 static int g_tjDummyHandle = 0;

@@ -1,4 +1,4 @@
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 
 #include "stdafx.h"
 
@@ -9,7 +9,11 @@
 #include <android/log.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#if defined(__ANDROID__)
 #include <linux/tcp.h>
+#elif defined(MU_IOS)
+#include <netinet/tcp.h>
+#endif
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -179,7 +183,7 @@ void RecordRecvBytes(int32_t handle, size_t bytes)
 
 int QuerySocketLatencyMs(int32_t handle)
 {
-#ifdef TCP_INFO
+#if defined(__ANDROID__) && defined(TCP_INFO)
     tcp_info info {};
     socklen_t infoSize = sizeof(info);
     if (handle > 0 &&
@@ -187,6 +191,16 @@ int QuerySocketLatencyMs(int32_t handle)
         info.tcpi_rtt > 0)
     {
         return static_cast<int>((info.tcpi_rtt + 500u) / 1000u);
+    }
+#elif defined(MU_IOS)
+    // Darwin reports the smoothed RTT in milliseconds already.
+    tcp_connection_info info {};
+    socklen_t infoSize = sizeof(info);
+    if (handle > 0 &&
+        getsockopt(handle, IPPROTO_TCP, TCP_CONNECTION_INFO, &info, &infoSize) == 0 &&
+        info.tcpi_srtt > 0)
+    {
+        return static_cast<int>(info.tcpi_srtt);
     }
 #else
     (void)handle;
@@ -513,6 +527,14 @@ MU_EXPORT int32_t ConnectionManager_Connect(
         NET_LOGE("socket failed errno=%d", errno);
         return 0;
     }
+#if defined(MU_IOS)
+    // iOS has no MSG_NOSIGNAL: without this a send() to a dropped peer
+    // raises SIGPIPE and kills the app.
+    {
+        int noSigPipe = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, sizeof(noSigPipe));
+    }
+#endif
 
     sockaddr_in address {};
     address.sin_family = AF_INET;

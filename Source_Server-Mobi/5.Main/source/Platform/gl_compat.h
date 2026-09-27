@@ -293,4 +293,25 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
                         GLuint textureId, const GLSkinDrawState& state);
 void GL_DeleteSkinnedMeshBuffers(unsigned int* vboInOut, unsigned int* eboInOut);
 
+#if defined(MU_IOS)
+// Full-screen frame with the engine inside the safe area. The engine treats
+// the safe area as its whole window - all of its UI, touch and picking maths
+// is unchanged - and every viewport/scissor it sets is shifted to where the
+// safe area sits in the frame. Only the main world pass is then widened to the
+// full frame (GL_ExtendProjectionToFrame), so the world reaches the screen
+// edges while windows and HUD stay clear of the notch and rounded corners.
+void GL_SetFrameLayout(int frameWidth, int frameHeight, int offsetX, int offsetY);
+// How much wider/taller the frame is than the engine's window (1,1 when the
+// layout is unset). Culling scales its frustum by this so objects in the extra
+// margins are not dropped.
+void GL_GetFrameExtension(float* widthRatio, float* heightRatio);
+void GL_ExtendProjectionToFrame(int x, int yFromBottom, int width, int height);
+void GL_CompatViewport(GLint x, GLint y, GLsizei width, GLsizei height);
+void GL_CompatScissor(GLint x, GLint y, GLsizei width, GLsizei height);
+#if !defined(MU_GL_RAW_VIEWPORT)
+#define glViewport GL_CompatViewport
+#define glScissor GL_CompatScissor
+#endif
+#endif
+
 #endif // __ANDROID__

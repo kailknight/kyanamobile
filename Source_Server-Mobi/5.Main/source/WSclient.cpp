@@ -56,10 +56,10 @@
 #include "SkillManager.h"
 
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
-#include "GameShop\InGameShopSystem.h"
-#include "GameShop\MsgBoxIGSCommon.h"
-#include "GameShop\ShopListManager\interface\PathMethod\Path.h"
-#ifndef __ANDROID__
+#include "GameShop/InGameShopSystem.h"
+#include "GameShop/MsgBoxIGSCommon.h"
+#include "GameShop/ShopListManager/interface/PathMethod/Path.h"
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 #include <UrlMon.h>
 #pragma comment(lib,"Urlmon.lib")
 #endif // __ANDROID__
@@ -429,18 +429,20 @@ void ReceiveServerConnect(BYTE* ReceiveBuffer) //Recebe informação do ConnectS
 	char IP[16];
 	memset(IP, 0, 16);
 	memcpy(IP, (char*)Data->IP, 15);
+	// Close() frees the queued packets, this one included: take the port first.
+	const auto Port = Data->Port;
 	g_ErrorReport.Write("[ReceiveServerConnect]");
 	SocketClient.Close();
 
 #ifndef NEW_PROTOCOL_SYSTEM
-	if (CreateSocket(IP, Data->Port))
+	if (CreateSocket(IP, Port))
 	{
 		g_bGameServerConnected = TRUE;
 	}
 #else
 	gProtocolSend.DisconnectServer();
 
-	if (gProtocolSend.ConnectServer(IP,Data->Port))
+	if (gProtocolSend.ConnectServer(IP,Port))
 	{
 		g_bGameServerConnected = TRUE;
 		g_ConsoleDebug->Write(MCD_NORMAL, " > ProtocolSend Connect");
@@ -448,7 +450,7 @@ void ReceiveServerConnect(BYTE* ReceiveBuffer) //Recebe informação do ConnectS
 #endif
 	
 	char Text[100];
-	sprintf(Text,GlobalText[481],IP,Data->Port);
+	sprintf(Text,GlobalText[481],IP,Port);
 	g_pChatListBox->AddText("", Text, SEASON3B::TYPE_SYSTEM_MESSAGE);	
 }
 

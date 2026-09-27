@@ -466,6 +466,11 @@ void CSocketItemMgr::CheckSocketSetOption()
 	for (int i = 0; i < MAX_EQUIPMENT; ++i)
 	{
 		pItem = &CharacterMachine->Equipment[i];
+		// Several paths empty a slot by setting only Type = -1, leaving the old
+		// item's seeds behind - they kept lighting the socket set tab.
+		if (pItem->Type < 0) continue;
+		// Non-socket items still carry socket bytes; the server ignores them for the set bonus.
+		if (!IsSocketItem(pItem)) continue;
 		for (int j = 0; j < pItem->SocketCount; ++j)
 		{
 			if (pItem->SocketSeedID[j] != SOCKET_EMPTY)
@@ -536,6 +541,7 @@ void CSocketItemMgr::CalcSocketStatusBonus()
 	for (int i = 0; i < MAX_EQUIPMENT; ++i)
 	{
 		pItem = &CharacterMachine->Equipment[i];
+		if (pItem->Type < 0) continue;
 
 		if (!IsSocketItem(pItem)) continue;
 

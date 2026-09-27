@@ -615,7 +615,7 @@ bool Interface::ActionSendItemGS(ITEM* ItemSell, int Slot)
 }
 void Interface::Init()
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #define ANDROID_IF_STAGE(msg) do { OutputDebugStringA("UI_IFACE: " msg); g_ErrorReport.Write("[UI_IFACE] " msg "\r\n"); } while(0)
 #else
 #define ANDROID_IF_STAGE(msg) ((void)0)

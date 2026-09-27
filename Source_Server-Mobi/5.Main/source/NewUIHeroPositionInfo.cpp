@@ -11,7 +11,7 @@
 #include "Protocol.h"
 #include "ZzzAI.h"
 #include "wsclientinline.h"
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #include "Platform/MobileTime.h"
 #endif
 
@@ -34,7 +34,7 @@ extern CHARACTER_ATTRIBUTE *CharacterAttribute;
 extern CHARACTER_MACHINE *CharacterMachine;
 extern Interface gInterface;
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #define ANDROID_HERO_STAGE(msg) do { OutputDebugStringA("UI_HERO: " msg); g_ErrorReport.Write("[UI_HERO] " msg "\r\n"); } while(0)
 #else
 #define ANDROID_HERO_STAGE(msg) ((void)0)
@@ -1185,7 +1185,7 @@ void ShowInfoTitleWindow() {
 bool CNewUIHeroPositionInfo::Render() {
   // gInterface.DrawMessage(1, "CNewUIHeroPositionInfo::Render() %d/%d",
   // m_Pos.x, m_Pos.y);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
   const uint64_t dbgInitStart = MU_MobilePerfNow();
 #endif
   ShowInfoTitleWindow();
@@ -1204,7 +1204,7 @@ bool CNewUIHeroPositionInfo::Render() {
   DrawAndroidMiniMap();
   return true;
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
   const uint64_t dbgInitTicks = MU_MobilePerfNow() - dbgInitStart;
   const uint64_t dbgImgStart = MU_MobilePerfNow();
 #endif
@@ -1243,13 +1243,13 @@ bool CNewUIHeroPositionInfo::Render() {
   } else {
     m_BtnStop.Render();
   }
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
   const uint64_t dbgImgTicks = MU_MobilePerfNow() - dbgImgStart;
   const uint64_t dbgTextStart = MU_MobilePerfNow();
 #endif
 
   //--
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
   // RenderText() does an expensive re-layout whenever its string content
   // changes, and this string includes the live coordinates which change on
   // almost every frame while walking - refresh it a few times a second
@@ -1274,7 +1274,7 @@ bool CNewUIHeroPositionInfo::Render() {
   g_pRenderText->RenderText(m_Pos.x + 10, m_Pos.y + 2, szText, WidenX + 20,
                             13 - 4, RT3_SORT_CENTER);
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
   const uint64_t dbgTextTicks = MU_MobilePerfNow() - dbgTextStart;
   const uint64_t dbgMenuStart = MU_MobilePerfNow();
 #endif
@@ -1304,13 +1304,13 @@ bool CNewUIHeroPositionInfo::Render() {
   }
   DisableAlphaBlend();
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
   const uint64_t dbgMenuTicks = MU_MobilePerfNow() - dbgMenuStart;
   const uint64_t dbgMapStart = MU_MobilePerfNow();
 #endif
   //===DrawMapo
   DrawMiniMap();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
   {
     const double freq = static_cast<double>(MU_MobilePerfFrequency());
     const double initMs = (static_cast<double>(dbgInitTicks) * 1000.0) / freq;

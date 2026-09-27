@@ -12,7 +12,7 @@
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "WZResult.h"
 #include <crtdbg.h>
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 #include <strsafe.h>
 #endif
 

@@ -12,7 +12,7 @@
 //   HWND/HDC/HGLRC         鑺掗垾鐘偓?nullptr stubs (PlatformDefs.h)
 // =============================================================================
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 
 #include "stdafx.h"
 #include "CB_DangKyInGame.h"
@@ -51,6 +51,14 @@ static void android_set_data_dir_early()
         "fallback chdir(/data/.../files) = %d (errno=%d)", r2, errno);
 #endif
 }
+#elif defined(MU_IOS)
+#include "Platform/IosPlatform.h"
+// iOS equivalent: game data lives in the app's Documents folder.
+__attribute__((constructor(101)))
+static void ios_set_data_dir_early()
+{
+    MU_IosChdirToDataRoot();
+}
 #endif
 
 #include <SDL.h>
@@ -58,7 +66,12 @@ static void android_set_data_dir_early()
 #include <android/input.h>
 #include <android/log.h>
 #include <android/keycodes.h>
+#if defined(__ANDROID__)
 #include <jni.h>
+#else
+// The Android key-mapping helpers take JNI ints; on iOS they are never called.
+typedef int32_t jint;
+#endif
 #include <sys/system_properties.h>
 #include <algorithm>
 #include <array>
@@ -140,6 +153,8 @@ int AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel);
 #include "android/AndroidNetwork.h"
 #include "android/SimpleModulusCrypt.h"
 #include "wsclientinline.h"
+#include "GIPetManager.h"
+#include "MixMgr.h"
 #include "Util.h"
 
 // stb_image 鑺掗埀顑解偓?implementation is in android_turbojpeg_stubs.cpp; only declare here.
@@ -260,6 +275,10 @@ static std::string ReadAndroidSystemProperty(const char* key)
 
 static void SetWorkingDirectoryToMobileDataRoot()
 {
+#if defined(MU_IOS)
+    MU_IosChdirToDataRoot();
+    return;
+#endif
     static constexpr const char* kMobileDataRoots[] = {
         "/sdcard/Android/data/com.worldofkira/files",
         "/storage/emulated/0/Android/data/com.worldofkira/files",
@@ -6070,6 +6089,12 @@ void RefreshAndroidSkillPickerListEntries()
         {
             continue;
         }
+        // Skill[120..123] always hold the raven commands for a DL, raven or
+        // not. They are appended below only when a pet is out.
+        if (skillType >= AT_PET_COMMAND_DEFAULT && skillType < AT_PET_COMMAND_END)
+        {
+            continue;
+        }
 
         const BYTE useType = SkillAttribute[skillType].SkillUseType;
         if (useType == SKILL_USE_TYPE_MASTER || useType == SKILL_USE_TYPE_MASTERLEVEL)
@@ -8823,6 +8848,39 @@ void ReleaseVirtualNovaCharge()
     g_novaChargeSkillIndex = -1;
 }
 
+// Raven commands are not skills: PC sends them from Attack() on a right click
+// via giPetManager::SendPetCommand. Default/Random/Owner need no target, so the
+// skill paths' "no target" guards must not see them.
+bool AndroidSendPetCommand(int petCommand)
+{
+    if (Hero == nullptr
+        || Hero->m_pPet == nullptr
+        || petCommand < AT_PET_COMMAND_DEFAULT
+        || petCommand >= AT_PET_COMMAND_END)
+    {
+        return false;
+    }
+
+    if (petCommand == AT_PET_COMMAND_TARGET)
+    {
+        EnsureOffensiveSkillTarget();
+        if (SelectedCharacter < 0)
+        {
+            return false;
+        }
+    }
+
+    MouseRButtonPop = false;
+    MouseRButtonPush = true;
+    MouseRButton = true;
+    const bool sent = giPetManager::SendPetCommand(Hero, petCommand);
+    MouseRButtonPush = false;
+    MouseRButton = false;
+    LOGI("VirtualPad: pet command=%d sent=%d target=%d",
+         petCommand - AT_PET_COMMAND_DEFAULT, sent ? 1 : 0, SelectedCharacter);
+    return sent;
+}
+
 void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
 {
     if (!IsVirtualPadAvailable() || Hero->Dead > 0)
@@ -8883,6 +8941,13 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
             skillSlot,
             Hero->CurrentSkill,
             currentSkillType);
+        return;
+    }
+
+    if (g_virtualSkillSlots[skillSlot] >= AT_PET_COMMAND_DEFAULT
+        && g_virtualSkillSlots[skillSlot] < AT_PET_COMMAND_END)
+    {
+        AndroidSendPetCommand(g_virtualSkillSlots[skillSlot]);
         return;
     }
 
@@ -9112,13 +9177,9 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
 
     if (hotKeySkillIndex >= AT_PET_COMMAND_DEFAULT && hotKeySkillIndex < AT_PET_COMMAND_END)
     {
-        if (Hero->m_pPet == nullptr)
-        {
-            return false;
-        }
-
-        Hero->CurrentSkill = static_cast<BYTE>(hotKeySkillIndex);
-        return true;
+        // This used to only set CurrentSkill, which on mobile never reaches
+        // Attack()'s SendPetCommand, so the raven ignored every command.
+        return AndroidSendPetCommand(hotKeySkillIndex);
     }
 
     if (!IsValidSkillIndex(hotKeySkillIndex))
@@ -21790,6 +21851,74 @@ static bool g_ForceSkipVBOOrphan = false;
 static int g_NativePresentWidth = 0;
 static int g_NativePresentHeight = 0;
 
+// Top-left corner of that area in window pixels, for touch. 0,0 on Android.
+static int g_PresentOriginX = 0;
+static int g_PresentOriginTop = 0;
+// The whole window in physical pixels; differs from the above only on iOS.
+static int g_WindowPixelWidth = 0;
+static int g_WindowPixelHeight = 0;
+
+// The part of the window the engine lays out in: all of it on Android. On iOS
+// it is the safe area, so no UI lands under the camera cutout, no close button
+// is cut off by the rounded corners, and nothing sits on the home indicator.
+// The picture itself still covers the whole screen: see ApplyAndroidFrameLayout.
+static void ApplyAndroidPresentRect(int windowW, int windowH)
+{
+    int x = 0;
+    int top = 0;
+    int w = windowW;
+    int h = windowH;
+#if defined(MU_IOS)
+    float left = 0.0f, topFrac = 0.0f, right = 0.0f, bottom = 0.0f;
+    MU_IosGetSafeAreaFractions(&left, &topFrac, &right, &bottom);
+    const int leftPx = static_cast<int>(std::lround(left * windowW));
+    const int rightPx = static_cast<int>(std::lround(right * windowW));
+    const int topPx = static_cast<int>(std::lround(topFrac * windowH));
+    const int bottomPx = static_cast<int>(std::lround(bottom * windowH));
+    if ((leftPx + rightPx) < windowW / 2 && (topPx + bottomPx) < windowH / 2)
+    {
+        x = leftPx;
+        top = topPx;
+        w = windowW - leftPx - rightPx;
+        h = windowH - topPx - bottomPx;
+    }
+#endif
+    g_NativePresentWidth = w;
+    g_NativePresentHeight = h;
+    g_PresentOriginX = x;
+    g_PresentOriginTop = top;
+    g_WindowPixelWidth = windowW;
+    g_WindowPixelHeight = windowH;
+    // The blit always fills the whole window.
+    RenderBackend_SetNativePresentSize(windowW, windowH);
+}
+
+// iOS: the offscreen frame covers the whole window at the engine's render
+// scale, with the engine's (safe-area) window placed inside it at the safe-area
+// offset. Must run before the backend (re)creates its render target.
+static void ApplyAndroidFrameLayout(int engineW, int engineH)
+{
+#if defined(MU_IOS)
+    if (g_NativePresentWidth <= 0 || g_NativePresentHeight <= 0 || engineW <= 0 || engineH <= 0)
+    {
+        return;
+    }
+    const float scaleX = static_cast<float>(engineW) / static_cast<float>(g_NativePresentWidth);
+    const float scaleY = static_cast<float>(engineH) / static_cast<float>(g_NativePresentHeight);
+    const int rightPx = g_WindowPixelWidth - g_PresentOriginX - g_NativePresentWidth;
+    const int bottomPx = g_WindowPixelHeight - g_PresentOriginTop - g_NativePresentHeight;
+    const int offsetX = static_cast<int>(std::lround(g_PresentOriginX * scaleX));
+    const int offsetY = static_cast<int>(std::lround(bottomPx * scaleY));
+    const int frameW = offsetX + engineW + static_cast<int>(std::lround(rightPx * scaleX));
+    const int frameH = offsetY + engineH + static_cast<int>(std::lround(g_PresentOriginTop * scaleY));
+    RenderBackend_SetFrameSize(frameW, frameH);
+    GL_SetFrameLayout(frameW, frameH, offsetX, offsetY);
+#else
+    (void)engineW;
+    (void)engineH;
+#endif
+}
+
 // TEMP profiling: last frame's top-level phase split, read by the FPS overlay.
 unsigned long long g_ProfSceneTicks = 0;
 unsigned long long g_ProfPadTicks = 0;
@@ -21901,6 +22030,7 @@ static void ApplyAndroidDrawableSize(int screenW, int screenH, const char* reaso
     g_DrawableHeight = screenH;
     UpdateAndroidScreenMetrics(screenW, screenH);
 
+    ApplyAndroidFrameLayout(screenW, screenH);
     if (g_RenderBackend)
     {
         g_RenderBackend->OnDrawableSizeChanged(screenW, screenH);
@@ -21948,18 +22078,21 @@ static void SyncAndroidDrawableSizeFromSokol(const char* reason)
         return;
     }
 
-    const bool nativeChanged =
-        (screenW != g_NativePresentWidth) || (screenH != g_NativePresentHeight);
+    const int previousPresentW = g_NativePresentWidth;
+    const int previousPresentH = g_NativePresentHeight;
+    const int previousOriginX = g_PresentOriginX;
+    const int previousOriginTop = g_PresentOriginTop;
 
     // Physical size drives the upscale blit and touch normalisation.
-    g_NativePresentWidth = screenW;
-    g_NativePresentHeight = screenH;
-    RenderBackend_SetNativePresentSize(screenW, screenH);
+    ApplyAndroidPresentRect(screenW, screenH);
+    const bool nativeChanged =
+        (g_NativePresentWidth != previousPresentW) || (g_NativePresentHeight != previousPresentH) ||
+        (g_PresentOriginX != previousOriginX) || (g_PresentOriginTop != previousOriginTop);
 
     // The engine is told the SCALED size - see the g_RenderScale* comment above.
-    int renderW = screenW;
-    int renderH = screenH;
-    ComputeAndroidRenderSize(screenW, screenH, renderW, renderH);
+    int renderW = g_NativePresentWidth;
+    int renderH = g_NativePresentHeight;
+    ComputeAndroidRenderSize(g_NativePresentWidth, g_NativePresentHeight, renderW, renderH);
 
     // Once the game is up, the engine size is locked. Far too much is sized
     // once at creation and never revisited - sprites bake WindowHeight,
@@ -21983,6 +22116,7 @@ static void SyncAndroidDrawableSizeFromSokol(const char* reason)
                 (reason && reason[0]) ? reason : "?", screenW, screenH, WindowWidth, WindowHeight);
             // Re-evaluates whether the frame needs the offscreen target now
             // that the two sizes may differ (or match again).
+            ApplyAndroidFrameLayout(static_cast<int>(WindowWidth), static_cast<int>(WindowHeight));
             g_RenderBackend->OnDrawableSizeChanged(static_cast<int>(WindowWidth), static_cast<int>(WindowHeight));
         }
         return;
@@ -22896,8 +23030,9 @@ static void QueueSappEventAsSDL(const sapp_event* event)
                 sdlEvent.type = sdlType;
                 sdlEvent.tfinger.touchId = 0;
                 sdlEvent.tfinger.fingerId = ToSdlFingerId(touch.identifier);
-                sdlEvent.tfinger.x = std::clamp(touch.pos_x / safeW, 0.0f, 1.0f);
-                sdlEvent.tfinger.y = std::clamp(touch.pos_y / safeH, 0.0f, 1.0f);
+                // Relative to the present area (the safe area on iOS).
+                sdlEvent.tfinger.x = std::clamp((touch.pos_x - g_PresentOriginX) / safeW, 0.0f, 1.0f);
+                sdlEvent.tfinger.y = std::clamp((touch.pos_y - g_PresentOriginTop) / safeH, 0.0f, 1.0f);
                 sdlEvent.tfinger.dx = 0.0f;
                 sdlEvent.tfinger.dy = 0.0f;
                 sdlEvent.tfinger.pressure = 1.0f;
@@ -22929,6 +23064,7 @@ static void QueueSappEventAsSDL(const sapp_event* event)
     }
 }
 
+#if defined(__ANDROID__)
 extern "C" JNIEXPORT void JNICALL
 Java_com_muonline_client_MuMainNativeActivity_nativeOnTextInput(
     JNIEnv* env,
@@ -22991,6 +23127,7 @@ Java_com_muonline_client_MuMainNativeActivity_nativeOnWindowFocusChanged(
 
     AndroidAudioSetFocusMuted(!focused);
 }
+#endif // __ANDROID__ (JNI entry points)
 
 static void ProcessAndroidEventQueue()
 {
@@ -23029,6 +23166,10 @@ static bool InitializeAndroidGame()
 
     MU_MobilePlatformInit();
     SetWorkingDirectoryToMobileDataRoot();
+#if defined(MU_IOS)
+    // Deferred from g_MixRecipeMgr's constructor: see OpenDefaultRecipeFile.
+    g_MixRecipeMgr.OpenDefaultRecipeFile();
+#endif
     MU_AppendExitTrace("startup: native init begin");
     // exit() runs this, so an exit that bypassed every trace above (sokol's own
     // onDestroy, a direct exit() in a loader) still leaves a line behind.
@@ -23061,9 +23202,7 @@ static bool InitializeAndroidGame()
     int screenH = 720;
     if ((sapp_width() > 1) && (sapp_height() > 1))
     {
-        g_NativePresentWidth = sapp_width();
-        g_NativePresentHeight = sapp_height();
-        RenderBackend_SetNativePresentSize(g_NativePresentWidth, g_NativePresentHeight);
+        ApplyAndroidPresentRect(sapp_width(), sapp_height());
         ComputeAndroidRenderSize(g_NativePresentWidth, g_NativePresentHeight, screenW, screenH);
     }
     g_DrawableWidth = screenW;
@@ -23087,6 +23226,7 @@ static bool InitializeAndroidGame()
             return false;
         }
 
+        ApplyAndroidFrameLayout(screenW, screenH);
         if (!backend->Initialize(screenW, screenH))
         {
             LOGW("Render backend init failed: %s", backend->GetName());
@@ -23134,7 +23274,7 @@ static bool InitializeAndroidGame()
     // optional mu_gl_ab.txt in the data folder overrides the draw-path policy
     // for this session, so variants can be compared without a rebuild each.
     // Nothing is drawn; absent file = normal behaviour. Keys, one per line:
-    //   preferDirect=0|1  skipOrphan=0|1  skinCache=0|1  itemIcons=0|1
+    //   preferDirect=0|1  skipOrphan=0|1  skinCache=0|1  itemIcons=0|1  gpuSkin=0|1
     // Per-mesh VAOs for skinned draws only where they are proven. On Mali
     // (G57 MC2, r32p1 - Redmi Note 14) they broke rendering outright: other
     // players exploded into screen-sized triangles over black terrain, while
@@ -23180,6 +23320,12 @@ static bool InitializeAndroidGame()
             {
                 extern bool g_AndroidItemIconsEnabled; // ZzzInventory.cpp
                 g_AndroidItemIconsEnabled = (value != 0);
+            }
+            else if (sscanf(line, "gpuSkin=%d", &value) == 1)
+            {
+                extern bool g_GpuSkinningTestEnabled; // ZzzBMD.cpp
+                g_GpuSkinningTestEnabled = (value != 0);
+                MU_AppendExitTrace("gl A/B gpuSkin=%d", value);
             }
         }
         fclose(ab);
@@ -23380,10 +23526,28 @@ static bool InitializeAndroidGame()
     return true;
 }
 
+#if defined(MU_IOS)
+// True while the first-launch data download (MU_IosPreloadBegin) is running.
+// Android does this in PreloadActivity before the native activity exists.
+static bool g_IosPreloadPending = false;
+#endif
+
 static void RunAndroidGameFrame()
 {
     if (!g_AndroidGameInitialized)
     {
+#if defined(MU_IOS)
+        if (g_IosPreloadPending)
+        {
+            if (!MU_IosPreloadIsComplete())
+            {
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                return;
+            }
+            g_IosPreloadPending = false;
+        }
+#endif
         if (!IsAndroidSurfaceSettled())
         {
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -23557,6 +23721,10 @@ static void RunAndroidGameFrame()
     // the g_adaptivePerf.targetFps default set above via SetTargetFps().
     if (g_bWndActive)
     {
+        if (g_RenderBackend)
+        {
+            g_RenderBackend->BeginFrame();
+        }
         const Uint64 renderSceneStart = static_cast<Uint64>(MU_MobilePerfNow());
         Scene(nullptr);
         const Uint64 virtualPadStart = static_cast<Uint64>(MU_MobilePerfNow());
@@ -24303,6 +24471,16 @@ static void ShutdownAndroidGame()
 
 static void OnAndroidSappInit()
 {
+#if defined(MU_IOS)
+    MU_IosSetIdleTimerDisabled(true);
+    MU_IosCopyBundledAssets();
+    if (!MU_IosPreloadBegin())
+    {
+        // RunAndroidGameFrame initialises the game once the download is done.
+        g_IosPreloadPending = true;
+        return;
+    }
+#endif
     if (!InitializeAndroidGame() && !g_AndroidQuitRequested)
     {
         MU_AppendExitTrace("quit: InitializeAndroidGame failed (init)");
@@ -25454,11 +25632,17 @@ sapp_desc sokol_main(int argc, char* argv[])
     // screen. Touch coordinates are scaled by the same ratio internally by
     // sokol_app, so input mapping stays correct automatically.
     desc.high_dpi = true;
+#if defined(__ANDROID__)
     desc.android_fb_scale = 0.8f;
+#endif
     desc.window_title = "MU Online";
     desc.swap_interval = 0;
     desc.gl.major_version = 3;
+#if defined(MU_IOS)
+    desc.gl.minor_version = 0; // iOS OpenGL ES stops at 3.0
+#else
     desc.gl.minor_version = 1;
+#endif
     return desc;
 }
 

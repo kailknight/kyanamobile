@@ -167,7 +167,7 @@ void SEASON3B::CNewUISystem::Release()
 
 bool SEASON3B::CNewUISystem::LoadMainSceneInterface()
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #define ANDROID_UI_STAGE(msg) do { OutputDebugStringA("UI_LOAD: " msg); g_ErrorReport.Write("[UI_LOAD] " msg "\r\n"); } while(0)
 #else
 #define ANDROID_UI_STAGE(msg) ((void)0)

@@ -9745,17 +9745,14 @@ void RenderEye(OBJECT *o,int Left,int Right,float fSize = 1.0f)
 bool g_CharacterLiteRender = false;
 
 // True while RenderCharactersClient draws any player that is not the hero and
-// not a priority character (target/selected) - mobile only. Such a player
+// not a priority character (target/selected) - mobile and PC. Such a player
 // keeps its normal look but with lighter effects: no separate additive shine
 // passes (ZzzObject.cpp), every other particle spawn (ZzzEffectParticle.cpp)
 // and 2 cloth-physics passes instead of 5 (below). Measured 25 Sep in a
 // Lorencia crowd: cloth 3.5-5.7 ms, particles 3-5 ms a frame.
 bool g_CharacterThinEffects = false;
-#if defined(__ANDROID__) || defined(MU_IOS)
+// PC too since 26 Sep: a busy Lorencia crowd ran at ~20 FPS on PC.
 #define MU_MOBILE_THIN_EFFECTS true
-#else
-#define MU_MOBILE_THIN_EFFECTS false
-#endif
 
 // Where RenderCharacter's post phase goes (the ~1.1 ms per character measured
 // 25 Sep), summed over the drift-log window: supplemental visuals, body parts,
@@ -12881,9 +12878,7 @@ void RenderCharactersClient()
         {
             s_crowdLite[i] = false;
         }
-#if defined(__ANDROID__) || defined(MU_IOS)
-        extern int g_CrowdLodFullLast;
-        extern int g_CrowdLodLiteLast;
+        // No shadow for players beyond the nearest 8 in view (mobile and PC).
         constexpr int kCrowdFullPlayers = 8;
         std::pair<float, int> players[MAX_CHARACTERS_CLIENT];
         int playerCount = 0;
@@ -12905,6 +12900,9 @@ void RenderCharactersClient()
                 s_crowdLite[players[k].second] = true;
             }
         }
+#if defined(__ANDROID__) || defined(MU_IOS)
+        extern int g_CrowdLodFullLast;
+        extern int g_CrowdLodLiteLast;
         g_CrowdLodFullLast = (std::min)(playerCount, kCrowdFullPlayers);
         g_CrowdLodLiteLast = (std::max)(0, playerCount - kCrowdFullPlayers);
 #endif

@@ -327,14 +327,14 @@ bool OpenJpegBuffer(char *filename,float *BufferFloat)
 #endif
 }
 
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 bool LoadBitmap(const char* szFileName, GLuint uiTextureIndex, GLuint uiFilter, GLuint uiWrapMode, bool bCheck, bool bFullPath)
 #else // KJH_ADD_INGAMESHOP_UI_SYSTEM || __ANDROID__
 bool LoadBitmap(const char* szFileName, GLuint uiTextureIndex, GLuint uiFilter, GLuint uiWrapMode, bool bCheck)
 #endif // KJH_ADD_INGAMESHOP_UI_SYSTEM || __ANDROID__
 {
 	char szFullPath[256] = {0, };
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 	if( bFullPath == true )
 	{
 		strcpy(szFullPath, szFileName);

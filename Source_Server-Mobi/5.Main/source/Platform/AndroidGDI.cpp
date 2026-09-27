@@ -3,9 +3,12 @@
 // Android GDI text-rendering stubs built on SDL2_ttf.
 // Provides CreateFont / CreateDIBSection / TextOut / GetTextExtentPoint32 etc.
 // =============================================================================
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 
 #include "AndroidGDI.h"
+#if defined(MU_IOS)
+#include "IosPlatform.h"
+#endif
 #include <SDL.h>
 #include <SDL_ttf.h>
 #include <android/log.h>
@@ -127,6 +130,12 @@ static TTF_Font* GetCachedFont(int size, bool bold) {
     const char** gameFonts = bold ? sGameFontsBold : sGameFontsNormal;
     for (int i = 0; !f && gameFonts[i]; ++i) f = TryOpenFont(gameFonts[i], size, fontBytes);
     for (int i = 0; !f && sGameFontsNormal[i]; ++i) f = TryOpenFont(sGameFontsNormal[i], size, fontBytes);
+
+#if defined(MU_IOS)
+    // data.zip carries no TTF: iOS falls back to its own system font, as
+    // Android does to /system/fonts below.
+    if (!f) f = TryOpenFont(MU_IosSystemFontPath(bold), size, fontBytes);
+#endif
 
     // 3. Android system fonts fallback
     static const char* sSys[] = {
@@ -306,16 +315,19 @@ bool AndroidTextOut(HDC hdc, int x, int y, const wchar_t* text, int len) {
     // DIB buffer is RGB24 — pitch = ((width*24+31)&~31)/8
     AndroidBitmap* bmp = hdc->bmp;
 
-    // Clear the text area first (black background)
+    // Clear the text area first (black background). Clipped on both sides like
+    // the copy below: centred text wider than its control arrives with x < 0,
+    // and an unclipped clear wrote in front of the row - before the buffer
+    // itself on row 0, which is heap corruption.
     int textW = surf->w;
     int textH = surf->h;
+    const int clearStart = (x > 0) ? x : 0;
+    const int clearEnd = (x + textW < bmp->width) ? (x + textW) : bmp->width;
     for (int row = 0; row < textH; ++row) {
         int dstY = y + row;
         if (dstY < 0 || dstY >= bmp->height) continue;
-        uint8_t* dstRow = bmp->data + dstY * bmp->pitch + x * 3;
-        int clearW = textW;
-        if (x + clearW > bmp->width) clearW = bmp->width - x;
-        if (clearW > 0) memset(dstRow, 0, clearW * 3);
+        if (clearEnd > clearStart)
+            memset(bmp->data + dstY * bmp->pitch + clearStart * 3, 0, (clearEnd - clearStart) * 3);
     }
 
     // Lock surface if needed

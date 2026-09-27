@@ -2,7 +2,7 @@
 #include "stdafx.h"
 #include "NewUIManager.h"
 #include "./Utilities/Log/ErrorReport.h"
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #include "Platform/MobileTime.h"
 #include <typeinfo>
 #include <cstdio>
@@ -12,7 +12,7 @@
 
 using namespace SEASON3B;
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 // TEMP profiling: filled in every frame by CNewUIManager::Render, rendered by
 // the FPS overlay in ZzzScene.cpp.
 char g_ProfUiTopWindows[176] = "uiwin -";
@@ -264,7 +264,7 @@ bool SEASON3B::CNewUIManager::Render()
 {
 	std::sort(m_vecUI.begin(),m_vecUI.end(), CompareLayerDepth);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	// TEMP profiling: CNewUISystem::Render is ~13.5ms of a ~51ms frame, by far
 	// the largest single bucket. Record the three most expensive windows so the
 	// FPS overlay can name them (fopen-based logging never worked on device -
@@ -288,7 +288,7 @@ bool SEASON3B::CNewUIManager::Render()
 	{
 		if((*vi)->IsVisible())
 		{
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 			if (bProfileThisFrame)
 			{
 				const uint64_t t0 = MU_MobilePerfNow();
@@ -321,7 +321,7 @@ bool SEASON3B::CNewUIManager::Render()
 		}
 	}
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	if (bProfileThisFrame)
 	{
 		char n0[40], n1[40], n2[40];

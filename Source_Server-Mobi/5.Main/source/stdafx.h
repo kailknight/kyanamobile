@@ -156,11 +156,11 @@ template< typename T, typename U > inline typename std::common_type<T, U>::type 
 #pragma comment(lib,"..\\ExternalObject\\curl\\libcurl_a.lib")
 
 #endif
-#include "ExternalObject\\FreeImage.h"
+#include "ExternalObject/FreeImage.h"
 #pragma comment(lib, "..\\ExternalObject\\FreeImage.lib")
 
 
-#include "ExternalObject\\detours.h"
+#include "ExternalObject/detours.h"
 #pragma comment(lib, "..\\ExternalObject\\detours.lib")
 
 

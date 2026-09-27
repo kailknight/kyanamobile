@@ -508,7 +508,7 @@ bool SEASON3B::CNewUIMasterSkillTree::UpdateMouseEvent()
 	const POINT& closePos = this->m_CloseBT.GetPos();
 	const POINT& closeSize = this->m_CloseBT.GetSize();
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(MU_IOS)
 	const int closePadX = 12;
 	const int closePadY = 10;
 

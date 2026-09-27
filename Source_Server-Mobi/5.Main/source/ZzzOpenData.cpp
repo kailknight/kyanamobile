@@ -1355,7 +1355,7 @@ void OpenItems()
 		BMD* model = &Models[modelIndex];
 		if (model->Meshs == NULL || meshIndex < 0 || model->NumMeshs <= meshIndex)
 		{
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 			char debugText[160];
 			sprintf(debugText, "OPENITEMS: skip NoneBlendMesh %s model=%d mesh=%d loaded=%d", label, modelIndex, meshIndex, model->NumMeshs);
 			OutputDebugStringA(debugText);
@@ -5200,16 +5200,16 @@ void ReleaseCharacterSceneData()
 
 void OpenBasicData(HDC hDC)
 {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: enter");
 #endif
 	CUIMng& rUIMng = CUIMng::Instance();
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: RenderTitle 0 begin");
 #endif
 	rUIMng.RenderTitleSceneUI(hDC, 0, 11);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: RenderTitle 0 done");
 	OutputDebugStringA("OPENBASIC: first bitmap group begin");
 #endif
@@ -5279,7 +5279,7 @@ void OpenBasicData(HDC hDC)
 #endif	// ASG_ADD_INFLUENCE_GROUND_EFFECT
 	LoadBitmap("Effect\\Spark02.jpg"  	,BITMAP_SPARK     ,GL_LINEAR,GL_CLAMP_TO_EDGE);
 	LoadBitmap("Effect\\Spark03.jpg"  	,BITMAP_SPARK+1   ,GL_LINEAR,GL_CLAMP_TO_EDGE);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: first bitmap group done");
 #endif
 	LoadBitmap("Effect\\smoke01.jpg"	    ,BITMAP_SMOKE     ,GL_LINEAR,GL_CLAMP_TO_EDGE);
@@ -5611,7 +5611,7 @@ void OpenBasicData(HDC hDC)
 	LoadBitmap("effect\\ring_of_gradation.jpg", BITMAP_RING_OF_GRADATION, GL_LINEAR, GL_CLAMP_TO_EDGE );
 
 	LoadBitmap("Interface\\InGameShop\\ingame_pack_check.tga", BITMAP_IGS_CHECK_BUTTON, GL_LINEAR);
-#if defined(__ANDROID__) && !defined(PBG_ADD_INGAMESHOP_UI_ITEMSHOP)
+#if (defined(__ANDROID__) || defined(MU_IOS)) && !defined(PBG_ADD_INGAMESHOP_UI_ITEMSHOP)
 	LoadBitmap("Interface\\InGameShop\\Ingame_Bt01.tga", BITMAP_ANDROID_IGS_CATEGORY_BTN, GL_LINEAR);
 	LoadBitmap("Interface\\InGameShop\\ingame_Bt_page_L.tga", BITMAP_ANDROID_IGS_PAGE_LEFT, GL_LINEAR);
 	LoadBitmap("Interface\\InGameShop\\ingame_Bt_page_R.tga", BITMAP_ANDROID_IGS_PAGE_RIGHT, GL_LINEAR);
@@ -5672,27 +5672,27 @@ void OpenBasicData(HDC hDC)
     OpenSkills();
 	rUIMng.RenderTitleSceneUI(hDC, 6, 11);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: OpenImages begin");
 #endif
 	OpenImages();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: OpenImages done");
 #endif
 	rUIMng.RenderTitleSceneUI(hDC, 7, 11);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: OpenSounds begin");
 #endif
     OpenSounds();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: OpenSounds done");
 #endif
 	rUIMng.RenderTitleSceneUI(hDC, 8, 11);
 
 	char Text[100];
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: scripts begin");
 #endif
 	g_ServerListManager->LoadServerListScript();
@@ -5729,11 +5729,11 @@ void OpenBasicData(HDC hDC)
 	sprintf(Text, "Data\\Local\\%s\\SocketItem_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
 	g_SocketItemMgr.OpenSocketItemScript(Text);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: OpenTextData begin");
 #endif
 	OpenTextData();		//. Text.bmd, Testtest.bmd
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: OpenTextData done");
 #endif
 
@@ -5755,7 +5755,7 @@ void OpenBasicData(HDC hDC)
 	sprintf(Text, "Data\\Local\\%s\\MasterSkillTooltip_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
 	g_pMasterSkillTreeInterface->OpenMasterSkillTooltip(Text);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("OPENBASIC: master/gate/filter done");
 #endif
 	rUIMng.RenderTitleSceneUI(hDC, 9, 11);

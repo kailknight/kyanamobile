@@ -13,7 +13,7 @@
 #if !defined(__ANDROID__) && !defined(MU_IOS)
 #include "wglext.h"
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #include "Platform/MobileTime.h"
 
 // TEMP profiling: the 2D path (UI panels, icons, text quads) goes through
@@ -806,6 +806,14 @@ void BeginOpengl(int x,int y,int Width,int Height )
 	glPushMatrix();
     glLoadIdentity();
     glViewport2(x,y,Width,Height);
+#if defined(MU_IOS)
+	// A full-width view is the world: widen it to the whole frame, past the
+	// safe area the engine lays out in (see GL_SetFrameLayout). Views inside
+	// panels (character previews) stay where the UI put them.
+	const bool extendToFrame = (x <= 0) && (Width >= (int)WindowWidth - 1);
+	if (extendToFrame)
+		GL_ExtendProjectionToFrame(x, WindowHeight - (y + Height), Width, Height);
+#endif
 
 	gluPerspective2(CameraFOV,((float)Width/(float)Height),CameraViewNear,CameraViewFar*1.4f);
     
@@ -818,10 +826,19 @@ void BeginOpengl(int x,int y,int Width,int Height )
     glRotatef(CameraAngle[2],0.f,0.f,1.f);
     glTranslatef(-CameraPosition[0],-CameraPosition[1],-CameraPosition[2]);
 
+#if defined(MU_IOS)
+	if (extendToFrame)
+	{
+		glClear(GL_DEPTH_BUFFER_BIT); // the widened view covers the whole frame
+	}
+	else
+#endif
+	{
 	glEnable(GL_SCISSOR_TEST);
 	glScissor(x, WindowHeight - (y + Height), Width, Height);
 	glClear(GL_DEPTH_BUFFER_BIT);
 	glDisable(GL_SCISSOR_TEST);
+	}
 
     glDisable(GL_ALPHA_TEST);
     glEnable(GL_TEXTURE_2D);
@@ -1588,7 +1605,7 @@ void RenderBitmap(int Texture,float x,float y,float Width,float Height,float u,f
 	// wired in yet - expand coverage incrementally once this is verified.
 	ResolveUIAtlas(Texture, u, v, uWidth, vHeight);
 #endif
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	++g_ProfBitmapCalls;
 	const unsigned long long profBitmapStart = static_cast<unsigned long long>(MU_MobilePerfNow());
 	struct ProfBitmapScope

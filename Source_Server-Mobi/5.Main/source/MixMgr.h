@@ -266,8 +266,16 @@ namespace SEASON3A
 		{
 			m_iMixSubType = 0;
 			m_btPlusChaosRate = 0;
-			OpenRecipeFile("Data\\Local\\Mix.bmd");
+#if !defined(MU_IOS)
+			OpenDefaultRecipeFile();
+#endif
 		}
+
+		// g_MixRecipeMgr is a global, so its constructor runs before main(). On
+		// iOS the game is part of the app executable and that is before the
+		// first-launch data download, so iOS calls this from game init instead.
+		// (Android only loads the game library once its preloader has finished.)
+		void OpenDefaultRecipeFile() { OpenRecipeFile("Data\\Local\\Mix.bmd"); }
 		virtual ~CMixRecipeMgr() {}
 
 		void SetMixType(int iMixType) { this->m_iMixType = iMixType; }

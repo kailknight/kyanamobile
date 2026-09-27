@@ -107,7 +107,15 @@ vec3_t LightTransform[MAX_MESH][MAX_VERTICES];
 // (gl_compat.cpp), which rewrote the shared bone UBO with no orphaning, so a
 // queued draw could skin with another character's bones - see the comment
 // there. Fixed, so this stays true.
+//
+// Off on iOS: the GPU path draws characters with misplaced meshes and wrong
+// textures there (character create, 2026-09-27), and the CPU path is correct.
+// mu_gl_ab.txt "gpuSkin=1" turns it back on for investigating the cause.
+#if defined(MU_IOS)
+bool g_GpuSkinningTestEnabled = false;
+#else
 bool g_GpuSkinningTestEnabled = true;
+#endif
 
 float  g_SkinBoneMatrixCache[MAX_BONES][3][4];
 int    g_SkinBoneMatrixCacheCount = 0;

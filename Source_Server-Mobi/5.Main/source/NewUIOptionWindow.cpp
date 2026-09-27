@@ -43,7 +43,7 @@ SEASON3B::CNewUIOptionWindow::CNewUIOptionWindow()
 	m_bWhisperSound = false;
 	m_bSlideHelp = true;
 	m_iVolumeLevel = 0;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	// Mobile default is lower than PC's max (4): ZzzObject.cpp's Level clamp
 	// (GetRenderLevel()<4 => Level=min(Level,GetRenderLevel()*2+5)) means this
 	// caps every +11-15 item's glow at the +9/10 tier's 2-overlay treatment

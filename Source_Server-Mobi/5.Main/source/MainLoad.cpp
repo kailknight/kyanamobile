@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "Protect.h"
-#include ".\\Utilities\\CCRC32.H"
+#include "./Utilities/CCRC32.H"
 #include "Util.h"
 #include "MainLoad.h"
 #include "BuffIcon.h"

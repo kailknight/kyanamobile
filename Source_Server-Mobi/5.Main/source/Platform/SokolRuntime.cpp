@@ -99,4 +99,53 @@ void MU_MobileKeepRenderingWhileUnfocused()
 #endif
 }
 
+#if defined(MU_IOS)
+#include <cstdio>
+
+// sokol brings the iOS keyboard up by making a hidden UITextField first
+// responder, and UIKit refuses first responder to a hidden view (or one with
+// user interaction off), so the keyboard never appeared. The field stays
+// visible and interactive but sits just outside the view's bounds, where no
+// touch can hit it, at an alpha too low to see.
+void MU_IosShowKeyboard(bool show)
+{
+    sapp_show_keyboard(show); // creates the text field on first use
+    UITextField* field = _sapp.ios.textfield;
+    if (field == nil || !show)
+    {
+        return;
+    }
+    if (field.hidden)
+    {
+        field.hidden = NO;
+        field.alpha = 0.02;
+        field.userInteractionEnabled = YES;
+        field.frame = CGRectMake(-200.0, -200.0, 100.0, 50.0);
+    }
+    if (!field.isFirstResponder && ![field becomeFirstResponder])
+    {
+        static int s_failures = 0;
+        if (s_failures++ < 5)
+        {
+            fprintf(stderr,
+                "E/MuMain: keyboard text field refused first responder "
+                "(canBecome=%d inWindow=%d hidden=%d enabled=%d interaction=%d)\n",
+                field.canBecomeFirstResponder ? 1 : 0,
+                field.window != nil ? 1 : 0,
+                field.hidden ? 1 : 0,
+                field.enabled ? 1 : 0,
+                field.userInteractionEnabled ? 1 : 0);
+        }
+    }
+}
+
+// Whether the keyboard's text field still has focus: the player can dismiss
+// the keyboard without the game asking, and a re-tap must bring it back.
+bool MU_IosKeyboardHasFocus()
+{
+    UITextField* field = _sapp.ios.textfield;
+    return field != nil && field.isFirstResponder;
+}
+#endif
+
 #endif // defined(__ANDROID__) || defined(MU_IOS)

@@ -166,7 +166,7 @@ void			CListManager::DeleteScriptFiles() // OK
 
 WZResult		CListManager::FileDownLoad() // OK
 {
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	if(this->m_ListManagerInfo.m_dwDownloadMaxTime>0)
 	{
 		unsigned int ThreadID = 0;
@@ -214,7 +214,7 @@ WZResult		CListManager::FileDownLoad() // OK
 
 WZResult		CListManager::FileDownLoadImpl() // OK
 {
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	if(m_pFTPDownLoader!=NULL)
 	{
 		m_pFTPDownLoader->Break();

@@ -151,7 +151,7 @@ char* ConvertModuleFileName(char* name) // OK
 
 void LoadReferenceAddressTable(HMODULE mod,char* name,DWORD address) // OK
 {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(MU_IOS)
 	(void)mod; (void)name; (void)address;
 	return;
 #else

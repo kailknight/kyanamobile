@@ -26,7 +26,7 @@
 #endif //PBG_ADD_NEWCHAR_MONK_SKILL
 
 #ifdef FOR_WORK
-#include "Utilities\Log\DebugAngel.h"
+#include "Utilities/Log/DebugAngel.h"
 #endif // FOR_WORK
 
 //ui개편 완료후 제거

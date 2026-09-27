@@ -491,6 +491,7 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 	{
 		return false;
 	}
+#endif
 
 	// Other players' gear effects (set by RenderCharactersClient while it draws
 	// a player that is not the hero or the target): spawn every other particle.
@@ -504,7 +505,6 @@ int CreateParticle(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Su
 			return false;
 		}
 	}
-#endif
 
 	for (int i = 0; i < MAX_PARTICLES; i++)
 	{

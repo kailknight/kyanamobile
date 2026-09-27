@@ -1,4 +1,4 @@
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 
 #include "stdafx.h"
 #include "APICB.h"
@@ -17,7 +17,11 @@
 #include "ZzzScene.h"
 #include "android/SimpleModulusCrypt.h"
 
+#if defined(__ANDROID__)
 #include <jni.h>
+#else
+#include "IosAudio.h"
+#endif
 #include <android/log.h>
 // SDL_mixer is deliberately absent: SDL never starts in this app (sokol_app
 // replaces SDL_main), so every Mix_ call here was a no-op. Audio is Java side.
@@ -169,8 +173,12 @@ int ConvertDirectSoundVolumeToPercent(long volume)
 
 void ApplyAndroidMasterVolume()
 {
+#if defined(__ANDROID__)
     CallMuAudioVoid("setVolume", "(I)V",
         static_cast<jint>(ConvertDirectSoundVolumeToPercent(g_androidMasterVolume)));
+#else
+    IosAudio_SetMasterVolumePercent(ConvertDirectSoundVolumeToPercent(g_androidMasterVolume));
+#endif
 }
 
 bool ShouldSuppressAndroidRuntimeLog(const char* format)
@@ -233,6 +241,7 @@ DWORD* API_ViewPhysiSpeed = nullptr;
 DWORD* API_ViewMagicSpeed = nullptr;
 
 HRESULT InitDirectSound(HWND) { return S_OK; }
+#if defined(__ANDROID__)
 void SetEnableSound(bool enabled)
 {
     g_androidSoundEnabled = enabled;
@@ -748,6 +757,88 @@ extern "C" void AndroidAudioInit()
     // File presence is checked inside PushAndroidSoundTable, which already
     // opens each one to read its length - see the noheader= count it logs.
 }
+#else
+// iOS: the same entry points over AVAudioEngine (ios/src/IosAudio.mm). The
+// AndroidAudio* music calls live there too.
+namespace
+{
+    // "Data\Sound\aWind.wav" -> "<cwd>/Data/Sound/aWind.wav". The absolute form
+    // keeps a later chdir from breaking lazy decoding.
+    std::string NormalizeIosSoundPath(const TCHAR* raw)
+    {
+        if (raw == nullptr)
+        {
+            return std::string();
+        }
+        std::string path(raw);
+        std::replace(path.begin(), path.end(), '\\', '/');
+        if (path.empty() || path[0] == '/')
+        {
+            return path;
+        }
+        char cwd[1024] = {};
+        if (getcwd(cwd, sizeof(cwd)) == nullptr)
+        {
+            return path;
+        }
+        std::string absolute(cwd);
+        if (absolute.empty() || absolute.back() != '/')
+        {
+            absolute.push_back('/');
+        }
+        return absolute + path;
+    }
+}
+
+void SetEnableSound(bool enabled)
+{
+    g_androidSoundEnabled = enabled;
+    IosAudio_SetEnabled(enabled);
+    if (enabled)
+    {
+        ApplyAndroidMasterVolume();
+    }
+}
+void FreeDirectSound()
+{
+    g_androidSoundEnabled = false;
+    IosAudio_StopAll();
+    AndroidAudioStopMusic();
+}
+void LoadWaveFile(int Buffer, TCHAR* strFileName, int, bool)
+{
+    if (Buffer < 0 || Buffer >= MAX_BUFFER)
+    {
+        return;
+    }
+    IosAudio_LoadSound(Buffer, NormalizeIosSoundPath(strFileName).c_str());
+}
+// Object carries the emitter position for desktop 3D mixing; like Android,
+// sounds play centred.
+HRESULT PlayBuffer(int Buffer, OBJECT*, BOOL bLooped)
+{
+    if (g_androidSoundEnabled)
+    {
+        IosAudio_Play(Buffer, bLooped != FALSE);
+    }
+    return S_OK;
+}
+void StopBuffer(int Buffer, BOOL) { IosAudio_Stop(Buffer); }
+void AllStopSound(void) { IosAudio_StopAll(); }
+void Set3DSoundPosition() {}
+HRESULT ReleaseBuffer(int) { return S_OK; }
+HRESULT RestoreBuffers(int, int) { return S_OK; }
+void SetVolume(int, long vol)
+{
+    g_androidMasterVolume = std::clamp<long>(vol, kAndroidDsVolumeMin, kAndroidDsVolumeMax);
+    ApplyAndroidMasterVolume();
+}
+void SetMasterVolume(long vol)
+{
+    g_androidMasterVolume = std::clamp<long>(vol, kAndroidDsVolumeMin, kAndroidDsVolumeMax);
+    ApplyAndroidMasterVolume();
+}
+#endif // __ANDROID__ audio
 
 static BYTE g_wsctlcReadMessage[MAX_RECVBUF] = {};
 namespace

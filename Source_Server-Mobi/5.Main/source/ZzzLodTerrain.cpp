@@ -3,8 +3,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
-#include <gl\gl.h>
-#include <gl\glu.h>
+#include <gl/gl.h>
+#include <gl/glu.h>
 #include <math.h>
 #include <algorithm>
 #include <cstdint>
@@ -2482,7 +2482,12 @@ extern int GetScreenWidth();
 
 static inline float GetFrustumScreenWidth()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_IOS)
+	// The world is drawn wider than the engine's window: see GL_SetFrameLayout.
+	float widthRatio = 1.0f, heightRatio = 1.0f;
+	GL_GetFrameExtension(&widthRatio, &heightRatio);
+	return static_cast<float>(GetWindowsX()) * widthRatio;
+#elif defined(__ANDROID__)
 	return static_cast<float>(GetWindowsX());
 #else
 	return static_cast<float>(GetScreenWidth());
@@ -2873,6 +2878,13 @@ bool TestFrustrum2D(float x,float y,float Range)
 
 void CreateFrustrum(float xAspect, float yAspect, vec3_t position)
 {
+#if defined(MU_IOS)
+	// The world is drawn wider than the engine's window: see GL_SetFrameLayout.
+	float widthRatio = 1.0f, heightRatio = 1.0f;
+	GL_GetFrameExtension(&widthRatio, &heightRatio);
+	xAspect *= widthRatio;
+	yAspect *= heightRatio;
+#endif
 	const float fovv = tanf(CameraFOV * Q_PI / 360.f);
 	float Distance = CameraViewFar;
 	float Width = fovv * Distance * xAspect + 100.f;

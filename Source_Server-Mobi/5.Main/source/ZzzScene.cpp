@@ -17,7 +17,7 @@
 #include "ZzzInventory.h"
 #include "ZzzTexture.h"
 #include "ZzzOpenData.h"
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 #include <android/log.h>
 #endif
 #include "ZzzScene.h"
@@ -425,22 +425,22 @@ void WebzenScene(HDC hDC)
 {
 	CUIMng& rUIMng = CUIMng::Instance();
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("WEBZEN: enter");
 #endif
 	OpenFont();
 	ClearInput();
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("WEBZEN: loading title bitmaps");
 #endif
 	LoadBitmap("Interface\\New_lo_back_01.jpg", BITMAP_TITLE, GL_LINEAR);
 	LoadBitmap("Interface\\New_lo_back_02.jpg", BITMAP_TITLE+1, GL_LINEAR);
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	LoadBitmap("Interface\\MU_TITLE.tga", BITMAP_TITLE+2, GL_LINEAR);
 #endif
 	LoadBitmap("Interface\\lo_121518.tga", BITMAP_TITLE+3, GL_LINEAR);
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	LoadBitmap("Interface\\New_lo_webzen_logo.tga", BITMAP_TITLE+4, GL_LINEAR);
 #endif
 	LoadBitmap("Interface\\lo_lo.jpg", BITMAP_TITLE+5, GL_LINEAR, GL_REPEAT);
@@ -470,16 +470,16 @@ void WebzenScene(HDC hDC)
 	FogEnable = false;
 	
 	::EnableAlphaTest();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("WEBZEN: OpenBasicData begin");
 #endif
 	OpenBasicData(hDC);
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("WEBZEN: OpenBasicData done");
 #endif
 
 	g_pNewUISystem->LoadMainSceneInterface();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	OutputDebugStringA("WEBZEN: LoadMainSceneInterface done");
 #endif
 
@@ -488,11 +488,11 @@ void WebzenScene(HDC hDC)
 	rUIMng.ReleaseTitleSceneUI();
 		DeleteBitmap(BITMAP_TITLE);
    	DeleteBitmap(BITMAP_TITLE+1);
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	DeleteBitmap(BITMAP_TITLE+2);
 #endif
    	DeleteBitmap(BITMAP_TITLE+3);
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	DeleteBitmap(BITMAP_TITLE+4);
 #endif
    	DeleteBitmap(BITMAP_TITLE+5);
@@ -1056,7 +1056,7 @@ void CreateCharacterScene()
     g_ErrorReport.Write( "> Character scene init success.\r\n");
 }
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 // Character-select tap, deferred by one frame.
 //
 // SelectedCharacter is produced by SelectObjects() inside
@@ -1118,7 +1118,7 @@ void NewMoveCharacterScene()
 	CInput& rInput = CInput::Instance();
 	CUIMng& rUIMng = CUIMng::Instance();
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	if (rInput.IsLBtnDn() || rInput.IsLBtnDbl())
 	{
 		if (FILE* dbgf = fopen("mu_debug_charselect.txt", "a"))
@@ -1163,7 +1163,7 @@ void NewMoveCharacterScene()
 		}
 	}
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	// Drain the PREVIOUS frame's tap before latching this one - see the comment on
 	// s_CharSelTapPending. Done ahead of the IsCursorOnUI() bail below so a latched
 	// tap always resolves, even if the finger has since drifted into the button bar.
@@ -1195,7 +1195,7 @@ void NewMoveCharacterScene()
 		return;
 	}
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	// Latch only; the pick this tap needs does not exist yet this frame.
 	if (rInput.IsLBtnDbl() || rInput.IsLBtnDn())
 	{
@@ -2783,7 +2783,7 @@ bool RenderMainScene()
 
 	const unsigned long long uiStart = MainScenePerfNow();
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	unsigned long long dbgPhaseStart = MainScenePerfNow();
 #endif
 
@@ -2801,7 +2801,7 @@ bool RenderMainScene()
 #endif
 
     SelectObjects();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	g_ProfUiSelectTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 	BeginBitmap();
@@ -2813,23 +2813,23 @@ bool RenderMainScene()
 	}
 	RenderTournamentInterface();
 	EndBitmap();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	g_ProfUiInterfaceTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 
 	g_pPartyManager->Render();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	g_ProfUiPartyTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 	g_pNewUISystem->Render();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	g_ProfUiNewUiTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 
 	BeginBitmap();
 
 #if(UseReconnect)
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(MU_IOS)
 	// Android's socket layer notices the drop on its receive thread; this hands
 	// that over on the main thread, which is what CWsctlc::Close() does on PC.
 	{
@@ -2850,7 +2850,7 @@ bool RenderMainScene()
 #endif //ENABLE_EDIT
 
 	EndBitmap();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	g_ProfUiInfoTicks = MainScenePerfElapsed(dbgPhaseStart); dbgPhaseStart = MainScenePerfNow();
 #endif
 	BeginBitmap();
@@ -2873,7 +2873,7 @@ bool RenderMainScene()
 #endif
 
 	EndBitmap();
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 	g_ProfUiCursorTicks = MainScenePerfElapsed(dbgPhaseStart);
 #endif
 	g_mainScenePerfSnapshot.uiTicks += MainScenePerfElapsed(uiStart);
@@ -3121,7 +3121,7 @@ void MainScene(HDC hDC)
 		extern bool g_ShowPerfOverlay;
 		extern bool g_ShowFpsOnly;
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(MU_IOS)
 		// The GETMAIN status line that used to sit here is gone - it had served
 		// its purpose (confirming CBGetMain.bin was accepted) and was printing
 		// the server address in plain sight on the login screen.
@@ -3651,7 +3651,7 @@ void MainScene(HDC hDC)
 			const int prof5X = (((hudWidth - size5.cx) - 12) > 10) ? ((hudWidth - size5.cx) - 12) : 10;
 			g_pRenderText->RenderText(prof5X, DisplayHeight - 74, szProf5);
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
 			// TEMP profiling line 6: the three most expensive UI windows this
 			// frame, by class name (CNewUIManager.cpp). `new` is the single
 			// biggest bucket in the frame, so this says which window it is.
@@ -4608,13 +4608,13 @@ void Scene(HDC hDC)
     }
     catch (const std::exception& e)
     {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
         __android_log_print(ANDROID_LOG_ERROR, "MuMain", "Scene exception scene=%d world=%d: %s", SceneFlag, gMapManager.WorldActive, e.what());
 #endif
     }
     catch (...)
     {
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(MU_IOS)
         __android_log_print(ANDROID_LOG_ERROR, "MuMain", "Scene unknown exception scene=%d world=%d", SceneFlag, gMapManager.WorldActive);
 #endif
     }

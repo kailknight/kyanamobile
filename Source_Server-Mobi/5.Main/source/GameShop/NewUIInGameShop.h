@@ -471,7 +471,7 @@ namespace SEASON3B
 	};
 }
 	
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(MU_IOS)
 
 namespace SEASON3B
 {

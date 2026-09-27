@@ -215,13 +215,13 @@ void SEASON3B::CNewUIButton::ChangeButtonImgState(bool imgregister, int imgindex
 	}
 }
 #else // KJH_MOD_RADIOBTN_MOUSE_OVER_IMAGE
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 void SEASON3B::CNewUIButton::ChangeButtonImgState(bool imgregister, int imgindex, bool overflg, bool isimgwidth, bool bClickEffect )
 #else // KJH_ADD_INGAMESHOP_UI_SYSTEM || __ANDROID__
 void SEASON3B::CNewUIButton::ChangeButtonImgState(bool imgregister, int imgindex, bool overflg, bool isimgwidth )
 #endif // KJH_ADD_INGAMESHOP_UI_SYSTEM || __ANDROID__
 {
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 	m_bClickEffect = bClickEffect;
 #endif // KJH_ADD_INGAMESHOP_UI_SYSTEM || __ANDROID__
 	
@@ -280,7 +280,7 @@ void SEASON3B::CNewUIButton::ChangeImgIndex( int imgindex, int curimgstate )
 	}
 }
 
-#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || defined(__ANDROID__)
+#if defined(KJH_ADD_INGAMESHOP_UI_SYSTEM) || (defined(__ANDROID__) || defined(MU_IOS))
 void SEASON3B::CNewUIButton::ChangeButtonState( BUTTON_STATE eventstate, int iButtonState )
 {
 	if( m_ButtonInfo.size() != 0 )

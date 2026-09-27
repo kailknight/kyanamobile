@@ -19,14 +19,14 @@ CFTPFileDownLoader::CFTPFileDownLoader() // OK
 
 CFTPFileDownLoader::~CFTPFileDownLoader() // OK
 {
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	SAFE_DELETE(this->m_pFileDownloader);
 #endif // __ANDROID__ - m_pFileDownloader is never assigned on Android (see
 	   // the #else DownLoadFiles() below), so there is nothing to delete,
 	   // and FileDownloader's destructor is never linked in.
 }
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 WZResult CFTPFileDownLoader::DownLoadFiles(DownloaderType type,
 										   std::string strServerIP,
 										   unsigned short PortNum,

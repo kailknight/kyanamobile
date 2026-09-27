@@ -49,16 +49,20 @@ int DivideStringByPixel(LPTSTR alpszDst, int nDstRow, int nDstColumn, LPCTSTR lp
 
 	char* pszToken = ::strtok(szWorkSrc, &szNewlineChar);
 
-	while (pszToken != NULL)
+	// Each chunk may only use the rows the earlier chunks left. Passing the full
+	// nDstRow to every chunk let a multi-chunk text write rows past the end of
+	// the caller's buffer - heap corruption when that buffer is a member array,
+	// as in CNewUIMyQuestInfoWindow::m_aszMsg.
+	while (pszToken != NULL && nLine < nDstRow)
 	{
 		if (bSpaceInsert)
 		{
-			::sprintf(szWorkToken, " %s", pszToken);
-			nLine += ::CutText3(szWorkToken, alpszDst + nLine * nDstColumn, nPixelPerLine,nDstRow, nDstColumn);
+			::snprintf(szWorkToken, sizeof(szWorkToken), " %s", pszToken);
+			nLine += ::CutText3(szWorkToken, alpszDst + nLine * nDstColumn, nPixelPerLine, nDstRow - nLine, nDstColumn);
 		}
 		else
 		{
-			nLine += ::CutText3(pszToken, alpszDst + nLine * nDstColumn, nPixelPerLine,nDstRow, nDstColumn);
+			nLine += ::CutText3(pszToken, alpszDst + nLine * nDstColumn, nPixelPerLine, nDstRow - nLine, nDstColumn);
 		}
 		pszToken = ::strtok(NULL, &szNewlineChar);
 	}

@@ -310,7 +310,7 @@ void CNewUISlotMachine::CenterWindow()
 	m_Pos.x = (int)((sw - (float)WINDOW_WIDTH) / 2.0f);
 	m_Pos.y = (int)((sh - (float)WINDOW_HEIGHT) / 2.0f);
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(MU_IOS)
 	// Right-aligned on Android instead of centred, so the window clears the chat
 	// block the mobile UI relocates to x 7..240 while a chat-friendly window is up
 	// (android_main.cpp: kAndroidChatBlockShiftedOffsetX and

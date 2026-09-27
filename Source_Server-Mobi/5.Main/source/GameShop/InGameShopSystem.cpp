@@ -11,8 +11,8 @@
 // The banner fetch worker needs urlmon for the download, Path for the cache
 // directory, and process.h for _beginthreadex - all Windows-only, like the
 // fetch itself.
-#ifndef __ANDROID__
-#include "ShopListManager\interface\PathMethod\Path.h"
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+#include "ShopListManager/interface/PathMethod/Path.h"
 #include <UrlMon.h>
 #include <process.h>
 #pragma comment(lib,"Urlmon.lib")
@@ -118,7 +118,7 @@ void CInGameShopSystem::SetBannerVersion(int iSalesZone, int iYear, int iYearId)
 	m_BannerVerInfo.yearId = iYearId;
 }
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 /*
 	Fetch one banner jpg. Runs on its own thread and touches nothing but the file.
 

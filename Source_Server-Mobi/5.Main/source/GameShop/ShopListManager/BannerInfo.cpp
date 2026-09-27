@@ -14,7 +14,7 @@
 #include "StringToken.h"
 #include "StringMethod.h"
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 #include <UrlMon.h>
 #pragma comment(lib,"Urlmon.lib")
 #endif

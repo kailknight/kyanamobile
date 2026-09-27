@@ -34,6 +34,9 @@ public:
     virtual RenderBackendType GetType() const = 0;
     virtual bool Initialize(int drawableWidth, int drawableHeight) = 0;
     virtual void OnDrawableSizeChanged(int drawableWidth, int drawableHeight) = 0;
+    // Called before the frame's first draw. iOS's GLKView rebinds its own
+    // framebuffer every frame, so the render target has to be re-applied here.
+    virtual void BeginFrame() {}
     virtual void Present() = 0;
     virtual RenderBackendStats GetAndResetStats() = 0;
     virtual void Shutdown() = 0;
@@ -44,6 +47,11 @@ public:
 // if it equals the render size, no scaling is done and rendering goes straight
 // to the backbuffer.
 void RenderBackend_SetNativePresentSize(int width, int height);
+
+// Size of the offscreen frame, when it is larger than the engine's drawable.
+// Only iOS sets it: the frame covers the whole screen while the engine draws
+// into its safe area (GL_SetFrameLayout). 0,0 = same size as the drawable.
+void RenderBackend_SetFrameSize(int width, int height);
 
 RenderBackendType ParseRenderBackendType(const char* value);
 const char* RenderBackendTypeToString(RenderBackendType type);

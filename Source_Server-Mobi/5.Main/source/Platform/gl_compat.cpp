@@ -6,6 +6,8 @@
 
 #if defined(__ANDROID__) || defined(MU_IOS)
 
+// This file implements the viewport/scissor shift, so it calls the real ones.
+#define MU_GL_RAW_VIEWPORT 1
 #include "gl_compat.h"
 #include "MobileTime.h"
 #include <GLES3/gl32.h>
@@ -31,6 +33,7 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
+#include <string>
 
 #define LOG_TAG "GL_Compat"
 
@@ -291,11 +294,22 @@ typedef void (GL_APIENTRY* MU_PFNGLDRAWELEMENTSBASEVERTEX)(
     GLenum mode, GLsizei count, GLenum type, const void* indices, GLint basevertex);
 static MU_PFNGLDRAWELEMENTSBASEVERTEX s_glDrawElementsBaseVertex = nullptr;
 
+#if defined(MU_IOS)
+// Defined below, next to the attribute state it has to touch.
+static void DrawQuadIndicesWithAttribOffset(GLsizei indexCount, GLint firstVertex);
+// True on iOS: the ring buffers exist but are mapped per draw (see InitStreamRing).
+static bool s_streamRingMapPerDraw = false;
+#endif
+
 // Every indexed-quad draw site funnels through here so there is exactly one
 // place that knows whether base-vertex is actually available.
 static inline void DrawQuadIndicesFrom(GLsizei indexCount, GLint firstVertex) {
     if (firstVertex != 0 && s_glDrawElementsBaseVertex) {
         s_glDrawElementsBaseVertex(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0, firstVertex);
+#if defined(MU_IOS)
+    } else if (firstVertex != 0) {
+        DrawQuadIndicesWithAttribOffset(indexCount, firstVertex);
+#endif
     } else {
         glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
     }
@@ -349,6 +363,38 @@ static void InitStreamRing() {
 
     LOGI("Stream ring capability: baseVertex=%d bufferStorage=%d (GLES %d.%d)",
          hasBaseVertex ? 1 : 0, hasBufferStorage ? 1 : 0, glMajor, glMinor);
+
+#if defined(MU_IOS)
+    // iOS GLES stops at 3.0: no buffer storage, no base vertex, so the
+    // persistent-mapped ring below cannot exist and every draw would fall back
+    // to the per-draw glBufferData orphan - measured on an iPhone 12 in a
+    // Lorencia crowd at ~19% of the main thread, most of it in IOKit/kernel
+    // buffer allocation. Instead: the same three slots, allocated once, with
+    // each draw writing its slice through an UNSYNCHRONIZED map (Apple's
+    // recommended streaming pattern). The per-frame fences in GL_FlushPending
+    // are what make reusing a slot safe, exactly as for the persistent ring.
+    // Indexed draws without base vertex offset their attribute pointers
+    // instead (DrawQuadIndicesWithAttribOffset).
+    for (int i = 0; i < kStreamRingSize; ++i) {
+        StreamRingSlot& slot = s_streamRing[i];
+        glGenBuffers(1, &slot.vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, slot.vbo);
+        glBufferData(GL_ARRAY_BUFFER, kStreamRingSlotBytes, nullptr, GL_STREAM_DRAW);
+        if (glGetError() != GL_NO_ERROR) {
+            LOGE("Stream ring (map per draw): allocation failed on slot %d, falling back", i);
+            DestroyStreamRing();
+            return;
+        }
+        slot.mapped = nullptr;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    s_streamIdx = 0;
+    s_streamOffset = 0;
+    s_streamRingMapPerDraw = true;
+    s_streamRingAvailable = true;
+    LOGI("Stream ring: active (map per draw), %d slots x %lld bytes", kStreamRingSize, (long long)kStreamRingSlotBytes);
+    return;
+#endif
 
     if (!hasBaseVertex || !hasBufferStorage) {
         return;
@@ -842,10 +888,66 @@ static inline void BindImmediateVertexAttribLayout() {
     s_imAttribValid = true;
 }
 
+#if defined(MU_IOS)
+// Base-vertex stand-in for ES 3.0: point the attributes at this draw's first
+// vertex inside the bound ring buffer, draw the shared quad indices from 0,
+// and mark the layout stale so the next draw re-points it at offset 0.
+static void DrawQuadIndicesWithAttribOffset(GLsizei indexCount, GLint firstVertex) {
+    const size_t base = static_cast<size_t>(firstVertex) * sizeof(IMVertex);
+    const int stride = sizeof(IMVertex);
+    glEnableVertexAttribArray(s_aPos);
+    glVertexAttribPointer(s_aPos, 3, GL_FLOAT, GL_FALSE, stride, (void*)(base + offsetof(IMVertex, x)));
+    glEnableVertexAttribArray(s_aColor);
+    glVertexAttribPointer(s_aColor, 4, GL_FLOAT, GL_FALSE, stride, (void*)(base + offsetof(IMVertex, r)));
+    glEnableVertexAttribArray(s_aUV);
+    glVertexAttribPointer(s_aUV, 2, GL_FLOAT, GL_FALSE, stride, (void*)(base + offsetof(IMVertex, u)));
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
+    s_imAttribValid = false;
+}
+#endif
+
 // =============================================================================
 // Shader helpers
 // =============================================================================
+#if defined(MU_IOS)
+// The shaders are written for GLSL ES 3.10. iOS stops at 3.00, and the only
+// 3.10 features they use are explicit uniform locations and the UBO binding
+// qualifier - both dropped here. Uniforms are then found by name (s_uMVP etc.,
+// and s_skinLoc) and the bone block is bound with glUniformBlockBinding.
+static std::string AdaptShaderSource(const char* src) {
+    std::string s(src);
+    auto replaceAll = [&s](const char* from, const char* to) {
+        const size_t fromLen = strlen(from);
+        for (size_t pos = s.find(from); pos != std::string::npos; pos = s.find(from, pos)) {
+            s.replace(pos, fromLen, to);
+        }
+    };
+    replaceAll("#version 310 es", "#version 300 es");
+    replaceAll("layout(std140, binding = 0) uniform", "layout(std140) uniform");
+
+    // "layout(location = N) uniform ..." -> "uniform ...". Vertex inputs keep
+    // their layout(location = N): that is legal in 3.00.
+    for (size_t pos = s.find("layout(location"); pos != std::string::npos; pos = s.find("layout(location", pos)) {
+        const size_t close = s.find(')', pos);
+        if (close == std::string::npos) {
+            break;
+        }
+        const size_t next = s.find_first_not_of(" \t", close + 1);
+        if (next != std::string::npos && s.compare(next, 8, "uniform ") == 0) {
+            s.erase(pos, next - pos);
+        } else {
+            pos = close + 1;
+        }
+    }
+    return s;
+}
+#endif
+
 static GLuint CompileShader(GLenum type, const char* src) {
+#if defined(MU_IOS)
+    const std::string adapted = AdaptShaderSource(src);
+    src = adapted.c_str();
+#endif
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
     glCompileShader(s);
@@ -1329,13 +1431,28 @@ static GLint StreamVertexData(const void* data, GLsizeiptr bytes) {
             // to offset 0 within the same frame would not be: earlier draws
             // this frame already point the GPU at data earlier in this same
             // slot, and it has not necessarily read it yet.
-        } else {
+        } else if (slot.mapped != nullptr) {
             memcpy(slot.mapped + s_streamOffset, data, static_cast<size_t>(bytes));
             const GLint firstVertex = static_cast<GLint>(s_streamOffset / static_cast<GLsizeiptr>(sizeof(IMVertex)));
             s_streamOffset += bytes;
             BindArrayBufferCached(slot.vbo);
             return firstVertex;
         }
+#if defined(MU_IOS)
+        else if (s_streamRingMapPerDraw) {
+            BindArrayBufferCached(slot.vbo);
+            void* dst = glMapBufferRange(GL_ARRAY_BUFFER, s_streamOffset, bytes,
+                GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+            if (dst != nullptr) {
+                memcpy(dst, data, static_cast<size_t>(bytes));
+                glUnmapBuffer(GL_ARRAY_BUFFER);
+                const GLint firstVertex = static_cast<GLint>(s_streamOffset / static_cast<GLsizeiptr>(sizeof(IMVertex)));
+                s_streamOffset += bytes;
+                return firstVertex;
+            }
+            // Map failed: this draw takes the orphan path below.
+        }
+#endif
     }
 
     BindArrayBufferCached(s_vbo);
@@ -2991,6 +3108,24 @@ void main() {
 }
 )";
 
+// Skin program uniform locations. The shaders above pin them with
+// layout(location = N), so on Android SKIN_U(n) is just n. GLSL ES 3.00 (iOS)
+// has no explicit uniform locations: there GL_SkinInit looks each one up by
+// name after linking and stores it at its pinned index.
+#if defined(MU_IOS)
+static GLint s_skinLoc[19];
+#define SKIN_U(n) s_skinLoc[n]
+static const char* const kSkinUniformNames[19] = {
+    "u_mvp", nullptr, nullptr, nullptr,   // mat4: pinned locations 0-3
+    "u_lightDir", "u_useVertexLight", "u_texOffset", "u_chromeMode",
+    "u_sampler", "u_bodyLight", "u_alpha", "u_useTexture", "u_glowColor",
+    "u_chromeSampler", "u_chromeBodyLight", "u_hasChrome",
+    "u_overlay2Sampler", "u_overlay2BodyLight", "u_hasOverlay2",
+};
+#else
+#define SKIN_U(n) (n)
+#endif
+
 static GLuint s_skinProg = 0;
 static GLuint s_skinBoneUbo = 0;
 static GLuint s_skinVbo = 0;      // scratch VBO for callers that pass raw vertex data
@@ -3095,6 +3230,17 @@ bool GL_SkinInit() {
         return false;
     }
 
+#if defined(MU_IOS)
+    for (int i = 0; i < 19; ++i) {
+        s_skinLoc[i] = kSkinUniformNames[i] ? glGetUniformLocation(s_skinProg, kSkinUniformNames[i]) : -1;
+    }
+    // Replaces the shader's layout(binding = 0) on the bone block.
+    const GLuint boneBlock = glGetUniformBlockIndex(s_skinProg, "BoneBlock");
+    if (boneBlock != GL_INVALID_INDEX) {
+        glUniformBlockBinding(s_skinProg, boneBlock, 0);
+    }
+#endif
+
     glGenBuffers(1, &s_skinBoneUbo);
     glBindBuffer(GL_UNIFORM_BUFFER, s_skinBoneUbo);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 4 * 3 * kMaxSkinBones, nullptr, GL_DYNAMIC_DRAW);
@@ -3105,9 +3251,9 @@ bool GL_SkinInit() {
 
     // Sampler units never change - set once here instead of on every draw.
     glUseProgram(s_skinProg);
-    glUniform1i(8, 0);
-    glUniform1i(13, 1);
-    glUniform1i(16, 2);
+    glUniform1i(SKIN_U(8), 0);
+    glUniform1i(SKIN_U(13), 1);
+    glUniform1i(SKIN_U(16), 2);
     ResetSkinStateCaches();
 
     GL_InvalidateCachedGLState();
@@ -3238,33 +3384,33 @@ static void DrawSkinnedMeshUncached(const void* vertices, int vertexCount,
     UseProgramCached(s_skinProg);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_skinBoneUbo);
 
-    glUniformMatrix4fv(0, 1, GL_FALSE, mvp);   // mat4 occupies locations 0-3
-    glUniform3fv(4, 1, lightDir);
-    glUniform1i(5, state.useVertexLight ? 1 : 0);
-    glUniform2f(6, state.texOffsetU, state.texOffsetV);
-    glUniform1i(7, state.chromeMode ? 1 : 0);
-    glUniform3fv(9, 1, bodyLight);
-    glUniform1f(10, alpha);
-    glUniform1i(11, state.useTexture ? 1 : 0);
-    glUniform3fv(12, 1, state.glowColor);
-    glUniform1i(15, state.hasChromeOverlay ? 1 : 0);
+    glUniformMatrix4fv(SKIN_U(0), 1, GL_FALSE, mvp);   // mat4 occupies locations 0-3
+    glUniform3fv(SKIN_U(4), 1, lightDir);
+    glUniform1i(SKIN_U(5), state.useVertexLight ? 1 : 0);
+    glUniform2f(SKIN_U(6), state.texOffsetU, state.texOffsetV);
+    glUniform1i(SKIN_U(7), state.chromeMode ? 1 : 0);
+    glUniform3fv(SKIN_U(9), 1, bodyLight);
+    glUniform1f(SKIN_U(10), alpha);
+    glUniform1i(SKIN_U(11), state.useTexture ? 1 : 0);
+    glUniform3fv(SKIN_U(12), 1, state.glowColor);
+    glUniform1i(SKIN_U(15), state.hasChromeOverlay ? 1 : 0);
     if (state.hasChromeOverlay) {
-        glUniform3fv(14, 1, state.chromeBodyLight);
+        glUniform3fv(SKIN_U(14), 1, state.chromeBodyLight);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, state.chromeTextureId);
-        glUniform1i(13, 1);
+        glUniform1i(SKIN_U(13), 1);
     }
-    glUniform1i(18, state.hasOverlay2 ? 1 : 0);
+    glUniform1i(SKIN_U(18), state.hasOverlay2 ? 1 : 0);
     if (state.hasOverlay2) {
-        glUniform3fv(17, 1, state.overlay2BodyLight);
+        glUniform3fv(SKIN_U(17), 1, state.overlay2BodyLight);
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, state.overlay2TextureId);
-        glUniform1i(16, 2);
+        glUniform1i(SKIN_U(16), 2);
     }
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureId);
-    glUniform1i(8, 0);
+    glUniform1i(SKIN_U(8), 0);
 
     const bool firstUpload = (*vboInOut == 0);
     if (firstUpload) {
@@ -3351,36 +3497,36 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     const float texOffset[2] = { state.texOffsetU, state.texOffsetV };
 
     if (all || SkinFloatsDiffer(u.mvp, mvp, 16)) {
-        glUniformMatrix4fv(0, 1, GL_FALSE, mvp);   // mat4 occupies locations 0-3
+        glUniformMatrix4fv(SKIN_U(0), 1, GL_FALSE, mvp);   // mat4 occupies locations 0-3
         memcpy(u.mvp, mvp, sizeof(u.mvp));
     }
     if (all || SkinFloatsDiffer(u.lightDir, lightDir, 3)) {
-        glUniform3fv(4, 1, lightDir);
+        glUniform3fv(SKIN_U(4), 1, lightDir);
         memcpy(u.lightDir, lightDir, sizeof(u.lightDir));
     }
-    if (all || u.vertexLight != vertexLight) { glUniform1i(5, vertexLight); u.vertexLight = vertexLight; }
+    if (all || u.vertexLight != vertexLight) { glUniform1i(SKIN_U(5), vertexLight); u.vertexLight = vertexLight; }
     if (all || SkinFloatsDiffer(u.texOffset, texOffset, 2)) {
-        glUniform2f(6, texOffset[0], texOffset[1]);
+        glUniform2f(SKIN_U(6), texOffset[0], texOffset[1]);
         memcpy(u.texOffset, texOffset, sizeof(u.texOffset));
     }
-    if (all || u.chromeMode != chromeMode) { glUniform1i(7, chromeMode); u.chromeMode = chromeMode; }
+    if (all || u.chromeMode != chromeMode) { glUniform1i(SKIN_U(7), chromeMode); u.chromeMode = chromeMode; }
     if (all || SkinFloatsDiffer(u.bodyLight, bodyLight, 3)) {
-        glUniform3fv(9, 1, bodyLight);
+        glUniform3fv(SKIN_U(9), 1, bodyLight);
         memcpy(u.bodyLight, bodyLight, sizeof(u.bodyLight));
     }
-    if (all || u.alpha != alpha) { glUniform1f(10, alpha); u.alpha = alpha; }
-    if (all || u.useTexture != useTexture) { glUniform1i(11, useTexture); u.useTexture = useTexture; }
+    if (all || u.alpha != alpha) { glUniform1f(SKIN_U(10), alpha); u.alpha = alpha; }
+    if (all || u.useTexture != useTexture) { glUniform1i(SKIN_U(11), useTexture); u.useTexture = useTexture; }
     if (all || SkinFloatsDiffer(u.glow, state.glowColor, 3)) {
-        glUniform3fv(12, 1, state.glowColor);
+        glUniform3fv(SKIN_U(12), 1, state.glowColor);
         memcpy(u.glow, state.glowColor, sizeof(u.glow));
     }
-    if (all || u.hasChrome != hasChrome) { glUniform1i(15, hasChrome); u.hasChrome = hasChrome; }
-    if (all || u.hasOverlay2 != hasOverlay2) { glUniform1i(18, hasOverlay2); u.hasOverlay2 = hasOverlay2; }
+    if (all || u.hasChrome != hasChrome) { glUniform1i(SKIN_U(15), hasChrome); u.hasChrome = hasChrome; }
+    if (all || u.hasOverlay2 != hasOverlay2) { glUniform1i(SKIN_U(18), hasOverlay2); u.hasOverlay2 = hasOverlay2; }
     // The overlay colours only matter while their overlay is on; an unused
     // one is not refreshed, so compare against a stale value only then.
     if (state.hasChromeOverlay) {
         if (all || SkinFloatsDiffer(u.chromeLight, state.chromeBodyLight, 3)) {
-            glUniform3fv(14, 1, state.chromeBodyLight);
+            glUniform3fv(SKIN_U(14), 1, state.chromeBodyLight);
             memcpy(u.chromeLight, state.chromeBodyLight, sizeof(u.chromeLight));
         }
         glActiveTexture(GL_TEXTURE1);
@@ -3388,7 +3534,7 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     }
     if (state.hasOverlay2) {
         if (all || SkinFloatsDiffer(u.overlay2Light, state.overlay2BodyLight, 3)) {
-            glUniform3fv(17, 1, state.overlay2BodyLight);
+            glUniform3fv(SKIN_U(17), 1, state.overlay2BodyLight);
             memcpy(u.overlay2Light, state.overlay2BodyLight, sizeof(u.overlay2Light));
         }
         glActiveTexture(GL_TEXTURE2);
@@ -3544,6 +3690,57 @@ void GL_DrawSkinnedMesh(const void* vertices, int vertexCount,
     ++s_drawCallCount; ++s_drawSite[6];
     s_totalVertices += vertexCount;
 }
+
+#if defined(MU_IOS)
+// See gl_compat.h. Frame size and offset are in framebuffer pixels, the offset
+// from the frame's left/bottom edge (GL convention).
+static int s_frameWidth = 0;
+static int s_frameHeight = 0;
+static int s_frameOffsetX = 0;
+static int s_frameOffsetY = 0;
+
+void GL_SetFrameLayout(int frameWidth, int frameHeight, int offsetX, int offsetY) {
+    s_frameWidth = frameWidth;
+    s_frameHeight = frameHeight;
+    s_frameOffsetX = offsetX;
+    s_frameOffsetY = offsetY;
+}
+
+void GL_GetFrameExtension(float* widthRatio, float* heightRatio) {
+    extern unsigned int WindowWidth;
+    extern unsigned int WindowHeight;
+    *widthRatio = (s_frameWidth > 0 && WindowWidth > 0) ? static_cast<float>(s_frameWidth) / WindowWidth : 1.0f;
+    *heightRatio = (s_frameHeight > 0 && WindowHeight > 0) ? static_cast<float>(s_frameHeight) / WindowHeight : 1.0f;
+}
+
+void GL_CompatViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
+    glViewport(x + s_frameOffsetX, y + s_frameOffsetY, width, height);
+}
+
+void GL_CompatScissor(GLint x, GLint y, GLsizei width, GLsizei height) {
+    glScissor(x + s_frameOffsetX, y + s_frameOffsetY, width, height);
+}
+
+// Called with the projection matrix current and still identity, for a viewport
+// the engine has just set in its own (safe-area) space. Makes the GL viewport
+// the whole frame and pre-multiplies a clip-space scale/offset, so that region
+// of the frame renders exactly as before and the rest shows more of the world.
+void GL_ExtendProjectionToFrame(int x, int yFromBottom, int width, int height) {
+    if (s_frameWidth <= 0 || s_frameHeight <= 0 || width <= 0 || height <= 0) {
+        return;
+    }
+    const float vx = static_cast<float>(x + s_frameOffsetX);
+    const float vy = static_cast<float>(yFromBottom + s_frameOffsetY);
+    if (vx == 0.0f && vy == 0.0f && width == s_frameWidth && height == s_frameHeight) {
+        return;
+    }
+    const float fw = static_cast<float>(s_frameWidth);
+    const float fh = static_cast<float>(s_frameHeight);
+    glViewport(0, 0, s_frameWidth, s_frameHeight);
+    GL_Translatef((2.0f * vx + width) / fw - 1.0f, (2.0f * vy + height) / fh - 1.0f, 0.0f);
+    GL_Scalef(width / fw, height / fh, 1.0f);
+}
+#endif
 
 #endif // __ANDROID__
 
