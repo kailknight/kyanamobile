@@ -1,0 +1,3352 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/android/app/build/intermediates/cxx/Debug/4585e4e4/obj/x86/libmain.so"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"target_link_options",
+			"target_link_libraries",
+			"target_compile_options",
+			"add_compile_definitions",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 157,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 203,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 207,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 187,
+				"parent" : 0
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 34,
+				"parent" : 0
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 161,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -mstackrealign -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -D__ANDROID__ -DANDROID -DNDEBUG -Wno-error -Wno-unknown-pragmas -fexceptions -frtti -DMU_ANDROID_DISABLE_LOG -fno-limit-debug-info  -fPIC"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-unknown-pragmas"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-error=deprecated-declarations"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-error=format-security"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-format-security"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-multichar"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-narrowing"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fno-strict-aliasing"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fvisibility=hidden"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fvisibility-inlines-hidden"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-O2"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-g1"
+				},
+				{
+					"fragment" : "-std=c++20"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 5,
+					"define" : "ANDROID"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "NDEBUG"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "SOKOL_GLES3"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "USE_OPENGL_ES"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "_NDEBUG"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "_NO_EDITOR"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "__ANDROID__"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "__NDK_FPABI__="
+				},
+				{
+					"define" : "main_EXPORTS"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/android/app/src/main/cpp/SDL2/include"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/android/app/src/main/cpp/compat_include"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ExternalObject"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GameConfig"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GameShop"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/dependencies/include"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/OpenGL3"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Platform"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Scenes"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Time"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Translation"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "D:/firstproject/sokol-master"
+				},
+				{
+					"backtrace" : 6,
+					"path" : "D:/firstproject/sokol-master/util"
+				}
+			],
+			"language" : "CXX",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					1
+				],
+				"standard" : "20"
+			},
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31,
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38,
+				39,
+				40,
+				41,
+				42,
+				43,
+				44,
+				45,
+				46,
+				47,
+				48,
+				49,
+				50,
+				51,
+				52,
+				53,
+				54,
+				55,
+				56,
+				57,
+				58,
+				59,
+				60,
+				61,
+				62,
+				63,
+				64,
+				65,
+				66,
+				67,
+				68,
+				69,
+				70,
+				71,
+				72,
+				73,
+				74,
+				75,
+				76,
+				77,
+				78,
+				79,
+				80,
+				81,
+				82,
+				83,
+				84,
+				85,
+				86,
+				87,
+				88,
+				89,
+				90,
+				91,
+				92,
+				93,
+				94,
+				95,
+				96,
+				97,
+				98,
+				99,
+				100,
+				101,
+				102,
+				103,
+				104,
+				105,
+				106,
+				107,
+				108,
+				109,
+				110,
+				111,
+				112,
+				113,
+				114,
+				115,
+				116,
+				117,
+				118,
+				119,
+				120,
+				121,
+				122,
+				123,
+				124,
+				125,
+				126,
+				127,
+				128,
+				129,
+				130,
+				131,
+				132,
+				133,
+				134,
+				135,
+				136,
+				137,
+				138,
+				139,
+				140,
+				141,
+				142,
+				143,
+				144,
+				145,
+				146,
+				147,
+				148,
+				149,
+				150,
+				151,
+				152,
+				153,
+				154,
+				155,
+				156,
+				157,
+				158,
+				159,
+				160,
+				161,
+				162,
+				163,
+				164,
+				165,
+				166,
+				167,
+				168,
+				169,
+				170,
+				171,
+				172,
+				173,
+				174,
+				175,
+				176,
+				177,
+				178,
+				179,
+				180,
+				181,
+				182,
+				183,
+				184,
+				185,
+				186,
+				187,
+				188,
+				189,
+				190,
+				191,
+				192,
+				193,
+				194,
+				195,
+				196,
+				197,
+				198,
+				199,
+				200,
+				201,
+				202,
+				203,
+				204,
+				205,
+				206,
+				207,
+				208,
+				209,
+				210,
+				211,
+				212,
+				213,
+				214,
+				215,
+				216,
+				217,
+				218,
+				219,
+				220,
+				221,
+				222,
+				223,
+				224,
+				225,
+				226,
+				227,
+				228,
+				229,
+				230,
+				231,
+				232,
+				233,
+				234,
+				235,
+				236,
+				237,
+				238,
+				239,
+				240,
+				241,
+				242,
+				243,
+				244,
+				245,
+				246,
+				247,
+				248,
+				249,
+				250,
+				251,
+				252,
+				253,
+				254,
+				255,
+				256,
+				257,
+				258,
+				259,
+				260,
+				261,
+				262,
+				263,
+				264,
+				265,
+				266,
+				267,
+				268,
+				269,
+				270,
+				271,
+				272,
+				273,
+				274,
+				275,
+				276,
+				277,
+				278,
+				279,
+				280,
+				281,
+				282,
+				283,
+				284,
+				285,
+				286,
+				287,
+				288,
+				289,
+				290,
+				291,
+				292,
+				293,
+				294,
+				295,
+				296,
+				297,
+				298,
+				299,
+				300,
+				301,
+				302,
+				303,
+				304,
+				305,
+				306,
+				307,
+				308,
+				309,
+				310,
+				311,
+				312,
+				313,
+				314,
+				315,
+				317,
+				318,
+				319,
+				320,
+				321,
+				322,
+				323,
+				324,
+				325,
+				326,
+				327,
+				328,
+				329,
+				330,
+				331,
+				332,
+				333,
+				334,
+				335,
+				336,
+				337,
+				338,
+				339,
+				340,
+				341,
+				342,
+				343,
+				344,
+				345,
+				346,
+				347,
+				348,
+				349,
+				350,
+				351,
+				352,
+				353,
+				354,
+				355,
+				356,
+				357,
+				358,
+				359,
+				360,
+				361,
+				362,
+				363,
+				364,
+				365,
+				366,
+				367,
+				368,
+				369,
+				370,
+				371,
+				372,
+				373,
+				374
+			],
+			"sysroot" : 
+			{
+				"path" : "C:/Users/KYANa/AppData/Local/Android/Sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+			}
+		}
+	],
+	"id" : "main::@6890427a1f51a3e7e1df",
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "-static-libstdc++ -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--fatal-warnings -Wl,--gc-sections -Wl,--no-undefined -Qunused-arguments",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 2,
+				"fragment" : "-Wl,-z,max-page-size=16384",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "\"E:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\src\\main\\jniLibs\\x86\\libSDL2.so\"",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "\"E:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\src\\main\\jniLibs\\x86\\libSDL2_image.so\"",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "\"E:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\src\\main\\jniLibs\\x86\\libSDL2_mixer.so\"",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "\"E:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\src\\main\\jniLibs\\x86\\libSDL2_ttf.so\"",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "\"E:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\src\\main\\jniLibs\\x86\\libSDL_net.so\"",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "\"E:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\src\\main\\jniLibs\\x86\\libmpg123.so\"",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "\"E:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\src\\main\\jniLibs\\x86\\libbotan.so\"",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "-landroid",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "-llog",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "-lGLESv3",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "-lEGL",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "-lz",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "-lc++_static",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-latomic -lm",
+				"role" : "libraries"
+			}
+		],
+		"language" : "CXX",
+		"sysroot" : 
+		{
+			"path" : "C:/Users/KYANa/AppData/Local/Android/Sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+		}
+	},
+	"name" : "main",
+	"nameOnDisk" : "libmain.so",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31,
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38,
+				39,
+				40,
+				41,
+				42,
+				43,
+				44,
+				45,
+				46,
+				47,
+				48,
+				49,
+				50,
+				51,
+				52,
+				53,
+				54,
+				55,
+				56,
+				57,
+				58,
+				59,
+				60,
+				61,
+				62,
+				63,
+				64,
+				65,
+				66,
+				67,
+				68,
+				69,
+				70,
+				71,
+				72,
+				73,
+				74,
+				75,
+				76,
+				77,
+				78,
+				79,
+				80,
+				81,
+				82,
+				83,
+				84,
+				85,
+				86,
+				87,
+				88,
+				89,
+				90,
+				91,
+				92,
+				93,
+				94,
+				95,
+				96,
+				97,
+				98,
+				99,
+				100,
+				101,
+				102,
+				103,
+				104,
+				105,
+				106,
+				107,
+				108,
+				109,
+				110,
+				111,
+				112,
+				113,
+				114,
+				115,
+				116,
+				117,
+				118,
+				119,
+				120,
+				121,
+				122,
+				123,
+				124,
+				125,
+				126,
+				127,
+				128,
+				129,
+				130,
+				131,
+				132,
+				133,
+				134,
+				135,
+				136,
+				137,
+				138,
+				139,
+				140,
+				141,
+				142,
+				143,
+				144,
+				145,
+				146,
+				147,
+				148,
+				149,
+				150,
+				151,
+				152,
+				153,
+				154,
+				155,
+				156,
+				157,
+				158,
+				159,
+				160,
+				161,
+				162,
+				163,
+				164,
+				165,
+				166,
+				167,
+				168,
+				169,
+				170,
+				171,
+				172,
+				173,
+				174,
+				175,
+				176,
+				177,
+				178,
+				179,
+				180,
+				181,
+				182,
+				183,
+				184,
+				185,
+				186,
+				187,
+				188,
+				189,
+				190,
+				191,
+				192,
+				193,
+				194,
+				195,
+				196,
+				197,
+				198,
+				199,
+				200,
+				201,
+				202,
+				203,
+				204,
+				205,
+				206,
+				207,
+				208,
+				209,
+				210,
+				211,
+				212,
+				213,
+				214,
+				215,
+				216,
+				217,
+				218,
+				219,
+				220,
+				221,
+				222,
+				223,
+				224,
+				225,
+				226,
+				227,
+				228,
+				229,
+				230,
+				231,
+				232,
+				233,
+				234,
+				235,
+				236,
+				237,
+				238,
+				239,
+				240,
+				241,
+				242,
+				243,
+				244,
+				245,
+				246,
+				247,
+				248,
+				249,
+				250,
+				251,
+				252,
+				253,
+				254,
+				255,
+				256,
+				257,
+				258,
+				259,
+				260,
+				261,
+				262,
+				263,
+				264,
+				265,
+				266,
+				267,
+				268,
+				269,
+				270,
+				271,
+				272,
+				273,
+				274,
+				275,
+				276,
+				277,
+				278,
+				279,
+				280,
+				281,
+				282,
+				283,
+				284,
+				285,
+				286,
+				287,
+				288,
+				289,
+				290,
+				291,
+				292,
+				293,
+				294,
+				295,
+				296,
+				297,
+				298,
+				299,
+				300,
+				301,
+				302,
+				303,
+				304,
+				305,
+				306,
+				307,
+				308,
+				309,
+				310,
+				311,
+				312,
+				313,
+				314,
+				315,
+				317,
+				318,
+				319,
+				320,
+				321,
+				322,
+				323,
+				324,
+				325,
+				326,
+				327,
+				328,
+				329,
+				330,
+				331,
+				332,
+				333,
+				334,
+				335,
+				336,
+				337,
+				338,
+				339,
+				340,
+				341,
+				342,
+				343,
+				344,
+				345,
+				346,
+				347,
+				348,
+				349,
+				350,
+				351,
+				352,
+				353,
+				354,
+				355,
+				356,
+				357,
+				358,
+				359,
+				360,
+				361,
+				362,
+				363,
+				364,
+				365,
+				366,
+				367,
+				368,
+				369,
+				370,
+				371,
+				372,
+				373,
+				374
+			]
+		},
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				316
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/APICB.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/BlackWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/BoneManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/BuffIcon.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Builder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Button.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CBChoTroi.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CBInterface.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CBInterfaceVIPChar.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CBNewUiEx.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CBTMessageBox.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_ActiveInvasions.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_AutoLogin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_AutoNapGame.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_AutoResetInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_BXHTopDmg.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_BossGuild.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_BotTrader.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_CTCMini.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_CongHuong.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_DangKyInGame.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_DanhHieu.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_DoiMK.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_DrawCustomRank.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_GetMixRate.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_HuyDongExc.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_InfoCustomMix.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_JewelBank.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_LockItem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_MUHelper.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_Mapping.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_NewJewelBank.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_NewQuest.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_OffMuHelper.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_OffTrade.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_StatsAdvance.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CB_ViewCharItem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CComGem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CDirection.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CGFxFontConfigParser.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CGFxInfoPopup.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CGFxMainUi.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CGFxProcess.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CGFxSample.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CKANTURUDirection.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CMVP1stDirection.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSChaosCastle.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSEventMatch.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSItemOption.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSMapServer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSParts.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSPetSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSQuest.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CSWaterTerrain.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CUIController.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CameraMove.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ChangeRingManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CharInfoBalloon.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CharInfoBalloonMng.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CharMakeWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CharSelMainWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CharacterManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CreditInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CreditWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomBow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomBuyVip.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomCloak.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomCommandInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomDmgColor.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomEventTime.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomGloves.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomItem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomJewel.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomMap.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomMessage.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomMonster.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomMonsterGlow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomNpcName.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomPet.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomPetEffect.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomRankUser.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomRanking.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/CustomWing.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/DialogInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/DuelMgr.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/DynamicEffect.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Event.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ExplanationInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/FilterInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/FilterNameInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GIPetManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GM3rdChangeUp.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMAida.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMBattleCastle.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMCryingWolf2nd.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMCrywolf1st.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMDoppelGanger1.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMDoppelGanger2.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMDoppelGanger3.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMDoppelGanger4.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMDuelArena.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMEmpireGuardian1.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMEmpireGuardian2.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMEmpireGuardian3.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMEmpireGuardian4.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMHellas.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMHuntingGround.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMKarutan1.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMNewTown.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMSantaTown.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMSwampOfQuiet.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GMUnitedMarketPlace.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GM_Kanturu_2nd.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GM_Kanturu_3rd.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GM_PK_Field.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GM_Raklion.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GM_kanturu_1st.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GOBoid.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GambleSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GameCensorship.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GameConfig/GameConfig.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GaugeBar.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GlobalBitmap.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GlobalPortalSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GuildCache.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/GuildManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Input.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ItemAddOptioninfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ItemInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ItemManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ItemTRSData.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ItemTooltip.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/KeyGenerater.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/LauncherHelper.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/LoadData.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/LoadingScene.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Local.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/LoginMainWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/LoginWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MainLoad.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MapManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MatchEvent.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Math/ZzzMathLib.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MemScript.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MenuCustom.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MixMgr.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MocDonate.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MonkSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MonsterEffect.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MoveCommandData.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MovereqInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MovieScene.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MsgWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/MultiLanguage.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewBloodCastleSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewChaosCastleSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewGatemanWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUI3DRenderMng.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIBCustomMenu.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIBMacro.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIBattleSoccerScore.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIBloodCastleEnter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIBloodCastleTime.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIBuffWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIButton.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICastleWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICatapultWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIChaosCastleTime.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICharacterInfoWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIChatInputBox.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIChatLogWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICommandWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICommon.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICommonMessageBox.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICryWolf.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICursedTempleEnter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICursedTempleResult.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICursedTempleSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUICustomMessageBox.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIDoppelGangerFrame.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIDoppelGangerWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIDuelWatchMainFrameWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIDuelWatchUserListWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIDuelWatchWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIDuelWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIEmpireGuardianNPC.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIEmpireGuardianTimer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIEnterDevilSquare.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIExchangeLuckyCoin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIFriendWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGateSwitchWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGatemanWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGensRanking.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGoldBowmanLena.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGoldBowmanWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGroup.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGuardWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGuildInfoWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIGuildMakeWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIHelpWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIHeroPositionInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIHotKey.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIInventoryCtrl.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIInventoryExtension.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIItemEnduranceInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIItemExplanationWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIItemMng.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIKanturuEvent.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUILuckyItemWnd.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMainFrameWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMasterLevel.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMasterSkillTree.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMessageBox.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMiniMap.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMixInventory.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMoveCommandWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMuHelper.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMyInventory.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMyQuestInfoWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIMyShopInventory.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUINPCDialogue.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUINPCQuest.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUINPCShop.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUINameWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIOptionWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIPartyInfoWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIPartyListWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIPetInfoWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIPurchaseShopInventory.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIQuestProgress.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIQuestProgressByEtc.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIQuickCommandWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIRegistrationLuckyCoin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIRenderNumber.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIScrollBar.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISeigeWarfare.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISetItemExplanation.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISiegeWarBase.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISiegeWarCommander.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISiegeWarObserver.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISiegeWarSoldier.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISlideWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIStorageInventory.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIStorageInventoryExt.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUISystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUITextBox.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUITrade.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIUnitedMarketPlaceWindow.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/NewUIWindowMenu.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Observer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/OpenGL3/Shader/Shader.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/OptionWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Other.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PList.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PacketManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PartyManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PersonalShopTitleImp.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PetProtocol.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PhysicsManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Platform/AndroidGDI.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Platform/MobilePlatform.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Platform/MobileTime.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Platform/RenderBackend.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Platform/SokolRuntime.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Platform/gl_compat.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PortalMgr.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/PrintPlayer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Protect.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Protocol.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ProtocolSend.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/QuestInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/QuestMng.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Ranking.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Reconnect.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SMD.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SMD2BMD.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ScenePerfTelemetry.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ServerGroup.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ServerInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ServerListManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ServerMsgWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ServerSelWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ShadowVolume.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SideHair.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SkillEffectMgr.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SkillInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SkillManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SlideInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Slider.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SocketSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Sprite.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/StaticEffect.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/StdAfx.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SummonSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/SysMenuWin.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/TestEventMap.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/TextureScript.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Time/CTimCheck.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Time/Timer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Translation/i18n.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIControls.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIDefaultBase.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIGateKeeper.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIGuardsMan.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIGuildInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIGuildMaster.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIJewelHarmony.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIManager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIMapName.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIMng.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIPopup.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UISenatus.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UIWindows.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/UsefulDef.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Util.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Utilities/CCRC32.Cpp",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Utilities/Log/DebugAngel.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Utilities/Log/muConsoleDebug.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Utilities/MD5.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Utilities/Memory/MemoryLock.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/VongQuay.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/WSclient.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/Win.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/WinEx.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/WindowClass.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzAI.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzBMD.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzCharacter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffect.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectBlurSpark.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectFireLeave.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectJoint.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectMagicSkill.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectNoUse.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectParticle.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectPoint.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzEffectPointer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzInfomation.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzInterface.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzInventory.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzLodTerrain.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzObject.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzOpenData.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzOpenglUtil.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzScene.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/ZzzTexture.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/_GlobalFunctions.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/android/AndroidNetwork.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/android_link_stubs.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/android_main.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/android_turbojpeg_stubs.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/npcBreeder.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/npcCatapult.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/npcGateSwitch.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_BasePet.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_Buff.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_BuffScriptLoader.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_BuffStateSystem.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_BuffStateValueControl.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_BuffTimeControl.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_CharacterInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_CursedTemple.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_MapProcess.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_ObjectInfo.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_PetActionCollecter.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_PetActionCollecter_Add.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_PetActionDemon.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_PetActionRound.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_PetActionStand.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_PetActionUnicorn.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/w_PetProcess.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/zzzMixInvetory.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/zzzeffectsprite.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "E:/MU/MU Mobile/Source_Server-Mobi/5.Main/source/zzzpath.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "SHARED_LIBRARY"
+}

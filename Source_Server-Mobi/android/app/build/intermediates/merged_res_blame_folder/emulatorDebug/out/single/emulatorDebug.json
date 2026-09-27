@@ -1,0 +1,146 @@
+[
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxhdpi_map.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxhdpi/map.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xhdpi_minimap.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xhdpi/minimap.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_setting.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/setting.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xhdpi_character.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xhdpi/character.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_character.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/character.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-mdpi_map.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-mdpi/map.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxxhdpi_minimap.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxxhdpi/minimap.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxxhdpi_character.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxxhdpi/character.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_balo.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/balo.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxhdpi_character.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxhdpi/character.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-mdpi_setting.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-mdpi/setting.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_banner_preload_1.jpg.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/banner_preload_1.jpg"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxxhdpi_balo.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxxhdpi/balo.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xhdpi_map.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xhdpi/map.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xhdpi_setting.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xhdpi/setting.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-mdpi_minimap.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-mdpi/minimap.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxhdpi_balo.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxhdpi/balo.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_minimap.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/minimap.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xhdpi_balo.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xhdpi/balo.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxxhdpi_setting.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxxhdpi/setting.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-mdpi_balo.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-mdpi/balo.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-mdpi_banner_preload_1.jpg.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-mdpi/banner_preload_1.jpg"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxxhdpi_map.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxxhdpi/map.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_hit.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/hit.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxhdpi_minimap.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxhdpi/minimap.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_banner_preload_2.jpg.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/banner_preload_2.jpg"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-mdpi_character.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-mdpi/character.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_map.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/map.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-xxhdpi_setting.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-xxhdpi/setting.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.muonline.client.app-merged_res-20:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.muonline.client.app-main-24:/mipmap-anydpi-v26/ic_launcher.xml"
+    }
+]

@@ -1,0 +1,7 @@
+#Sat Jun 13 18:46:14 PST 2026
+base.0=E\:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\build\\intermediates\\dex\\emulatorDebugAndroidTest\\mergeProjectDexEmulatorDebugAndroidTest\\0\\classes.dex
+base.1=E\:\\MU\\MU Mobile\\Source_Server-Mobi\\android\\app\\build\\intermediates\\dex\\emulatorDebugAndroidTest\\mergeProjectDexEmulatorDebugAndroidTest\\9\\classes.dex
+path.0=0/classes.dex
+path.1=9/classes.dex
+renamed.0=classes.dex
+renamed.1=classes2.dex
