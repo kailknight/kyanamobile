@@ -56,7 +56,7 @@ CAttack::~CAttack() // OK
 
 }
 
-bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BYTE flag, __int64 damage, int count, bool combo) // OK
+bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BYTE flag, __int64 damage, int count, bool combo, bool bReflectHit) // OK
 {
 	#pragma region ATTACK_CHECK
 
@@ -136,7 +136,13 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 		// so it holds for the PC client, the mobile client and anything else.
 		// HelperDelayTime is non-zero exactly while the helper is on - see
 		// CHelper::CGHelperStartRecv / DisableHelper.
-		if(lpObj->HelperDelayTime != 0)
+		//
+		// bReflectHit exempts this: a reflected blow re-enters Attack() with
+		// lpObj set to the original victim (see ObjectStateProc's case 10 in
+		// ObjectManager.cpp), so without the exemption a defender's own Helper
+		// being on silently ate their reflect damage - they never initiated
+		// anything, they just got hit.
+		if(lpObj->HelperDelayTime != 0 && !bReflectHit)
 		{
 			if((GetTickCount()-lpObj->HelperPvpNoticeTime) >= 5000)
 			{

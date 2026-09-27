@@ -521,9 +521,13 @@ void CObjectManager::ObjectStateProc(LPOBJ lpObj,int MessageCode,int aIndex,int 
 			}
 			break;
 		case 10:
+			// Reflect-damage delivery only (Attack.cpp's GetReflectDamage callers,
+			// and DarkSpirit.cpp) - lpObj here is the original victim reflecting
+			// the blow back, not someone initiating an attack. bReflectHit=true
+			// so a reflecting player's own MU Helper being on doesn't eat it.
 			if(lpObj->Live != 0 && SubCode > 0)
 			{
-				gAttack.Attack(lpObj,&gObj[aIndex],0,0,0,SubCode,0,0);
+				gAttack.Attack(lpObj,&gObj[aIndex],0,0,0,SubCode,0,0,true);
 			}
 			break;
 		case 16:

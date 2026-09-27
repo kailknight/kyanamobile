@@ -27,7 +27,7 @@ class CAttack
 public:
 	CAttack();
 	virtual ~CAttack();
-	bool Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BYTE flag, __int64 damage, int count, bool combo);
+	bool Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BYTE flag, __int64 damage, int count, bool combo, bool bReflectHit = false);
 	bool AttackElemental(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,bool send,BYTE flag,int damage,int count,bool combo);
 	bool DecreaseArrow(LPOBJ lpObj);
 	void WingSprite(LPOBJ lpObj, LPOBJ lpTarget, __int64* damage);
