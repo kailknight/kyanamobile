@@ -437,6 +437,10 @@ public:
 	int m_MariaDecDamageConstA;
 	int m_ComboDamageConstA;
 	int m_ComboDamageConstB;
+	// [attacker][target class] (DW, DK, FE, MG, DL, SU, RF): a percent of a combo
+	// hit against a player, ComboRate<Attacker>vs<Target> in Character.ini.
+	// 100 = unchanged.
+	int m_ComboDamageRateVs[7][7];
 	int m_EarthquakeDamageConstA;
 	int m_EarthquakeDamageConstB;
 	int m_EarthquakeDamageConstC;

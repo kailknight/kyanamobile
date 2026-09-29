@@ -2049,6 +2049,21 @@ void CServerInfo::ReadCharacterInfo(char* section,char* path) // OK
 
 	this->m_ComboDamageConstB = GetPrivateProfileInt(section,"ComboDamageConstB",0,path);
 
+	{
+		static const char* comboClassName[7] = { "DW", "DK", "FE", "MG", "DL", "SU", "RF" };
+
+		for (int n = 0; n < 7; n++)
+		{
+			for (int t = 0; t < 7; t++)
+			{
+				char key[64];
+
+				wsprintf(key, "ComboRate%svs%s", comboClassName[n], comboClassName[t]);
+				this->m_ComboDamageRateVs[n][t] = GetPrivateProfileInt(section, key, 100, path);
+			}
+		}
+	}
+
 	this->m_EarthquakeDamageConstA = GetPrivateProfileInt(section,"EarthquakeDamageConstA",0,path);
 
 	this->m_EarthquakeDamageConstB = GetPrivateProfileInt(section,"EarthquakeDamageConstB",0,path);

@@ -754,6 +754,13 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 			#if(GAMESERVER_UPDATE>=602)
 			damage += (damage*gMasterSkillTree.GetMasterSkillValue(lpObj,MASTER_SKILL_ADD_COMBO_DAMAGE))/100;
 			#endif
+			// ComboRate<Attacker>vs<Target> (Character.ini): a percent of the
+			// finished combo hit against a player of that class. Monsters are not
+			// scaled.
+			if(lpTarget->Type == OBJECT_USER && lpObj->Class >= 0 && lpObj->Class < 7 && lpTarget->Class >= 0 && lpTarget->Class < 7)
+			{
+				damage = (int)(((__int64)damage*gServerInfo.m_ComboDamageRateVs[lpObj->Class][lpTarget->Class])/100);
+			}
 			skill = SKILL_COMBO;
 		}
 	}
