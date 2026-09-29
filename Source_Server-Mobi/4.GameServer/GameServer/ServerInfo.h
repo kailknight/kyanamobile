@@ -1348,6 +1348,16 @@ public:
 	// 0 normal, 1 PM, 2 post, 3 online, 4 guild, 5 ally, 6 party, 7 gens.
 	// Sent to the client with the account level (GCAccountLevelSend).
 	DWORD m_ChatColor[8][2];
+	// ResetKeepStats (CustomConfig.ini): 1 = a reset leaves STR/AGI/VIT/ENE/CMD
+	// and unspent points exactly as they were, and gives no stat points, whatever
+	// CommandResetType and the reset tables say. 0 = the old behaviour.
+	int m_ResetKeepStats;
+	// ResetNoLevelUpPoint (CustomConfig.ini): 1 = a character with at least one
+	// reset gets no stat points from levelling. Characters at Reset 0 still do.
+	int m_ResetNoLevelUpPoint;
+	// ResetRewardWCoinC / WCoinP / GoblinPoint (CustomConfig.ini): credited on
+	// every reset. 0 = nothing.
+	int m_ResetRewardCoin[3];
 	// PotionDelayMS (CustomConfig.ini): the least time, in milliseconds,
 	// between two potions from the same character - hotkey, auto potion and
 	// MU Helper alike, since they all arrive as the same item-use request.

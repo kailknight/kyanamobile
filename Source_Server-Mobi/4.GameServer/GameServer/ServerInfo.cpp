@@ -5043,6 +5043,13 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	this->m_AutoPotionConfigure[2] = GetPrivateProfileInt(section, "AutoPotion_AL2", 1, path);
 	this->m_AutoPotionConfigure[3] = GetPrivateProfileInt(section, "AutoPotion_AL3", 1, path);
 
+	// Off by default so an ini without the keys resets exactly as before.
+	this->m_ResetKeepStats = GetPrivateProfileInt(section, "ResetKeepStats", 0, path);
+	this->m_ResetNoLevelUpPoint = GetPrivateProfileInt(section, "ResetNoLevelUpPoint", 0, path);
+	this->m_ResetRewardCoin[0] =GetPrivateProfileInt(section, "ResetRewardWCoinC", 0, path);
+	this->m_ResetRewardCoin[1] = GetPrivateProfileInt(section, "ResetRewardWCoinP", 0, path);
+	this->m_ResetRewardCoin[2] = GetPrivateProfileInt(section, "ResetRewardGoblinPoint", 0, path);
+
 	// ChatColor<Category><Text|Bg> = hex RRGGBBAA, with or without 0x. Alpha 00
 	// draws nothing, so a transparent background is 00000000.
 	static const char* chatColorName[8] = { "Normal", "PM", "Post", "Online", "Guild", "Ally", "Party", "Gens" };

@@ -1702,9 +1702,14 @@ bool CObjectManager::CharacterLevelUp(LPOBJ lpObj,DWORD AddExperience,int MaxLev
 		{
 			lpObj->Level++;
 
-			lpObj->LevelUpPoint += gServerInfo.m_LevelUpPoint[lpObj->Class];
+			// ResetNoLevelUpPoint: a character that has reset keeps its stats, so
+			// levelling it again must not hand out points a second time.
+			if(gServerInfo.m_ResetNoLevelUpPoint == 0 || lpObj->Reset <= 0)
+			{
+				lpObj->LevelUpPoint += gServerInfo.m_LevelUpPoint[lpObj->Class];
 
-			lpObj->LevelUpPoint += ((lpObj->Level>220)?((gQuest.CheckQuestListState(lpObj,2,QUEST_FINISH)==0)?0:gServerInfo.m_PlusStatPoint):0);
+				lpObj->LevelUpPoint += ((lpObj->Level>220)?((gQuest.CheckQuestListState(lpObj,2,QUEST_FINISH)==0)?0:gServerInfo.m_PlusStatPoint):0);
+			}
 
 			AddExperience -= (((--MaxLevelUp)==0)?AddExperience:(lpObj->NextExperience-lpObj->Experience));
 

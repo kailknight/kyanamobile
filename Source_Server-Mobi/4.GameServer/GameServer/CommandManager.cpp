@@ -1962,12 +1962,15 @@ void CCommandManager::CommandResetAutoProc(LPOBJ lpObj) // OK
 		}
 	}
 #endif
-	if(((lpObj->CommandManagerTransaction[0]==0)?(lpObj->CommandManagerTransaction[0]++):lpObj->CommandManagerTransaction[0]) != 0)
+	// Checked before the transaction is taken: refusing after it left the lock
+	// set with no DataServer reply to clear it, so the player could not reset
+	// even once the setting was turned on, until they logged out.
+	if(gServerInfo.m_CommandResetAutoEnable[lpObj->AccountLevel] == 0)
 	{
 		return;
 	}
 
-	if(gServerInfo.m_CommandResetAutoEnable[lpObj->AccountLevel] == 0)
+	if(((lpObj->CommandManagerTransaction[0]==0)?(lpObj->CommandManagerTransaction[0]++):lpObj->CommandManagerTransaction[0]) != 0)
 	{
 		return;
 	}
@@ -2108,6 +2111,11 @@ void CCommandManager::DGCommandResetRecv(SDHP_COMMAND_RESET_RECV* lpMsg) // OK
 		gMasterSkillTree.GCMasterInfoSend(lpObj);
 	}
 
+	// ResetKeepStats: remember the stats now, put them back after every branch
+	// below has had its say (they rebuild or add to the stats and the points).
+	const int keepStats[5] = { lpObj->Strength, lpObj->Dexterity, lpObj->Vitality, lpObj->Energy, lpObj->Leadership };
+	const int keepLevelUpPoint = lpObj->LevelUpPoint;
+
 	if(gServerInfo.m_CommandResetType == 1)
 	{
 #if(CB_AUTORESETINFO)
@@ -2207,6 +2215,24 @@ void CCommandManager::DGCommandResetRecv(SDHP_COMMAND_RESET_RECV* lpMsg) // OK
 		point = (point*gServerInfo.m_CommandMasterResetPointRate[lpObj->Class])/100;
 
 		lpObj->LevelUpPoint += point;
+	}
+
+	if(gServerInfo.m_ResetKeepStats != 0)
+	{
+		lpObj->Strength = keepStats[0];
+		lpObj->Dexterity = keepStats[1];
+		lpObj->Vitality = keepStats[2];
+		lpObj->Energy = keepStats[3];
+		lpObj->Leadership = keepStats[4];
+		lpObj->LevelUpPoint = keepLevelUpPoint;
+	}
+
+	// ResetReward*: WCoinC, WCoinP and Goblin Points for every reset.
+	if(gServerInfo.m_ResetRewardCoin[0] != 0 || gServerInfo.m_ResetRewardCoin[1] != 0 || gServerInfo.m_ResetRewardCoin[2] != 0)
+	{
+		GDSetCoinSend(lpObj->Index,gServerInfo.m_ResetRewardCoin[0],gServerInfo.m_ResetRewardCoin[1],gServerInfo.m_ResetRewardCoin[2],"ResetReward");
+
+		gNotice.NewNoticeSend(lpObj->Index,0,0,0,0,0,"Reset reward: %d WCoinC, %d WCoinP, %d Goblin Points",gServerInfo.m_ResetRewardCoin[0],gServerInfo.m_ResetRewardCoin[1],gServerInfo.m_ResetRewardCoin[2]);
 	}
 
 	gObjectManager.CharacterCalcAttribute(lpObj->Index);
