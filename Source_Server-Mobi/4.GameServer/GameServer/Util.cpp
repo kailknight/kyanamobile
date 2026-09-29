@@ -318,13 +318,30 @@ void CloseClient(int aIndex) // OK
 	gSocketManager.Disconnect(aIndex);
 }
 
+// The chat-packet path carried the poster in the name field, so message 69 is
+// just "%s" for the text. The 0xF3:0xE4 path has no name field: use the
+// message as the format when it takes both, otherwise put the name in front.
+static void FormatPostLine(char* buff,char* message,char* name,char* text)
+{
+	const char* first = strstr(message,"%s");
+
+	if(first != 0 && strstr(first+2,"%s") != 0)
+	{
+		wsprintf(buff,message,name,text);
+	}
+	else
+	{
+		wsprintf(buff,"%s: %s",name,text);
+	}
+}
+
 void PostMessage1(char* name,char* message,char* text) // OK
 {
-	#if(GAMESERVER_UPDATE>=701)
+	#if(GAMESERVER_UPDATE>=701 || GAMESERVER_EXTRA==1)
 
 	char buff[256] = {0};
 
-	wsprintf(buff,message,name,text);
+	FormatPostLine(buff,message,name,text);
 
 	for(int n=OBJECT_START_USER;n < MAX_OBJECT;n++)
 	{
@@ -367,11 +384,11 @@ void PostMessage1(char* name,char* message,char* text) // OK
 
 void PostMessage2(char* name,char* message,char* text) // OK
 {
-	#if(GAMESERVER_UPDATE>=701)
+	#if(GAMESERVER_UPDATE>=701 || GAMESERVER_EXTRA==1)
 
 	char buff[256] = {0};
 
-	wsprintf(buff,message,name,text);
+	FormatPostLine(buff,message,name,text);
 
 	for(int n=OBJECT_START_USER;n < MAX_OBJECT;n++)
 	{
@@ -408,11 +425,11 @@ void PostMessage2(char* name,char* message,char* text) // OK
 
 void PostMessage3(char* name,char* message,char* text) // OK
 {
-	#if(GAMESERVER_UPDATE>=701)
+	#if(GAMESERVER_UPDATE>=701 || GAMESERVER_EXTRA==1)
 
 	char buff[256] = {0};
 
-	wsprintf(buff,message,name,text);
+	FormatPostLine(buff,message,name,text);
 
 	for(int n=OBJECT_START_USER;n < MAX_OBJECT;n++)
 	{
@@ -449,11 +466,11 @@ void PostMessage3(char* name,char* message,char* text) // OK
 
 void PostMessage4(char* name,char* message,char* text) // OK
 {
-	#if(GAMESERVER_UPDATE>=701)
+	#if(GAMESERVER_UPDATE>=701 || GAMESERVER_EXTRA==1)
 
 	char buff[256] = {0};
 
-	wsprintf(buff,message,name,text);
+	FormatPostLine(buff,message,name,text);
 
 	for(int n=OBJECT_START_USER;n < MAX_OBJECT;n++)
 	{
@@ -531,17 +548,18 @@ void PostMessagePK(char* name,char* message,char* text, char* MapName) // OK
 
 void PostMessageUserON(char* name,char* message) // OK
 {
-	#if(GAMESERVER_UPDATE>=701)
+	#if(GAMESERVER_UPDATE>=701 || GAMESERVER_EXTRA==1)
 
 	char buff[256] = {0};
 
-	wsprintf(buff,message,name);
+	wsprintf(buff,"[UserON] ");
+	wsprintf(buff+strlen(buff),message,name);
 
 	for(int n=OBJECT_START_USER;n < MAX_OBJECT;n++)
 	{
 		if(gObjIsConnectedGP(n) != 0)
 		{
-			GCNewMessageSend(&gObj[n],buff);
+			GCNewMessageSend(&gObj[n],buff,1);
 		}
 	}
 

@@ -1201,6 +1201,7 @@ struct PMSG_NEW_MESSAGE_SEND
 {
 	PSBMSG_HEAD header; // C1:F3:E4
 	char message[128];
+	BYTE kind; // 0 = post, 1 = player online. Trails the text so an older client that reads only the text is unaffected.
 };
 
 struct PMSG_OFFTRADE_SEND
@@ -1330,7 +1331,7 @@ void GCNewCharacterInfoSend(LPOBJ lpObj);
 void GCNewCharacterCalcSend(LPOBJ lpObj);
 void GCNewHealthBarSend(LPOBJ lpObj);
 void GCNewGensBattleInfoSend(LPOBJ lpObj);
-void GCNewMessageSend(LPOBJ lpObj,char* message);
+void GCNewMessageSend(LPOBJ lpObj,char* message,BYTE kind = 0);
 void GCEventStateSendToAll(int map,BYTE state,BYTE event); //Dragones Funcion
 //**************************************************************************//
 // RAW FUNCTIONS ***********************************************************//
@@ -2203,3 +2204,13 @@ struct PMSG_ACCOUNT_LEVEL_SEND
 };
 int GetAutoPotionClientState(int aIndex);
 void GCAccountLevelSend(int aIndex);
+
+// 0xD3:0x7F, server -> client: chat colours (CustomConfig.ini ChatColor*).
+// Eight categories in the order normal, PM, post, online, guild, ally, party,
+// gens; per category a text and a background colour as R,G,B,A bytes.
+struct PMSG_CHAT_COLORS_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:7F
+	BYTE color[8][2][4];
+};
+void GCChatColorsSend(int aIndex);

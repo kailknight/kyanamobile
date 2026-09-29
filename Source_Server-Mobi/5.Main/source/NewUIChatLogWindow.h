@@ -28,10 +28,17 @@ namespace SEASON3B
 		TYPE_GENS_MESSAGE,
 		TYPE_GM_MESSAGE,
 		TYPE_POST_ITEM,
+		TYPE_ONLINE_MESSAGE,
 
 		NUMBER_OF_TYPES,
 		TYPE_UNKNOWN = 0xFFFFFFFF
 	};
+
+	// Chat colours from the server (CustomConfig.ini ChatColor*, packet
+	// 0xD3:0x7F): 8 categories in the order normal, PM, post, online, guild,
+	// ally, party, gens, each a text then a background colour as R,G,B,A bytes.
+	// Until it arrives the window keeps its built-in colours.
+	void SetServerChatColors(const BYTE* pColors);
 	extern void RemoveItem(ITEM* pItem);
 	template <class T>
 	class TMessageText
@@ -135,6 +142,7 @@ namespace SEASON3B
 		type_vector_filters	m_vecFilters;
 
 		type_vector_msgs	m_vecPostItemMsgs;
+		type_vector_msgs	m_vecOnlineMsgs;
 		type_postItem    m_postitemdata;
 
 		POINT	m_WndPos, m_ScrollBtnPos;

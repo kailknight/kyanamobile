@@ -1343,6 +1343,11 @@ public:
 	// - it was unconditional before, and it is off by owner request, so the
 	// default holds even on a server whose ini predates the key.
 	int m_ShowResetLimitOnLogin;
+	// ChatColor* (CustomConfig.ini): [category][0 = text, 1 = background], each
+	// packed R,G,B,A from the top byte down (hex RRGGBBAA in the ini). Categories:
+	// 0 normal, 1 PM, 2 post, 3 online, 4 guild, 5 ally, 6 party, 7 gens.
+	// Sent to the client with the account level (GCAccountLevelSend).
+	DWORD m_ChatColor[8][2];
 	// PotionDelayMS (CustomConfig.ini): the least time, in milliseconds,
 	// between two potions from the same character - hotkey, auto potion and
 	// MU Helper alike, since they all arrive as the same item-use request.

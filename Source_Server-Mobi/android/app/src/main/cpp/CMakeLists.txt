@@ -194,6 +194,12 @@ target_include_directories(main PRIVATE
     ${SOKOL_ROOT}/util
 )
 
+# app/build.gradle passes -DMU_ANDROID_VERSION_CODE (the APK's versionCode);
+# ClientBuild.h refuses to compile without it.
+if(DEFINED MU_ANDROID_VERSION_CODE)
+    target_compile_definitions(main PRIVATE MU_ANDROID_VERSION_CODE=${MU_ANDROID_VERSION_CODE})
+endif()
+
 if(MU_ENABLE_BGFX)
     target_include_directories(main PRIVATE
         "${BGFX_ROOT}/include"

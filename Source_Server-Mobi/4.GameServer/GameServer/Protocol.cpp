@@ -4596,7 +4596,7 @@ void GCNewGensBattleInfoSend(LPOBJ lpObj) // OK
 	#endif
 }
 
-void GCNewMessageSend(LPOBJ lpObj,char* message) // OK
+void GCNewMessageSend(LPOBJ lpObj,char* message,BYTE kind) // OK
 {
 	#if(GAMESERVER_EXTRA==1)
 
@@ -4605,6 +4605,10 @@ void GCNewMessageSend(LPOBJ lpObj,char* message) // OK
 	pMsg.header.set(0xF3,0xE4,sizeof(pMsg));
 
 	memcpy(pMsg.message,message,sizeof(pMsg.message));
+
+	pMsg.message[sizeof(pMsg.message)-1] = 0;
+
+	pMsg.kind = kind;
 
 	DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
 
@@ -6578,6 +6582,37 @@ void GCAccountLevelSend(int aIndex) // OK
 	pMsg.AccountLevel = (BYTE)level;
 	pMsg.AutoPotionConfigure = (BYTE)((gServerInfo.m_AutoPotionConfigure[level] != 0) ? 1 : 0);
 	pMsg.AutoPotionThreshold = (BYTE)gServerInfo.m_AutoPotionThreshold;
+
+	DataSend(aIndex, (BYTE*)&pMsg, pMsg.header.size);
+
+	// Rides along: this already goes out on entering the game and whenever the
+	// rules change, which is when the client needs the chat colours too.
+	GCChatColorsSend(aIndex);
+}
+
+void GCChatColorsSend(int aIndex) // OK
+{
+	if (OBJECT_RANGE(aIndex) == 0)
+	{
+		return;
+	}
+
+	PMSG_CHAT_COLORS_SEND pMsg;
+
+	pMsg.header.set(0xD3, 0x7F, sizeof(pMsg));
+
+	for (int n = 0; n < 8; n++)
+	{
+		for (int part = 0; part < 2; part++)
+		{
+			const DWORD value = gServerInfo.m_ChatColor[n][part];
+
+			pMsg.color[n][part][0] = (BYTE)(value >> 24);
+			pMsg.color[n][part][1] = (BYTE)(value >> 16);
+			pMsg.color[n][part][2] = (BYTE)(value >> 8);
+			pMsg.color[n][part][3] = (BYTE)(value);
+		}
+	}
 
 	DataSend(aIndex, (BYTE*)&pMsg, pMsg.header.size);
 }

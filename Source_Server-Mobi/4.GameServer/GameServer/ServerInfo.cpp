@@ -5043,6 +5043,38 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	this->m_AutoPotionConfigure[2] = GetPrivateProfileInt(section, "AutoPotion_AL2", 1, path);
 	this->m_AutoPotionConfigure[3] = GetPrivateProfileInt(section, "AutoPotion_AL3", 1, path);
 
+	// ChatColor<Category><Text|Bg> = hex RRGGBBAA, with or without 0x. Alpha 00
+	// draws nothing, so a transparent background is 00000000.
+	static const char* chatColorName[8] = { "Normal", "PM", "Post", "Online", "Guild", "Ally", "Party", "Gens" };
+	static const char* chatColorTextDefault[8] = { "FFFFFFFF", "FF0000FF", "00FF00FF", "FFFF00FF", "FFFFFFFF", "FF8000FF", "3399FFFF", "FFFFFFFF" };
+	static const char* chatColorBgDefault[8] = { "00000000", "00000000", "00000000", "00000000", "00000000", "00000000", "00000000", "000000FF" };
+
+	for (int n = 0; n < 8; n++)
+	{
+		for (int part = 0; part < 2; part++)
+		{
+			char key[64];
+			char value[32];
+
+			wsprintf(key, "ChatColor%s%s", chatColorName[n], ((part == 0) ? "Text" : "Bg"));
+
+			GetPrivateProfileString(section, key, ((part == 0) ? chatColorTextDefault[n] : chatColorBgDefault[n]), value, sizeof(value), path);
+
+			// RRGGBB (6 digits) means fully opaque; without this its bytes would
+			// shift down and leave the alpha at 00, an invisible colour.
+			const char* digits = ((value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) ? &value[2] : value);
+
+			DWORD color = (DWORD)strtoul(digits, 0, 16);
+
+			if (strlen(digits) <= 6)
+			{
+				color = (color << 8) | 0xFF;
+			}
+
+			this->m_ChatColor[n][part] = color;
+		}
+	}
+
 	this->m_AutoPotionThreshold = GetPrivateProfileInt(section, "AutoPotionThreshold", 30, path);
 
 	if (this->m_AutoPotionThreshold < 10)

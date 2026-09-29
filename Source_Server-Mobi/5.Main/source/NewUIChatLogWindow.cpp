@@ -84,6 +84,37 @@ bool SEASON3B::CNewUIChatLogWindow::RenderBackground()
 	return true;
 }
 
+namespace
+{
+	const int CHAT_COLOR_CATEGORIES = 8;
+
+	BYTE g_ServerChatColors[CHAT_COLOR_CATEGORIES][2][4];
+	bool g_bServerChatColors = false;
+
+	// Index into the server's table, or -1 for a type it does not colour.
+	int ChatColorCategory(SEASON3B::MESSAGE_TYPE type)
+	{
+		switch (type)
+		{
+		case SEASON3B::TYPE_CHAT_MESSAGE:		return 0;
+		case SEASON3B::TYPE_WHISPER_MESSAGE:	return 1;
+		case SEASON3B::TYPE_POST_ITEM:			return 2;
+		case SEASON3B::TYPE_ONLINE_MESSAGE:		return 3;
+		case SEASON3B::TYPE_GUILD_MESSAGE:		return 4;
+		case SEASON3B::TYPE_UNION_MESSAGE:		return 5;
+		case SEASON3B::TYPE_PARTY_MESSAGE:		return 6;
+		case SEASON3B::TYPE_GENS_MESSAGE:		return 7;
+		}
+		return -1;
+	}
+}
+
+void SEASON3B::SetServerChatColors(const BYTE* pColors)
+{
+	memcpy(g_ServerChatColors, pColors, sizeof(g_ServerChatColors));
+	g_bServerChatColors = true;
+}
+
 bool SEASON3B::CNewUIChatLogWindow::RenderMessages(int Type)
 {
 	float fRenderPosX = m_WndPos.x, fRenderPosY = m_WndPos.y - m_WndSize.cy + SCROLL_TOP_BOTTOM_PART_HEIGHT;
@@ -169,6 +200,11 @@ bool SEASON3B::CNewUIChatLogWindow::RenderMessages(int Type)
 			g_pRenderText->SetTextColor(250, 200, 50, 255);
 			g_pRenderText->SetFont(g_hFontBold);
 		}
+		else if (pMsgText->GetType() == TYPE_ONLINE_MESSAGE)
+		{
+			g_pRenderText->SetBgColor(0, 0, 0, 150);
+			g_pRenderText->SetTextColor(255, 255, 0, 255);
+		}
 		else if (pMsgText->GetType() == TYPE_POST_ITEM)
 		{
 			g_pRenderText->SetBgColor(255, 255, 255, 200);
@@ -178,6 +214,18 @@ bool SEASON3B::CNewUIChatLogWindow::RenderMessages(int Type)
 		else
 		{
 			bRenderMessage = false;
+		}
+
+		if (bRenderMessage && g_bServerChatColors)
+		{
+			const int iCategory = ChatColorCategory(pMsgText->GetType());
+			if (iCategory >= 0)
+			{
+				const BYTE* pText = g_ServerChatColors[iCategory][0];
+				const BYTE* pBg = g_ServerChatColors[iCategory][1];
+				g_pRenderText->SetBgColor(pBg[0], pBg[1], pBg[2], pBg[3]);
+				g_pRenderText->SetTextColor(pText[0], pText[1], pText[2], pText[3]);
+			}
 		}
 
 		if (bRenderMessage && !pMsgText->GetText().empty())
@@ -1156,6 +1204,8 @@ SEASON3B::CNewUIChatLogWindow::type_vector_msgs* SEASON3B::CNewUIChatLogWindow::
 		return &m_vecGMMsgs;
 	case TYPE_POST_ITEM:
 		return &m_vecPostItemMsgs;
+	case TYPE_ONLINE_MESSAGE:
+		return &m_vecOnlineMsgs;
 	}
 
 	return nullptr;

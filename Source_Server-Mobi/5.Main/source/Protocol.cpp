@@ -249,6 +249,23 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 					return 1;
 				}
 				break;
+				// /post and player-online lines: C1:F3:E4, 128 chars of text, then a
+				// kind byte (0 post, 1 online). Servers older than the kind byte end
+				// at the text, which reads as post.
+				case 0xE4:
+				{
+					if (size >= 5 && g_pChatListBox != NULL)
+					{
+						char szText[129] = { 0 };
+						const int iTextMax = (size - 4 < 128) ? (size - 4) : 128;
+						memcpy(szText, lpMsg + 4, iTextMax);
+
+						const bool bOnline = (size >= 133 && lpMsg[132] == 1);
+						g_pChatListBox->AddText("", szText, bOnline ? SEASON3B::TYPE_ONLINE_MESSAGE : SEASON3B::TYPE_POST_ITEM);
+					}
+					return 1;
+				}
+				break;
 				//Get HP BAR
 				case 0xE2:
 					ReceiveNewHealthBar(lpMsg);
@@ -700,6 +717,13 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				gCB_DangKyInGame->RecvKQRegInGame((XULY_CGPACKET*)lpMsg);
 				break;
 #endif
+			case 0x7F: // Chat colours - GCChatColorsSend
+				if (size >= 4 + 64)
+				{
+					SEASON3B::SetServerChatColors(lpMsg + 4);
+				}
+				break;
+
 			case 0x7E: // Account level + auto potion rules - GCAccountLevelSend
 				if (size >= 7)
 				{
