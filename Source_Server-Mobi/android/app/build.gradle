@@ -495,8 +495,8 @@ android {
         //     excellent, cyan ignore defense, pink reflect, yellow SD, light
         //     green poison/DOT, white double damage
         // Death Stab and damage colours are from the uncommitted working tree.
-        versionCode 22
-        versionName "1.0.22"
+        versionCode 23
+        versionName "1.0.23"
 
         externalNativeBuild {
             cmake {
