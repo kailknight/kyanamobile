@@ -40,6 +40,10 @@
         android:usesCleartextTraffic="true"
         android:resizeableActivity="true">
 
+        <!-- Lets simpleperf profile a release build from adb (API 29+).
+             Only true in a -PmuDiag=true build; see build.gradle. -->
+        <profileable android:shell="${muProfileable}" />
+
         <!--
             Android 12+ signal that the game redraws correctly at whatever size
             it is given, rather than needing to be letterboxed or restarted.

@@ -429,6 +429,121 @@ static void InitStreamRing() {
     s_streamRingAvailable = true;
     LOGI("Stream ring: active, %d slots x %lld bytes", kStreamRingSize, (long long)kStreamRingSlotBytes);
 }
+
+// Bone-matrix ring for the GPU-skinned path (GL_UpdateSkinningBones).
+//
+// Every character, every linked item model (weapons, wings, +15 ornaments) and
+// every pet uploads its own bones, ~300 times a frame in a crowd. Each upload
+// orphaned the single 9.6 KB bone UBO (glBufferData) and copied into it
+// (glBufferSubData): on a Helio G85 / Mali-G52 that was ~6% of a crowded frame,
+// nearly all of it the driver allocating fresh storage and copying (1 Oct).
+//
+// Same cure as the stream ring above, which it rides on: one persistent-mapped
+// UBO per stream-ring slot, each bone set memcpy'd at the next aligned offset
+// and bound with glBindBufferRange. The stream ring's per-frame fences already
+// cover every GPU command of a frame, so a bone slot is reused exactly when its
+// stream slot is - see GL_FlushPending. Only where the stream ring itself is
+// persistent-mapped; otherwise, and when a frame overflows its slot, the
+// per-upload orphan path in GL_UpdateSkinningBones runs unchanged.
+static constexpr int kBoneRingBones = 200;   // kMaxSkinBones - asserted next to it
+static constexpr GLsizeiptr kBoneRingBlockBytes = kBoneRingBones * 3 * 4 * sizeof(float);
+static constexpr GLsizeiptr kBoneRingSlotBytes = 6 * 1024 * 1024;   // ~650 bone sets a frame
+
+struct BoneRingSlot {
+    GLuint ubo = 0;
+    unsigned char* mapped = nullptr;
+};
+static BoneRingSlot s_boneRing[kStreamRingSize];
+static bool       s_boneRingAvailable = false;
+static bool       s_boneRingTried = false;
+static GLsizeiptr s_boneRingOffset = 0;
+static GLsizeiptr s_boneRingStride = kBoneRingBlockBytes;
+// True while uniform binding 0 holds the bones in s_boneRingLast, written
+// through the ring during this frame. Anything else that touches the binding
+// (the orphan path, a state reset, the frame rotating) clears it.
+static bool       s_boneRingBound = false;
+static float      s_boneRingLast[kBoneRingBones][3][4];
+// Identity for every slot, copied in after a bone set's own matrices - the
+// unused tail must read as identity (see GL_UpdateSkinningBones).
+static float      s_boneRingIdentity[kBoneRingBones][3][4];
+
+static void DestroyBoneRing() {
+    for (int i = 0; i < kStreamRingSize; ++i) {
+        BoneRingSlot& slot = s_boneRing[i];
+        if (slot.ubo) {
+            if (slot.mapped) {
+                glBindBuffer(GL_UNIFORM_BUFFER, slot.ubo);
+                glUnmapBuffer(GL_UNIFORM_BUFFER);
+            }
+            glDeleteBuffers(1, &slot.ubo);
+            slot.ubo = 0;
+        }
+        slot.mapped = nullptr;
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    s_boneRingAvailable = false;
+    s_boneRingTried = false;
+    s_boneRingOffset = 0;
+    s_boneRingBound = false;
+}
+
+static void InitBoneRing() {
+    s_boneRingTried = true;
+#if defined(MU_IOS)
+    return;   // the iOS stream ring maps per draw - no persistent mapping
+#else
+    if (!s_streamRingAvailable || !s_glBufferStorageEXT) {
+        return;
+    }
+
+    GLint align = 0;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &align);
+    if (align <= 0) {
+        align = 256;
+    }
+    s_boneRingStride = ((kBoneRingBlockBytes + align - 1) / align) * align;
+
+    for (int b = 0; b < kBoneRingBones; ++b) {
+        memset(s_boneRingIdentity[b], 0, sizeof(s_boneRingIdentity[b]));
+        s_boneRingIdentity[b][0][0] = 1.0f;
+        s_boneRingIdentity[b][1][1] = 1.0f;
+        s_boneRingIdentity[b][2][2] = 1.0f;
+    }
+
+    // Errors left over from elsewhere would read as this allocation failing.
+    for (int n = 0; n < 16 && glGetError() != GL_NO_ERROR; ++n) {}
+
+    const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT_EXT | GL_MAP_COHERENT_BIT_EXT;
+    for (int i = 0; i < kStreamRingSize; ++i) {
+        BoneRingSlot& slot = s_boneRing[i];
+        glGenBuffers(1, &slot.ubo);
+        glBindBuffer(GL_UNIFORM_BUFFER, slot.ubo);
+        s_glBufferStorageEXT(GL_UNIFORM_BUFFER, kBoneRingSlotBytes, nullptr, flags);
+        if (glGetError() != GL_NO_ERROR) {
+            LOGE("Bone ring: glBufferStorageEXT failed on slot %d, falling back", i);
+            DestroyBoneRing();
+            s_boneRingTried = true;
+            return;
+        }
+        slot.mapped = reinterpret_cast<unsigned char*>(
+            glMapBufferRange(GL_UNIFORM_BUFFER, 0, kBoneRingSlotBytes, flags));
+        if (slot.mapped == nullptr) {
+            LOGE("Bone ring: glMapBufferRange failed on slot %d, falling back", i);
+            DestroyBoneRing();
+            s_boneRingTried = true;
+            return;
+        }
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    s_boneRingOffset = 0;
+    s_boneRingBound = false;
+    s_boneRingAvailable = true;
+    LOGI("Bone ring: active, %d slots x %lld bytes, stride %lld",
+         kStreamRingSize, (long long)kBoneRingSlotBytes, (long long)s_boneRingStride);
+#endif
+}
+
+bool GL_IsBoneRingActive() { return s_boneRingAvailable; }
 static bool   s_samplerUniformInitialized = false;
 static bool   s_hasLastMvp = false;
 static Mat4   s_lastMvp = { 0 };
@@ -1751,6 +1866,12 @@ void GL_FlushPending() {
         glDeleteSync(nextSlot.fence);
         nextSlot.fence = nullptr;
     }
+
+    // The bone ring follows the stream ring's slot, now known to be free. The
+    // binding still points into last frame's slot, which is NOT fenced by this
+    // frame's commands - so the next bone upload must not be skipped.
+    s_boneRingOffset = 0;
+    s_boneRingBound = false;
 }
 
 // =============================================================================
@@ -2966,6 +3087,7 @@ void GL_BatchAppendIndexedTrianglesConstColor(const float* positions3,
 // Not ZzzBMD.h's MAX_BONES directly - this file stays free of game-layer
 // includes. Keep this in sync with MAX_BONES (currently 200) if that changes.
 static constexpr int kMaxSkinBones = 200;
+static_assert(kMaxSkinBones == kBoneRingBones, "bone ring block must match the shader's BoneBlock");
 
 // NOTE: vertex attribute locations MUST be < GL_MAX_VERTEX_ATTRIBS, which
 // GLES 3.x only guarantees to be 16 (and Adreno reports exactly 16). Using
@@ -3192,6 +3314,7 @@ static void ResetSkinStateCaches() {
     s_skinLastBoneCount = -1;
     s_skinUniforms.valid = false;
     s_skinUboBound = false;
+    s_boneRingBound = false;
 }
 
 static inline bool SkinFloatsDiffer(const float* a, const float* b, int n) {
@@ -3214,6 +3337,17 @@ void GL_GetCurrentMVP(float mvp[16]) {
 }
 
 bool GL_SkinInit() {
+    // Created lazily on the first bone upload, on this context - like the
+    // stream ring, names from a previous context are dropped, not deleted.
+    for (int i = 0; i < kStreamRingSize; ++i) {
+        s_boneRing[i].ubo = 0;
+        s_boneRing[i].mapped = nullptr;
+    }
+    s_boneRingAvailable = false;
+    s_boneRingTried = false;
+    s_boneRingOffset = 0;
+    s_boneRingBound = false;
+
     GLuint vs = CompileShader(GL_VERTEX_SHADER, s_skinVertSrc);
     GLuint fs = CompileShader(GL_FRAGMENT_SHADER, s_skinFragSrc);
     if (!vs || !fs) {
@@ -3262,6 +3396,7 @@ bool GL_SkinInit() {
 }
 
 void GL_SkinShutdown() {
+    DestroyBoneRing();
     if (s_skinProg)    { glDeleteProgram(s_skinProg); s_skinProg = 0; }
     if (s_skinBoneUbo) { glDeleteBuffers(1, &s_skinBoneUbo); s_skinBoneUbo = 0; }
     if (s_skinVbo)     { glDeleteBuffers(1, &s_skinVbo); s_skinVbo = 0; }
@@ -3289,6 +3424,46 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
     if (boneCount > kMaxSkinBones) {
         boneCount = kMaxSkinBones;
     }
+
+#if !defined(MU_IOS)
+    // Bone ring (see kBoneRingSlotBytes): no orphan, no driver copy - a memcpy
+    // into persistent-mapped memory and a ranged bind. Same contents as the
+    // orphan path below: this set's bones, then identity to the end of the block.
+    if (s_skinStateCacheEnabled) {
+        if (!s_boneRingTried) {
+            InitBoneRing();
+        }
+        if (s_boneRingAvailable) {
+            const size_t usedBytes = sizeof(float) * 3 * 4 * static_cast<size_t>(boneCount);
+            if ((s_skinOpts & kSkinOptBoneSkip) && s_boneRingBound && boneCount == s_skinLastBoneCount &&
+                memcmp(s_boneRingLast, boneMatrix3x4, usedBytes) == 0) {
+                return;
+            }
+            if (s_boneRingOffset + kBoneRingBlockBytes <= kBoneRingSlotBytes) {
+                const BoneRingSlot& slot = s_boneRing[s_streamIdx];
+                unsigned char* dst = slot.mapped + s_boneRingOffset;
+                memcpy(dst, boneMatrix3x4, usedBytes);
+                if (usedBytes < static_cast<size_t>(kBoneRingBlockBytes)) {
+                    memcpy(dst + usedBytes,
+                           reinterpret_cast<const unsigned char*>(s_boneRingIdentity) + usedBytes,
+                           static_cast<size_t>(kBoneRingBlockBytes) - usedBytes);
+                }
+                glBindBufferRange(GL_UNIFORM_BUFFER, 0, slot.ubo, s_boneRingOffset, kBoneRingBlockBytes);
+                s_boneRingOffset += s_boneRingStride;
+                memcpy(s_boneRingLast, boneMatrix3x4, usedBytes);
+                s_skinLastBoneCount = boneCount;
+                s_boneRingBound = true;
+                s_skinUboBound = true;   // the draw must not rebind binding 0 to s_skinBoneUbo
+                return;
+            }
+            // This frame's slot is full: the orphan path below, which has to
+            // really upload - its skip compares against s_boneUpload, which the
+            // ring never wrote.
+            s_skinLastBoneCount = -1;
+        }
+    }
+#endif
+
     // The whole buffer is written every time, never just the boneCount bones
     // actually in use, with identity in the unused tail.
     //
@@ -3324,13 +3499,21 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
     }
     s_skinLastBoneCount = boneCount;
 
+    // The tail stays identity between calls, so only the slots the previous
+    // upload filled past this one's count need resetting - not all ~150-190
+    // of them every time (that loop was most of this function's cost in a
+    // Helio G85 crowd profile, 1 Oct). s_boneUploadDirtyEnd is one past the
+    // highest slot holding a non-identity matrix; kMaxSkinBones until the
+    // first full reset has run.
+    static int s_boneUploadDirtyEnd = kMaxSkinBones;
     memcpy(s_boneUpload, boneMatrix3x4, sizeof(float) * 3 * 4 * boneCount);
-    for (int i = boneCount; i < kMaxSkinBones; ++i) {
+    for (int i = boneCount; i < s_boneUploadDirtyEnd; ++i) {
         memset(s_boneUpload[i], 0, sizeof(s_boneUpload[i]));
         s_boneUpload[i][0][0] = 1.0f;
         s_boneUpload[i][1][1] = 1.0f;
         s_boneUpload[i][2][2] = 1.0f;
     }
+    s_boneUploadDirtyEnd = boneCount;
 
     glBindBuffer(GL_UNIFORM_BUFFER, s_skinBoneUbo);
     // Orphan first: this single UBO is rewritten immediately before each
@@ -3350,6 +3533,7 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
     // black terrain. Adreno and the emulator follow the spec. Only happens when
     // the bones actually change - once per character, not once per mesh.
     s_skinUboBound = false;
+    s_boneRingBound = false;
 }
 
 // Draws one skinned mesh from caller-supplied vertex/index data using the

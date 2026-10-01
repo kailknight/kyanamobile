@@ -89,6 +89,8 @@ typedef int32_t jint;
 #include <fstream>
 #include <filesystem>
 #include <memory>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <limits>
 #include <string>
@@ -10211,6 +10213,12 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidScreenOwningWindows[] = {
     // attack wheel and potion slots sit, so leaving it out would have let
     // those eat the taps that are meant to place a bet.
     SEASON3B::INTERFACE_SLOTMACHINE,
+
+    // The party window (x 450..640, full height) - the attack wheel, skill
+    // buttons and PK/AutoPots toggles drew straight over it once tapping a
+    // party member started opening it (1 Oct). Chat stays: see
+    // kAndroidChatFriendlyWindows.
+    SEASON3B::INTERFACE_PARTY,
 };
 
 // The subset of the list above that the movement joystick is allowed to stay
@@ -10405,6 +10413,10 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidChatFriendlyWindows[] = {
     SEASON3B::INTERFACE_UNITEDMARKETPLACE_NPC_JULIA,
     SEASON3B::INTERFACE_GOLD_BOWMAN,
     SEASON3B::INTERFACE_GOLD_BOWMAN_LENA,
+
+    // Party window, x 450..640 - clear of the shifted chat lane. Not an NPC
+    // window, but the user asked for chat to stay up beside it (1 Oct).
+    SEASON3B::INTERFACE_PARTY,
 };
 
 // True when at least one screen-owning window is open AND every one that is, is
@@ -22961,6 +22973,57 @@ static SDL_FingerID ToSdlFingerId(uintptr_t identifier)
     return static_cast<SDL_FingerID>(identifier);
 }
 
+// Keeps the GameServer connection alive while the app is in the background.
+//
+// The live-client packet (CheckHack, 0x0E) is sent every 20 s from the frame
+// loop, and the GameServer closes anyone it has not heard from in 60 s
+// (gObjSecondProc, "Game response error causes conclusion"). sokol parks the
+// whole loop while the activity is paused (see the SUSPENDED case below), so
+// a minute in another app was enough to be dropped and come back to the
+// reconnect screen. This thread sends the same packet while backgrounded.
+//
+// The frame loop never runs while backgrounded, so the only overlap is at the
+// edges: every send happens under g_bgKeepAliveMutex with g_bgKeepAliveActive
+// still set, and RESUMED clears the flag under the same mutex on the sokol
+// thread before the next frame - after that the thread cannot send again.
+static std::mutex g_bgKeepAliveMutex;
+static std::condition_variable g_bgKeepAliveCv;
+static bool g_bgKeepAliveActive = false;
+static bool g_bgKeepAliveThreadStarted = false;
+
+static void BackgroundKeepAliveThread()
+{
+    std::unique_lock<std::mutex> lock(g_bgKeepAliveMutex);
+    for (;;)
+    {
+        g_bgKeepAliveCv.wait(lock, [] { return g_bgKeepAliveActive; });
+        // Half the server's limit, and well inside it even if a send is late.
+        if (g_bgKeepAliveCv.wait_for(lock, std::chrono::seconds(15),
+                                     [] { return !g_bgKeepAliveActive; }))
+        {
+            continue; // resumed
+        }
+        if (SceneFlag == MAIN_SCENE && g_bGameServerConnected)
+        {
+            CheckHack();
+        }
+    }
+}
+
+static void SetBackgroundKeepAlive(bool active)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_bgKeepAliveMutex);
+        g_bgKeepAliveActive = active;
+        if (active && !g_bgKeepAliveThreadStarted)
+        {
+            g_bgKeepAliveThreadStarted = true;
+            std::thread(BackgroundKeepAliveThread).detach();
+        }
+    }
+    g_bgKeepAliveCv.notify_all();
+}
+
 static void QueueSappEventAsSDL(const sapp_event* event)
 {
     if (!event)
@@ -22993,6 +23056,7 @@ static void QueueSappEventAsSDL(const sapp_event* event)
             // for the entire time the app sat in the background/switcher.
             AllStopSound();
             AndroidAudioStopMusic();
+            SetBackgroundKeepAlive(true);
 
             SDL_Event sdlEvent {};
             sdlEvent.type = SDL_APP_DIDENTERBACKGROUND;
@@ -23004,6 +23068,7 @@ static void QueueSappEventAsSDL(const sapp_event* event)
     case SAPP_EVENTTYPE_FOCUSED:
     case SAPP_EVENTTYPE_RESTORED:
         {
+            SetBackgroundKeepAlive(false);
             SDL_Event sdlEvent {};
             sdlEvent.type = SDL_APP_DIDENTERFOREGROUND;
             QueueSyntheticSDLEvent(sdlEvent);
@@ -23644,6 +23709,11 @@ static void RunAndroidGameFrame()
 
     SyncAndroidDrawableSizeFromSokol("frame");
 
+    // Options-window choices -> mu_settings.cfg, written only when one changed
+    // (NewUIOptionWindow.cpp). Last frame's toggles land here.
+    extern void MobileSyncOptionSettings();
+    MobileSyncOptionSettings();
+
     MouseLButtonDBClick = false;
     if (MouseLButtonPop && ((g_iMousePopPosition_x != MouseX) || (g_iMousePopPosition_y != MouseY)))
     {
@@ -24141,6 +24211,40 @@ static void RunAndroidGameFrame()
                                 g_ProfCharPostPhase[5] * toMs / n, g_ProfCharPostPhase[2] * toMs / n, g_ProfCharPostPhase[3] * toMs / n,
                                 g_ProfCharPostPhase[4] * toMs / n);
                             for (int pp = 0; pp < 6; ++pp) g_ProfCharPostPhase[pp] = 0;
+                        }
+                        fprintf(f, "  ring[stream%d bone%d]\n",
+                            GL_IsStreamRingActive() ? 1 : 0, GL_IsBoneRingActive() ? 1 : 0);
+                        // TEMP (1 Oct): "untargetable monsters in Lorencia" - every
+                        // character within 15 tiles, with what the target picker sees.
+                        if (Hero != nullptr && CharactersClient != nullptr)
+                        {
+                            fprintf(f, "  near hero(%d,%d) ctl=%d gm=%d nonAtkGm=%d pk=%d\n",
+                                Hero->PositionX, Hero->PositionY, static_cast<int>(Hero->CtlCode),
+                                IsGMCharacter() ? 1 : 0, IsNonAttackGM() ? 1 : 0,
+                                (g_pBCustomMenuInfo != nullptr && g_pBCustomMenuInfo->AutoCtrlPK) ? 1 : 0);
+                            for (int ci = 0; ci < MAX_CHARACTERS_CLIENT; ++ci)
+                            {
+                                CHARACTER* nc = &CharactersClient[ci];
+                                if (!nc->Object.Live || nc == Hero)
+                                {
+                                    continue;
+                                }
+                                const int ddx = nc->PositionX - Hero->PositionX;
+                                const int ddy = nc->PositionY - Hero->PositionY;
+                                if (ddx * ddx + ddy * ddy > 15 * 15)
+                                {
+                                    continue;
+                                }
+                                const int wall = TerrainWall[TERRAIN_INDEX_REPEAT(nc->PositionX, nc->PositionY)];
+                                fprintf(f, "    #%d key=%d kind=%d type=%d mon=%d id=[%s] at(%d,%d) dead=%d vis=%d alpha=%.2f hide=%d safe=%d valid=%d atk=%d\n",
+                                    ci, static_cast<int>(nc->Key), static_cast<int>(nc->Object.Kind),
+                                    static_cast<int>(nc->Object.Type), static_cast<int>(nc->MonsterIndex), nc->ID,
+                                    nc->PositionX, nc->PositionY, static_cast<int>(nc->Dead),
+                                    nc->Object.Visible ? 1 : 0, nc->Object.Alpha,
+                                    static_cast<int>(nc->Object.HiddenMesh),
+                                    (wall & TW_SAFEZONE) == TW_SAFEZONE ? 1 : 0,
+                                    IsValidAutoCombatTarget(ci) ? 1 : 0, IsTargetAttackable(ci) ? 1 : 0);
+                            }
                         }
                         fclose(f);
                     }

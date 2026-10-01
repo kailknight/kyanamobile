@@ -495,8 +495,12 @@ android {
         //     excellent, cyan ignore defense, pink reflect, yellow SD, light
         //     green poison/DOT, white double damage
         // Death Stab and damage colours are from the uncommitted working tree.
-        versionCode 23
-        versionName "1.0.23"
+        versionCode 24
+        versionName "1.0.24"
+
+        // A diagnostics build can be CPU-profiled with simpleperf without
+        // being debuggable (which would change its performance).
+        manifestPlaceholders = [muProfileable: muDiag ? "true" : "false"]
 
         externalNativeBuild {
             cmake {

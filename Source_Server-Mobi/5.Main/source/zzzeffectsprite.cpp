@@ -114,6 +114,58 @@ void FlushSpriteQuadBatch(SpriteQuadBatch& batch)
     batch.quadCount = 0;
 }
 
+// Per-texture buckets for the order-independent sprite kinds: additive
+// (glBlendFunc(GL_ONE, GL_ONE)) and darkening (GL_ZERO, GL_ONE_MINUS_SRC_COLOR,
+// a product). Same reasoning as the particle buckets in ZzzEffectParticle.cpp:
+// walking Sprites[] in slot order cut the batch on every texture change, and
+// each cut is a full draw on Mali. Order-dependent kinds still draw in slot
+// order; the buckets follow them, darkening then additive.
+struct SpriteBucket
+{
+    SpriteBatchBlendMode mode;
+    SpriteQuadBatch batch;
+};
+std::vector<SpriteBucket> s_spriteBuckets;
+
+SpriteQuadBatch& GetSpriteBucket(SpriteBatchBlendMode mode, int texture)
+{
+    for (SpriteBucket& b : s_spriteBuckets)
+    {
+        if (b.mode == mode && b.batch.texture == texture)
+        {
+            return b.batch;
+        }
+    }
+    // Flushed buckets have texture -1 (FlushSpriteQuadBatch) - reuse one.
+    for (SpriteBucket& b : s_spriteBuckets)
+    {
+        if (b.batch.quadCount == 0)
+        {
+            b.mode = mode;
+            b.batch.texture = texture;
+            return b.batch;
+        }
+    }
+    // Bounded like the particle buckets: past the cap, share the first one and
+    // pay an extra flush rather than grow.
+    if (s_spriteBuckets.size() >= 64)
+    {
+        SpriteBucket& first = s_spriteBuckets[0];
+        if (first.batch.quadCount > 0 && (first.mode != mode || first.batch.texture != texture))
+        {
+            FlushSpriteQuadBatch(first.batch);
+        }
+        first.mode = mode;
+        first.batch.texture = texture;
+        return first.batch;
+    }
+    SpriteBucket nb;
+    nb.mode = mode;
+    nb.batch.texture = texture;
+    s_spriteBuckets.push_back(std::move(nb));
+    return s_spriteBuckets.back().batch;
+}
+
 void AppendSpriteBatchVertex(std::vector<float>& vertices, const vec3_t position, const float uv[2], const float color[4])
 {
     vertices.push_back(position[0]);
@@ -229,28 +281,57 @@ void QueueSpriteQuadBatch(SpriteQuadBatch& batch, OBJECT* o)
     }
 
     const SpriteBatchBlendMode blendMode = DetermineSpriteBlendMode(o);
-    if (batch.quadCount > 0 && (batch.texture != o->Type || batch.blendMode != blendMode))
+    SpriteQuadBatch* target = &batch;
+    if (blendMode == SpriteBatchBlendMode::AlphaBlend || blendMode == SpriteBatchBlendMode::AlphaBlendMinus)
+    {
+        target = &GetSpriteBucket(blendMode, o->Type);
+    }
+    else if (batch.quadCount > 0 && (batch.texture != o->Type || batch.blendMode != blendMode))
     {
         FlushSpriteQuadBatch(batch);
     }
 
-    if (batch.vertices.empty())
+    if (target->vertices.empty())
     {
-        batch.vertices.reserve(4096);
+        target->vertices.reserve(4096);
     }
 
-    batch.texture = o->Type;
-    batch.blendMode = blendMode;
+    target->texture = o->Type;
+    target->blendMode = blendMode;
     for (int i = 0; i < 4; ++i)
     {
-        AppendSpriteBatchVertex(batch.vertices, positions[i], texCoords[i], color);
+        AppendSpriteBatchVertex(target->vertices, positions[i], texCoords[i], color);
     }
-    ++batch.quadCount;
+    ++target->quadCount;
+}
+
+// Draws what the buckets hold: darkening first, then additive - see
+// s_spriteBuckets.
+void FlushSpriteBuckets()
+{
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        const SpriteBatchBlendMode mode = (pass == 0) ? SpriteBatchBlendMode::AlphaBlendMinus : SpriteBatchBlendMode::AlphaBlend;
+        for (SpriteBucket& b : s_spriteBuckets)
+        {
+            if (b.mode != mode || b.batch.quadCount <= 0)
+            {
+                continue;
+            }
+            FlushSpriteQuadBatch(b.batch);
+        }
+    }
 }
 #endif
 }
 
 OBJECT	Sprites   [MAX_SPRITES];
+// Lowest slot that may be free. Sprites are created in order during the frame
+// and freed together in RenderSprites, so scanning from 0 walked every sprite
+// already alive this frame - quadratic in the sprite count, ~3% of a crowded
+// frame on a Helio G85. Every place that frees a slot lowers this hint, so the
+// slot handed out is still the lowest free one, exactly as before.
+int g_SpriteFreeHint = 0;
 inline SpinLock* g_CreateSprite_lock = new SpinLock();
 int CreateSprite(int Type,vec3_t Position,float Scale,vec3_t Light,OBJECT *Owner,float Rotation,int SubType)
 {
@@ -263,8 +344,25 @@ int CreateSprite(int Type,vec3_t Position,float Scale,vec3_t Light,OBJECT *Owner
 	}
 #endif
 
+	// Nothing free from the hint up to the recycled tail: rescan from 0 in case
+	// a slot below the hint was freed somewhere that does not report it.
+	int start = g_SpriteFreeHint;
+	if (start < 0 || start > MAX_SPRITES - 2)
+	{
+		start = 0;
+	}
+	else
+	{
+		bool anyFree = false;
+		for (int i = start; i < MAX_SPRITES - 2; i++)
+		{
+			if (!Sprites[i].Live) { anyFree = true; start = i; break; }
+		}
+		if (!anyFree) start = 0;
+	}
+
 	//g_CreateSprite_lock->lock();
-	for(int i=0;i<MAX_SPRITES;i++)
+	for(int i=start;i<MAX_SPRITES;i++)
 	{
 		OBJECT *o = &Sprites[i];
 		//== Fix Effect
@@ -275,6 +373,7 @@ int CreateSprite(int Type,vec3_t Position,float Scale,vec3_t Light,OBJECT *Owner
 		}
 		if(!o->Live)
 		{
+			g_SpriteFreeHint = i + 1;
 			o->Live           = true;
 			o->Type           = Type;
 			o->SubType        = SubType;
@@ -388,6 +487,7 @@ void RenderSprites ( BYTE byRenderOneMore )
             if( o->Position[2] <= 100.f )
             {
                 o->Live = false;
+                if (i < g_SpriteFreeHint) g_SpriteFreeHint = i;
                 continue;
             }
         }
@@ -423,11 +523,13 @@ void RenderSprites ( BYTE byRenderOneMore )
             if( byRenderOneMore == 0 || byRenderOneMore == 2 )
             {
                 o->Live = false;
+                if (i < g_SpriteFreeHint) g_SpriteFreeHint = i;
             }
 		}
 	}
 #if defined(__ANDROID__) || defined(MU_IOS)
     FlushSpriteQuadBatch(spriteBatch);
+    FlushSpriteBuckets();
     DisableAlphaBlend();
     if (restoreDepthTest)
     {

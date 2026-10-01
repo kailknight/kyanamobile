@@ -117,6 +117,13 @@ void GetJointQuadColor(const JOINT* o, int tailIndex, float outColor[4])
 }
 #endif
 
+// One past the highest slot that can hold a live joint. CreateJoint is the only
+// place a joint goes live and MoveJoints recomputes this from the whole pool
+// every frame, so it is always an upper bound. DeleteJoint/SearchJoint stop
+// there instead of walking all MAX_JOINTS slots: RenderCharacter calls them for
+// every visible character every frame, ~2% of a crowded frame on a Helio G85.
+static int s_jointLiveEnd = MAX_JOINTS;
+
 inline SpinLock* g_CreateJoint_lock = new SpinLock();
 void CreateJoint(int Type, vec3_t Position, vec3_t TargetPosition, vec3_t Angle, int SubType, OBJECT* Target, float Scale, short PKKey,
 	WORD SkillIndex, WORD SkillSerialNum, int iChaIndex, const float* vPriorColor, short int sTargetindex)
@@ -141,6 +148,10 @@ void CreateJoint(int Type, vec3_t Position, vec3_t TargetPosition, vec3_t Angle,
 		if (!o->Live)
 		{
 			o->Live = true;
+			if (i + 1 > s_jointLiveEnd)
+			{
+				s_jointLiveEnd = i + 1;
+			}
 			o->Type = Type;
 			o->TexType = o->Type;
 			o->SubType = SubType;
@@ -2827,7 +2838,8 @@ void CreateJoint(int Type, vec3_t Position, vec3_t TargetPosition, vec3_t Angle,
 
 void DeleteJoint(int Type, OBJECT * Target, int SubType)
 {
-	for (int i = 0; i < MAX_JOINTS; i++)
+	const int end = (s_jointLiveEnd < MAX_JOINTS) ? s_jointLiveEnd : MAX_JOINTS;
+	for (int i = 0; i < end; i++)
 	{
 		JOINT* o = &Joints[i];
 
@@ -2855,7 +2867,8 @@ void DeleteJoint(int Type, OBJECT * Target, int SubType)
 
 bool SearchJoint(int Type, OBJECT * Target, int SubType)
 {
-	for (int i = 0; i < MAX_JOINTS; i++)
+	const int end = (s_jointLiveEnd < MAX_JOINTS) ? s_jointLiveEnd : MAX_JOINTS;
+	for (int i = 0; i < end; i++)
 	{
 		JOINT* o = &Joints[i];
 		if (o->Live && o->Type == Type && o->Target == Target)
@@ -7039,6 +7052,7 @@ void MoveJoint(JOINT * o, int iIndex)
 void MoveJoints()
 {
 	int NumBerJoin = 0;
+	int lastLive = -1;
 	for (int i = 0; i < MAX_JOINTS; i++)
 	{
 		JOINT* o = &Joints[i];
@@ -7046,9 +7060,13 @@ void MoveJoints()
 		{
 			MoveJoint(o, i);
 			NumBerJoin++;
+			lastLive = i;
 		}
 	}
 	mMAX_JOIN = NumBerJoin;
+	// A joint created during the loop sits either below a live slot already
+	// visited or above the cursor, where the loop still reached it.
+	s_jointLiveEnd = lastLive + 1;
 }
 void RenderJoints(BYTE bRenderOneMore)
 {

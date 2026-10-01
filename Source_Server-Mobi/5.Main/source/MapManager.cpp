@@ -1673,6 +1673,8 @@ void CMapManager::DeleteObjects()
 
 	for(int i=0;i<MAX_SPRITES;i++)
 		Sprites[i].Live = false;
+	extern int g_SpriteFreeHint;
+	g_SpriteFreeHint = 0;
 	for(int i=0;i<MAX_BOIDS;i++)
 		Boids[i].Live = false;
 	for(int i=0;i<MAX_FISHS;i++)

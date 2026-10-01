@@ -7,6 +7,17 @@
 #include <windows.h>
 #endif
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+// Player settings that survive a restart on mobile: a key=value text file,
+// mu_settings.cfg, in the data root the process chdir's to at startup. PC keeps
+// its config.ini / registry paths; this is what GameConfig::Load/Save and the
+// Options window (NewUIOptionWindow.cpp) use instead there.
+int  MobileSettingsGetInt(const char* key, int defaultValue);
+// saveNow=false batches several changes into one MobileSettingsSave().
+void MobileSettingsSetInt(const char* key, int value, bool saveNow = true);
+void MobileSettingsSave();
+#endif
+
 class GameConfig
 {
 public:
@@ -38,11 +49,10 @@ public:
 
     // Proximity voice chat.
     //
-    // NOTE: these do not persist on Android. GameConfig::Load and Save are
-    // no-ops there, so every setting in this class resets on each launch. That
-    // is a pre-existing gap and not specific to voice, but it does mean a
-    // mobile player who mutes has to mute again next time - which is why the
-    // defaults are the common case rather than the cautious one.
+    // On mobile these persist through mu_settings.cfg (since 1 Oct 2026; before
+    // that GameConfig::Load/Save were no-ops there and every setting reset on
+    // launch). The defaults are still the common case rather than the cautious
+    // one.
     bool GetVoiceEnabled()    const { return m_voiceEnabled; }
     bool GetVoiceMuteOthers() const { return m_voiceMuteOthers; }
     int  GetVoiceVolume()     const { return m_voiceVolume; }

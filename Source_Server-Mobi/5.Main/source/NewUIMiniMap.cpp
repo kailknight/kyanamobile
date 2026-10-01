@@ -15,6 +15,7 @@
 #include "CSitemOption.h"
 #include "MapManager.h"
 #include "Protocol.h"
+#include "ZzzInventory.h"
 
 extern int DisplayWinCDepthBox;
 extern int DisplayWin;
@@ -24,6 +25,10 @@ extern int DisplayHeightExt;
 extern int DisplayWinExt;
 extern int DisplayWinReal;
 extern BYTE m_OccupationState;
+// NewUIHeroPositionInfo.cpp
+extern int GetAutoMoveRoute(const unsigned char **xs, const unsigned char **ys, int *cursor);
+extern bool GetPartyMemberMapTile(int i, int *outX, int *outY);
+extern void RequestPartyPositions(DWORD intervalMs);
 
 using namespace SEASON3B;
 
@@ -295,6 +300,48 @@ bool SEASON3B::CNewUIMiniMap::Render()
 		else
 			break;
 	}
+	// The planned auto-walk route, from where the hero is now to the tap.
+	{
+		const unsigned char *rx = NULL;
+		const unsigned char *ry = NULL;
+		int cursor = 0;
+		const int n = GetAutoMoveRoute(&rx, &ry, &cursor);
+		if (n > 0)
+		{
+			glColor4f(0.0f, 1.0f, 0.93f, 0.85f);
+			for (int r = cursor; r < n; r += 2)
+			{
+				const float rxp = (float)(x + (rx[r] * (m_MapWidth.x / 256.f)));
+				const float ryp = (float)(y + ((255 - ry[r]) * (m_MapWidth.y / 256.f)));
+				RenderColor(rxp - 1.0f, ryp - 1.0f, 2.f, 2.f);
+			}
+			EndRenderColor();
+		}
+	}
+
+	// Party members, on top of the player arrows, with their names.
+	RequestPartyPositions(1500);
+	for (i = 0; i < PartyNumber; ++i)
+	{
+		int mx, my;
+		if (!GetPartyMemberMapTile(i, &mx, &my))
+			continue;
+		XNPC = (float)(x + (mx * (m_MapWidth.x / 256.f)));
+		YNPC = (float)(y + ((255 - my) * (m_MapWidth.y / 256.f)));
+		glColor3f(0.05f, 0.05f, 0.05f);
+		RenderColor(XNPC - 3.0f, YNPC - 3.0f, 7.f, 7.f);
+		glColor3f(1.0f, 0.42f, 0.9f);
+		RenderColor(XNPC - 2.0f, YNPC - 2.0f, 5.f, 5.f);
+		EndRenderColor();
+		g_pRenderText->SetFont(g_hFont);
+		g_pRenderText->SetShadowText(1);
+		g_pRenderText->SetBgColor(0, 0, 0, 0);
+		g_pRenderText->SetTextColor(255, 140, 235, 255);
+		g_pRenderText->RenderText((int)XNPC - 40, (int)YNPC - 14, Party[i].Name, 80, 0, RT3_SORT_CENTER);
+		g_pRenderText->SetShadowText(0);
+	}
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
 	if (g_pNewUIMiniMap->Movement)
 	{
 		XNPC = (float)(x + (ViTriDiChuyen.x * (m_MapWidth.x / 256.f)));

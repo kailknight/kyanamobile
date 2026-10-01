@@ -39,6 +39,13 @@ extern int MoveSceneFrame;
 BYTE    g_byUpperBoneLocation[7] = { 25, 26, 27, 20, 34, 35, 36 };
 
 OBJECT Effects[MAX_EFFECTS];
+
+// One past the highest Effects[] slot that can be live. CreateEffect is the only
+// place one goes live and MoveEffects recomputes this every frame, so it is an
+// upper bound. DeleteEffect/SearchEffect stop there: RenderCharacter calls them
+// for every visible character every frame (~2% of a crowded Helio G85 frame).
+static int s_effectLiveEnd = MAX_EFFECTS;
+static inline int EffectScanEnd() { return (s_effectLiveEnd < MAX_EFFECTS) ? s_effectLiveEnd : MAX_EFFECTS; }
 bool CheckCharacterRange(OBJECT* so, float Range, short PKKey, BYTE Kind = 0)
 {
 	for (int i = 0; i < MAX_CHARACTERS_CLIENT; i++)
@@ -270,7 +277,7 @@ void TerminateOwnerEffectObject(int iOwnerObjectType)
 bool DeleteEffect(int Type, OBJECT * Owner, int iSubType)
 {
 	bool bDelete = false;
-	for (int i = 0; i < MAX_EFFECTS; i++)
+	for (int i = 0; i < EffectScanEnd(); i++)
 	{
 		OBJECT* o = &Effects[i];
 		if (o->Live && o->Type == Type)
@@ -331,7 +338,7 @@ bool DeleteParticle(int iType)
 
 bool SearchEffect(int iType, OBJECT * pOwner, int iSubType)
 {
-	for (int i = 0; i < MAX_EFFECTS; ++i)
+	for (int i = 0; i < EffectScanEnd(); ++i)
 	{
 		OBJECT* o = &Effects[i];
 		if (o->Live && o->Type == iType && o->Owner == pOwner)
@@ -472,6 +479,8 @@ void CreateEffect(int Type, vec3_t Position, vec3_t Angle, vec3_t Light, int Sub
 		if (!o->Live)
 		{
 			o->Live = true;
+			if (o >= &Effects[0] && o < &Effects[MAX_EFFECTS] && (int)(o - Effects) + 1 > s_effectLiveEnd)
+				s_effectLiveEnd = (int)(o - Effects) + 1;
 			o->Type = Type;
 			o->SubType = SubType;
 			o->LightEnable = true;
@@ -18121,6 +18130,7 @@ void MoveEffects()
 	}
 
 	int GetCount = 0;
+	int lastLive = -1;
 	for (int i = 0; i < MAX_EFFECTS; i++)
 	{
 		OBJECT* o = &Effects[i];
@@ -18128,9 +18138,11 @@ void MoveEffects()
 		{
 			MoveEffect(o, i);
 			GetCount++;
+			lastLive = i;
 		}
 	}
 	mMAX_EFFECTS = GetCount;
+	s_effectLiveEnd = lastLive + 1;
 	g_SkillEffects.MoveEffects();
 }
 

@@ -150,6 +150,9 @@ bool GL_GetSkinStateCache();
 // GL_EXT_buffer_storage + ES 3.2 base-vertex draws). False means every
 // streamed draw takes the per-draw glBufferData orphan (or client arrays).
 bool GL_IsStreamRingActive();
+// True once the GPU-skinning bone ring is in use (persistent-mapped, rides on
+// the stream ring). False until the first skinned draw, or where unsupported.
+bool GL_IsBoneRingActive();
 
 // TEMP profiling: reads GL_DEPTH_BITS / GL_STENCIL_BITS for whichever
 // framebuffer is currently bound, so the real depth-stencil format can be

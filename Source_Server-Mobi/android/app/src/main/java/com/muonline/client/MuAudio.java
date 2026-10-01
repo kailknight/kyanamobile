@@ -3,6 +3,8 @@ package com.muonline.client;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
 import android.media.SoundPool;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -38,6 +40,15 @@ import java.util.HashMap;
  *    decoding is silently dropped. Since each sound is loaded on first use,
  *    that would lose the first occurrence of every sound in the game. Requests
  *    arriving mid-decode are deferred to the load callback instead.
+ *
+ * Everything that talks to the audio service runs on one "MuAudio" thread, in
+ * the order it was asked for. Native calls in from the game thread, and
+ * SoundPool.play is a binder round trip to audioserver that sometimes takes
+ * milliseconds - measured 1 Oct on a Helio G85 as hitches every footstep while
+ * walking, with the game thread parked in IPCThreadState::waitForResponse.
+ * MediaPlayer.prepare (music on a map change) was the same, only longer. The
+ * public methods now queue and return; isMusicPlaying reads a flag instead of
+ * asking MediaPlayer every frame.
  */
 public final class MuAudio {
 
@@ -47,7 +58,28 @@ public final class MuAudio {
     private static SoundPool sPool;
     private static MediaPlayer sMusic;
     private static float sVolume = 1.0f;
-    private static boolean sEnabled = true;
+    private static volatile boolean sEnabled = true;
+
+    private static Handler sHandler;
+    /**
+     * What isMusicPlaying reports. Set the moment music is asked for, not when
+     * MediaPlayer actually starts on the audio thread: IsEndMp3 chains one
+     * event-map track into the next, and seeing "not playing" in the gap would
+     * start the next track at once. Cleared by stopMusic, a failed start, and
+     * the end of a track that does not loop.
+     */
+    private static volatile boolean sMusicPlaying = false;
+    /** Bumped by every playMusic; see the completion listener in playMusicNow. */
+    private static volatile int sMusicRequest = 0;
+
+    private static synchronized Handler handler() {
+        if (sHandler == null) {
+            HandlerThread thread = new HandlerThread("MuAudio");
+            thread.start();
+            sHandler = new Handler(thread.getLooper());
+        }
+        return sHandler;
+    }
 
     /** Engine sound id -> absolute file path, filled by OpenSounds(). */
     private static final HashMap<Integer, String> sPaths = new HashMap<>();
@@ -101,7 +133,7 @@ public final class MuAudio {
                     engineId = pendingId;
                     loop = (pendingLoop != null) && pendingLoop;
                 }
-                // Outside the lock: play() takes it again.
+                // Queued like any other request, behind whatever is pending.
                 play(engineId, loop);
             }
         });
@@ -121,7 +153,14 @@ public final class MuAudio {
         }
     }
 
-    public static synchronized void play(int id, boolean loop) {
+    public static void play(final int id, final boolean loop) {
+        if (!sEnabled) {
+            return;
+        }
+        handler().post(() -> playNow(id, loop));
+    }
+
+    private static synchronized void playNow(int id, boolean loop) {
         if (!sEnabled) {
             return;
         }
@@ -186,7 +225,11 @@ public final class MuAudio {
     }
 
     /** Stops one sound - the ambient loops are stopped by id as the map changes. */
-    public static synchronized void stop(int id) {
+    public static void stop(final int id) {
+        handler().post(() -> stopNow(id));
+    }
+
+    private static synchronized void stopNow(int id) {
         Integer looped = sLoops.remove(id);
         Integer stream = sStreams.remove(id);
         sBusyUntil.remove(id);
@@ -207,7 +250,11 @@ public final class MuAudio {
         }
     }
 
-    public static synchronized void stopAll() {
+    public static void stopAll() {
+        handler().post(MuAudio::stopAllNow);
+    }
+
+    private static synchronized void stopAllNow() {
         if (sPool != null) {
             for (Integer stream : sLoops.values()) {
                 sPool.stop(stream);
@@ -223,26 +270,57 @@ public final class MuAudio {
         sPendingLoops.clear();
     }
 
-    public static synchronized void playMusic(String path, boolean loop) {
+    public static void playMusic(final String path, final boolean loop) {
         if (!sEnabled || path == null || path.isEmpty()) {
             return;
         }
+        final int request = ++sMusicRequest;
+        sMusicPlaying = true;
+        handler().post(() -> playMusicNow(path, loop, request));
+    }
 
-        stopMusic();
+    private static synchronized void playMusicNow(String path, boolean loop, final int request) {
+        if (!sEnabled) {
+            if (sMusicRequest == request) {
+                sMusicPlaying = false;
+            }
+            return;
+        }
+
+        stopMusicNow();
         try {
-            sMusic = new MediaPlayer();
-            sMusic.setDataSource(path);
-            sMusic.setLooping(loop);
-            sMusic.setVolume(sVolume, sVolume);
-            sMusic.prepare();
-            sMusic.start();
+            final MediaPlayer player = new MediaPlayer();
+            sMusic = player;
+            player.setDataSource(path);
+            player.setLooping(loop);
+            player.setVolume(sVolume, sVolume);
+            // Only the track asked for last may report that music has ended -
+            // an older one finishing must not clear a newer request.
+            player.setOnCompletionListener(mp -> {
+                if (sMusicRequest == request && !loop) {
+                    sMusicPlaying = false;
+                }
+            });
+            player.prepare();
+            player.start();
         } catch (Exception musicError) {
             Log.w(TAG, "music failed path=" + path + " (" + musicError.getMessage() + ")");
+            if (sMusic != null) {
+                sMusic.release();
+            }
             sMusic = null;
+            if (sMusicRequest == request) {
+                sMusicPlaying = false;
+            }
         }
     }
 
-    public static synchronized void stopMusic() {
+    public static void stopMusic() {
+        sMusicPlaying = false;
+        handler().post(MuAudio::stopMusicNow);
+    }
+
+    private static synchronized void stopMusicNow() {
         if (sMusic != null) {
             try {
                 sMusic.stop();
@@ -254,16 +332,14 @@ public final class MuAudio {
         }
     }
 
-    /** Backs IsEndMp3(), which the event maps use to chain one track into the next. */
-    public static synchronized boolean isMusicPlaying() {
-        if (sMusic == null) {
-            return false;
-        }
-        try {
-            return sMusic.isPlaying();
-        } catch (IllegalStateException alreadyReleased) {
-            return false;
-        }
+    /**
+     * Backs IsEndMp3(), which the event maps use to chain one track into the
+     * next. Called every frame from the game thread, so it neither takes the
+     * lock the audio thread holds through its binder calls nor asks MediaPlayer
+     * (itself a binder call) - see sMusicPlaying.
+     */
+    public static boolean isMusicPlaying() {
+        return sMusicPlaying;
     }
 
     /**
@@ -271,7 +347,11 @@ public final class MuAudio {
      * scale; that is converted to this linear percentage native side, where the
      * existing conversion already lives.
      */
-    public static synchronized void setVolume(int percent) {
+    public static void setVolume(final int percent) {
+        handler().post(() -> setVolumeNow(percent));
+    }
+
+    private static synchronized void setVolumeNow(int percent) {
         sVolume = Math.max(0.0f, Math.min(1.0f, percent / 100.0f));
         if (sPool != null) {
             for (Integer stream : sLoops.values()) {
@@ -290,10 +370,10 @@ public final class MuAudio {
         }
     }
 
-    public static synchronized void setEnabled(boolean enabled) {
+    public static void setEnabled(boolean enabled) {
         sEnabled = enabled;
         if (!enabled) {
-            stopAll();
+            stopAll();     // both queue behind anything already asked for
             stopMusic();
         }
     }

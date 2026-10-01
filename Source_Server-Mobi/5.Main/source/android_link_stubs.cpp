@@ -700,8 +700,8 @@ extern "C" void AndroidAudioStopMusic()
 // away from a floating window.
 //
 // Called from the UI thread via the focus bridge. Safe from there: MuAudio's
-// setVolume is static synchronized, and AndroidAudioEnv attaches whatever
-// thread asks.
+// setVolume only queues onto its audio thread, and AndroidAudioEnv attaches
+// whatever thread asks.
 extern "C" void AndroidAudioSetFocusMuted(bool muted)
 {
     if (g_androidFocusMuted == muted)
@@ -1005,7 +1005,10 @@ void CWsctlc::AndroidClearPacketQueue()
         m_pPacketQueue->PopPacket();
     }
 
-    m_pPacketQueue->ClearGarbage();
+    // Not ClearGarbage here: Connect/Close can run from inside a packet handler
+    // (server change, reconnect) that is still reading its own packet's buffer,
+    // which sits in the garbage list. GetReadMsg frees it once that handler is
+    // done - see there.
 }
 
 void CWsctlc::AndroidOnPacket(int32_t handle, int32_t size, uint8_t* data)
@@ -1117,7 +1120,15 @@ void CWsctlc::AndroidOnPacket(int32_t handle, int32_t size, uint8_t* data)
         }
     }
 
-    client->m_pPacketQueue->ClearGarbage();
+    // No ClearGarbage on this (receive) thread. Popped packets go to the
+    // garbage list while the main thread is still parsing them - GetReadMsg
+    // returns a pointer into the CPacket - so freeing the list here deleted the
+    // packet being parsed, and the next `new CPacket` (same 8 KB size class)
+    // reused its memory mid-parse. Seen 1 Oct as a 0x13 monster-create burst
+    // that went from valid NPC records into chat text and zeros halfway through
+    // the packet: ~50 monsters only that client could see, and NPCs "walking"
+    // (garbage creates re-using NPC keys). Windows never hit it: there the
+    // receive and the parse share the main thread.
 }
 
 void CWsctlc::AndroidOnDisconnect(int32_t handle)
@@ -1358,6 +1369,15 @@ int CWsctlc::nRecv()
 BYTE* CWsctlc::GetReadMsg()
 {
     std::lock_guard<std::mutex> lock(g_androidSocketMutex);
+
+    // Packets popped by earlier calls are finished with by now: ProtocolCompiler
+    // parses one at a time and does not re-enter (g_protocol_lock), so this is
+    // the one place it is safe to free them - on the parsing thread, before
+    // handing out the next buffer. See AndroidOnPacket.
+    if (m_pPacketQueue != nullptr)
+    {
+        m_pPacketQueue->ClearGarbage();
+    }
 
     if (m_pPacketQueue != nullptr && !m_pPacketQueue->IsEmpty())
     {

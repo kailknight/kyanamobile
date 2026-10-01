@@ -11,6 +11,13 @@
 #include "Protocol.h"
 #include "ZzzAI.h"
 #include "wsclientinline.h"
+#include "ZzzInterface.h"
+#include "ZzzLodTerrain.h"
+#include "ZzzCharacter.h"
+#include "ZzzInventory.h"
+#include <functional>
+#include <queue>
+#include <vector>
 #if defined(__ANDROID__) || defined(MU_IOS)
 #include "Platform/MobileTime.h"
 #endif
@@ -32,6 +39,53 @@ extern int DisplayWinReal;
 extern HWND g_hWnd;
 extern CHARACTER_ATTRIBUTE *CharacterAttribute;
 extern CHARACTER_MACHINE *CharacterMachine;
+
+// Where party member i is on the current map, for the minimaps. A member in
+// the viewport (SearchPartyMember resolved its CharactersClient slot) uses the
+// live tile; one out of sight falls back to the last position the party-list
+// packet carried, if that was on this map. The hero (index -3) is skipped -
+// every minimap already draws its own marker.
+//
+// Party[i].index is not usable for this: it is only re-resolved while the
+// party list window's Update resets it to -2, so with that window hidden it
+// stays -1 (or a stale slot) forever. The viewport is searched by name instead.
+//
+// The packet position is only sent on join/leave, so RequestPartyPositions()
+// asks the server for a fresh list (0x42, same reply as opening the party
+// window) while a minimap is showing party members.
+bool GetPartyMemberMapTile(int i, int *outX, int *outY) {
+  if (i < 0 || i >= PartyNumber || i >= MAX_PARTYS || Hero == NULL)
+    return false;
+  const PARTY_t &p = Party[i];
+  if (p.Name[0] == 0 || strncmp(p.Name, Hero->ID, MAX_ID_SIZE) == 0)
+    return false;
+  for (int k = 0; k < MAX_CHARACTERS_CLIENT; ++k) {
+    CHARACTER *c = &CharactersClient[k];
+    if (c == Hero || !c->Object.Live || c->Object.Kind != KIND_PLAYER)
+      continue;
+    if (strncmp(p.Name, c->ID, MAX_ID_SIZE) != 0)
+      continue;
+    *outX = c->PositionX;
+    *outY = c->PositionY;
+    return true;
+  }
+  if ((int)p.Map != gMapManager.WorldActive)
+    return false;
+  *outX = p.x;
+  *outY = p.y;
+  return true;
+}
+
+void RequestPartyPositions(DWORD intervalMs) {
+  static DWORD s_lastRequest = 0;
+  if (PartyNumber <= 1 || SceneFlag != MAIN_SCENE)
+    return;
+  const DWORD now = GetTickCount();
+  if (s_lastRequest != 0 && now - s_lastRequest < intervalMs)
+    return;
+  s_lastRequest = now;
+  SendRequestPartyList();
+}
 extern Interface gInterface;
 
 #if defined(__ANDROID__) || defined(MU_IOS)
@@ -316,6 +370,38 @@ void CNewUIHeroPositionInfo::DataViewPortMapLoad(float x, float y) {
     // Clip against the actual computed position instead.
     if (X >= x && X <= x + 94.f && Y >= y && Y <= y + 94.f)
       RenderColor((float)(X), (float)(Y), 3.f, 3.f); // 11
+  }
+
+  // Party members on top, larger and in their own colour, with the same
+  // placement maths as the loop above. Out-of-sight members use the last tile
+  // the party list reported, so they can be off this small window - those are
+  // clipped like everything else.
+  RequestPartyPositions(3000);
+  for (int i = 0; i < PartyNumber; ++i) {
+    int mx, my;
+    if (!GetPartyMemberMapTile(i, &mx, &my))
+      continue;
+    lpTarget[0] = (double)mx + 2.5;
+    lpTarget[1] = (double)my;
+    if (ScaleMap == 0.125) {
+      BoxCurrentX = 56.0 + ((lpObj[0] - lpTarget[0]) *
+                            ((lpObj[0] < lpTarget[0]) ? 1.1 : 1.7));
+      BoxCurrentY = 46.0 - ((lpObj[1] - lpTarget[1]) * 1.4);
+    } else if (ScaleMap == 0.25) {
+      BoxCurrentX = 56.0 + ((lpObj[0] - lpTarget[0]) * 0.7);
+      BoxCurrentY = 46.0 - ((lpObj[1] - lpTarget[1]) * 0.5);
+    } else {
+      BoxCurrentX = 51.0 + ((lpObj[0] - lpTarget[0]) * 0.4);
+      BoxCurrentY = 46.0 - ((lpObj[1] - lpTarget[1]) * 0.4);
+    }
+    X = x + BoxCurrentX + (lpTarget[0] / BoxPrintW) - v53;
+    Y = y + BoxCurrentY + ((253.5 - lpTarget[1]) / BoxPrintW) - v48;
+    if (X >= x && X <= x + 94.f && Y >= y && Y <= y + 94.f) {
+      glColor3f(0.05f, 0.05f, 0.05f);
+      RenderColor(X - 1.0f, Y - 1.0f, 5.f, 5.f);
+      glColor3f(1.0f, 0.42f, 0.9f);
+      RenderColor(X - 0.5f, Y - 0.5f, 4.f, 4.f);
+    }
   }
   EndRenderColor();
 }
@@ -789,19 +875,19 @@ static void DrawRotatingMapQuad(int ID, float X, float Y, float W, float H,
   glBegin(GL_TRIANGLE_FAN);
 
   float ox, oy, u, v;
-  ox = -halfScale; oy = -halfScale;
+  ox = -halfScale; oy = halfScale;
   u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
   glTexCoord2f(u, v); glVertex2f(left, bottom);
 
-  ox = halfScale; oy = -halfScale;
+  ox = halfScale; oy = halfScale;
   u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
   glTexCoord2f(u, v); glVertex2f(right, bottom);
 
-  ox = halfScale; oy = halfScale;
+  ox = halfScale; oy = -halfScale;
   u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
   glTexCoord2f(u, v); glVertex2f(right, top);
 
-  ox = -halfScale; oy = halfScale;
+  ox = -halfScale; oy = -halfScale;
   u = CurrenX + (ox * cosT - oy * sinT); v = CurrenY + (ox * sinT + oy * cosT);
   glTexCoord2f(u, v); glVertex2f(left, top);
 
@@ -885,8 +971,34 @@ void CNewUIHeroPositionInfo::DrawAndroidMiniMap() {
       glColor3f(0 / 255.f, 255 / 255.f, 234 / 255.f);
 
     const float bx = cx + normX * (pw / 2.0f);
-    const float by = cy - normY * (ph / 2.0f);
+    const float by = cy + normY * (ph / 2.0f);
     RenderColor(bx - 1.5f, by - 1.5f, 3.f, 3.f);
+  }
+
+  // Party members, on top of the ordinary blips and larger, in their own
+  // colour. Out-of-sight members still show at their last reported tile.
+  RequestPartyPositions(3000);
+  for (int i = 0; i < PartyNumber; ++i) {
+    int mx, my;
+    if (!GetPartyMemberMapTile(i, &mx, &my))
+      continue;
+    const float uOffset = (float)(mx - Hero->PositionX) / 256.0f;
+    const float vOffset = -(float)(my - Hero->PositionY) / 256.0f;
+    float normX = (uOffset * cosT + vOffset * sinT) / halfScale;
+    float normY = (-uOffset * sinT + vOffset * cosT) / halfScale;
+    // Pin a member beyond the panel to its edge, so the direction still shows.
+    const float edge = (std::fabs(normX) > std::fabs(normY)) ? std::fabs(normX)
+                                                             : std::fabs(normY);
+    if (edge > 0.95f) {
+      normX *= 0.95f / edge;
+      normY *= 0.95f / edge;
+    }
+    const float bx = cx + normX * (pw / 2.0f);
+    const float by = cy + normY * (ph / 2.0f);
+    glColor3f(0.05f, 0.05f, 0.05f);
+    RenderColor(bx - 3.0f, by - 3.0f, 6.f, 6.f);
+    glColor3f(1.0f, 0.42f, 0.9f);
+    RenderColor(bx - 2.0f, by - 2.0f, 4.f, 4.f);
   }
 
   // Player marker, fixed at the panel's center.
@@ -898,26 +1010,28 @@ void CNewUIHeroPositionInfo::DrawAndroidMiniMap() {
   // rotates to show which way the player is looking - otherwise turning the
   // character would give no feedback here at all.
   //
-  // Rotating the cone by +Angle[2] is the exact inverse of the -Angle[2] the map
-  // quad used to apply, so it points at whatever terrain used to be pushed to the
-  // top of the panel. Angles are in UI space, which is y-DOWN, hence the tip at
-  // -10 rather than +10.
-  //
-  // If the cone points the wrong way on device, flip the sign of facingRad only;
-  // the map and blips are independent of it now.
+  // MU facing (CreateAngle, ZzzAI.cpp): 0 = world -Y, 90 = world +X, so the
+  // world heading is (sin a, -cos a). The panel draws world +X to the right and
+  // world +Y up (the blips above use -dy), so in this y-DOWN UI space the heading
+  // is (sin a, +cos a). The old cone rotated a tip at (0,-10) - correct for
+  // east/west but mirrored north/south: walking down the map drew it pointing up.
   const float facingRad = Hero->Object.Angle[2] * (3.14159265f / 180.0f);
-  const float cosF = std::cos(facingRad);
-  const float sinF = std::sin(facingRad);
+  const float fwdX = std::sin(facingRad);
+  const float fwdY = std::cos(facingRad);
+  const float sideX = fwdY;   // perpendicular, for the cone's base
+  const float sideY = -fwdX;
 
-  const float coneLocal[3][2] = { { 0.0f, -10.0f }, { -5.0f, 2.0f }, { 5.0f, 2.0f } };
+  const float cone[3][2] = {
+    { cx + fwdX * 10.0f, cy + fwdY * 10.0f },
+    { cx - fwdX * 2.0f + sideX * 5.0f, cy - fwdY * 2.0f + sideY * 5.0f },
+    { cx - fwdX * 2.0f - sideX * 5.0f, cy - fwdY * 2.0f - sideY * 5.0f },
+  };
 
   glDisable(GL_TEXTURE_2D);
   glColor4f(0.16f, 0.94f, 0.35f, 0.9f);
   glBegin(GL_TRIANGLES);
   for (int n = 0; n < 3; ++n) {
-    const float rx = (coneLocal[n][0] * cosF) - (coneLocal[n][1] * sinF);
-    const float ry = (coneLocal[n][0] * sinF) + (coneLocal[n][1] * cosF);
-    glVertex2f(ConvertX(cx + rx), (float)WindowHeight - ConvertY(cy + ry));
+    glVertex2f(ConvertX(cone[n][0]), (float)WindowHeight - ConvertY(cone[n][1]));
   }
   glEnd();
   glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
@@ -948,116 +1062,393 @@ void CNewUIHeroPositionInfo::DrawAndroidMiniMap() {
 }
 #endif // __ANDROID__ || MU_IOS
 
+// ---------------------------------------------------------------------------
+// Minimap auto-walk (PC + mobile).
+//
+// PathFinding2 alone cannot do this: PATH::FindPath gives up after 500 nodes
+// and a move packet carries at most MAX_PATH_FIND (15) steps, so it can only
+// ever see a small window around the character. The old version fanned a few
+// headings out toward the target from wherever it stood, which got stuck in
+// any dead end deeper than its fan - "it walks into the wall".
+//
+// So the whole route is planned once, here, with A* over the full 256x256
+// TerrainWall grid (the same walkability rule FindPath uses, minus characters,
+// which move). The character is then walked along that route in legs of up to
+// kAutoRouteLegTiles, each leg still pathed by PathFinding2 so SendMove gets a
+// path in exactly the shape it always has.
+//
+// Legs are topped up at a tile boundary before the current one runs out, the
+// same way the Android joystick extends a hold, instead of waiting for the
+// character to stop: stopping between legs played the stand animation and
+// reset Run (SetPlayerStop), so every 15 tiles the run dropped back to a walk.
+//
+// Any path the hero picks up that is not ours (click-to-move, joystick,
+// attacking a monster, the helper) cancels the auto-walk.
+// ---------------------------------------------------------------------------
+namespace {
+
+const int kAutoRouteLegTiles = 12;
+// Same threshold the joystick uses to decide it is at a step boundary: closer
+// than this to the centre of the tile being entered, a new path can be rooted
+// on that tile without throwing away the step in progress.
+const float kAutoRouteStepCommitPx = 30.0f;
+
+struct AutoRoute {
+  std::vector<unsigned char> x;
+  std::vector<unsigned char> y;
+  int cursor;           // route index the hero is at (or just past)
+  int goalX, goalY;     // tapped tile this route was planned for
+  int world;            // map it was planned on
+  int legEndX, legEndY; // final tile of the leg last handed to SendMove
+  int replans;
+  bool forceLeg;        // a fresh route wants a new leg at the next boundary
+};
+
+AutoRoute g_autoRoute;
+
+void ResetAutoRoute() {
+  g_autoRoute.x.clear();
+  g_autoRoute.y.clear();
+  g_autoRoute.cursor = 0;
+  g_autoRoute.goalX = g_autoRoute.goalY = -1;
+  g_autoRoute.world = -1;
+  g_autoRoute.legEndX = g_autoRoute.legEndY = -1;
+  g_autoRoute.replans = 0;
+  g_autoRoute.forceLeg = false;
+}
+
+struct AutoRouteInit {
+  AutoRouteInit() { ResetAutoRoute(); }
+} g_autoRouteInit;
+
+// FindPath's rule (ZzzPath.h) with iWall = TW_NOMOVE: strip ACTION / HEIGHT /
+// CAMERA_UP and anything left at or above TW_NOMOVE blocks. Safe zone and
+// TW_CHARACTER pass - characters move, so planning around them only produces a
+// detour that is wrong a second later. The per-leg PathFinding2 uses the same
+// TW_NOMOVE wall so it agrees with the plan.
+inline bool AutoRouteOpen(int x, int y) {
+  if (x < 0 || y < 0 || x >= TERRAIN_SIZE || y >= TERRAIN_SIZE)
+    return false;
+  int a = TerrainWall[y * TERRAIN_SIZE + x];
+  a &= ~(TW_ACTION | TW_HEIGHT | TW_CAMERA_UP);
+  return a < TW_NOMOVE;
+}
+
+inline int AutoRouteOctile(int ax, int ay, int bx, int by) {
+  const int dx = abs(ax - bx);
+  const int dy = abs(ay - by);
+  return 10 * (dx + dy) - 6 * min(dx, dy);
+}
+
+// A* from (sx,sy) toward (tx,ty). When the target itself cannot be reached (a
+// tap on a wall, a roof, the sea, a fenced-off area) it routes to the reachable
+// tile closest to it instead, so a tap always walks somewhere sensible.
+bool PlanAutoRoute(int sx, int sy, int tx, int ty) {
+  static const int kN = TERRAIN_SIZE * TERRAIN_SIZE;
+  static int s_cost[TERRAIN_SIZE * TERRAIN_SIZE];
+  static int s_prev[TERRAIN_SIZE * TERRAIN_SIZE];
+  static unsigned short s_stamp[TERRAIN_SIZE * TERRAIN_SIZE];
+  static unsigned char s_closed[TERRAIN_SIZE * TERRAIN_SIZE];
+  static unsigned short s_gen = 0;
+
+  // Generation stamps instead of clearing the arrays on every tap.
+  if (++s_gen == 0) {
+    memset(s_stamp, 0, sizeof(s_stamp));
+    s_gen = 1;
+  }
+
+  g_autoRoute.x.clear();
+  g_autoRoute.y.clear();
+  g_autoRoute.cursor = 0;
+
+  if (sx < 0 || sy < 0 || sx >= TERRAIN_SIZE || sy >= TERRAIN_SIZE)
+    return false;
+  tx = (tx < 0) ? 0 : ((tx >= TERRAIN_SIZE) ? TERRAIN_SIZE - 1 : tx);
+  ty = (ty < 0) ? 0 : ((ty >= TERRAIN_SIZE) ? TERRAIN_SIZE - 1 : ty);
+
+  typedef std::pair<int, int> Node; // (f, index); min-heap via greater<>
+  std::priority_queue<Node, std::vector<Node>, std::greater<Node> > open;
+
+  const int start = sy * TERRAIN_SIZE + sx;
+  const int goal = ty * TERRAIN_SIZE + tx;
+  s_stamp[start] = s_gen;
+  s_cost[start] = 0;
+  s_prev[start] = -1;
+  s_closed[start] = 0;
+  open.push(Node(AutoRouteOctile(sx, sy, tx, ty), start));
+
+  int best = start;
+  int bestH = AutoRouteOctile(sx, sy, tx, ty);
+
+  static const int kDir[8][2] = {{1, 0}, {-1, 0}, {0, 1},  {0, -1},
+                                 {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+  while (!open.empty()) {
+    const int cur = open.top().second;
+    open.pop();
+    if (s_closed[cur])
+      continue;
+    s_closed[cur] = 1;
+
+    const int cx = cur % TERRAIN_SIZE;
+    const int cy = cur / TERRAIN_SIZE;
+    const int h = AutoRouteOctile(cx, cy, tx, ty);
+    if (h < bestH) {
+      bestH = h;
+      best = cur;
+    }
+    if (cur == goal)
+      break;
+
+    for (int d = 0; d < 8; ++d) {
+      const int nx = cx + kDir[d][0];
+      const int ny = cy + kDir[d][1];
+      if (!AutoRouteOpen(nx, ny))
+        continue;
+      const bool diagonal = (kDir[d][0] != 0 && kDir[d][1] != 0);
+      // No squeezing diagonally between two blocked tiles - FindPath tolerates
+      // it, but on screen it is walking through a wall corner.
+      if (diagonal && !AutoRouteOpen(cx + kDir[d][0], cy) &&
+          !AutoRouteOpen(cx, cy + kDir[d][1]))
+        continue;
+
+      const int ni = ny * TERRAIN_SIZE + nx;
+      const int nc = s_cost[cur] + (diagonal ? 14 : 10);
+      if (s_stamp[ni] != s_gen) {
+        s_stamp[ni] = s_gen;
+        s_closed[ni] = 0;
+      } else if (s_closed[ni] || nc >= s_cost[ni]) {
+        continue;
+      }
+      s_cost[ni] = nc;
+      s_prev[ni] = cur;
+      open.push(Node(nc + AutoRouteOctile(nx, ny, tx, ty), ni));
+    }
+  }
+
+  // Walk back from the goal (or the reachable tile nearest to it).
+  std::vector<int> rev;
+  for (int i = best; i != -1 && (int)rev.size() < kN; i = s_prev[i])
+    rev.push_back(i);
+
+  g_autoRoute.x.reserve(rev.size());
+  g_autoRoute.y.reserve(rev.size());
+  for (int i = (int)rev.size() - 1; i >= 0; --i) {
+    g_autoRoute.x.push_back((unsigned char)(rev[i] % TERRAIN_SIZE));
+    g_autoRoute.y.push_back((unsigned char)(rev[i] / TERRAIN_SIZE));
+  }
+  return g_autoRoute.x.size() > 1;
+}
+
+void StopAutoMove(bool stopHero) {
+  if (g_pNewUIMiniMap != NULL)
+    g_pNewUIMiniMap->Movement = false;
+  if (stopHero && Hero != NULL) {
+    Hero->Movement = false;
+    SetPlayerStop(Hero);
+  }
+  ResetAutoRoute();
+  CGAutoMove(0);
+}
+
+// The tile to root the next leg on. MovePath sets PositionX/Y to the tile
+// being entered as soon as a step begins, which is what lets a leg chain onto
+// the end of the step in progress - unless a server position sync has pulled
+// it more than a tile away from the model, in which case the model wins (same
+// correction as the Android joystick).
+void AutoRouteStartTile(int *outX, int *outY) {
+  int sx = Hero->PositionX;
+  int sy = Hero->PositionY;
+  const int ox = (int)floorf(Hero->Object.Position[0] / TERRAIN_SCALE);
+  const int oy = (int)floorf(Hero->Object.Position[1] / TERRAIN_SCALE);
+  if ((abs(ox - sx) > 1 || abs(oy - sy) > 1) && ox >= 0 && ox < TERRAIN_SIZE &&
+      oy >= 0 && oy < TERRAIN_SIZE) {
+    sx = ox;
+    sy = oy;
+  }
+  *outX = sx;
+  *outY = sy;
+}
+
+} // namespace
+
+// Read by the minimap window to draw the planned route.
+int GetAutoMoveRoute(const unsigned char **xs, const unsigned char **ys,
+                     int *cursor) {
+  if (g_pNewUIMiniMap == NULL || !g_pNewUIMiniMap->Movement ||
+      g_autoRoute.x.empty()) {
+    return 0;
+  }
+  *xs = &g_autoRoute.x[0];
+  *ys = &g_autoRoute.y[0];
+  *cursor = g_autoRoute.cursor;
+  return (int)g_autoRoute.x.size();
+}
+
 void AutoMove() {
-  if (Hero == NULL)
+  if (Hero == NULL || g_pNewUIMiniMap == NULL)
     return;
 
   if (!g_pNewUIMiniMap->Movement) {
+    // Cancelled from outside (the Android joystick, the minimap close, ...).
+    if (!g_autoRoute.x.empty() || g_autoRoute.goalX >= 0)
+      ResetAutoRoute();
     return;
   }
 
   if (SEASON3B::IsPress(VK_ESCAPE)) {
-    Hero->Movement = false;
-    g_pNewUIMiniMap->Movement = false;
-    SetPlayerStop(Hero);
-    CGAutoMove(0);
-    return;
-  }
-  if (Hero->Movement) {
-    // Mid-leg: let it finish, then this function issues the next one.
+    StopAutoMove(true);
     return;
   }
 
-  if (Hero->Dead != 0 || Hero->Appear != 0) {
-    Hero->Movement = false;
-    g_pNewUIMiniMap->Movement = false;
+  if (Hero->Dead != 0 || Hero->Object.Live == 0) {
+    StopAutoMove(false);
     return;
   }
 
-  const int startX = Hero->PositionX;
-  const int startY = Hero->PositionY;
+  // Warped mid-walk: the tapped coordinates belong to the old map.
+  if (g_autoRoute.world >= 0 && g_autoRoute.world != gMapManager.WorldActive) {
+    StopAutoMove(false);
+    return;
+  }
+
   const int targetX = (int)g_pNewUIMiniMap->ViTriDiChuyen.x;
   const int targetY = (int)g_pNewUIMiniMap->ViTriDiChuyen.y;
+  const bool newTap = (g_autoRoute.goalX != targetX || g_autoRoute.goalY != targetY);
 
-  const int dx = targetX - startX;
-  const int dy = targetY - startY;
-  const int distSq = (dx * dx) + (dy * dy);
+  // A path we did not issue means the player took over (click-to-move, the
+  // joystick, attacking a monster). Only checked once we have issued a leg and
+  // the tap has not changed, so a tap made mid-walk still starts cleanly.
+  if (!newTap && Hero->Movement && g_autoRoute.legEndX >= 0) {
+    const PATH_t &p = Hero->Path;
+    const bool ours = Hero->MovementType == MOVEMENT_MOVE && p.PathNum > 0 &&
+                      p.PathX[p.PathNum - 1] == g_autoRoute.legEndX &&
+                      p.PathY[p.PathNum - 1] == g_autoRoute.legEndY;
+    if (!ours) {
+      StopAutoMove(false);
+      return;
+    }
+  }
 
-  // Close enough - stop cleanly instead of thrashing one tile back and forth.
-  if (distSq <= 4) {
-    Hero->Movement = false;
-    g_pNewUIMiniMap->Movement = false;
-    SetPlayerStop(Hero);
-    CGAutoMove(0);
+  // Mid-teleport / mid-skill / a shop owns the interface: wait, keep the route.
+  if (Hero->Appear != 0 || !CanHeroAcceptMoveCommand(&Hero->Object))
+    return;
+  if (g_pNewUISystem->IsImpossibleSendMoveInterface())
+    return;
+
+  // Not at a tile boundary yet: let the step finish. Re-pathing mid-step resets
+  // CurrentPathFloat and the model snaps back (the joystick's "vibrate" bug).
+  if (Hero->Movement) {
+    const float destX = ((float)Hero->PositionX + 0.5f) * TERRAIN_SCALE;
+    const float destY = ((float)Hero->PositionY + 0.5f) * TERRAIN_SCALE;
+    const float ddx = destX - Hero->Object.Position[0];
+    const float ddy = destY - Hero->Object.Position[1];
+    if (sqrtf(ddx * ddx + ddy * ddy) > kAutoRouteStepCommitPx)
+      return;
+    const PATH_t &p = Hero->Path;
+    const bool legEnding = (int)p.CurrentPath >= (int)p.PathNum - 2;
+    if (!legEnding && !newTap && !g_autoRoute.forceLeg)
+      return;
+  }
+
+  int sx, sy;
+  AutoRouteStartTile(&sx, &sy);
+
+  if (newTap) {
+    ResetAutoRoute();
+    g_autoRoute.goalX = targetX;
+    g_autoRoute.goalY = targetY;
+    g_autoRoute.world = gMapManager.WorldActive;
+    if (!PlanAutoRoute(sx, sy, targetX, targetY)) {
+      StopAutoMove(true);
+      return;
+    }
+  }
+
+  const int last = (int)g_autoRoute.x.size() - 1;
+
+  // Where on the route are we? Search a little behind and well ahead of the
+  // cursor (a leg can cut a corner tile, or the server can nudge us).
+  {
+    int bestI = -1;
+    int bestD = 1 << 30;
+    const int lo = max(0, g_autoRoute.cursor - 4);
+    const int hi = min(last, g_autoRoute.cursor + kAutoRouteLegTiles + 8);
+    for (int i = lo; i <= hi; ++i) {
+      const int d = max(abs((int)g_autoRoute.x[i] - sx),
+                        abs((int)g_autoRoute.y[i] - sy));
+      if (d <= bestD) { // <= : prefer the furthest-along of equal matches
+        bestD = d;
+        bestI = i;
+      }
+    }
+    if (bestI < 0 || bestD > 3) {
+      // Knocked off the route (pushed, a server snap, a leg that went round a
+      // crowd). Plan again from here, a bounded number of times.
+      if (++g_autoRoute.replans > 5 ||
+          !PlanAutoRoute(sx, sy, targetX, targetY)) {
+        StopAutoMove(true);
+        return;
+      }
+      g_autoRoute.forceLeg = true;
+      return; // next frame, against the new route
+    }
+    if (bestI > g_autoRoute.cursor)
+      g_autoRoute.cursor = bestI;
+  }
+
+  // Arrived (at the tap, or as close to it as the terrain allows).
+  if (g_autoRoute.cursor >= last ||
+      (g_autoRoute.cursor >= last - 1 &&
+       abs((int)g_autoRoute.x[last] - sx) <= 1 &&
+       abs((int)g_autoRoute.y[last] - sy) <= 1)) {
+    if (!Hero->Movement)
+      StopAutoMove(false);
+    else {
+      // Let the last step play out; just stop chaining legs.
+      g_pNewUIMiniMap->Movement = false;
+      ResetAutoRoute();
+      CGAutoMove(0);
+    }
     return;
   }
 
-  // PathFinding2 can only ever return MAX_PATH_FIND (15, _define.h) steps,
-  // because that is the hard cap on what a move packet can carry. The old code
-  // asked for a path straight to the clicked tile and gave up permanently the
-  // moment that failed - so any minimap click more than ~15 tiles away (which
-  // is nearly all of them on a 256x256 map) stopped auto-move dead before the
-  // character took a single step. That is the "auto path doesn't work" bug.
-  //
-  // Walk it as a series of legs instead: aim at the furthest point along the
-  // way that pathfinding will actually accept, move there, and re-enter here
-  // when that leg finishes to issue the next one. Fanning out by a few angles
-  // at each length lets it round a wall corner rather than stalling against it;
-  // it is not a full long-range A*, but it gets out of local obstructions,
-  // which is what the straight-line-only version could never do.
-  static const int kLegLengths[] = { 14, 11, 8, 6, 4, 3, 2 };
-  static const float kFanRadians[] = { 0.0f, 0.45f, -0.45f, 0.9f, -0.9f, 1.4f, -1.4f };
-
-  const float dist = sqrtf((float)distSq);
-  const float baseAngle = atan2f((float)dy, (float)dx);
-
+  // Next leg: the furthest route tile within reach that PathFinding2 accepts.
+  static const int kLook[] = {kAutoRouteLegTiles, 9, 6, 4, 2, 1};
   bool issued = false;
-
-  // Straight to the target first - short hops still resolve in one leg.
-  if (PathFinding2(startX, startY, targetX, targetY, &Hero->Path, 0.0f)) {
-    issued = true;
+  for (int li = 0; li < (int)(sizeof(kLook) / sizeof(kLook[0])) && !issued;
+       ++li) {
+    const int k = min(last, g_autoRoute.cursor + kLook[li]);
+    if (k <= g_autoRoute.cursor)
+      continue;
+    const int kx = g_autoRoute.x[k];
+    const int ky = g_autoRoute.y[k];
+    if (kx == sx && ky == sy)
+      continue;
+    if (PathFinding2(sx, sy, kx, ky, &Hero->Path, 0.0f, TW_NOMOVE))
+      issued = true;
   }
 
-  for (int li = 0; li < (int)(sizeof(kLegLengths) / sizeof(kLegLengths[0])) && !issued; ++li) {
-    const float leg = (float)kLegLengths[li];
-
-    if (leg >= dist) {
-      continue; // already covered by the direct attempt above
+  if (!issued) {
+    // Usually a crowd standing on the route. Re-plan from here; if that keeps
+    // failing, give up rather than spin.
+    if (++g_autoRoute.replans > 5 ||
+        !PlanAutoRoute(sx, sy, targetX, targetY)) {
+      StopAutoMove(true);
     }
-
-    for (int ai = 0; ai < (int)(sizeof(kFanRadians) / sizeof(kFanRadians[0])) && !issued; ++ai) {
-      const float angle = baseAngle + kFanRadians[ai];
-
-      int wx = startX + (int)(cosf(angle) * leg);
-      int wy = startY + (int)(sinf(angle) * leg);
-
-      wx = (wx < 0) ? 0 : ((wx > 255) ? 255 : wx);
-      wy = (wy < 0) ? 0 : ((wy > 255) ? 255 : wy);
-
-      if (wx == startX && wy == startY) {
-        continue;
-      }
-
-      if (PathFinding2(startX, startY, wx, wy, &Hero->Path, 0.0f)) {
-        issued = true;
-      }
-    }
+    return;
   }
 
-  if (issued) {
-    Hero->MovementType = MOVEMENT_MOVE;
-    Hero->Movement = true;
-    // Immediately after the successful query and before anything else touches
-    // the path: SendMove transmits PathX[0..] assuming index 0 is where the
-    // character currently stands.
-    SendMove(Hero, &Hero->Object);
-  } else {
-    // Genuinely boxed in on every heading tried - stop rather than spin.
-    Hero->Movement = false;
-    g_pNewUIMiniMap->Movement = false;
-    SetPlayerStop(Hero);
-    CGAutoMove(0);
-  }
+  g_iFollowCharacter = -1;
+  Hero->MovementType = MOVEMENT_MOVE;
+  Hero->Movement = true;
+  g_autoRoute.legEndX = Hero->Path.PathX[Hero->Path.PathNum - 1];
+  g_autoRoute.legEndY = Hero->Path.PathY[Hero->Path.PathNum - 1];
+  g_autoRoute.forceLeg = false;
+  // Immediately after the successful query and before anything else touches
+  // the path: SendMove transmits PathX[0..] assuming index 0 is where the
+  // character currently stands.
+  SendMove(Hero, &Hero->Object);
 }
 
 // void ShowInfoTitleWindow()

@@ -12,6 +12,9 @@
 #include "UIControls.h"
 #include "CSChaosCastle.h"
 #include "PersonalShopTitleImp.h"
+#if defined(__ANDROID__) || defined(MU_IOS)
+#include "GameConfig/GameConfig.h"
+#endif
 #include "MatchEvent.h"
 #include "MapManager.h"
 #include "CBInterface.h"
@@ -40,6 +43,11 @@ SEASON3B::CNewUINameWindow::CNewUINameWindow()
 	// loads) - not at CNewUISystem::Create() during early WinMain bootstrap,
 	// which is well before that and does not create this window at all.
 	m_bShowItemName = GetPrivateProfileInt("Custom", "ShowItemNames", 1, ".\\config.ini") != 0;
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// The ini read above is a stub on mobile; written back by
+	// MobileSyncOptionSettings (NewUIOptionWindow.cpp).
+	m_bShowItemName = MobileSettingsGetInt("Custom.ShowItemNames", m_bShowItemName ? 1 : 0) != 0;
+#endif
 }
 
 SEASON3B::CNewUINameWindow::~CNewUINameWindow()

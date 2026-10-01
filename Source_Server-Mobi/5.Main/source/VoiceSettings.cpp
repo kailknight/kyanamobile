@@ -12,11 +12,10 @@
 // Rather than teach the rest of the voice code about that split, it is dealt
 // with once, here. Everything else calls these eight functions.
 //
-// NOTE: on Android nothing persists. GameConfig::Load and Save are no-ops
-// there, so these values reset every launch. That is a pre-existing gap across
-// every setting in the client, not something voice introduced, but it does
-// mean a mobile player who mutes has to mute again next time - which is why
-// the defaults are the common case rather than the cautious one.
+// On Android GameConfig::Load/Save go to mu_settings.cfg in the data root, so
+// these persist across launches (until 1 Oct 2026 they were no-ops and reset
+// every launch). The defaults are still the common case rather than the
+// cautious one.
 
 #include "stdafx.h"
 #include "VoiceClient.h"

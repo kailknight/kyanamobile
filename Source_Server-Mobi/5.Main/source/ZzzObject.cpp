@@ -103,6 +103,15 @@ extern vec3_t VertexTransform[MAX_MESH][MAX_VERTICES];
 extern vec3_t LightTransform[MAX_MESH][MAX_VERTICES];
 extern float CameraDistanceTarget;
 
+// Mobile: the mounts players ride or lead (Dark Horse, Fenrir, the Dark Lord's
+// Dark Spirit) cast no shadow, matching the players themselves - see
+// kRenderPlayerShadows in ZzzCharacter.cpp. User request, 1 Oct.
+#if defined(__ANDROID__) || defined(MU_IOS)
+static constexpr bool kRenderPlayerMountShadows = false;
+#else
+static constexpr bool kRenderPlayerMountShadows = true;
+#endif
+
 int          g_iTotalObj = 0;
 OBJECT_BLOCK ObjectBlock [256];
 OBJECT       Boids		 [MAX_BOIDS];
@@ -2267,7 +2276,7 @@ void Draw_RenderObject(OBJECT *o,bool Translate,int Select, int ExtraMon)
 			b->RenderMesh(14, RENDER_CHROME|RENDER_BRIGHT,o->Alpha,o->BlendMesh,o->BlendMeshLight,o->BlendMeshTexCoordU,o->BlendMeshTexCoordV,o->HiddenMesh);
 			b->RenderMesh(15, RENDER_CHROME|RENDER_BRIGHT,o->Alpha,o->BlendMesh,o->BlendMeshLight,o->BlendMeshTexCoordU,o->BlendMeshTexCoordV,o->HiddenMesh);
 
-			if ( gMapManager.WorldActive != WD_10HEAVEN && gMapManager.InHellas()==false )
+			if ( kRenderPlayerMountShadows && gMapManager.WorldActive != WD_10HEAVEN && gMapManager.InHellas()==false )
 			{
 				if(!g_Direction.m_CKanturu.IsMayaScene())
 				{
@@ -2337,8 +2346,8 @@ void Draw_RenderObject(OBJECT *o,bool Translate,int Select, int ExtraMon)
 			}
 
 			b->EndRender();
-			
-			if (gMapManager.WorldActive != WD_10HEAVEN && gMapManager.InHellas() == FALSE)
+
+			if (kRenderPlayerMountShadows && gMapManager.WorldActive != WD_10HEAVEN && gMapManager.InHellas() == FALSE)
 			{
 				if(!g_Direction.m_CKanturu.IsMayaScene())
 				{
@@ -2479,7 +2488,7 @@ void Draw_RenderObject(OBJECT *o,bool Translate,int Select, int ExtraMon)
             }
             b->EndRender();
 
-            if ( gMapManager.WorldActive!=WD_10HEAVEN && gMapManager.InHellas()==false )
+            if ( kRenderPlayerMountShadows && gMapManager.WorldActive!=WD_10HEAVEN && gMapManager.InHellas()==false )
             {
 				if(!g_Direction.m_CKanturu.IsMayaScene())
 				{
@@ -11022,6 +11031,15 @@ void RenderPartObjectBody(BMD *b,OBJECT *o,int Type,float Alpha,int RenderType)
 
 	fLight = 0.8f - absf(sinf(WorldTime * 0.0018f) * 0.5f);
 	b->RenderMesh(0, RENDER_TEXTURE | RENDER_BRIGHT, o->Alpha, 0, fLight - 0.1f, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Other players: the glow pass only, without the scrolling-rainbow and
+	// chrome passes - see the crowd LOD note in NextGradeObjectRender.
+	extern bool g_CharacterThinEffects;
+	if (g_CharacterThinEffects)
+	{
+		return;
+	}
+#endif
 	texCoordU = absf(sinf(WorldTime * 0.0005f));
 	b->RenderMesh(0, RENDER_TEXTURE | RENDER_BRIGHT, o->Alpha, 0, fLight - 0.3f, texCoordU, o->BlendMeshTexCoordV, BITMAP_RGB_MIX);
 	b->RenderMesh(0, RENDER_TEXTURE | RENDER_CHROME4, o->Alpha, 0, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
@@ -11695,6 +11713,21 @@ void NextGradeObjectRender(CHARACTER* c)
 		}break;
 		}//switch
 	} //for
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Crowd LOD for the +15 armour ornaments. Each ornament is its own linked
+	// model drawn in three passes, so a full +15 set is 27 extra draws a frame
+	// per player - measured 1 Oct on a Helio G85 (Mali-G52) in a 20-player crowd
+	// at 20% of the whole frame, the largest single cost in it. Players beyond
+	// the nearest 8 in view (g_CharacterLiteRender) skip the ornaments; the
+	// nearer ones draw them in one pass (RenderPartObjectEffect). The hero, the
+	// target and whatever is selected keep the full look. Mobile only.
+	extern bool g_CharacterLiteRender;
+	if (g_CharacterLiteRender)
+	{
+		return;
+	}
+#endif
 
 	int bornIndex[2]{}; // left, right;
 	int gradeType[2]{}; // left, right;

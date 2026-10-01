@@ -18,6 +18,8 @@
 #include <wchar.h>
 #include <vector>
 #include <string>
+#include <unordered_map>
+#include <stdint.h>
 
 #define LOG_TAG "AndroidGDI"
 #if defined(MU_ANDROID_DISABLE_LOG)
@@ -202,7 +204,33 @@ void AndroidGDI_Init(int defaultFontSizePx) {
     GetCachedFont(defaultFontSizePx, true);
 }
 
+// ── Text extent cache ─────────────────────────────────────────────────────
+// Measuring is a pure function of (font, text), but TTF_SizeUNICODE runs the
+// full HarfBuzz shaper every call. The name/chat-bubble pass (SetBooleanPosition)
+// re-measures every visible player's name, guild and chat lines each frame: in a
+// 20-player crowd on a Helio G85 that was 8.5% of the whole frame (~4 ms).
+// Fonts are only closed at shutdown, so the TTF_Font pointer is a stable key.
+struct TextExtentEntry {
+    TTF_Font* font;
+    std::vector<Uint16> text;
+    int w;
+    int h;
+    bool ok;
+};
+static std::unordered_map<unsigned long long, TextExtentEntry> s_TextExtentCache;
+static const size_t kTextExtentCacheMax = 4096;
+
+static unsigned long long HashTextExtentKey(TTF_Font* font, const std::vector<Uint16>& text) {
+    unsigned long long h = 1469598103934665603ULL ^ (unsigned long long)(uintptr_t)font;
+    for (Uint16 c : text) {
+        h ^= c;
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
 void AndroidGDI_Shutdown() {
+    s_TextExtentCache.clear();
     for (auto& e : s_FontCache)
         if (e.font) TTF_CloseFont(e.font);
     s_FontCache.clear();
@@ -405,7 +433,27 @@ bool AndroidGetTextExtentPoint32(HDC hdc, const wchar_t* text, int len, int* out
         TTF_SizeUNICODE(font, zero, outW, outH);
         return true;
     }
-    return TTF_SizeUNICODE(font, utext.data(), outW, outH) == 0;
+
+    const unsigned long long key = HashTextExtentKey(font, utext);
+    auto it = s_TextExtentCache.find(key);
+    if (it != s_TextExtentCache.end() && it->second.font == font && it->second.text == utext) {
+        *outW = it->second.w;
+        *outH = it->second.h;
+        return it->second.ok;
+    }
+
+    const bool ok = TTF_SizeUNICODE(font, utext.data(), outW, outH) == 0;
+    // Chat lines keep arriving, so the table is bounded; dropping it all is
+    // rare and costs one re-measure per string.
+    if (s_TextExtentCache.size() >= kTextExtentCacheMax)
+        s_TextExtentCache.clear();
+    TextExtentEntry& e = s_TextExtentCache[key];
+    e.font = font;
+    e.text = std::move(utext);
+    e.w = *outW;
+    e.h = *outH;
+    e.ok = ok;
+    return ok;
 }
 
 void AndroidSetTextColor(HDC hdc, uint32_t colorref) {

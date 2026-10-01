@@ -354,11 +354,27 @@ void QueueParticleSpriteQuadBatch(ParticleSpriteQuadBatch& batch,
 // order-dependent and is left exactly as it was - and when one appears, the
 // pending additive buckets are flushed FIRST, so relative ordering between
 // additive and non-additive particles is preserved.
+//
+// Darkening particles (AlphaBlendMinus, glBlendFunc(GL_ZERO,
+// GL_ONE_MINUS_SRC_COLOR): dst * (1 - src)) are a product, so they are
+// order-independent among themselves too and get buckets of their own.
+//
+// 1 Oct, Helio G85 (Mali-G52) crowd profile: even with the additive buckets,
+// particles averaged 2.3 quads per draw (~740 draws a frame) and the quad path
+// was ~10% of the frame, nearly all of it Mali's per-draw driver cost. The
+// cause was the rule above: every order-dependent particle flushed all pending
+// buckets first, and the pool interleaves kinds, so the buckets rarely held more
+// than a quad or two. Now only the order-dependent kinds (AlphaTest,
+// AlphaBlend3) draw in slot order, and both bucket sets are drawn after them -
+// darkening, then additive. The one visible difference: where a glow overlaps
+// smoke, the glow is now always on top.
 std::vector<ParticleSpriteQuadBatch> s_particleAddBuckets;
+std::vector<ParticleSpriteQuadBatch> s_particleMinusBuckets;
 
-ParticleSpriteQuadBatch& GetParticleAddBucket(int texture, bool depthEnabled)
+ParticleSpriteQuadBatch& GetParticleBucket(std::vector<ParticleSpriteQuadBatch>& buckets,
+	ParticleSpriteBlendMode mode, int texture, bool depthEnabled)
 {
-	for (ParticleSpriteQuadBatch& b : s_particleAddBuckets)
+	for (ParticleSpriteQuadBatch& b : buckets)
 	{
 		if (b.texture == texture && b.depthEnabled == depthEnabled)
 		{
@@ -370,32 +386,33 @@ ParticleSpriteQuadBatch& GetParticleAddBucket(int texture, bool depthEnabled)
 	// rather than grow without bound. Falling back to the first bucket keeps
 	// rendering correct (additive is order-independent, and the texture is
 	// re-bound per flush) at the cost of extra flushes.
-	if (s_particleAddBuckets.size() >= 64)
+	if (buckets.size() >= 64)
 	{
-		return s_particleAddBuckets[0];
+		return buckets[0];
 	}
 
 	ParticleSpriteQuadBatch nb;
 	nb.texture = texture;
 	nb.depthEnabled = depthEnabled;
-	nb.blendMode = ParticleSpriteBlendMode::AlphaBlend;
+	nb.blendMode = mode;
 	nb.vertices.reserve(64 * 4 * 9);
-	s_particleAddBuckets.push_back(std::move(nb));
-	return s_particleAddBuckets.back();
+	buckets.push_back(std::move(nb));
+	return buckets.back();
 }
 
-void FlushParticleAddBuckets(ParticleSpriteBlendMode& currentBlendMode, bool& currentDepthEnabled)
+void FlushParticleBuckets(std::vector<ParticleSpriteQuadBatch>& buckets, ParticleSpriteBlendMode mode,
+	ParticleSpriteBlendMode& currentBlendMode, bool& currentDepthEnabled)
 {
-	for (ParticleSpriteQuadBatch& b : s_particleAddBuckets)
+	for (ParticleSpriteQuadBatch& b : buckets)
 	{
 		if (b.quadCount <= 0)
 		{
 			continue;
 		}
-		if (currentBlendMode != ParticleSpriteBlendMode::AlphaBlend)
+		if (currentBlendMode != mode)
 		{
-			ApplyParticleBlendMode(ParticleSpriteBlendMode::AlphaBlend);
-			currentBlendMode = ParticleSpriteBlendMode::AlphaBlend;
+			ApplyParticleBlendMode(mode);
+			currentBlendMode = mode;
 		}
 		if (currentDepthEnabled != b.depthEnabled)
 		{
@@ -416,7 +433,7 @@ void FlushParticleAddBuckets(ParticleSpriteBlendMode& currentBlendMode, bool& cu
 		FlushParticleSpriteQuadBatch(b);
 		b.texture = keepTexture;
 		b.depthEnabled = keepDepth;
-		b.blendMode = ParticleSpriteBlendMode::AlphaBlend;
+		b.blendMode = mode;
 	}
 }
 
@@ -436,21 +453,22 @@ void RenderParticleSpriteBatched(ParticleSpriteQuadBatch& batch,
 	float uWidth = 1.f,
 	float vHeight = 1.f)
 {
-	if (desiredBlendMode == ParticleSpriteBlendMode::AlphaBlend)
+	if (desiredBlendMode == ParticleSpriteBlendMode::AlphaBlend ||
+		desiredBlendMode == ParticleSpriteBlendMode::AlphaBlendMinus)
 	{
 		bool depthEnabled = currentDepthEnabled;
 		if (desiredDepthMode == ParticleDepthMode::Enable)      { depthEnabled = true;  }
 		else if (desiredDepthMode == ParticleDepthMode::Disable) { depthEnabled = false; }
 
-		ParticleSpriteQuadBatch& bucket = GetParticleAddBucket(texture, depthEnabled);
+		ParticleSpriteQuadBatch& bucket = GetParticleBucket(
+			desiredBlendMode == ParticleSpriteBlendMode::AlphaBlend ? s_particleAddBuckets : s_particleMinusBuckets,
+			desiredBlendMode, texture, depthEnabled);
 		QueueParticleSpriteQuadBatch(bucket, texture, position, width, height, light, rotation, u, v, uWidth, vHeight);
 		return;
 	}
 
-	// Order-dependent mode: everything additive queued so far has to land
-	// before it.
-	FlushParticleAddBuckets(currentBlendMode, currentDepthEnabled);
-
+	// Order-dependent mode: drawn in slot order. The buckets are drawn after
+	// all of these (see s_particleMinusBuckets).
 	PrepareParticleSpriteBatch(batch, texture, desiredBlendMode, desiredDepthMode, currentBlendMode, currentDepthEnabled);
 	QueueParticleSpriteQuadBatch(batch, texture, position, width, height, light, rotation, u, v, uWidth, vHeight);
 }
@@ -9894,9 +9912,10 @@ void RenderParticles(BYTE byRenderOneMore)
 	}
 #if defined(__ANDROID__) || defined(MU_IOS)
 	FlushParticleSpriteQuadBatch(spriteBatch);
-	// Anything additive still queued - one draw per (texture, depth) instead of
-	// one per particle. See GetParticleAddBucket.
-	FlushParticleAddBuckets(currentBlendMode, currentDepthEnabled);
+	// The order-independent kinds - one draw per (texture, depth) instead of
+	// one per particle. Darkening first, then additive. See s_particleMinusBuckets.
+	FlushParticleBuckets(s_particleMinusBuckets, ParticleSpriteBlendMode::AlphaBlendMinus, currentBlendMode, currentDepthEnabled);
+	FlushParticleBuckets(s_particleAddBuckets, ParticleSpriteBlendMode::AlphaBlend, currentBlendMode, currentDepthEnabled);
 	DisableAlphaBlend();
 	if (restoreDepthTest)
 	{

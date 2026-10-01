@@ -5,6 +5,7 @@
 
 #include "NewUIPartyListWindow.h"
 #include "NewUISystem.h"
+#include "DSPlaySound.h"
 #include "wsclientinline.h"
 #include "ZzzInventory.h"
 #include "CharacterManager.h"
@@ -149,7 +150,20 @@ bool CNewUIPartyListWindow::BtnProcess()
 				}
 			}
 
-			if( SelectCharacterInPartyList(	&Party[i] ) )	
+#if defined(__ANDROID__) || defined(MU_IOS)
+			// Mobile: tapping a member opens the party window (user request,
+			// 1 Oct). There is no keyboard shortcut for it on a phone. The
+			// buff-target selection below still runs, so a heal/buff skill
+			// keeps aiming at the tapped member.
+			if( SEASON3B::IsPress(VK_LBUTTON)
+				&& g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_PARTY) == false )
+			{
+				g_pNewUISystem->Show(SEASON3B::INTERFACE_PARTY);
+				PlayBuffer(SOUND_CLICK01);
+			}
+#endif
+
+			if( SelectCharacterInPartyList(	&Party[i] ) )
 			{
 				return true;
 			}

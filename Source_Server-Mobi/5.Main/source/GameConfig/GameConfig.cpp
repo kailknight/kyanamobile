@@ -365,7 +365,99 @@ void GameConfig::EncryptAndSaveCredentials(const wchar_t* user, const wchar_t* p
 }
 
 #else // __ANDROID__
-// Android: GameConfig stubs — config loaded from SDL preferences or hardcoded defaults
+// Android/iOS: GameConfig keeps its settings in mu_settings.cfg (see
+// MobileSettingsGetInt in GameConfig.h). Only player-facing settings - audio
+// and voice - are stored; window, server and credentials are fixed or handled
+// elsewhere on mobile.
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <map>
+
+namespace
+{
+    const char* const kMobileSettingsFile = "mu_settings.cfg";
+    const char* const kMobileSettingsTemp = "mu_settings.cfg.tmp";
+
+    std::map<std::string, int>& MobileSettingsMap()
+    {
+        static std::map<std::string, int> s_values;
+        return s_values;
+    }
+
+    bool s_mobileSettingsLoaded = false;
+
+    // Lazily, on first use: by then the process has chdir'd to the data root.
+    void EnsureMobileSettingsLoaded()
+    {
+        if (s_mobileSettingsLoaded)
+        {
+            return;
+        }
+        s_mobileSettingsLoaded = true;
+
+        FILE* f = fopen(kMobileSettingsFile, "r");
+        if (f == nullptr)
+        {
+            return;
+        }
+        char line[256];
+        while (fgets(line, sizeof(line), f) != nullptr)
+        {
+            char* eq = strchr(line, '=');
+            if (eq == nullptr || eq == line)
+            {
+                continue;   // blank, comment, or malformed
+            }
+            *eq = '\0';
+            MobileSettingsMap()[std::string(line)] = atoi(eq + 1);
+        }
+        fclose(f);
+    }
+}
+
+int MobileSettingsGetInt(const char* key, int defaultValue)
+{
+    EnsureMobileSettingsLoaded();
+    const auto it = MobileSettingsMap().find(key);
+    return (it != MobileSettingsMap().end()) ? it->second : defaultValue;
+}
+
+void MobileSettingsSetInt(const char* key, int value, bool saveNow)
+{
+    EnsureMobileSettingsLoaded();
+    int& slot = MobileSettingsMap()[key];
+    const bool changed = (slot != value);
+    slot = value;
+    if (saveNow && changed)
+    {
+        MobileSettingsSave();
+    }
+}
+
+// Written to a temp file and renamed over the old one, so a crash or a kill
+// mid-write leaves the previous settings rather than a truncated file.
+void MobileSettingsSave()
+{
+    EnsureMobileSettingsLoaded();
+    FILE* f = fopen(kMobileSettingsTemp, "w");
+    if (f == nullptr)
+    {
+        return;
+    }
+    fputs("# World of Kira settings - rewritten by the game\n", f);
+    for (const auto& entry : MobileSettingsMap())
+    {
+        fprintf(f, "%s=%d\n", entry.first.c_str(), entry.second);
+    }
+    const bool ok = (fflush(f) == 0);
+    fclose(f);
+    if (ok)
+    {
+        rename(kMobileSettingsTemp, kMobileSettingsFile);
+    }
+}
 
 GameConfig& GameConfig::GetInstance() {
     static GameConfig instance;
@@ -389,8 +481,34 @@ GameConfig::GameConfig()
 {
 }
 
-void GameConfig::Load() {}
-void GameConfig::Save() {}
+void GameConfig::Load()
+{
+    m_soundEnabled    = MobileSettingsGetInt("Audio.Sound", m_soundEnabled ? 1 : 0) != 0;
+    m_musicEnabled    = MobileSettingsGetInt("Audio.Music", m_musicEnabled ? 1 : 0) != 0;
+    m_volumeLevel     = MobileSettingsGetInt("Audio.Volume", m_volumeLevel);
+    m_voiceEnabled    = MobileSettingsGetInt("Voice.Enabled", m_voiceEnabled ? 1 : 0) != 0;
+    m_voiceMuteOthers = MobileSettingsGetInt("Voice.MuteOthers", m_voiceMuteOthers ? 1 : 0) != 0;
+    SetVoiceVolume(MobileSettingsGetInt("Voice.Volume", m_voiceVolume));
+    m_voicePttKey     = MobileSettingsGetInt("Voice.PttKey", m_voicePttKey);
+    SetVoiceMicBoost(MobileSettingsGetInt("Voice.MicBoost", m_voiceMicBoost));
+    m_voiceNoiseGate  = MobileSettingsGetInt("Voice.NoiseGate", m_voiceNoiseGate ? 1 : 0) != 0;
+    SetVoiceTalkMode(MobileSettingsGetInt("Voice.TalkMode", m_voiceTalkMode));
+}
+
+void GameConfig::Save()
+{
+    MobileSettingsSetInt("Audio.Sound", m_soundEnabled ? 1 : 0, false);
+    MobileSettingsSetInt("Audio.Music", m_musicEnabled ? 1 : 0, false);
+    MobileSettingsSetInt("Audio.Volume", m_volumeLevel, false);
+    MobileSettingsSetInt("Voice.Enabled", m_voiceEnabled ? 1 : 0, false);
+    MobileSettingsSetInt("Voice.MuteOthers", m_voiceMuteOthers ? 1 : 0, false);
+    MobileSettingsSetInt("Voice.Volume", m_voiceVolume, false);
+    MobileSettingsSetInt("Voice.PttKey", m_voicePttKey, false);
+    MobileSettingsSetInt("Voice.MicBoost", m_voiceMicBoost, false);
+    MobileSettingsSetInt("Voice.NoiseGate", m_voiceNoiseGate ? 1 : 0, false);
+    MobileSettingsSetInt("Voice.TalkMode", m_voiceTalkMode, false);
+    MobileSettingsSave();
+}
 
 void GameConfig::SetWindowSize(int width, int height) { m_windowWidth = width; m_windowHeight = height; }
 void GameConfig::SetWindowMode(bool windowed)         { m_windowMode = windowed; }

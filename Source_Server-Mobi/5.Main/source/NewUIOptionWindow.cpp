@@ -29,6 +29,25 @@ extern "C" int wzAudioCreate(HWND hParentWnd);
 extern "C" void wzAudioOption(int nOption, int nVal);
 #endif
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+// mu_settings.cfg keys for OnOffGrap[], in ONOFFGRAP_OPTION order.
+static const char* const kMobileGraphicsKeys[SEASON3B::CNewUIOptionWindow::eEndOnOffGrap] =
+{
+	"Graphics.GlowEffect",
+	"Graphics.EffectDynamic",
+	"Graphics.EffectStatic",
+	"Graphics.BMDPlayer",
+	"Graphics.BMDWings",
+	"Graphics.BMDWeapons",
+	"Graphics.BMDImg",
+	"Graphics.BMDMonter",
+	"Graphics.RenderObjects",
+	"Graphics.RenderTerrain",
+	"Graphics.ExcellentEffect",
+	"Graphics.BMDZen",
+};
+#endif
+
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -69,7 +88,78 @@ SEASON3B::CNewUIOptionWindow::CNewUIOptionWindow()
 	this->OnOffGrap[eRenderTerrain] = GetPrivateProfileInt("Graphics", "RenderTerrain", 1, ".\\config.ini");
 	this->OnOffGrap[eExcellentEffect] = GetPrivateProfileInt("Graphics", "ExcellentEffect", 1, ".\\config.ini");
 	this->OnOffGrap[eBMDZen] = GetPrivateProfileInt("Graphics", "BMDZen", 1, ".\\config.ini");
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// GetPrivateProfileInt is a stub on mobile that always returns the default,
+	// so every choice made in this window was lost on restart. The values come
+	// from mu_settings.cfg instead; MobileSyncOptionSettings writes them back.
+	m_bAutoAttack = MobileSettingsGetInt("Option.AutoAttack", m_bAutoAttack ? 1 : 0) != 0;
+	m_bWhisperSound = MobileSettingsGetInt("Option.WhisperSound", m_bWhisperSound ? 1 : 0) != 0;
+	m_bSlideHelp = MobileSettingsGetInt("Option.SlideHelp", m_bSlideHelp ? 1 : 0) != 0;
+	m_iRenderLevel = MobileSettingsGetInt("Option.RenderLevel", m_iRenderLevel);
+	for (int i = 0; i < eEndOnOffGrap; i++)
+	{
+		this->OnOffGrap[i] = MobileSettingsGetInt(kMobileGraphicsKeys[i], this->OnOffGrap[i] ? 1 : 0) != 0;
+	}
+	// Globals owned by android_link_stubs.cpp; the Options window is the only
+	// place a player sets them (plus the minimap's name button for ShowName).
+	mShowHPBar = MobileSettingsGetInt("Custom.ShowHPBar", mShowHPBar);
+	mShowName = MobileSettingsGetInt("Custom.ShowName", mShowName);
+	mShowMiniMap = MobileSettingsGetInt("Custom.ShowMiniMap", mShowMiniMap);
+	mShowDanhHieu = MobileSettingsGetInt("Custom.ShowTitle", mShowDanhHieu);
+	g_bGMObservation = (mShowName != 0);
+#endif
 }
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+// Writes this window's settings to mu_settings.cfg whenever one differs from
+// what is stored. Called every frame (android_main.cpp) rather than from each
+// checkbox, so no toggle - including the minimap's ShowName button and the
+// render-level bar - can be missed. ~25 map lookups; the file is only written
+// on an actual change.
+void MobileSyncOptionSettings()
+{
+	SEASON3B::CNewUIOptionWindow* w = g_pOption;
+	if (w == NULL)
+	{
+		return;
+	}
+
+	bool dirty = false;
+	auto put = [&dirty](const char* key, int value)
+	{
+		if (MobileSettingsGetInt(key, value - 1) != value)
+		{
+			MobileSettingsSetInt(key, value, false);
+			dirty = true;
+		}
+	};
+
+	put("Option.AutoAttack", w->IsAutoAttack() ? 1 : 0);
+	put("Option.WhisperSound", w->IsWhisperSound() ? 1 : 0);
+	put("Option.SlideHelp", w->IsSlideHelp() ? 1 : 0);
+	put("Option.RenderLevel", w->GetRenderLevel());
+	for (int i = 0; i < SEASON3B::CNewUIOptionWindow::eEndOnOffGrap; i++)
+	{
+		put(kMobileGraphicsKeys[i], w->OnOffGrap[i] ? 1 : 0);
+	}
+	put("Custom.ShowHPBar", mShowHPBar);
+	put("Custom.ShowName", mShowName);
+	put("Custom.ShowMiniMap", mShowMiniMap);
+	put("Custom.ShowTitle", mShowDanhHieu);
+
+	// Built with the main scene, later than this window.
+	if (CNewUINameWindow* pNameWindow = g_pNewUISystem->GetUI_NewNameWindow())
+	{
+		put("Custom.ShowItemNames", pNameWindow->IsShowItemName() ? 1 : 0);
+	}
+
+	if (dirty)
+	{
+		MobileSettingsSave();
+	}
+}
+#endif
 
 SEASON3B::CNewUIOptionWindow::~CNewUIOptionWindow()
 {

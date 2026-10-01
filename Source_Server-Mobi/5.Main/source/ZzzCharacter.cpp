@@ -9900,7 +9900,14 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
     }
 
     // Crowd LOD: players beyond the nearest few skip their shadow - see
-    // RenderCharactersClient.
+    // RenderCharactersClient. On mobile no player casts one at all (user
+    // request, 1 Oct; their mounts' shadows go too - kRenderPlayerMountShadows
+    // in ZzzObject.cpp). Monster shadows are unchanged.
+#if defined(__ANDROID__) || defined(MU_IOS)
+    constexpr bool kRenderPlayerShadows = false;
+#else
+    constexpr bool kRenderPlayerShadows = true;
+#endif
     if (ShouldRenderCharacterShadowPass() && o->Alpha>=0.5f && c->HideShadow==false && !g_CharacterLiteRender )
     {
         const Uint64 shadowTicksStart = static_cast<Uint64>(MU_MobilePerfNow());
@@ -9916,9 +9923,12 @@ void RenderCharacter(CHARACTER *c,OBJECT *o,int Select)
                     o->Position[2] = height;
                 }
             }
-            o->EnableShadow = true;
-            RenderPartObject(&c->Object,MODEL_SHADOW_BODY,NULL,c->Light,o->Alpha,0,0,0,false,false,Translate);
-            o->EnableShadow = false;
+            if (kRenderPlayerShadows)
+            {
+                o->EnableShadow = true;
+                RenderPartObject(&c->Object,MODEL_SHADOW_BODY,NULL,c->Light,o->Alpha,0,0,0,false,false,Translate);
+                o->EnableShadow = false;
+            }
         }
         g_characterPerfSnapshot.renderShadowTicks += static_cast<unsigned long long>(MU_MobilePerfNow() - shadowTicksStart);
     }

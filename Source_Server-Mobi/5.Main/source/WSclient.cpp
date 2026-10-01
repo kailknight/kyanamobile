@@ -90,6 +90,32 @@
 #include "CB_OffTrade.h"
 #endif
 
+#if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
+#include <cstdarg>
+// TEMP (1 Oct): monsters only one client sees, and NPCs that walk - both look
+// like viewport create/delete keys disagreeing with what the client holds.
+// Diagnostics builds only; mu_viewport_trace.txt in the data root.
+static void VpTrace(const char* fmt, ...)
+{
+	static int s_lines = 0;
+	if (s_lines >= 20000)
+	{
+		return;
+	}
+	++s_lines;
+	if (FILE* f = fopen("mu_viewport_trace.txt", "a"))
+	{
+		fprintf(f, "%lu ", (unsigned long)GetTickCount());
+		va_list args;
+		va_start(args, fmt);
+		vfprintf(f, fmt, args);
+		va_end(args);
+		fputc('\n', f);
+		fclose(f);
+	}
+}
+#endif
+
 #define MAX_DEBUG_MAX 10
 
 extern BYTE m_AltarState[];
@@ -1036,7 +1062,11 @@ BOOL ReceiveJoinMapServer(BYTE *ReceiveBuffer, BOOL bEncrypted)
 	}
 
 	ClearCharacters();
-	
+#if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
+	VpTrace("JOINMAP clear map=%d at(%d,%d) heroKey=%d", (int)Data->Map,
+		(int)Data->PositionX, (int)Data->PositionY, HeroKey);
+#endif
+
 	if(gMapManager.WorldActive == WD_34CRYWOLF_1ST)
 	{
 		SendRequestCrywolfInfo();
@@ -1820,6 +1850,16 @@ void ReceiveMoveCharacter(BYTE *ReceiveBuffer)
     CHARACTER *c = &CharactersClient[FindCharacterIndex(Key)];
 
 	OBJECT *o = &c->Object;
+#if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
+	// NPCs never walk on the server - a move landing on one means its key
+	// now belongs to something else there.
+	if (o->Live && o->Kind == KIND_NPC)
+	{
+		VpTrace("MOVE-NPC key=%d id=[%s] mon=%d from(%d,%d) to(%d,%d) map=%d", Key, c->ID,
+			(int)c->MonsterIndex, c->PositionX, c->PositionY, Data->PositionX, Data->PositionY,
+			gMapManager.WorldActive);
+	}
+#endif
 
 	if(c->Dead==0)
 	{
@@ -1950,6 +1990,10 @@ BOOL ReceiveTeleport(BYTE *ReceiveBuffer, BOOL bEncrypted)
 	}
 	else
 	{
+#if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
+		VpTrace("TELEPORT clear map=%d->%d to(%d,%d) heroKey=%d", gMapManager.WorldActive, (int)Data->Map,
+			(int)Data->PositionX, (int)Data->PositionY, HeroKey);
+#endif
         ClearItems();
 		ClearCharacters(HeroKey);
 		RemoveAllShopTitleExceptHero();
@@ -2821,9 +2865,25 @@ void ReceiveCreateMonsterViewport( BYTE *ReceiveBuffer )
 		
 		int CreateFlag = (Key>>15);
 		int TeleportFlag = (Data2->KeyH&0x40)>>6;
-		
-		Key &= 0x7FFF;
+
+		// Both flag bits off, not just the create bit: the GameServer sets 0x40
+		// in the high byte for a monster that arrives by teleport
+		// (CViewport::GCViewportMonsterSend / GCViewportSimpleMonsterSend). With
+		// only 0x7FFF that bit stayed in the key, so the monster was filed under
+		// index+16384 while every later move, damage and delete packet used the
+		// real index: a frozen copy nothing could hit or remove, on that one
+		// client only. Object indices stop at MAX_OBJECT (10000), well under 0x4000.
+		Key &= 0x3FFF;
+#if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
+		const bool vpReused = FindCharacterIndex(Key) != MAX_CHARACTERS_CLIENT;
+#endif
 		CHARACTER *c = CreateMonster(Type,Data2->PositionX,Data2->PositionY,Key);
+#if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
+		VpTrace("CREATE key=%d raw=%02X%02X type=%d at(%d,%d) map=%d create=%d tele=%d reused=%d slot=%d",
+			Key, Data2->KeyH, Data2->KeyL, Type, Data2->PositionX, Data2->PositionY,
+			gMapManager.WorldActive, CreateFlag, TeleportFlag, vpReused ? 1 : 0,
+			c != NULL ? (int)(c - CharactersClient) : -1);
+#endif
 		
 		g_ConsoleDebug->Write(MCD_RECEIVE, "0x13 [ReceiveCreateMonsterViewport(Type : %d | Key : %d)]", Type, Key);
 		
@@ -3048,7 +3108,14 @@ void ReceiveDeleteCharacterViewport( BYTE *ReceiveBuffer )
 		
 		iIndex = FindCharacterIndex(Key);
 		CHARACTER* pCha = &CharactersClient[iIndex];
-		
+#if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
+		VpTrace("DELETE key=%d found=%d kind=%d mon=%d map=%d", Key,
+			iIndex != MAX_CHARACTERS_CLIENT ? 1 : 0,
+			iIndex != MAX_CHARACTERS_CLIENT ? (int)pCha->Object.Kind : -1,
+			iIndex != MAX_CHARACTERS_CLIENT ? (int)pCha->MonsterIndex : -1,
+			gMapManager.WorldActive);
+#endif
+
 		int buffSize = g_CharacterBuffSize( (&pCha->Object) );
 		
 		for( int k = 0; k < buffSize; k++ )
