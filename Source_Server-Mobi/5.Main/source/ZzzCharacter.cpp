@@ -3658,7 +3658,7 @@ bool AttackStage(CHARACTER* c, OBJECT* o)
 
             if( o->AnimationFrame>=3.f )
             {
-				o->PKKey = getTargetCharacterKey( c, SelectedCharacter );
+				o->PKKey = GetHeroSkillTargetKey( c, SelectedCharacter );
 
 				PlayBuffer( SOUND_SKILL_SWORD3);
 

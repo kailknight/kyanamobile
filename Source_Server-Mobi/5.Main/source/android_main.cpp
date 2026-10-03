@@ -26021,7 +26021,14 @@ bool ShouldThrottleAdaptiveEffectSpawn(int kind, int type, vec3_t Position, int 
     (void)Position;
     (void)SubType;
     (void)Scale;
-    (void)Owner;
+    // Never drop the hero's own effects. Skills such as Fire Slash, Twister and
+    // Inferno deal their damage from the client-side effect/joint, so a spawn
+    // throttled on one slow frame (FPS is per-frame, not averaged) silently
+    // loses the hits.
+    if (Hero != nullptr && Owner == &Hero->Object)
+    {
+        return false;
+    }
 
     const float scale = GetAdaptiveEffectSpawnScale();
     if (scale >= 1.0f)

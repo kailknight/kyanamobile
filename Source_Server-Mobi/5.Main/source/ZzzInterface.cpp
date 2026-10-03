@@ -5801,9 +5801,13 @@ void AttackKnight(CHARACTER *c, int Skill, float Distance)
 				Success = false;
 			}
 		}
-		
+
         if ( Success )
         {
+			// Fire Slash and the other swing effects read their PvP target key
+			// mid-swing, after mobile has already cleared SelectedCharacter.
+			RememberHeroSkillTarget(c);
+
             switch(Skill)
             {
 			case AT_SKILL_TORNADO_SWORDA_UP:
