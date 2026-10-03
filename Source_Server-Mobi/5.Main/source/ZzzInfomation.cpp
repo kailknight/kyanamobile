@@ -547,7 +547,9 @@ void load_item_tooltip_text(char* path)
 	if (fp)
 	{
 		BYTE* Buffer = new BYTE[size * TOOLTIP_TEXT_SIZE];
-		fread(Buffer, size * TOOLTIP_TEXT_SIZE, 1, fp);
+		memset(Buffer, 0, size * TOOLTIP_TEXT_SIZE);
+		// Whole records only: an older, shorter file leaves the rest zeroed instead of garbage.
+		const size_t recordsRead = fread(Buffer, size, TOOLTIP_TEXT_SIZE, fp);
 		DWORD dwCheckSum;
 		fread(&dwCheckSum, sizeof(DWORD), 1, fp);
 		fclose(fp);
@@ -563,7 +565,7 @@ void load_item_tooltip_text(char* path)
 		else*/
 		{
 			BYTE* pSeek = Buffer;
-			for (int i = 0; i < TOOLTIP_TEXT_SIZE; i++)
+			for (size_t i = 0; i < recordsRead; i++)
 			{
 				BuxConvert(pSeek, size);
 				memcpy(&tooltip_text_data[i], pSeek, size);

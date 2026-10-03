@@ -16,7 +16,7 @@
 #define ITEM2(x, y)					((x * 512) + y + ITEM_INTER)
 //===Config Size
 #define TOOLTIP_LEVEL_SIZE							128
-#define TOOLTIP_TEXT_SIZE							512
+#define TOOLTIP_TEXT_SIZE							1024
 #define TOOLTIP_SIZE									60
 #define USE_ITEMTOOLTIP_SS6						1
 
