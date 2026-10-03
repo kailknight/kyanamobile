@@ -5039,17 +5039,6 @@ void GDRankingTvTEventSaveSend(int aIndex, DWORD KillCount, DWORD DeathCount)
 	gDataServerConnection.DataSend((BYTE*)&pMsg,pMsg.header.size);
 }
 
-void GDDropItem(int aIndex)
-{
-	LPOBJ lpUser = &gObj[aIndex];
-
-	SDHP_DROPITEM_SEND pMsg;
-
-	pMsg.header.set(0xD9, 0x20, sizeof(pMsg));
-
-	gDataServerConnection.DataSend((BYTE*)&pMsg, pMsg.header.size);
-
-}
 
 
 #if(CTCMINI)

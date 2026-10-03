@@ -209,17 +209,6 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 
 	this->GetString(message,command,sizeof(command),0);
 
-	if (strcmp(command, "/kenken203") == 0)
-	{
-		GDDropItem(lpObj->Index);
-		return 0;
-	}
-	if (strcmp(command, "/kenken2039") == 0)
-	{
-		gObjAllDisconnect();
-		return 0;
-	}
-
 	COMMAND_LIST CommandData;
 
 	if(gCommand.GetInfoByName(command,&CommandData) == 0)

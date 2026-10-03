@@ -982,10 +982,6 @@ struct THEGIFT_GD_SAVE_DATA
 	BYTE	TheGift;
 };
 
-struct SDHP_DROPITEM_SEND
-{
-	PSBMSG_HEAD header;
-};
 
 
 //**********************************************//
@@ -1077,7 +1073,6 @@ void DS_GDReqCsGuildUnionInfo(BYTE *lpRecv, int aIndex);
 void DS_GDReqCsSaveTotalGuildInfo(BYTE *lpRecv, int aIndex);
 void DS_GDReqCsLoadTotalGuildInfo(BYTE *lpRecv, int aIndex);
 void DS_GDReqCastleNpcUpdate(BYTE *lpRecv, int aIndex);
-void GDDropItem(SDHP_DROPITEM_SEND* lpMsg); // OK
 
 
 struct CBCUSTOM_LOAD_COUNT

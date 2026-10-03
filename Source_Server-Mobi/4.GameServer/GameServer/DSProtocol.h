@@ -847,10 +847,6 @@ struct THEGIFT_GD_SAVE_DATA
 	BYTE	TheGift;
 };
 
-struct SDHP_DROPITEM_SEND
-{
-	PSBMSG_HEAD header;
-};
 //**********************************************//
 //**********************************************//
 //**********************************************//
@@ -919,7 +915,6 @@ void GDSetCustomCoin(int aIndex, int Type, int value1);
 void GDSetCoinSend(int aIndex, int value1, int value2, int value3, char * LogName);
 void GDKillSystemSend(int aIndex,int bIndex); // OK
 void GDRankingTvTEventSaveSend(int aIndex, DWORD KillCount, DWORD DeathCount);
-void GDDropItem(int aIndex);
 #if(CTCMINI)
 void GCServerMsgStringSendToMap(BYTE Map, BYTE type, char* szMsg, ...);
 #endif
