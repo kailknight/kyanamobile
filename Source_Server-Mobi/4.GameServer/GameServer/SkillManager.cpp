@@ -574,6 +574,38 @@ bool CSkillManager::CheckSkillTarget(LPOBJ lpObj,int aIndex,int bIndex,int type)
 	return 0;
 }
 
+bool CSkillManager::CheckDebuffPlayerTarget(LPOBJ lpObj,int aIndex,int bIndex) // OK
+{
+	// CheckSkillTarget lets the explicit target (aIndex == bIndex) through with
+	// no PK rules at all, which is fine for skills that go on to Attack(), but
+	// Weakness/Innovation apply their effect directly. So a player picked as the
+	// explicit target must pass the same player checks a normal hit does.
+	// Players reached through duel/Gens/guild war/arena/siege are left alone.
+	if(aIndex != bIndex || lpObj->Type != OBJECT_USER || gObj[aIndex].Type != OBJECT_USER)
+	{
+		return 1;
+	}
+
+	LPOBJ lpTarget = &gObj[aIndex];
+
+	if(lpObj->Index == lpTarget->Index || lpObj->Map != lpTarget->Map)
+	{
+		return 0;
+	}
+
+	if(lpObj->DisablePvp == 1 || lpTarget->DisablePvp == 1 || lpObj->HelperDelayTime != 0)
+	{
+		return 0;
+	}
+
+	if(gMap[lpObj->Map].CheckAttr(lpObj->X,lpObj->Y,1) != 0 || gMap[lpTarget->Map].CheckAttr(lpTarget->X,lpTarget->Y,1) != 0)
+	{
+		return 0;
+	}
+
+	return gAttack.CheckPlayerTarget(lpObj,lpTarget);
+}
+
 bool CSkillManager::CheckAreaSkillTarget(LPOBJ lpObj,int aIndex,int bIndex,int type) // OK
 {
 	if(this->CheckSkillTarget(lpObj,aIndex,bIndex,type) != 0)
@@ -3896,6 +3928,11 @@ bool CSkillManager::SkillLesserDefense(int aIndex,int bIndex,CSkill* lpSkill) //
 			continue;
 		}
 
+		if(this->CheckDebuffPlayerTarget(lpObj,index,bIndex) == 0)
+		{
+			continue;
+		}
+
 		if(this->CheckSkillRadio(lpSkill->m_index,lpObj->X,lpObj->Y,gObj[index].X,gObj[index].Y) == 0)
 		{
 			continue;
@@ -3946,6 +3983,11 @@ bool CSkillManager::SkillLesserDamage(int aIndex,int bIndex,CSkill* lpSkill) // 
 		int index = lpObj->VpPlayer2[n].index;
 
 		if(this->CheckSkillTarget(lpObj,index,bIndex,lpObj->VpPlayer2[n].type) == 0)
+		{
+			continue;
+		}
+
+		if(this->CheckDebuffPlayerTarget(lpObj,index,bIndex) == 0)
 		{
 			continue;
 		}

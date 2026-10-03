@@ -422,6 +422,7 @@ public:
 	bool CheckSkillTarget(LPOBJ lpObj,int aIndex,int bIndex,int type);
 	bool CheckAreaSkillTarget(LPOBJ lpObj,int aIndex,int bIndex,int type);
 	bool CheckAreaSkillPlayerTarget(LPOBJ lpObj,int aIndex,int bIndex);
+	bool CheckDebuffPlayerTarget(LPOBJ lpObj,int aIndex,int bIndex);
 	void FireScreamPlayerSplash(int aIndex,int bIndex,CSkill* lpSkill,bool combo);
 	bool CheckSkillRequireLevel(LPOBJ lpObj,int index);
 	bool CheckSkillRequireEnergy(LPOBJ lpObj,int index);

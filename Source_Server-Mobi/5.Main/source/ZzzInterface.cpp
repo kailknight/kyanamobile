@@ -3006,7 +3006,21 @@ void UseSkillSummon(CHARACTER* pCha, OBJECT* pObj)
 		case AT_SKILL_ALICE_WEAKNESS:
 		case AT_SKILL_ALICE_ENERVATION:
 			LetHeroStop();
-			SendRequestMagicContinue(iSkill, pCha->PositionX, pCha->PositionY,(BYTE)(pObj->Angle[2]/360.f*256.f), 0, 0, 0xffff, 0);
+			{
+				// The server only debuffs a non-duel player when it is the
+				// explicit target, so send the aimed target when it may be hit
+				// (Ctrl / PK mode for players) instead of always "no target".
+				WORD TKey = 0xffff;
+				if (SelectedCharacter != -1 && CheckAttack())
+				{
+					int key = getTargetCharacterKey(pCha, SelectedCharacter);
+					if (key != -1)
+					{
+						TKey = (WORD)key;
+					}
+				}
+				SendRequestMagicContinue(iSkill, pCha->PositionX, pCha->PositionY,(BYTE)(pObj->Angle[2]/360.f*256.f), 0, 0, TKey, 0);
+			}
 			switch(pCha->Helper.Type)
 			{
 			case MODEL_HELPER+2:
