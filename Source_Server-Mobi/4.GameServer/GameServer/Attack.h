@@ -72,6 +72,7 @@ public:
 	int GetAttackDamageElemental(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,WORD* effect,int AttackDamage,int TargetDefense);
 	int GetShieldDamage(LPOBJ lpObj, LPOBJ lpTarget, __int64 damage);
 	__int64 GetReflectDamage(LPOBJ lpObj, LPOBJ lpTarget, __int64 damage);
+	__int64 ManaShieldAbsorb(LPOBJ lpTarget, __int64 damage);
 	int ApplyTargetDefense(LPOBJ lpObj, __int64 damage, int defense);
 	void GetPreviewDefense(LPOBJ lpObj,DWORD* defense);
 	void GetPreviewPhysiDamage(LPOBJ lpObj,DWORD* DamageMin,DWORD* DamageMax,DWORD* MulDamage,DWORD* DivDamage);

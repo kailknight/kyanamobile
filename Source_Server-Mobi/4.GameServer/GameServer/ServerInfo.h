@@ -778,6 +778,8 @@ public:
 	int m_ManaShieldTimeConstA;
 	int m_ManaShieldTimeConstB;
 	int m_ManaShieldMaxRate;
+	int m_ManaShieldManaAbsorbRate;
+	int m_ManaShieldManaCostRate;
 	int m_DefenseConstA;
 	int m_DefenseTimeConstA;
 	int m_HealConstA;

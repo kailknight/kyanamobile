@@ -4458,6 +4458,10 @@ void CServerInfo::ReadSkillInfo(char* section,char* path) // OK
 
 	this->m_ManaShieldMaxRate = GetPrivateProfileInt(section,"ManaShieldMaxRate",0,path);
 
+	this->m_ManaShieldManaAbsorbRate = GetPrivateProfileInt(section,"ManaShieldManaAbsorbRate",100,path);
+
+	this->m_ManaShieldManaCostRate = GetPrivateProfileInt(section,"ManaShieldManaCostRate",100,path);
+
 	this->m_DefenseConstA = GetPrivateProfileInt(section,"DefenseConstA",0,path);
 
 	this->m_DefenseTimeConstA = GetPrivateProfileInt(section,"DefenseTimeConstA",0,path);

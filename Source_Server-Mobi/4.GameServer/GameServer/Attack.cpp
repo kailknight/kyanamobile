@@ -998,13 +998,15 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 	{
 		ShieldDamage = this->GetShieldDamage(lpObj,lpTarget,damage);
 
-		if(lpTarget->Life < (damage-ShieldDamage))
+		__int64 LifeDamage = this->ManaShieldAbsorb(lpTarget,damage-ShieldDamage);
+
+		if(lpTarget->Life < LifeDamage)
 		{
 			lpTarget->Life = 0;
 		}
 		else
 		{
-			lpTarget->Life -= damage-ShieldDamage;
+			lpTarget->Life -= LifeDamage;
 		}
 
 		if(lpTarget->Shield < ShieldDamage)
@@ -1018,13 +1020,15 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 	}
 	else
 	{
-		if(lpTarget->Life < damage)
+		__int64 LifeDamage = this->ManaShieldAbsorb(lpTarget,damage);
+
+		if(lpTarget->Life < LifeDamage)
 		{
 			lpTarget->Life = 0;
 		}
 		else
 		{
-			lpTarget->Life -= damage;
+			lpTarget->Life -= LifeDamage;
 		}
 	}
 
@@ -1410,13 +1414,15 @@ bool CAttack::AttackElemental(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,bool se
 	{
 		ShieldDamage = this->GetShieldDamage(lpObj,lpTarget,damage);
 
-		if(lpTarget->Life < (damage-ShieldDamage))
+		__int64 LifeDamage = this->ManaShieldAbsorb(lpTarget,damage-ShieldDamage);
+
+		if(lpTarget->Life < LifeDamage)
 		{
 			lpTarget->Life = 0;
 		}
 		else
 		{
-			lpTarget->Life -= damage-ShieldDamage;
+			lpTarget->Life -= LifeDamage;
 		}
 
 		if(lpTarget->Shield < ShieldDamage)
@@ -1432,13 +1438,15 @@ bool CAttack::AttackElemental(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,bool se
 	}
 	else
 	{
-		if(lpTarget->Life < damage)
+		__int64 LifeDamage = this->ManaShieldAbsorb(lpTarget,damage);
+
+		if(lpTarget->Life < LifeDamage)
 		{
 			lpTarget->Life = 0;
 		}
 		else
 		{
-			lpTarget->Life -= damage;
+			lpTarget->Life -= LifeDamage;
 		}
 	}
 
@@ -3488,6 +3496,52 @@ int CAttack::GetShieldDamage(LPOBJ lpObj, LPOBJ lpTarget, __int64 damage) // OK
 	}
 
 	return SDDamage;
+}
+
+// Soul Barrier: the HP part of a hit is paid from mana first, and only what
+// mana cannot cover reaches HP. ManaShieldManaAbsorbRate is the share of the
+// hit mana takes (0 = old behaviour, reduction only), ManaShieldManaCostRate the
+// mana spent per 100 damage absorbed. Returns the damage left for HP.
+__int64 CAttack::ManaShieldAbsorb(LPOBJ lpTarget, __int64 damage) // OK
+{
+	if(damage <= 0 || lpTarget->Type != OBJECT_USER || gServerInfo.m_ManaShieldManaAbsorbRate <= 0 || gServerInfo.m_ManaShieldManaCostRate <= 0)
+	{
+		return damage;
+	}
+
+	if(gEffectManager.CheckEffect(lpTarget,EFFECT_MANA_SHIELD) == 0 && gEffectManager.CheckEffect(lpTarget,EFFECT_MANA_SHIELD_MASTERED) == 0)
+	{
+		return damage;
+	}
+
+	int rate = ((gServerInfo.m_ManaShieldManaAbsorbRate>100)?100:gServerInfo.m_ManaShieldManaAbsorbRate);
+
+	__int64 absorb = (damage*rate)/100;
+
+	__int64 cost = (absorb*gServerInfo.m_ManaShieldManaCostRate)/100;
+
+	if(cost > (__int64)lpTarget->Mana)
+	{
+		cost = (__int64)lpTarget->Mana;
+
+		absorb = (cost*100)/gServerInfo.m_ManaShieldManaCostRate;
+	}
+
+	if(absorb <= 0)
+	{
+		return damage;
+	}
+
+	lpTarget->Mana -= (float)cost;
+
+	if(lpTarget->Mana < 0)
+	{
+		lpTarget->Mana = 0;
+	}
+
+	GCManaSend(lpTarget->Index,0xFF,(int)lpTarget->Mana,lpTarget->BP);
+
+	return damage-absorb;
 }
 
 void CAttack::GetPreviewDefense(LPOBJ lpObj,DWORD* defense) // OK
