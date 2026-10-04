@@ -500,33 +500,21 @@ android {
         // effects are never dropped by the adaptive effect throttle.
         // 26 (2026-10-01): Summoner Weakness/Innovation send the aimed target,
         // so they debuff players in normal PvP (needs the matching GameServer).
-        // 27 (2026-10-04): item pick-up menu details no longer sway or let taps reach
-        // the inventory behind them, auto potion finds potions in expanded inventory
-        // pages, and a finished duel clears the target system.
-        // 28 (2026-10-04): pick-up menu tooltip sized from its own rectangle and kept
-        // below the picture, chat typing no longer drops fast keystrokes (the IME
-        // bridge is no longer reset after every commit).
-        // 29 (2026-10-04): pick-up menu tooltip text drawn under the picture and
-        // Pick Up button, not pulled up over them by the inventory's y=420 limit.
-        // 30 (2026-10-04): combo ms per step limited to 200-600, the same range as
-        // the PC auto combo.
-        // 31 (2026-10-04): tapping Settings, Jewel Bank or any other custom window no
-        // longer walks the character or starts the joystick under it.
-        // 32 (2026-10-04): pick-up menu keeps the item details open while paging.
-        // 33 (2026-10-04): master skill tree lights the next best pick, from what the
-        // top 20 characters of the class learned (needs the matching GameServer
-        // and DataServer, packet C1:D3:B9).
-        // 34 (2026-10-04): master skill PICK shows how many points to add (the level
-        // most top players took it to); recommendation entries are 4 bytes now.
-        // 35 (2026-10-04): master skill PICK rounds to steps of 10 and hides with no
-        // points; minimum 5 players; duel kills show the score big in the middle
-        // (fading), the small corner score box is gone.
-        // 36 (2026-10-04): duel kill score centred on any screen width; the blue name
-        // shows (TextDraw colours are 0xAABBGGRR).
-        // 37 (2026-10-04): preload screen shows error codes, never the server address
-        // or the download login; reset window redesign (keep stats, reward, on spot).
-        versionCode 37
-        versionName "1.0.37"
+        // 27 (2026-10-04): item pick-up menu details stay inside their box, no longer
+        // sway, stay open while paging and keep taps off the inventory behind them;
+        // auto potion finds potions in expanded inventory pages; a finished duel
+        // clears the target system; chat typing no longer drops fast keystrokes;
+        // combo ms per step limited to 200-600 (same as PC auto combo); tapping
+        // Settings, Jewel Bank or any custom window no longer walks the character;
+        // master skill tree lights the next best pick with "PICK +N" (steps of 10,
+        // from the top 20 characters of the class, min 5, hidden with no points;
+        // needs the matching GameServer and DataServer, packet C1:D3:B9); duel kills
+        // show a big fading score in the middle, the corner score box is gone; the
+        // preload screen shows error codes, never the server address; reset window
+        // redesign (keep stats, reward, on spot). Local test builds 28-37 of the
+        // same day were folded into this version.
+        versionCode 27
+        versionName "1.0.27"
 
         // A diagnostics build can be CPU-profiled with simpleperf without
         // being debuggable (which would change its performance).
