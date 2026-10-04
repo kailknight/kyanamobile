@@ -939,6 +939,9 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 			case 0x35: //==Slot machine reward box - save
 				gSlotClaim.GDSlotClaimSaveRecv((SDHP_SLOTCLAIM_SAVE_RECV*)lpMsg);
 				break;
+			case 0x36: //==Master skill tree recommendations - request
+				gMasterSkillTree.GDMasterRecommendRecv((SDHP_MASTER_RECOMMEND_RECV*)lpMsg, index);
+				break;
 			}
 			break;
 		case 0xEC:

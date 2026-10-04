@@ -330,6 +330,12 @@ void CResetTableVIP::SendInfoReset(LPOBJ lpObj)
 		int size = sizeof(pMsg);
 
 		pMsg.Count = 0;
+		pMsg.RewardWC = gServerInfo.m_ResetRewardCoin[0];
+		pMsg.RewardWP = gServerInfo.m_ResetRewardCoin[1];
+		pMsg.RewardGP = gServerInfo.m_ResetRewardCoin[2];
+		pMsg.KeepStats = (gServerInfo.m_ResetKeepStats != 0) ? 1 : 0;
+		pMsg.NoLevelUpPoint = (gServerInfo.m_ResetNoLevelUpPoint != 0) ? 1 : 0;
+		pMsg.ResetMove = (gServerInfo.m_CommandResetMove[lpObj->AccountLevel] != 0) ? 1 : 0;
 		//==
 		pMsg.ResetView = lpObj->Reset;
 

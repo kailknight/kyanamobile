@@ -1256,15 +1256,33 @@ void CGGuildAssignType(PMSG_GUILD_ASSIGN_TYPE_REQ * aRecv, int aIndex)
 	GDGuildReqAssignType(aIndex, aRecv->btGuildType);
 }
 
+// The proposer is told why an alliance / rival request went nowhere. These
+// paths used to return without a word, so the client printed "Request to X to
+// join the guild alliance" and then nothing ever happened.
+static void GCRelationShipRequestFailSend(PMSG_RELATIONSHIP_JOIN_BREAKOFF_REQ* aRecv, int aIndex, BYTE result)
+{
+	PMSG_RELATIONSHIP_JOIN_BREAKOFF_ANS pMsg = { 0 };
+
+	pMsg.h.set(0xE6, sizeof(pMsg));
+	pMsg.btResult = result;
+	pMsg.btRequestType = aRecv->btRequestType;
+	pMsg.btRelationShipType = aRecv->btRelationShipType;
+	pMsg.btTargetUserIndexH = aRecv->btTargetUserIndexH;
+	pMsg.btTargetUserIndexL = aRecv->btTargetUserIndexL;
+
+	DataSend(aIndex, (LPBYTE)&pMsg, pMsg.h.size);
+}
+
 void CGRelationShipReqJoinBreakOff(PMSG_RELATIONSHIP_JOIN_BREAKOFF_REQ * aRecv, int aIndex) 
 {
-	if ( gCastleSiegeSync.GetCastleState() >= 5 && gCastleSiegeSync.GetCastleState() <= 7 )
+	if ( !OBJECT_RANGE(aIndex) )
 	{
 		return;
 	}
 
 	if ( IT_MAP_RANGE(gObj[aIndex].Map) != FALSE ) //season 2.5 add-on
 	{
+		gGuild.GCGuildResultSend(aIndex,6);
 		return;
 	}
 
@@ -1283,6 +1301,9 @@ void CGRelationShipReqJoinBreakOff(PMSG_RELATIONSHIP_JOIN_BREAKOFF_REQ * aRecv, 
 
 	if((gObj[iTargetUserIndex].Option&1) != 1) //season 3.0 add-on
 	{
+		// The other master has requests switched off (/request off): same
+		// answer a guild invite gets.
+		gGuild.GCGuildResultSend(aIndex,0);
 		return;
 	}
 
@@ -1332,6 +1353,32 @@ void CGRelationShipReqJoinBreakOff(PMSG_RELATIONSHIP_JOIN_BREAKOFF_REQ * aRecv, 
 	GUILD_INFO_STRUCT * lpGuildInfo = gObj[aIndex].Guild;
 	GUILD_INFO_STRUCT * lpTargetGuildInfo = gObj[iTargetUserIndex].Guild;
 	BYTE btRelationShip = gObjGetRelationShip(lpObj, lpTargetObj);
+
+	// Siege announce, ready and battle: the guilds fighting it - attackers, the
+	// castle owner, and anyone allied to them - may not change alliances or
+	// hostility until it is over. Every other guild may; this used to freeze
+	// all of them.
+	const int iCastleState = gCastleSiegeSync.GetCastleState();
+
+	if ( iCastleState >= 5 && iCastleState <= 7 )
+	{
+		if ( gCastleSiegeSync.IsSiegeGuildListLoaded() == false )
+		{
+			// The participant list is on its way; until it is here no one can
+			// be cleared. Asking again is the player trying again.
+			gCastleSiegeSync.RequestSiegeGuilds();
+			ErrMsg.btResult = 16; // GUILD_ANS_UNIONFAIL_BY_CASTLE
+			DataSend(aIndex, (LPBYTE)&ErrMsg, ErrMsg.h.size);
+			return;
+		}
+
+		if ( gCastleSiegeSync.IsSiegeGuild(lpGuildInfo->Name, lpGuildInfo->GuildUnion) || gCastleSiegeSync.IsSiegeGuild(lpTargetGuildInfo->Name, lpTargetGuildInfo->GuildUnion) )
+		{
+			ErrMsg.btResult = 16; // GUILD_ANS_UNIONFAIL_BY_CASTLE
+			DataSend(aIndex, (LPBYTE)&ErrMsg, ErrMsg.h.size);
+			return;
+		}
+	}
 
 	if ( aRecv->btRequestType == 1 )
 	{

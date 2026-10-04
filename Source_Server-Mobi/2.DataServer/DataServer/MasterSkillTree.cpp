@@ -6,6 +6,9 @@
 #include "MasterSkillTree.h"
 #include "QueryManager.h"
 #include "SocketManager.h"
+#include <algorithm>
+#include <map>
+#include <vector>
 
 CMasterSkillTree gMasterSkillTree;
 //////////////////////////////////////////////////////////////////////
@@ -106,4 +109,99 @@ void CMasterSkillTree::GDMasterSkillTreeSaveRecv(SDHP_MASTER_SKILL_TREE_SAVE_REC
 	}
 
 	#endif
+}
+
+void CMasterSkillTree::GDMasterRecommendRecv(SDHP_MASTER_RECOMMEND_RECV* lpMsg,int index) // OK
+{
+	for(int cls=0;cls < MASTER_RECOMMEND_CLASSES;cls++)
+	{
+		// skill -> how many of the sampled characters have at least one point in it,
+		// and how many of them stopped at each level
+		std::map<WORD,int> picks;
+		std::map<WORD,std::map<int,int>> levels;
+		int sample = 0;
+
+		// The strongest characters of the class: highest Master Level, then the
+		// most master experience. Only characters with points to spend count.
+		if(gQueryManager.ExecQuery("SELECT TOP %d M.MasterSkill FROM MasterSkillTree M JOIN Character C ON C.Name = M.Name WHERE (C.Class / 16) = %d AND M.MasterLevel > 0 ORDER BY M.MasterLevel DESC, M.MasterExperience DESC",MASTER_RECOMMEND_SAMPLE,cls) != 0)
+		{
+			while(gQueryManager.Fetch() != SQL_NO_DATA)
+			{
+				BYTE MasterSkill[MAX_MASTER_SKILL_LIST][3];
+
+				memset(MasterSkill,0xFF,sizeof(MasterSkill));
+
+				gQueryManager.GetAsBinary("MasterSkill",MasterSkill[0],sizeof(MasterSkill));
+
+				sample++;
+
+				for(int n=0;n < MAX_MASTER_SKILL_LIST;n++)
+				{
+					// Same 3-byte layout as CSkillManager::SkillByteConvert on the
+					// GameServer: index low, level, index high; FF..00 is empty.
+					if(MasterSkill[n][0] == 0xFF && MasterSkill[n][2] == 0x00)
+					{
+						continue;
+					}
+
+					const WORD skill = (WORD)((MasterSkill[n][2] << 8) | MasterSkill[n][0]);
+
+					if(skill == 0xFFFF || MasterSkill[n][1] == 0)
+					{
+						continue;
+					}
+
+					picks[skill]++;
+					levels[skill][MasterSkill[n][1]]++;
+				}
+			}
+		}
+
+		gQueryManager.Close();
+
+		std::vector<std::pair<int,WORD>> ranked;
+
+		for(std::map<WORD,int>::iterator it=picks.begin();it != picks.end();it++)
+		{
+			ranked.push_back(std::make_pair(-it->second,it->first)); // most picks first, then lowest skill id
+		}
+
+		std::sort(ranked.begin(),ranked.end());
+
+		SDHP_MASTER_RECOMMEND_SEND pMsg;
+
+		memset(&pMsg,0,sizeof(pMsg));
+
+		pMsg.header.set(0xD9,0x36,sizeof(pMsg));
+
+		pMsg.Class = (BYTE)cls;
+		pMsg.Sample = (BYTE)sample;
+
+		for(int n=0;n < (int)ranked.size() && n < MASTER_RECOMMEND_MAX;n++)
+		{
+			pMsg.Entry[n][0] = SET_NUMBERLB(ranked[n].second);
+			pMsg.Entry[n][1] = SET_NUMBERHB(ranked[n].second);
+			pMsg.Entry[n][2] = (BYTE)(-ranked[n].first);
+
+			// The level most of them took it to; a tie goes to the higher level.
+			int bestLevel = 0;
+			int bestCount = 0;
+
+			std::map<int,int>& counts = levels[ranked[n].second];
+
+			for(std::map<int,int>::iterator lt=counts.begin();lt != counts.end();lt++)
+			{
+				if(lt->second >= bestCount)
+				{
+					bestCount = lt->second;
+					bestLevel = lt->first;
+				}
+			}
+
+			pMsg.Entry[n][3] = (BYTE)bestLevel;
+			pMsg.Count++;
+		}
+
+		gSocketManager.DataSend(index,(BYTE*)&pMsg,pMsg.header.size);
+	}
 }

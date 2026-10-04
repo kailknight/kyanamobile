@@ -66,6 +66,9 @@ public:
 	void CCustomEventTime::AddDataEventsTime(char* NameEvent, int* Time);
 
 	void LoadFileXML(char* FilePath);
+	// A schedule entry using this gate that is an invasion running right now:
+	// where it spawned (CInvasionManager::GetSpawnPosition).
+	bool FindInvasionSpawnByGate(int gate,int* map,int* x,int* y);
 	std::vector <DATA_CUSTOMEVENTTIME> m_SendClientDataEventTime;
 	int m_Enable;
 private:

@@ -1378,6 +1378,24 @@ public:
 	// AutoPotionThreshold (CustomConfig.ini): HP % the auto potion drinks at
 	// for locked players, and the starting value for everyone else. 10-90.
 	int m_AutoPotionThreshold;
+	// AutoCombo_AL0..AL3 (CustomConfig.ini): 1 lets players at that account
+	// level change the milliseconds per skill of their auto combo (PC client,
+	// ~ menu); 0 locks them to AutoComboDelayMS. Same defaults as AutoPotion.
+	int m_AutoComboConfigure[MAX_ACCOUNT_LEVEL];
+	// AutoComboDelayMS (CustomConfig.ini): milliseconds the auto combo waits
+	// after each skill, for locked players and as everyone's starting value.
+	// Default 400, clamped to 200-600 (the PC and mobile combo range).
+	int m_AutoComboDelayMS;
+	// MasterRecommendMinPlayers (CustomConfig.ini): the master skill tree only
+	// recommends a pick for a class once at least this many of its characters
+	// have spent master points - fewer than that is one player's guess, not a
+	// trend. Default 5.
+	int m_MasterRecommendMinPlayers;
+	// DuelKillEffect (CustomConfig.ini): 1 = in the Duel Arena, every kill
+	// plays the SD-broken effect on the player who died and knocks them
+	// DuelKillPushDistance tiles back from the killer. 0 = off.
+	int m_DuelKillEffect;
+	int m_DuelKillPushDistance;
 };
 
 extern CServerInfo gServerInfo;

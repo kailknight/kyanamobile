@@ -340,6 +340,9 @@ void CInvasionManager::SetState_BLANK(INVASION_INFO* lpInfo) // OK
 
 void CInvasionManager::SetState_EMPTY(INVASION_INFO* lpInfo) // OK
 {
+	lpInfo->HasSpawn = 0;
+	lpInfo->SpawnIsBoss = 0;
+
 	this->ClearMonster(lpInfo);
 
 	this->CheckSync(lpInfo);
@@ -347,6 +350,9 @@ void CInvasionManager::SetState_EMPTY(INVASION_INFO* lpInfo) // OK
 
 void CInvasionManager::SetState_START(INVASION_INFO* lpInfo) // OK
 {
+	lpInfo->HasSpawn = 0;
+	lpInfo->SpawnIsBoss = 0;
+
 	for(int n=0;n < MAX_INVASION_RESPAWN_GROUP;n++)
 	{
 		if(lpInfo->RespawnInfo[n].empty() == 0)
@@ -580,6 +586,17 @@ void CInvasionManager::SetMonster(INVASION_INFO* lpInfo,INVASION_RESPWAN_INFO* l
 #endif
 		lpObj->MaxRegenTime = ((lpMonsterInfo->RegenType==0)?(lpInfo->InvasionTime*1000):lpMonsterInfo->RegenTime);
 
+		// Where the schedule teleports players: the boss's spawn, else the
+		// first monster's.
+		if(lpInfo->HasSpawn == 0 || (lpInfo->SpawnIsBoss == 0 && lpObj->Class == lpInfo->BossIndex))
+		{
+			lpInfo->HasSpawn = 1;
+			lpInfo->SpawnIsBoss = (lpObj->Class == lpInfo->BossIndex);
+			lpInfo->SpawnMap = lpObj->Map;
+			lpInfo->SpawnX = lpObj->X;
+			lpInfo->SpawnY = lpObj->Y;
+		}
+
 		if(lpObj->Class == lpInfo->BossIndex && lpInfo->BossMessage != -1)
 		{
 			LogAdd(LOG_EVENT,"[Invasion Manager] Index(%d) Boss Position (Map: %d X: %d Y: %d)",lpInfo->Index,lpObj->Map,lpObj->X,lpObj->Y);
@@ -701,4 +718,24 @@ void CInvasionManager::StartInvasion(int index)
 	LogAdd(LOG_EVENT,"[Set Invasion Start] Index %d At %2d:%2d:00",index,hour,minute);
 
 	this->SetState(&this->m_InvasionInfo[index],INVASION_STATE_EMPTY);
+}
+
+bool CInvasionManager::GetSpawnPosition(int index,int* map,int* x,int* y) // OK
+{
+	if(index < 0 || index >= MAX_INVASION)
+	{
+		return 0;
+	}
+
+	INVASION_INFO* lpInfo = &this->m_InvasionInfo[index];
+
+	if(lpInfo->State != INVASION_STATE_START || lpInfo->HasSpawn == 0)
+	{
+		return 0;
+	}
+
+	*map = lpInfo->SpawnMap;
+	*x = lpInfo->SpawnX;
+	*y = lpInfo->SpawnY;
+	return 1;
 }

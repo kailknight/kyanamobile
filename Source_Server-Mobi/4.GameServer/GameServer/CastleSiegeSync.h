@@ -6,6 +6,11 @@
 
 #define MAX_TRIBUTE_MONEY MAX_MONEY
 
+#include <set>
+#include <string>
+
+struct CSP_CSLOADTOTALGUILDINFO;
+
 class CCastleSiegeSync
 {
 public:
@@ -28,7 +33,19 @@ public:
 	void SetTaxRateStore(int rate);
 	void SetTaxHuntZone(int rate);
 	int GetTributeMoney();
+	// The guilds fighting the current siege (attackers and defenders, as
+	// GameServerCS registered them), fetched from the DataServer when the
+	// siege reaches announce/ready/battle. Only these - plus the castle owner
+	// and anyone allied to one of them - are frozen out of alliance and
+	// hostility changes; every other guild may change them during a siege.
+	void RequestSiegeGuilds();
+	void SetSiegeGuilds(CSP_CSLOADTOTALGUILDINFO* list, int count);
+	bool IsSiegeGuildListLoaded() { return this->m_SiegeGuildsLoaded; }
+	bool IsSiegeGuild(char* guildName, int guildUnion);
 private:
+	std::set<std::string> m_SiegeGuilds;
+	bool m_SiegeGuildsLoaded;
+	DWORD m_SiegeGuildsRequestTick;
 	int m_CurCastleState;
 	int m_CurTaxRateChaos;
 	int m_CurTaxRateStore;

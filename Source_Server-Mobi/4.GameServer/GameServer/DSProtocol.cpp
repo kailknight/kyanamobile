@@ -120,6 +120,9 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 			case 0x32: //Spin wheel claim box - load result
 				gCustomVongQuay.DGSpinClaimRecv((SDHP_SPINCLAIM_SEND*)lpMsg);
 				break;
+			case 0x36: //Master skill tree recommendations, one per class
+				gMasterSkillTree.DGMasterRecommendRecv((SDHP_MASTER_RECOMMEND_RECV*)lpMsg);
+				break;
 			}
 			break;
 		case 0x05:
@@ -4729,10 +4732,22 @@ void GS_DGAnsCsLoadTotalGuildInfo(LPBYTE lpRecv)
 	if(lpMsg->iResult == TRUE)
 	{
 		gCastleSiege.SetCsTotalGuildInfo(lpMsgBody,lpMsg->iCount);
+		gCastleSiegeSync.SetSiegeGuilds(lpMsgBody,lpMsg->iCount);
 		return;
 	}
 #else
-	return;
+	// An ordinary GameServer asked for the list itself (CCastleSiegeSync::
+	// RequestSiegeGuilds) to know which guilds the siege locks.
+	CSP_ANS_CSLOADTOTALGUILDINFO* lpMsg = (CSP_ANS_CSLOADTOTALGUILDINFO*)lpRecv;
+	CSP_CSLOADTOTALGUILDINFO* lpMsgBody = (CSP_CSLOADTOTALGUILDINFO*)(lpRecv+sizeof(CSP_ANS_CSLOADTOTALGUILDINFO));
+
+	if(lpMsg == NULL || lpMsg->wMapSvrNum != gMapServerManager.GetMapServerGroup())
+	{
+		return;
+	}
+
+	// iResult 0 is an empty list (no siege guilds registered).
+	gCastleSiegeSync.SetSiegeGuilds(((lpMsg->iResult == TRUE) ? lpMsgBody : NULL),((lpMsg->iResult == TRUE) ? lpMsg->iCount : 0));
 #endif
 }
 

@@ -1001,6 +1001,7 @@ struct OBJECTSTRUCT
 	DWORD HelperTotalTime;
 	DWORD HelperPvpNoticeTime; // last "no PvP while MU Helper is on" notice
 	int SentAutoPotionState; // GetAutoPotionClientState last sent (-1 = not yet)
+	int SentMasterRecommendVersion; // master skill recommendations last sent (-1 = not yet)
 	DWORD PcPointPointTime;
 	DWORD HPAutoRecuperationTime;
 	DWORD MPAutoRecuperationTime;
@@ -1606,7 +1607,9 @@ void gObjSkillNovaCheckTime(LPOBJ lpObj);
 void gObjPKDownCheckTime(LPOBJ lpObj,int TargetLevel);
 void gObjUserDie(LPOBJ lpObj,LPOBJ lpTarget);
 void gObjPlayerKiller(LPOBJ lpObj,LPOBJ lpTarget);
-BOOL gObjMoveGate(int aIndex,int gate);
+// forceMap/forceX/forceY: land there instead of on the gate's own spot, when it
+// is on the gate's map - every check the gate move does still applies.
+BOOL gObjMoveGate(int aIndex,int gate,int forceMap = -1,int forceX = -1,int forceY = -1);
 void gObjTeleport(int aIndex,int map,int x,int y);
 void gObjSummonAlly(LPOBJ lpObj,int map,int x,int y);
 void gObjSkillUseProc(LPOBJ lpObj);

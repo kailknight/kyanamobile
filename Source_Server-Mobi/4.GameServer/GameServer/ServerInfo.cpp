@@ -5111,4 +5111,39 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	{
 		this->m_AutoPotionThreshold = 90;
 	}
+
+	// AutoCombo_AL* / AutoComboDelayMS (CustomConfig.ini): see the header. Sent
+	// to each client with its account level (GCAccountLevelSend).
+	this->m_AutoComboConfigure[0] = GetPrivateProfileInt(section, "AutoCombo_AL0", 0, path);
+	this->m_AutoComboConfigure[1] = GetPrivateProfileInt(section, "AutoCombo_AL1", 1, path);
+	this->m_AutoComboConfigure[2] = GetPrivateProfileInt(section, "AutoCombo_AL2", 1, path);
+	this->m_AutoComboConfigure[3] = GetPrivateProfileInt(section, "AutoCombo_AL3", 1, path);
+
+	this->m_AutoComboDelayMS = GetPrivateProfileInt(section, "AutoComboDelayMS", 400, path);
+
+	if (this->m_AutoComboDelayMS < 200)
+	{
+		this->m_AutoComboDelayMS = 200;
+	}
+	else if (this->m_AutoComboDelayMS > 600)
+	{
+		this->m_AutoComboDelayMS = 600;
+	}
+
+	// MasterRecommendMinPlayers (CustomConfig.ini): see the header.
+	this->m_MasterRecommendMinPlayers = GetPrivateProfileInt(section, "MasterRecommendMinPlayers", 5, path);
+
+	if (this->m_MasterRecommendMinPlayers < 1)
+	{
+		this->m_MasterRecommendMinPlayers = 1;
+	}
+
+	// DuelKillEffect / DuelKillPushDistance (CustomConfig.ini): see the header.
+	this->m_DuelKillEffect = GetPrivateProfileInt(section, "DuelKillEffect", 0, path);
+	this->m_DuelKillPushDistance = GetPrivateProfileInt(section, "DuelKillPushDistance", 3, path);
+
+	if (this->m_DuelKillPushDistance < 0)
+	{
+		this->m_DuelKillPushDistance = 0;
+	}
 }

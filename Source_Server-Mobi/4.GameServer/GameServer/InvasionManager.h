@@ -64,6 +64,13 @@ struct INVASION_INFO
 	int AlarmMinLeft;
 	int AlarmTime;
 	char AlertMessage[128];
+	// Where this run of the invasion spawned: the boss if it has one, otherwise
+	// its first monster. The event schedule teleports players here while it runs.
+	bool HasSpawn;
+	bool SpawnIsBoss;
+	int SpawnMap;
+	int SpawnX;
+	int SpawnY;
 };
 
 class CInvasionManager
@@ -93,6 +100,8 @@ public:
 	void SetMonster(INVASION_INFO* lpInfo,INVASION_RESPWAN_INFO* lpRespawnInfo,INVASION_MONSTER_INFO* lpMonsterInfo);
 	void MonsterDieProc(LPOBJ lpObj,LPOBJ lpTarget);
 	void StartInvasion(int index);
+	// The running invasion's spawn spot (see INVASION_INFO::HasSpawn).
+	bool GetSpawnPosition(int index,int* map,int* x,int* y);
 
 	INVASION_INFO m_InvasionInfo[MAX_INVASION];
 };

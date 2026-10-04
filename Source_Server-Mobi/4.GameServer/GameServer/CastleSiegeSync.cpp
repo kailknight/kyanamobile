@@ -10,6 +10,9 @@
 #include "User.h"
 #include "Union.h"
 #include "Util.h"
+#include "GuildClass.h"
+#include "CastleSiege.h"
+#include "Protocol.h"
 
 CCastleSiegeSync gCastleSiegeSync;
 //////////////////////////////////////////////////////////////////////
@@ -29,6 +32,9 @@ CCastleSiegeSync::~CCastleSiegeSync() // OK
 void CCastleSiegeSync::Clear() // OK
 {
 	this->m_CurCastleState = -1;
+	this->m_SiegeGuilds.clear();
+	this->m_SiegeGuildsLoaded = false;
+	this->m_SiegeGuildsRequestTick = 0;
 	this->m_CurTaxRateChaos = 0;
 	this->m_CurTaxRateStore = 0;
 	this->m_CastleTributeMoney = 0;
@@ -207,7 +213,101 @@ void CCastleSiegeSync::SetCastleOwnerGuild(char* GuildName) // OK
 
 void CCastleSiegeSync::SetCastleState(int state) // OK
 {
+	const bool wasLocked = (this->m_CurCastleState >= CASTLESIEGE_STATE_NOTIFY && this->m_CurCastleState <= CASTLESIEGE_STATE_STARTSIEGE);
+	const bool isLocked = (state >= CASTLESIEGE_STATE_NOTIFY && state <= CASTLESIEGE_STATE_STARTSIEGE);
+
 	this->m_CurCastleState = state;
+
+	// Entering announce/ready/battle (or starting up inside it): the
+	// participants are final by now, so fetch them once. Leaving it: forget
+	// them, the next siege has its own.
+	if(isLocked != wasLocked)
+	{
+		this->m_SiegeGuilds.clear();
+		this->m_SiegeGuildsLoaded = false;
+		this->m_SiegeGuildsRequestTick = 0;
+
+		if(isLocked)
+		{
+			this->RequestSiegeGuilds();
+		}
+	}
+}
+
+void CCastleSiegeSync::RequestSiegeGuilds() // OK
+{
+	#if(GAMESERVER_TYPE==0)
+
+	// GameServerCS loads the same list for its own use; only the ordinary
+	// GameServers ask for it here. Not more than once every 5 seconds.
+	if(this->m_SiegeGuildsRequestTick != 0 && (GetTickCount()-this->m_SiegeGuildsRequestTick) < 5000)
+	{
+		return;
+	}
+
+	this->m_SiegeGuildsRequestTick = GetTickCount();
+
+	GS_GDReqCsLoadTotalGuildInfo(gMapServerManager.GetMapServerGroup());
+
+	#endif
+}
+
+void CCastleSiegeSync::SetSiegeGuilds(CSP_CSLOADTOTALGUILDINFO* list, int count) // OK
+{
+	this->m_SiegeGuilds.clear();
+
+	for(int n=0;list != 0 && n < count;n++)
+	{
+		char name[9] = {0};
+
+		memcpy(name,list[n].szGuildName,8);
+
+		if(name[0] != 0)
+		{
+			this->m_SiegeGuilds.insert(std::string(name));
+		}
+	}
+
+	this->m_SiegeGuildsLoaded = true;
+}
+
+bool CCastleSiegeSync::IsSiegeGuild(char* guildName, int guildUnion) // OK
+{
+	if(guildName == 0 || guildName[0] == 0)
+	{
+		return false;
+	}
+
+	if(this->m_CastleOwnerGuild[0] != 0 && strcmp(guildName,this->m_CastleOwnerGuild) == 0)
+	{
+		return true;
+	}
+
+	if(this->m_SiegeGuilds.find(std::string(guildName)) != this->m_SiegeGuilds.end())
+	{
+		return true;
+	}
+
+	// A guild in an alliance fights on its alliance master's side.
+	if(guildUnion != 0)
+	{
+		GUILD_INFO_STRUCT* lpUnionMaster = gGuildClass.SearchGuild_Number(guildUnion);
+
+		if(lpUnionMaster != 0 && strcmp(lpUnionMaster->Name,guildName) != 0)
+		{
+			if(this->m_CastleOwnerGuild[0] != 0 && strcmp(lpUnionMaster->Name,this->m_CastleOwnerGuild) == 0)
+			{
+				return true;
+			}
+
+			if(this->m_SiegeGuilds.find(std::string(lpUnionMaster->Name)) != this->m_SiegeGuilds.end())
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 void CCastleSiegeSync::SetTaxRateChaos(int rate) // OK

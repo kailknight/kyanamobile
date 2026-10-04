@@ -19,6 +19,10 @@ CMasterSkillTree gMasterSkillTree;
 
 CMasterSkillTree::CMasterSkillTree() // OK
 {
+	memset(this->m_Recommend,0,sizeof(this->m_Recommend));
+	this->m_RecommendRequestTick = 0;
+	this->m_RecommendVersion = 0;
+
 	#if(GAMESERVER_UPDATE>=401)
 
 	this->m_MasterSkillTreeInfo.clear();
@@ -2511,4 +2515,89 @@ void CMasterSkillTree::GDMasterSkillTreeSaveSend(int aIndex) // OK
 QWORD CMasterSkillTree::GetMasterLevelExpTlbInfo(int iMasterLevel)	//OK
 {
 	return this->m_MasterLevelExperienceTable[iMasterLevel];
+}
+//**********************************************//
+//******* Master skill recommendations *********//
+//**********************************************//
+
+void CMasterSkillTree::CheckRecommendRefresh() // OK
+{
+	// Called every second from the user loop; one tick compare unless due.
+	if(this->m_RecommendRequestTick != 0 && (GetTickCount()-this->m_RecommendRequestTick) < MASTER_RECOMMEND_REFRESH_MS)
+	{
+		return;
+	}
+
+	this->m_RecommendRequestTick = GetTickCount();
+
+	SDHP_MASTER_RECOMMEND_SEND pMsg;
+
+	pMsg.header.set(0xD9,0x36,sizeof(pMsg));
+
+	gDataServerConnection.DataSend((BYTE*)&pMsg,pMsg.header.size);
+}
+
+void CMasterSkillTree::DGMasterRecommendRecv(SDHP_MASTER_RECOMMEND_RECV* lpMsg) // OK
+{
+	if(lpMsg->Class >= MASTER_RECOMMEND_CLASSES)
+	{
+		return;
+	}
+
+	MASTER_RECOMMEND_INFO* lpInfo = &this->m_Recommend[lpMsg->Class];
+
+	lpInfo->Sample = lpMsg->Sample;
+	lpInfo->Count = ((lpMsg->Count > MASTER_RECOMMEND_MAX) ? MASTER_RECOMMEND_MAX : lpMsg->Count);
+
+	memcpy(lpInfo->Entry,lpMsg->Entry,sizeof(lpInfo->Entry));
+
+	// A new version makes the user loop push it to everyone of that class.
+	lpInfo->Version = ++this->m_RecommendVersion;
+}
+
+int CMasterSkillTree::GetRecommendVersion(int Class) // OK
+{
+	if(Class < 0 || Class >= MASTER_RECOMMEND_CLASSES)
+	{
+		return 0;
+	}
+
+	return this->m_Recommend[Class].Version;
+}
+
+void CMasterSkillTree::GCMasterRecommendSend(int aIndex) // OK
+{
+	LPOBJ lpObj = &gObj[aIndex];
+
+	if(lpObj->Class < 0 || lpObj->Class >= MASTER_RECOMMEND_CLASSES)
+	{
+		return;
+	}
+
+	MASTER_RECOMMEND_INFO* lpInfo = &this->m_Recommend[lpObj->Class];
+
+	PMSG_MASTER_RECOMMEND_SEND pMsg;
+
+	memset(&pMsg,0,sizeof(pMsg));
+
+	pMsg.Sample = lpInfo->Sample;
+	pMsg.Count = lpInfo->Count;
+
+	// Too few players of this class with master points to call it a trend:
+	// send an empty list, so the client shows no PICK at all.
+	if (lpInfo->Sample < gServerInfo.m_MasterRecommendMinPlayers)
+	{
+		pMsg.Count = 0;
+	}
+
+	memcpy(pMsg.Entry,lpInfo->Entry,sizeof(pMsg.Entry));
+
+	// Only the entries in use go on the wire.
+	const int size = (int)(sizeof(pMsg)-sizeof(pMsg.Entry)) + (pMsg.Count*4);
+
+	pMsg.header.set(0xD3,0xB9,size);
+
+	DataSend(aIndex,(BYTE*)&pMsg,size);
+
+	lpObj->SentMasterRecommendVersion = lpInfo->Version;
 }

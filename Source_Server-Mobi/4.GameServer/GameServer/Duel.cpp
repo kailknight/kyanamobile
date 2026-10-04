@@ -17,6 +17,7 @@
 #include "ServerInfo.h"
 #include "User.h"
 #include "Util.h"
+#include "Protocol.h"
 
 CDuel gDuel;
 //////////////////////////////////////////////////////////////////////
@@ -844,6 +845,19 @@ void CDuel::UserDieProc(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	if(this->CheckDuel(lpObj,lpTarget) == 0)
 	{
 		return;
+	}
+
+	// DuelKillEffect (CustomConfig.ini): a kill in the Duel Arena shatters the
+	// loser's SD (the same effect SD breaking shows) and knocks them back from
+	// the killer. lpObj is the player who died, lpTarget the killer.
+	if(gServerInfo.m_DuelKillEffect != 0 && DA_MAP_RANGE(lpObj->Map) != 0)
+	{
+		GCEffectInfoSend(lpObj->Index,17);
+
+		if(gServerInfo.m_DuelKillPushDistance > 0)
+		{
+			gObjBackSpring2(lpObj,lpTarget,gServerInfo.m_DuelKillPushDistance);
+		}
 	}
 
 	lpTarget->DuelScore++;

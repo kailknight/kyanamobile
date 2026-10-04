@@ -2083,7 +2083,15 @@ struct DKRS_COUNTLIST
 	BYTE DefStat[5];
 	BYTE AutoResetEnable;
 	WORD Count;
-
+	// The reset as this server runs it (CustomConfig.ini / Command.ini), so the
+	// reset window can describe it instead of a generic layout. Appended after
+	// Count, before the item list, on both sides.
+	int RewardWC;
+	int RewardWP;
+	int RewardGP;
+	BYTE KeepStats;      // ResetKeepStats
+	BYTE NoLevelUpPoint; // ResetNoLevelUpPoint
+	BYTE ResetMove;      // CommandResetMove for this account level: 1 = moved to town
 };
 
 struct DKRS_ITEMINFO
@@ -2191,7 +2199,8 @@ void GCAutoMove(AUTOMOVE_REQ* lpMsg, int aIndex);
 //==================
 
 // 0xD3:0x7E, server -> client: the player's account level and the auto
-// potion rules for it (CustomConfig.ini AutoPotion_AL* / AutoPotionThreshold).
+// potion and auto combo rules for it (CustomConfig.ini AutoPotion_AL* /
+// AutoPotionThreshold, AutoCombo_AL* / AutoComboDelayMS).
 // Sent by gObjSecondProc whenever any of it differs from what the client was
 // last told - on entering the game, when VIP starts or ends, and after a
 // config reload.
@@ -2199,8 +2208,10 @@ struct PMSG_ACCOUNT_LEVEL_SEND
 {
 	PSBMSG_HEAD header; // C1:D3:7E
 	BYTE AccountLevel;
-	BYTE AutoPotionConfigure; // 1 = may change the threshold (hold Q)
+	BYTE AutoPotionConfigure; // 1 = may change the threshold (hold ~)
 	BYTE AutoPotionThreshold; // HP %, fixed for AutoPotionConfigure 0
+	BYTE AutoComboConfigure;  // 1 = may change the ms per skill (hold ~)
+	BYTE AutoComboDelay10;    // ms per skill / 10, fixed for AutoComboConfigure 0
 };
 int GetAutoPotionClientState(int aIndex);
 void GCAccountLevelSend(int aIndex);

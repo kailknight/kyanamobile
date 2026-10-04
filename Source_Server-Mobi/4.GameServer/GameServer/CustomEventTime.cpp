@@ -8,6 +8,7 @@
 #include "Path.h"
 #include "ServerInfo.h"
 #include "CustomEventTime.h"
+#include "InvasionManager.h"
 #include "MemScript.h"
 #include "Notice.h"
 #include "InvasionManager.h"
@@ -146,4 +147,24 @@ void CCustomEventTime::GCReqEventTime(int Index, PMSG_CUSTOM_EVENTTIME_RECV* lpM
 
 #endif
 	return;
+}
+bool CCustomEventTime::FindInvasionSpawnByGate(int gate,int* map,int* x,int* y) // OK
+{
+	// NumberEvent 0-29 are the invasions (LoadData adds them first, in order).
+	for(int n=0;n < (int)this->m_SendClientDataEventTime.size();n++)
+	{
+		const DATA_CUSTOMEVENTTIME& info = this->m_SendClientDataEventTime[n];
+
+		if(info.NumberGate != gate || info.NumberEvent < 0 || info.NumberEvent >= MAX_INVASION)
+		{
+			continue;
+		}
+
+		if(gInvasionManager.GetSpawnPosition(info.NumberEvent,map,x,y) != 0)
+		{
+			return 1;
+		}
+	}
+
+	return 0;
 }

@@ -741,6 +741,47 @@ struct MASTER_SKILL_TREE_INFO
 	#endif
 };
 
+//**********************************************//
+//******* Master skill recommendations *********//
+//**********************************************//
+
+// What the top characters of each class learned, for the client's "pick this
+// next" highlight in the master skill tree. Asked of the DataServer every
+// MASTER_RECOMMEND_REFRESH_MS and pushed to each player for their own class.
+#define MASTER_RECOMMEND_CLASSES 7
+#define MASTER_RECOMMEND_MAX 40
+#define MASTER_RECOMMEND_REFRESH_MS (30*60*1000)
+
+struct SDHP_MASTER_RECOMMEND_SEND
+{
+	PSBMSG_HEAD header; // C1:D9:36 GameServer -> DataServer
+};
+
+struct SDHP_MASTER_RECOMMEND_RECV
+{
+	PSBMSG_HEAD header; // C1:D9:36 DataServer -> GameServer, one per class
+	BYTE Class;
+	BYTE Sample;
+	BYTE Count;
+	BYTE Entry[MASTER_RECOMMEND_MAX][4]; // skill low, skill high, picks, usual level
+};
+
+struct PMSG_MASTER_RECOMMEND_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:B9 GameServer -> client
+	BYTE Sample;
+	BYTE Count;
+	BYTE Entry[MASTER_RECOMMEND_MAX][4]; // skill low, skill high, picks, usual level - only Count entries are sent
+};
+
+struct MASTER_RECOMMEND_INFO
+{
+	int Version; // 0 = nothing received yet
+	BYTE Sample;
+	BYTE Count;
+	BYTE Entry[MASTER_RECOMMEND_MAX][4];
+};
+
 class CMasterSkillTree
 {
 public:
@@ -776,7 +817,15 @@ public:
 	void GCMasterSkillList2Send(int aIndex);
 	//15-04-2022
 	QWORD GetMasterLevelExpTlbInfo(int iMasterLevel);
+	// Master skill recommendations - see MASTER_RECOMMEND_INFO.
+	void CheckRecommendRefresh();
+	void DGMasterRecommendRecv(SDHP_MASTER_RECOMMEND_RECV* lpMsg);
+	int GetRecommendVersion(int Class);
+	void GCMasterRecommendSend(int aIndex);
 private:
+	MASTER_RECOMMEND_INFO m_Recommend[MASTER_RECOMMEND_CLASSES];
+	DWORD m_RecommendRequestTick;
+	int m_RecommendVersion;
 	std::map<int,MASTER_SKILL_TREE_INFO> m_MasterSkillTreeInfo;
 	QWORD m_MasterLevelExperienceTable[MAX_CHARACTER_MASTER_LEVEL+1];
 };

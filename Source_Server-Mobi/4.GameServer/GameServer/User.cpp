@@ -957,6 +957,7 @@ void gObjCharZeroSet(int aIndex) // OK
 	lpObj->HelperTotalTime = 0;
 	lpObj->HelperPvpNoticeTime = 0;
 	lpObj->SentAutoPotionState = -1;
+	lpObj->SentMasterRecommendVersion = -1;
 	lpObj->PcPointPointTime = GetTickCount();
 	lpObj->HPAutoRecuperationTime = 0;
 	lpObj->MPAutoRecuperationTime = 0;
@@ -2472,6 +2473,25 @@ void gObjInterfaceCheckTime(LPOBJ lpObj) // OK
 		return;
 	}
 
+	// An alliance / rival request waiting for the other guild master's answer
+	// (CGRelationShipReqJoinBreakOff). It had no timeout at all: one request
+	// that was never answered left both masters "busy" until they relogged,
+	// and every later request was refused. Half a minute to answer, then each
+	// side is released on its own. InterfaceTime is not refreshed here, so
+	// the 30 s really counts from the request.
+	if(lpObj->Interface.type == 14)
+	{
+		if((GetTickCount()-lpObj->InterfaceTime) < 30000)
+		{
+			return;
+		}
+
+		lpObj->Interface.use = 0;
+		lpObj->Interface.type = INTERFACE_NONE;
+		lpObj->Interface.state = 0;
+		return;
+	}
+
 	if((GetTickCount()-lpObj->InterfaceTime) < 5000)
 	{
 		return;
@@ -3003,7 +3023,7 @@ void gObjPlayerKiller(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	}
 }
 
-BOOL gObjMoveGate(int aIndex,int gate) // OK
+BOOL gObjMoveGate(int aIndex,int gate,int forceMap,int forceX,int forceY) // OK
 {
 	LPOBJ lpObj = &gObj[aIndex];
 
@@ -3058,6 +3078,14 @@ BOOL gObjMoveGate(int aIndex,int gate) // OK
 		return 0;
 		*/
 		goto ERROR_JUMP;
+	}
+
+	// A caller-chosen spot on the gate's map (the event schedule sending a
+	// player to where a running invasion spawned).
+	if(forceMap == map && forceX >= 0 && forceY >= 0)
+	{
+		x = forceX;
+		y = forceY;
 	}
 
 	if (lpObj->Transaction == 1)
@@ -3552,6 +3580,18 @@ void gObjSecondProc()
 				{
 					lpObj->SentAutoPotionState = autoPotionState;
 					GCAccountLevelSend(lpObj->Index);
+				}
+
+				// Master skill tree recommendations for this player's class: sent
+				// once on entering the game, and again whenever the DataServer's
+				// half-hourly refresh changes them.
+				gMasterSkillTree.CheckRecommendRefresh();
+
+				const int recommendVersion = gMasterSkillTree.GetRecommendVersion(lpObj->Class);
+
+				if (recommendVersion != 0 && lpObj->SentMasterRecommendVersion != recommendVersion)
+				{
+					gMasterSkillTree.GCMasterRecommendSend(lpObj->Index);
 				}
 			}
 			gObjSkillUseProc(lpObj);

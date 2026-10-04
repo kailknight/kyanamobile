@@ -1878,7 +1878,18 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 				if (mlpMsg->ThaoTac < 0)return;
 				if (OBJECT_RANGE(aIndex) != 0)
 				{
-					gObjMoveGate(aIndex, mlpMsg->ThaoTac);
+					// A running invasion on this entry: land where it spawned rather
+					// than on the gate.
+					int spawnMap = -1, spawnX = -1, spawnY = -1;
+
+					if (gCustomEventTime.FindInvasionSpawnByGate(mlpMsg->ThaoTac, &spawnMap, &spawnX, &spawnY) != 0)
+					{
+						gObjMoveGate(aIndex, mlpMsg->ThaoTac, spawnMap, spawnX, spawnY);
+					}
+					else
+					{
+						gObjMoveGate(aIndex, mlpMsg->ThaoTac);
+					}
 				}
 			}
 			break;
@@ -6562,8 +6573,11 @@ int GetAutoPotionClientState(int aIndex)
 {
 	const int level = GetClampedAccountLevel(aIndex);
 	const int configure = (gServerInfo.m_AutoPotionConfigure[level] != 0) ? 1 : 0;
+	const int comboConfigure = (gServerInfo.m_AutoComboConfigure[level] != 0) ? 1 : 0;
 
-	return level | (configure << 8) | (gServerInfo.m_AutoPotionThreshold << 16);
+	// level: bits 0-1, combo configure: bit 4, potion configure: bit 8, potion
+	// threshold: bits 16-22, combo delay / 10: bits 24-31.
+	return (int)((DWORD)level | ((DWORD)comboConfigure << 4) | ((DWORD)configure << 8) | ((DWORD)gServerInfo.m_AutoPotionThreshold << 16) | ((DWORD)(gServerInfo.m_AutoComboDelayMS / 10) << 24));
 }
 
 void GCAccountLevelSend(int aIndex) // OK
@@ -6582,6 +6596,8 @@ void GCAccountLevelSend(int aIndex) // OK
 	pMsg.AccountLevel = (BYTE)level;
 	pMsg.AutoPotionConfigure = (BYTE)((gServerInfo.m_AutoPotionConfigure[level] != 0) ? 1 : 0);
 	pMsg.AutoPotionThreshold = (BYTE)gServerInfo.m_AutoPotionThreshold;
+	pMsg.AutoComboConfigure = (BYTE)((gServerInfo.m_AutoComboConfigure[level] != 0) ? 1 : 0);
+	pMsg.AutoComboDelay10 = (BYTE)(gServerInfo.m_AutoComboDelayMS / 10);
 
 	DataSend(aIndex, (BYTE*)&pMsg, pMsg.header.size);
 
