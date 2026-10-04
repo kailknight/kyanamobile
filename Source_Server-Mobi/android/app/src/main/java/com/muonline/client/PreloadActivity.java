@@ -160,7 +160,7 @@ public class PreloadActivity extends Activity {
         configureWindow();
         buildUi();
         stageText.setText("Preparing preload...");
-        detailText.setText(DATA_ZIP_URL_CANDIDATES[0]);
+        detailText.setText("Contacting server...");
         timerText.setText("Waiting for network...");
         mainHandler.postDelayed(bannerSwitcher, BANNER_SWITCH_MS);
         ioExecutor.execute(this::runPreloadFlow);
@@ -428,7 +428,7 @@ public class PreloadActivity extends Activity {
                         return;
                     }
                     stageText.setText("Sync failed, using existing data...");
-                    detailText.setText(ex.getMessage() != null ? ex.getMessage() : "Unknown error");
+                    detailText.setText("Error code: " + errorCode(ex));
                     timerText.setText("Launching with local data");
                     progressBar.setProgress(1000);
                 });
@@ -442,8 +442,8 @@ public class PreloadActivity extends Activity {
                     return;
                 }
                 stageText.setText("Preload failed");
-                detailText.setText(ex.getMessage() != null ? ex.getMessage() : "Unknown error");
-                timerText.setText("Please reopen app after checking server/port.");
+                detailText.setText("Error code: " + errorCode(ex));
+                timerText.setText("Please reopen the app and try again.");
             });
         }
     }
@@ -942,10 +942,9 @@ public class PreloadActivity extends Activity {
                 stageText.setText(withAuth
                     ? "Connecting with Basic Auth..."
                     : "Connecting to download host...");
-                detailText.setText(urlText);
-                timerText.setText(withAuth
-                    ? "Auth mode: admin/openmu"
-                    : "Auth mode: none");
+                // Never the address or the download login - players see neither.
+                detailText.setText("Please wait...");
+                timerText.setText("");
             });
 
             URL url = new URL(urlText);
@@ -1740,9 +1739,9 @@ public class PreloadActivity extends Activity {
             if (cancelled) {
                 return;
             }
-            stageText.setText(stage);
-            detailText.setText(detail);
-            timerText.setText(timer);
+            stageText.setText(hideAddress(stage));
+            detailText.setText(hideAddress(detail));
+            timerText.setText(hideAddress(timer));
             progressBar.setProgress(progressValue);
         });
     }
@@ -1820,6 +1819,64 @@ public class PreloadActivity extends Activity {
         long totalBytes;
     }
 
+    // What the player sees when the sync fails: a short code instead of the
+    // exception text, which carries the server's address and port. The full
+    // message still goes to the log (Log.e / Log.w above).
+    //   E101 host name not resolved       E102 cannot connect (down / port closed)
+    //   E103 timed out                    E104 secure connection failed
+    //   E4xx / E5xx the server's HTTP status
+    //   E301 data empty or incomplete     E302 archive damaged
+    //   E303 cannot write to storage      E199 anything else
+    private static String errorCode(Throwable ex) {
+        if (ex == null) {
+            return "E199";
+        }
+        if (ex instanceof HttpStatusException) {
+            return "E" + ((HttpStatusException) ex).statusCode;
+        }
+        if (ex instanceof java.net.UnknownHostException) {
+            return "E101";
+        }
+        if (ex instanceof java.net.ConnectException || ex instanceof java.net.NoRouteToHostException) {
+            return "E102";
+        }
+        if (ex instanceof java.net.SocketTimeoutException) {
+            return "E103";
+        }
+        if (ex instanceof javax.net.ssl.SSLException) {
+            return "E104";
+        }
+        if (ex instanceof java.util.zip.ZipException) {
+            return "E302";
+        }
+        final String message = (ex.getMessage() != null) ? ex.getMessage().toLowerCase(Locale.US) : "";
+        if (message.contains("empty") || message.contains("incomplete") || message.contains("not found in downloaded")) {
+            return "E301";
+        }
+        if (message.contains("invalid zip")) {
+            return "E302";
+        }
+        if (message.contains("writable") || message.contains("create directory") || message.contains("unable to delete")
+                || message.contains("finalise") || message.contains("not a directory")) {
+            return "E303";
+        }
+        if (ex.getCause() != null && ex.getCause() != ex) {
+            return errorCode(ex.getCause());
+        }
+        return "E199";
+    }
+
+    // Safety net for every status line: no address or port reaches the screen,
+    // whatever a message happens to contain.
+    private static String hideAddress(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+            .replaceAll("(?i)https?://\\S+", "server")
+            .replaceAll("\\b\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?\\b", "server");
+    }
+
     private static final class HttpStatusException extends IOException {
         final int statusCode;
 

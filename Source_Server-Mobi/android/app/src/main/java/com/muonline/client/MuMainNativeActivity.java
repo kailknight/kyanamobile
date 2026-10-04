@@ -504,39 +504,65 @@ public class MuMainNativeActivity extends NativeActivity {
             outAttrs.imeOptions |= EditorInfo.IME_FLAG_NO_EXTRACT_UI
                 | EditorInfo.IME_FLAG_NO_FULLSCREEN;
             return new InputConnectionWrapper(baseConnection, true) {
+                // The word the keyboard is composing right now, which the game
+                // already has. Each update is diffed against it so only what
+                // changed goes over: the old code sent the whole word on every
+                // update (duplicated letters) and then wiped the bridge's text
+                // after every commit, which restarts the keyboard's input
+                // connection - keys typed while it restarted were lost, so
+                // typing at speed dropped characters.
+                private String composing = "";
+
+                private void sendBackspaces(int count) {
+                    for (int i = 0; i < count; i++) {
+                        nativeOnKeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0, 0, 0);
+                        nativeOnKeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0, 0, 0);
+                    }
+                }
+
+                // Makes what the game holds for the composing word equal `next`,
+                // sending backspaces for the part that changed and then the new
+                // tail - nothing at all when the keyboard repeats the same word.
+                private void replaceComposing(String next) {
+                    final int max = Math.min(composing.length(), next.length());
+                    int common = 0;
+                    while (common < max && composing.charAt(common) == next.charAt(common)) {
+                        common++;
+                    }
+                    sendBackspaces(composing.length() - common);
+                    if (next.length() > common) {
+                        nativeOnTextInput(next.substring(common));
+                    }
+                    composing = next;
+                }
+
                 @Override
                 public boolean commitText(CharSequence text, int newCursorPosition) {
-                    if (text != null && text.length() > 0) {
-                        nativeOnTextInput(text.toString());
-                    }
-                    post(new Runnable() {
-                        @Override
-                        public void run() {
-                            resetImeBridgeBuffer();
-                        }
-                    });
+                    replaceComposing(text != null ? text.toString() : composing);
+                    composing = "";
                     return true;
                 }
 
                 @Override
                 public boolean setComposingText(CharSequence text, int newCursorPosition) {
-                    if (text != null && text.length() > 0) {
-                        nativeOnTextInput(text.toString());
-                    }
-                    post(new Runnable() {
-                        @Override
-                        public void run() {
-                            resetImeBridgeBuffer();
-                        }
-                    });
+                    replaceComposing(text != null ? text.toString() : "");
+                    return true;
+                }
+
+                @Override
+                public boolean finishComposingText() {
+                    composing = "";
                     return true;
                 }
 
                 @Override
                 public boolean deleteSurroundingText(int beforeLength, int afterLength) {
                     if (beforeLength > 0) {
-                        nativeOnKeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0, 0, 0);
-                        nativeOnKeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0, 0, 0);
+                        // As many backspaces as the keyboard asked to delete -
+                        // one was sent whatever the count, so a word deleted in
+                        // one go left most of it behind.
+                        sendBackspaces(Math.min(beforeLength, 64));
+                        composing = composing.substring(0, Math.max(0, composing.length() - beforeLength));
                         return true;
                     }
                     return super.deleteSurroundingText(beforeLength, afterLength);
