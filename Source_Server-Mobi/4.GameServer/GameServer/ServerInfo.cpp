@@ -4068,15 +4068,26 @@ DWORD ParseClientBuildVersion(const char* szValue) // OK
 	// The two pieces that carry the date and time are the last 6-digit group and
 	// the 4-digit group after it. Found by shape rather than by position so the
 	// leading "1.0" does not have to be there at all.
+	//
+	// The date may also be written with a four-digit year, 1.0.DDMMYYYY.HHMM:
+	// "1.0.05102026.0000" is the natural way to type 5 Oct 2026, and before
+	// this it parsed to 0 and silently left the gate off.
 	for (int n = 0; n + 1 < count; n++)
 	{
-		if (digits[n] != 6 || digits[n + 1] != 4)
+		if ((digits[n] != 6 && digits[n] != 8) || digits[n + 1] != 4)
 		{
 			continue;
 		}
 
-		const DWORD dd = (DWORD)(numbers[n] / 10000);
-		const DWORD mm = (DWORD)((numbers[n] / 100) % 100);
+		const int div = ((digits[n] == 8) ? 100 : 1);
+
+		if (digits[n] == 8 && (numbers[n] % 10000) / 100 != 20)
+		{
+			return 0;
+		}
+
+		const DWORD dd = (DWORD)(numbers[n] / 10000 / div);
+		const DWORD mm = (DWORD)((numbers[n] / 100 / div) % 100);
 		const DWORD yy = (DWORD)(numbers[n] % 100);
 		const DWORD hh = (DWORD)(numbers[n + 1] / 100);
 		const DWORD mi = (DWORD)(numbers[n + 1] % 100);
@@ -5026,8 +5037,20 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 		GetPrivateProfileString(section, "MinClientBuildAndroid", "", szMinBuild, sizeof(szMinBuild), path);
 		this->m_MinClientBuildAndroid = ParseClientBuildVersion(szMinBuild);
 
+		// A value that is there but unreadable leaves the gate off - say so,
+		// instead of looking switched on while letting everyone in.
+		if (this->m_MinClientBuildAndroid == 0 && szMinBuild[0] != '\0' && strcmp(szMinBuild, "0") != 0)
+		{
+			LogAdd(LOG_RED, "[MinClientBuild] MinClientBuildAndroid = %s is not 1.0.DDMMYY.HHMM - Android check is OFF", szMinBuild);
+		}
+
 		GetPrivateProfileString(section, "MinClientBuildPC", "", szMinBuild, sizeof(szMinBuild), path);
 		this->m_MinClientBuildPC = ParseClientBuildVersion(szMinBuild);
+
+		if (this->m_MinClientBuildPC == 0 && szMinBuild[0] != '\0' && strcmp(szMinBuild, "0") != 0)
+		{
+			LogAdd(LOG_RED, "[MinClientBuild] MinClientBuildPC = %s is not 1.0.DDMMYY.HHMM - PC check is OFF", szMinBuild);
+		}
 	}
 
 	// MaxTalismanOfLuck (CustomConfig.ini): the cap on Talismans of Luck in a
@@ -5145,5 +5168,35 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	if (this->m_DuelKillPushDistance < 0)
 	{
 		this->m_DuelKillPushDistance = 0;
+	}
+
+	// Blood Castle / Devil Square limits, PK and mini bosses: see the header.
+	this->m_BloodCastleMaxPlayers = GetPrivateProfileInt(section, "BloodCastleMaxPlayers", 0, path);
+	this->m_DevilSquareMaxPlayers = GetPrivateProfileInt(section, "DevilSquareMaxPlayers", 0, path);
+	this->m_BloodCastlePK = GetPrivateProfileInt(section, "BloodCastlePK", 0, path);
+	this->m_DevilSquarePK = GetPrivateProfileInt(section, "DevilSquarePK", 0, path);
+
+	this->m_BloodCastleMiniBoss = GetPrivateProfileInt(section, "BloodCastleMiniBoss", 0, path);
+	this->m_BloodCastleMiniBossMinPlayers = GetPrivateProfileInt(section, "BloodCastleMiniBossMinPlayers", 20, path);
+
+	static const int BloodCastleMiniBossDefault[8] = {18,38,49,59,63,291,77,501};
+
+	for (int n = 0; n < 8; n++)
+	{
+		char key[64];
+		wsprintf(key, "BloodCastleMiniBossClass%d", (n + 1));
+		this->m_BloodCastleMiniBossClass[n] = GetPrivateProfileInt(section, key, BloodCastleMiniBossDefault[n], path);
+	}
+
+	this->m_DevilSquareMiniBoss = GetPrivateProfileInt(section, "DevilSquareMiniBoss", 0, path);
+	this->m_DevilSquareMiniBossMinPlayers = GetPrivateProfileInt(section, "DevilSquareMiniBossMinPlayers", 1, path);
+
+	static const int DevilSquareMiniBossDefault[7] = {38,49,59,291,77,440,501};
+
+	for (int n = 0; n < 7; n++)
+	{
+		char key[64];
+		wsprintf(key, "DevilSquareMiniBossClass%d", (n + 1));
+		this->m_DevilSquareMiniBossClass[n] = GetPrivateProfileInt(section, key, DevilSquareMiniBossDefault[n], path);
 	}
 }

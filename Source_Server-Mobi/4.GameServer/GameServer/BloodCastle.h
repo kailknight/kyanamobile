@@ -126,6 +126,8 @@ struct BLOOD_CASTLE_LEVEL
 	int SaintStatueIndex;
 	int MonsterIndex[MAX_BC_MONSTER];
 	std::vector<BLOOD_CASTLE_DELAY_SCORE> DelayScore;
+	int StartUserCount;
+	int MiniBossIndex;
 };
 
 class CBloodCastle
@@ -179,6 +181,10 @@ public:
 	void SetGate(BLOOD_CASTLE_LEVEL* lpLevel);
 	void SetSaintStatue(BLOOD_CASTLE_LEVEL* lpLevel);
 	void SetMonster(BLOOD_CASTLE_LEVEL* lpLevel,int MonsterClass);
+	void SetMiniBoss(BLOOD_CASTLE_LEVEL* lpLevel,int AnchorClass);
+	void DelMiniBoss(BLOOD_CASTLE_LEVEL* lpLevel);
+	bool ReleaseMiniBoss(int aIndex);
+	int GetMaxUser();
 	void NpcAngelKing(LPOBJ lpNpc,LPOBJ lpObj);
 	void NpcAngelMessenger(LPOBJ lpNpc,LPOBJ lpObj);
 	bool CheckEventItemSerial(int map,CMapItem* lpItem);

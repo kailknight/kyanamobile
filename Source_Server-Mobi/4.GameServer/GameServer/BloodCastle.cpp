@@ -56,6 +56,8 @@ CBloodCastle::CBloodCastle() // OK
 
 		lpLevel->GateIndex = -1;
 		lpLevel->SaintStatueIndex = -1;
+		lpLevel->StartUserCount = 0;
+		lpLevel->MiniBossIndex = -1;
 
 		this->CleanMonster(lpLevel);
 	}
@@ -540,6 +542,10 @@ void CBloodCastle::SetState_EMPTY(BLOOD_CASTLE_LEVEL* lpLevel) // OK
 		lpLevel->SaintStatueIndex = -1;
 	}
 
+	this->DelMiniBoss(lpLevel);
+
+	lpLevel->StartUserCount = 0;
+
 	this->ClearMonster(lpLevel);
 
 	this->SetEntranceZone(lpLevel);
@@ -573,6 +579,7 @@ void CBloodCastle::SetState_START(BLOOD_CASTLE_LEVEL* lpLevel) // OK
 	lpLevel->TimeCount = 0;
 	lpLevel->CurMonster = 0;
 	lpLevel->MaxMonster = this->GetUserCount(lpLevel)*40;
+	lpLevel->StartUserCount = this->GetUserCount(lpLevel);
 
 	this->DelEntranceZone(lpLevel);
 
@@ -669,6 +676,8 @@ void CBloodCastle::SetState_CLEAN(BLOOD_CASTLE_LEVEL* lpLevel) // OK
 		gObjDel(lpLevel->SaintStatueIndex);
 		lpLevel->SaintStatueIndex = -1;
 	}
+
+	this->DelMiniBoss(lpLevel);
 
 	this->ClearMonster(lpLevel);
 
@@ -791,6 +800,12 @@ void CBloodCastle::SetStage2(BLOOD_CASTLE_LEVEL* lpLevel) // OK
 			this->SetMonster(lpLevel,433);
 			break;
 	}
+
+	// The mini boss waits behind the gate: it appears the moment the gate
+	// falls, where this castle's stage-3 boss spawns.
+	static const int MiniBossAnchor[MAX_BC_LEVEL] = {89,95,112,118,124,130,143,433};
+
+	this->SetMiniBoss(lpLevel,MiniBossAnchor[lpLevel->Level]);
 }
 
 void CBloodCastle::SetStage3(BLOOD_CASTLE_LEVEL* lpLevel) // OK
@@ -1584,6 +1599,109 @@ void CBloodCastle::SetMonster(BLOOD_CASTLE_LEVEL* lpLevel,int MonsterClass) // O
 	}
 }
 
+void CBloodCastle::SetMiniBoss(BLOOD_CASTLE_LEVEL* lpLevel,int AnchorClass) // OK
+{
+	if(gServerInfo.m_BloodCastleMiniBoss == 0 || OBJECT_RANGE(lpLevel->MiniBossIndex) != 0)
+	{
+		return;
+	}
+
+	int MonsterClass = gServerInfo.m_BloodCastleMiniBossClass[lpLevel->Level];
+
+	if(MonsterClass <= 0 || lpLevel->StartUserCount < gServerInfo.m_BloodCastleMiniBossMinPlayers)
+	{
+		return;
+	}
+
+	short px = -1;
+	short py = -1;
+
+	for(int n=0;n < gMonsterSetBase.m_count;n++)
+	{
+		MONSTER_SET_BASE_INFO* lpInfo = &gMonsterSetBase.m_MonsterSetBaseInfo[n];
+
+		if(lpInfo->Type == 4 && lpInfo->MonsterClass == AnchorClass && lpInfo->Map == lpLevel->Map && gMonsterSetBase.GetPosition(n,lpLevel->Map,&px,&py) != 0)
+		{
+			break;
+		}
+
+		px = -1;
+	}
+
+	// No stage-3 spawn line for this castle: any free tile of the area the
+	// gate sealed (gBloodCastleGateZone[1], opened by DelGateZone).
+	if(px < 0 && gMonsterSetBase.GetBoxPosition(lpLevel->Map,12,81,18,92,&px,&py) == 0)
+	{
+		return;
+	}
+
+	int index = gObjAddMonster(lpLevel->Map);
+
+	if(OBJECT_RANGE(index) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[index];
+
+	lpObj->PosNum = -1;
+	lpObj->X = px;
+	lpObj->Y = py;
+	lpObj->TX = px;
+	lpObj->TY = py;
+	lpObj->OldX = px;
+	lpObj->OldY = py;
+	lpObj->StartX = (BYTE)px;
+	lpObj->StartY = (BYTE)py;
+	lpObj->Dir = 1;
+	lpObj->Map = lpLevel->Map;
+
+	if(gObjSetMonster(index,MonsterClass) == 0)
+	{
+		gObjDel(index);
+		return;
+	}
+
+	lpObj->MaxRegenTime = 1000;
+
+	lpLevel->MiniBossIndex = index;
+
+	this->NoticeSendToAll(lpLevel,0,"A mini boss (%s) appeared behind the gate!",lpObj->Name);
+}
+
+void CBloodCastle::DelMiniBoss(BLOOD_CASTLE_LEVEL* lpLevel) // OK
+{
+	if(OBJECT_RANGE(lpLevel->MiniBossIndex) != 0)
+	{
+		gObjDel(lpLevel->MiniBossIndex);
+	}
+
+	lpLevel->MiniBossIndex = -1;
+}
+
+bool CBloodCastle::ReleaseMiniBoss(int aIndex) // OK
+{
+	// Called when a dead monster is about to respawn: the mini boss must
+	// not come back, so its room forgets it and the caller deletes it.
+	for(int n=0;n < MAX_BC_LEVEL;n++)
+	{
+		if(this->m_BloodCastleLevel[n].MiniBossIndex == aIndex)
+		{
+			this->m_BloodCastleLevel[n].MiniBossIndex = -1;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+int CBloodCastle::GetMaxUser() // OK
+{
+	int MaxUser = ((gServerInfo.m_BloodCastleMaxPlayers>0)?gServerInfo.m_BloodCastleMaxPlayers:gServerInfo.m_BloodCastleMaxUser);
+
+	return ((MaxUser>MAX_BC_USER)?MAX_BC_USER:MaxUser);
+}
+
 void CBloodCastle::NpcAngelKing(LPOBJ lpNpc,LPOBJ lpObj) // OK
 {
 	if(gServerInfo.m_BloodCastleEvent == 0)
@@ -1973,6 +2091,14 @@ void CBloodCastle::MonsterDieProc(LPOBJ lpObj,LPOBJ lpTarget) // OK
 		return;
 	}
 
+	// The index stays set until the respawn pass deletes the body (see
+	// ReleaseMiniBoss), so nothing else can claim this object slot first.
+	if(lpObj->Index == this->m_BloodCastleLevel[level].MiniBossIndex)
+	{
+		this->NoticeSendToAll(&this->m_BloodCastleLevel[level],0,"%s defeated the mini boss %s!",lpTarget->Name,lpObj->Name);
+		return;
+	}
+
 	if(this->GetMonster(&this->m_BloodCastleLevel[level],lpObj->Index) == 0)
 	{
 		return;
@@ -2154,7 +2280,7 @@ void CBloodCastle::CGBloodCastleEnterRecv(PMSG_BLOOD_CASTLE_ENTER_RECV* lpMsg,in
 		return;
 	}
 
-	if(this->GetUserCount(lpLevel) >= gServerInfo.m_BloodCastleMaxUser)
+	if(this->GetUserCount(lpLevel) >= this->GetMaxUser())
 	{
 		pMsg.result = 5;
 		DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);

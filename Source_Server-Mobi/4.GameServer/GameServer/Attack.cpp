@@ -2276,6 +2276,24 @@ bool CAttack::CheckPlayerTarget(LPOBJ lpObj,LPOBJ lpTarget) // OK
 		return 0;
 	}
 
+	// BloodCastlePK / DevilSquarePK (CustomConfig.ini): 0 = no PvP inside the
+	// event, 1 = PvP even when the map is marked NonPK. -1 = not in one.
+	int EventPK = -1;
+
+	if(BC_MAP_RANGE(lpObj->Map) != 0 && BC_MAP_RANGE(lpTarget->Map) != 0)
+	{
+		EventPK = ((gServerInfo.m_BloodCastlePK==0)?0:1);
+	}
+	else if(DS_MAP_RANGE(lpObj->Map) != 0 && DS_MAP_RANGE(lpTarget->Map) != 0)
+	{
+		EventPK = ((gServerInfo.m_DevilSquarePK==0)?0:1);
+	}
+
+	if(EventPK == 0)
+	{
+		return 0;
+	}
+
 	if(lpObj->PvP != 0 && lpTarget->PvP != 0)
 	{
 		return 1;
@@ -2451,7 +2469,7 @@ bool CAttack::CheckPlayerTarget(LPOBJ lpObj,LPOBJ lpTarget) // OK
 		return 0;
 	}
 
-	if(gMapManager.GetMapNonPK(lpTarget->Map,lpTarget,lpObj) != 0)
+	if(EventPK != 1 && gMapManager.GetMapNonPK(lpTarget->Map,lpTarget,lpObj) != 0)
 	{
 		return 0;
 	}

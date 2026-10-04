@@ -277,6 +277,13 @@ void CObjectManager::ObjectSetStateProc() // OK
 				continue;
 			}
 
+			// Blood Castle / Devil Square mini bosses appear once per event.
+			if(gBloodCastle.ReleaseMiniBoss(lpObj->Index) != 0 || gDevilSquare.ReleaseMiniBoss(lpObj->Index) != 0)
+			{
+				gObjDel(lpObj->Index);
+				continue;
+			}
+
 			if(CC_MAP_RANGE(lpObj->Map) != 0)
 			{
 				gObjDel(lpObj->Index);

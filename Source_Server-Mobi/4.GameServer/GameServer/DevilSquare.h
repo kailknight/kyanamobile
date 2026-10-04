@@ -97,6 +97,8 @@ struct DEVIL_SQUARE_LEVEL
 	int Stage;
 	DEVIL_SQUARE_USER User[MAX_DS_USER];
 	int MonsterIndex[MAX_DS_MONSTER];
+	int StartUserCount;
+	int MiniBossIndex;
 };
 
 class CDevilSquare
@@ -145,6 +147,10 @@ public:
 	void ClearMonster(DEVIL_SQUARE_LEVEL* lpLevel);
 	int GetMonsterCount(DEVIL_SQUARE_LEVEL* lpLevel);
 	void SetMonster(DEVIL_SQUARE_LEVEL* lpLevel,int MonsterClass);
+	void SetMiniBoss(DEVIL_SQUARE_LEVEL* lpLevel,int AnchorClass);
+	void DelMiniBoss(DEVIL_SQUARE_LEVEL* lpLevel);
+	bool ReleaseMiniBoss(int aIndex);
+	int GetMaxUser();
 	void NpcCharon(LPOBJ lpNpc,LPOBJ lpObj);
 	void UserDieProc(LPOBJ lpObj,LPOBJ lpTarget);
 	void MonsterDieProc(LPOBJ lpObj,LPOBJ lpTarget);

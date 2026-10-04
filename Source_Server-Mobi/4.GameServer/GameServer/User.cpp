@@ -2873,6 +2873,18 @@ void gObjPlayerKiller(LPOBJ lpObj,LPOBJ lpTarget) // OK
 		return;
 	}
 
+	// PK switched on for the event (CustomConfig.ini BloodCastlePK /
+	// DevilSquarePK): fighting there is the point, not murder.
+	if(BC_MAP_RANGE(lpObj->Map) != 0 && BC_MAP_RANGE(lpTarget->Map) != 0 && gServerInfo.m_BloodCastlePK != 0)
+	{
+		return;
+	}
+
+	if(DS_MAP_RANGE(lpObj->Map) != 0 && DS_MAP_RANGE(lpTarget->Map) != 0 && gServerInfo.m_DevilSquarePK != 0)
+	{
+		return;
+	}
+
 	if(lpObj->PvP != 0 && lpTarget->PvP != 0)
 	{
 		return;

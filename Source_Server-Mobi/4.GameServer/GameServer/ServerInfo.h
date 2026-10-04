@@ -1396,6 +1396,30 @@ public:
 	// DuelKillPushDistance tiles back from the killer. 0 = off.
 	int m_DuelKillEffect;
 	int m_DuelKillPushDistance;
+	// BloodCastleMaxPlayers / DevilSquareMaxPlayers (CustomConfig.ini): how
+	// many players one event room takes. 0 = keep BloodCastleMaxUser /
+	// DevilSquareMaxUser from GameServerInfo - Event.ini. Capped at 50 (the
+	// room's slot count).
+	int m_BloodCastleMaxPlayers;
+	int m_DevilSquareMaxPlayers;
+	// BloodCastlePK / DevilSquarePK (CustomConfig.ini): 1 = players can attack
+	// each other inside the event and a kill there never makes the killer an
+	// outlaw. 0 = players cannot hurt each other inside the event.
+	int m_BloodCastlePK;
+	int m_DevilSquarePK;
+	// BloodCastleMiniBoss (CustomConfig.ini): 1 = a mini boss appears behind
+	// the castle gate the moment the gate is destroyed, when the event started
+	// with at least BloodCastleMiniBossMinPlayers players. The monster comes
+	// from BloodCastleMiniBossClass1..8 (one per castle, 0 = none there).
+	int m_BloodCastleMiniBoss;
+	int m_BloodCastleMiniBossMinPlayers;
+	int m_BloodCastleMiniBossClass[8];
+	// DevilSquareMiniBoss (CustomConfig.ini): 1 = a mini boss joins the final
+	// wave, when the event started with at least DevilSquareMiniBossMinPlayers
+	// players. Monster from DevilSquareMiniBossClass1..7 (0 = none there).
+	int m_DevilSquareMiniBoss;
+	int m_DevilSquareMiniBossMinPlayers;
+	int m_DevilSquareMiniBossClass[7];
 };
 
 extern CServerInfo gServerInfo;

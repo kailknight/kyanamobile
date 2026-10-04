@@ -41,6 +41,8 @@ CDevilSquare::CDevilSquare() // OK
 		lpLevel->MinutesLeft = -1;
 		lpLevel->TimeCount = 0;
 		lpLevel->Stage = 0;
+		lpLevel->StartUserCount = 0;
+		lpLevel->MiniBossIndex = -1;
 
 		this->CleanUser(lpLevel);
 
@@ -457,6 +459,10 @@ void CDevilSquare::SetState_EMPTY(DEVIL_SQUARE_LEVEL* lpLevel) // OK
 
 	this->ClearUser(lpLevel);
 
+	this->DelMiniBoss(lpLevel);
+
+	lpLevel->StartUserCount = 0;
+
 	this->ClearMonster(lpLevel);
 
 	this->CheckSync(lpLevel);
@@ -482,6 +488,7 @@ void CDevilSquare::SetState_START(DEVIL_SQUARE_LEVEL* lpLevel) // OK
 	lpLevel->EnterEnabled = 0;
 	lpLevel->MinutesLeft = -1;
 	lpLevel->TimeCount = 0;
+	lpLevel->StartUserCount = this->GetUserCount(lpLevel);
 
 	switch(lpLevel->Level)
 	{
@@ -527,6 +534,8 @@ void CDevilSquare::SetState_CLEAN(DEVIL_SQUARE_LEVEL* lpLevel) // OK
 	lpLevel->EnterEnabled = 0;
 	lpLevel->MinutesLeft = -1;
 	lpLevel->TimeCount = 0;
+
+	this->DelMiniBoss(lpLevel);
 
 	this->ClearMonster(lpLevel);
 
@@ -662,6 +671,11 @@ void CDevilSquare::SetStage2(DEVIL_SQUARE_LEVEL* lpLevel) // OK
 			this->SetMonster(lpLevel,440);
 			break;
 	}
+
+	// The mini boss joins the final wave, where this square's wave boss spawns.
+	static const int MiniBossAnchor[MAX_DS_LEVEL] = {18,38,49,63,291,77,440};
+
+	this->SetMiniBoss(lpLevel,MiniBossAnchor[lpLevel->Level]);
 }
 
 void CDevilSquare::SetStage3(DEVIL_SQUARE_LEVEL* lpLevel) // OK
@@ -1227,6 +1241,121 @@ void CDevilSquare::SetMonster(DEVIL_SQUARE_LEVEL* lpLevel,int MonsterClass) // O
 	}
 }
 
+void CDevilSquare::SetMiniBoss(DEVIL_SQUARE_LEVEL* lpLevel,int AnchorClass) // OK
+{
+	if(gServerInfo.m_DevilSquareMiniBoss == 0 || OBJECT_RANGE(lpLevel->MiniBossIndex) != 0)
+	{
+		return;
+	}
+
+	int MonsterClass = gServerInfo.m_DevilSquareMiniBossClass[lpLevel->Level];
+
+	if(MonsterClass <= 0 || lpLevel->StartUserCount < gServerInfo.m_DevilSquareMiniBossMinPlayers)
+	{
+		return;
+	}
+
+	short px = -1;
+	short py = -1;
+
+	for(int n=0;n < gMonsterSetBase.m_count;n++)
+	{
+		MONSTER_SET_BASE_INFO* lpInfo = &gMonsterSetBase.m_MonsterSetBaseInfo[n];
+
+		if(lpInfo->Type == 4 && lpInfo->MonsterClass == AnchorClass && lpInfo->Map == lpLevel->Map && gMonsterSetBase.GetPosition(n,lpLevel->Map,&px,&py) != 0)
+		{
+			break;
+		}
+
+		px = -1;
+	}
+
+	// No wave-boss spawn line for this square: next to any of its monsters,
+	// which are all inside this square's part of the map.
+	if(px < 0)
+	{
+		for(int n=0;n < MAX_DS_MONSTER;n++)
+		{
+			if(OBJECT_RANGE(lpLevel->MonsterIndex[n]) != 0 && gObj[lpLevel->MonsterIndex[n]].Live != 0)
+			{
+				px = gObj[lpLevel->MonsterIndex[n]].X;
+				py = gObj[lpLevel->MonsterIndex[n]].Y;
+				break;
+			}
+		}
+	}
+
+	if(px < 0)
+	{
+		return;
+	}
+
+	int index = gObjAddMonster(lpLevel->Map);
+
+	if(OBJECT_RANGE(index) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[index];
+
+	lpObj->PosNum = -1;
+	lpObj->X = px;
+	lpObj->Y = py;
+	lpObj->TX = px;
+	lpObj->TY = py;
+	lpObj->OldX = px;
+	lpObj->OldY = py;
+	lpObj->StartX = (BYTE)px;
+	lpObj->StartY = (BYTE)py;
+	lpObj->Dir = 1;
+	lpObj->Map = lpLevel->Map;
+
+	if(gObjSetMonster(index,MonsterClass) == 0)
+	{
+		gObjDel(index);
+		return;
+	}
+
+	lpObj->MaxRegenTime = 1000;
+
+	lpLevel->MiniBossIndex = index;
+
+	this->NoticeSendToAll(lpLevel,0,"Final wave: the mini boss %s appeared!",lpObj->Name);
+}
+
+void CDevilSquare::DelMiniBoss(DEVIL_SQUARE_LEVEL* lpLevel) // OK
+{
+	if(OBJECT_RANGE(lpLevel->MiniBossIndex) != 0)
+	{
+		gObjDel(lpLevel->MiniBossIndex);
+	}
+
+	lpLevel->MiniBossIndex = -1;
+}
+
+bool CDevilSquare::ReleaseMiniBoss(int aIndex) // OK
+{
+	// See CBloodCastle::ReleaseMiniBoss: a dead mini boss never respawns.
+	for(int n=0;n < MAX_DS_LEVEL;n++)
+	{
+		if(this->m_DevilSquareLevel[n].MiniBossIndex == aIndex)
+		{
+			this->m_DevilSquareLevel[n].MiniBossIndex = -1;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+int CDevilSquare::GetMaxUser() // OK
+{
+	int MaxUser = ((gServerInfo.m_DevilSquareMaxPlayers>0)?gServerInfo.m_DevilSquareMaxPlayers:gServerInfo.m_DevilSquareMaxUser);
+
+	return ((MaxUser>MAX_DS_USER)?MAX_DS_USER:MaxUser);
+}
+
 void CDevilSquare::NpcCharon(LPOBJ lpNpc,LPOBJ lpObj) // OK
 {
 	if(gServerInfo.m_DevilSquareEvent == 0)
@@ -1292,6 +1421,17 @@ void CDevilSquare::MonsterDieProc(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	if(OBJECT_RANGE(aIndex) != 0)
 	{
 		lpTarget = &gObj[aIndex];
+	}
+
+	// The index stays set until the respawn pass deletes the body (see
+	// ReleaseMiniBoss), so nothing else can claim this object slot first.
+	for(int n=0;n < MAX_DS_LEVEL;n++)
+	{
+		if(lpObj->Index == this->m_DevilSquareLevel[n].MiniBossIndex)
+		{
+			this->NoticeSendToAll(&this->m_DevilSquareLevel[n],0,"%s defeated the mini boss %s!",lpTarget->Name,lpObj->Name);
+			return;
+		}
 	}
 
 	int level = this->GetUserAbleLevel(lpTarget);
@@ -1454,7 +1594,7 @@ void CDevilSquare::CGDevilSquareEnterRecv(PMSG_DEVIL_SQUARE_ENTER_RECV* lpMsg,in
 		return;
 	}
 
-	if(this->GetUserCount(lpLevel) >= gServerInfo.m_DevilSquareMaxUser)
+	if(this->GetUserCount(lpLevel) >= this->GetMaxUser())
 	{
 		pMsg.result = 5;
 		DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
