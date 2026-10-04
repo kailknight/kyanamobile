@@ -306,7 +306,7 @@ android {
         // native-code path constants below had to change to match (see
         // android_main.cpp, Platform/AndroidGDI.cpp, Platform/MobilePlatform.cpp).
         applicationId "com.worldofkira"
-        minSdk 21          // Android 5.0 - covers Sony SO-02L (API 28)
+        minSdk 24          // Android 7.0 - Play automatic protection requires 24+; covers Sony SO-02L (API 28)
         targetSdk 36
         // Bumped 11 -> 12. Verify this is still higher than the max versionCode
         // present on ANY Play Console release/draft (including abandoned ones)
@@ -525,7 +525,7 @@ android {
                 // C++20, Android platform defines, disable editor/dotnet
                 cppFlags muNativeCppFlags
                 arguments "-DANDROID_STL=c++_static",
-                          "-DANDROID_PLATFORM=android-21",
+                          "-DANDROID_PLATFORM=android-24",
                           "-DMU_ENABLE_BGFX=" + (muEnableBgfx ? "ON" : "OFF"),
                           // Handed to native code so the build number the client
                           // reports to the GameServer (ClientBuild.h, packet
@@ -629,6 +629,10 @@ android {
     packagingOptions {
         // Don't strip debug symbols during development
         jniLibs.keepDebugSymbols += ['**/*.so']
+        // minSdk 24 would otherwise store the .so files uncompressed (the APK
+        // went 56 MB -> 179 MB). Keep them compressed and extracted at
+        // install, as they were under minSdk 21.
+        jniLibs.useLegacyPackaging = true
     }
 
     compileOptions {
