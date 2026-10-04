@@ -1010,11 +1010,17 @@ bool CNewUIBCustomMenuInfo::UseHotKey()
 }
 
 
+// NewUIDuelWindow.cpp. Declared here at file scope: inside the function below
+// clang binds it to SEASON3B::RenderDuelKillScore, which does not exist.
+void RenderDuelKillScore();
+
 bool CNewUIBCustomMenuInfo::Render() //Work()
 {
 	gInterface.Work();
 	// AutoHP is now the auto potion in QuickToggles.cpp: same flag and delay,
 	// but the threshold is the VIP setting (or 30%) instead of MainInfo RateHP.
+	gAutoPotion.UpdateHotkey();
+	::RenderDuelKillScore(); // the duel score shown big after each kill
 	gAutoPotion.Update();
 	gAutoPotion.Render();
 	UpdatePkModeHotkey();

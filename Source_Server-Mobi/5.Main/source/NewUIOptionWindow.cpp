@@ -227,7 +227,10 @@ bool SEASON3B::CNewUIOptionWindow::UpdateMouseEvent()
 		}
 	}
 
-	if(CheckMouseIn(m_Pos.x, m_Pos.y, 190, 249) == true)
+	// The whole Config System window (RenderFrame draws it 360x275), not the
+	// original 190x249 option panel: taps on the right half - the graphics and
+	// display checkboxes - went through to the world and walked the character.
+	if(CheckMouseIn(m_Pos.x, m_Pos.y, 360, 275) == true)
 	{
 		return false;
 	}

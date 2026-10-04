@@ -259,7 +259,7 @@ enum ObjectID
 #if(SAUDOIITEM)
 		eWindowDoiItem,
 #endif
-	eAutoPotionConfig, // QuickToggles.cpp - hold Q
+	eAutoPotionConfig, // QuickToggles.cpp - hold ~ (auto potion + auto combo)
 	eEndWindowCustom, //ket thuc
 
 

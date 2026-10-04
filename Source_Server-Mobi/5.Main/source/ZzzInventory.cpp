@@ -307,6 +307,11 @@ float g_fLastTipY = 0.f;
 float g_fLastTipW = 0.f;
 float g_fLastTipH = 0.f;
 bool  g_bTipSuppressBG = false;
+// Draw at exactly the y it was given. The usual path eases the y through a
+// cache refreshed every 50 ms (and nudged by the mouse wheel) for the PC cursor
+// tooltip, which lags behind anything that moves every frame - the Android item
+// menu dragged with its tooltip open swayed up and down because of it.
+bool  g_bTipFixedPos = false;
 
 void RenderTipTextList(const int sx, const int sy, int TextNum, int Tab, int iSort, int iRenderPoint, BOOL bUseBG, BOOL Render3DItem)
 {
@@ -382,6 +387,15 @@ void RenderTipTextList(const int sx, const int sy, int TextNum, int Tab, int iSo
 	}
 
 	//=== Fix Text Y
+	if (g_bTipFixedPos)
+	{
+		if ((int)(fsy - FixHRender3DItem) < 0)
+		{
+			fsy = FixHRender3DItem;
+		}
+	}
+	else
+	{
 	if (GetTickCount() > CacheTimeRenterTip1)
 	{
 		if ((int)(fsy - FixHRender3DItem) < 0)
@@ -392,10 +406,11 @@ void RenderTipTextList(const int sx, const int sy, int TextNum, int Tab, int iSo
 		{
 			CacheY = fsy;
 		}
-		
+
 	}
 
 	fsy = CacheY;
+	}
 	//===
 	//unicode::t_char szText[100];
 	//unicode::_sprintf(szText, " %d Get y %d, maxy %d", MouseWheel,(int)fsy, (int)(fsy+fHeight));
@@ -3419,7 +3434,18 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 
 		int nInvenHeight = item->Height * INVENTORY_SCALE;
 
-		sy += INVENTORY_SCALE;
+		// The inventory's placement: a gap below the cursor, and kept above the
+		// y=420 HUD line. A caller that lays the tooltip out itself (the Android
+		// item pick-up menu, g_bTipFixedPos) wants it exactly where it said - this
+		// pulled the text up over that menu's picture and Pick Up button.
+		if (g_bTipFixedPos)
+		{
+			iScreenHeight = 100000;
+		}
+		else
+		{
+			sy += INVENTORY_SCALE;
+		}
 		if (sy + Height > iScreenHeight)
 		{
 			sy += iScreenHeight - (sy + Height);
@@ -7044,7 +7070,18 @@ void RenderItemInfo(int sx,int sy,ITEM *ip,bool Sell, int Inventype, bool bItemT
 
 		int nInvenHeight	= p->Height*INVENTORY_SCALE;
 
-		sy += INVENTORY_SCALE;
+		// The inventory's placement: a gap below the cursor, and kept above the
+		// y=420 HUD line. A caller that lays the tooltip out itself (the Android
+		// item pick-up menu, g_bTipFixedPos) wants it exactly where it said - this
+		// pulled the text up over that menu's picture and Pick Up button.
+		if (g_bTipFixedPos)
+		{
+			iScreenHeight = 100000;
+		}
+		else
+		{
+			sy += INVENTORY_SCALE;
+		}
 		if( sy + Height > iScreenHeight)
 		{
 			sy += iScreenHeight - ( sy + Height );

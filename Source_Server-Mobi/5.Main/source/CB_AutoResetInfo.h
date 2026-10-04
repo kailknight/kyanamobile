@@ -25,6 +25,15 @@ public:
 		BYTE DefStat[5];
 		BYTE AutoResetEnable;
 		WORD Count;
+		// The reset as this server runs it (CustomConfig.ini / Command.ini), so the
+		// reset window can describe it instead of a generic layout. Appended after
+		// Count, before the item list, on both sides.
+		int RewardWC;
+		int RewardWP;
+		int RewardGP;
+		BYTE KeepStats;      // ResetKeepStats
+		BYTE NoLevelUpPoint; // ResetNoLevelUpPoint
+		BYTE ResetMove;      // CommandResetMove for this account level: 1 = moved to town
 	};
 
 	struct DKRS_ITEMINFO
@@ -51,6 +60,12 @@ public:
 		BYTE CodeReset;
 		BYTE DefStat[5];
 		BYTE AutoResetEnable;
+		int RewardWC;
+		int RewardWP;
+		int RewardGP;
+		BYTE KeepStats;
+		BYTE NoLevelUpPoint;
+		BYTE ResetMove;
 		std::vector<DKRS_ITEMINFO> m_ItemCheck;
 		void Clear()
 		{
@@ -68,6 +83,12 @@ public:
 			TypeReset = 0;
 			CodeReset = 0;
 			AutoResetEnable = 0;
+			RewardWC = 0;
+			RewardWP = 0;
+			RewardGP = 0;
+			KeepStats = 0;
+			NoLevelUpPoint = 0;
+			ResetMove = 0;
 			DefStat[0] = 0;
 			DefStat[1] = 0;
 			DefStat[2] = 0;

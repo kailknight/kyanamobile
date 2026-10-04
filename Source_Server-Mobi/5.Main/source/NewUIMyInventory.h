@@ -160,6 +160,7 @@ namespace SEASON3B
 		// nullptr unless the slot is filled (Type >= 0), mirroring
 		// CNewUIInventoryCtrl::FindItemAtPt's own convention for the bag grid.
 		ITEM* FindEquippedItemAtPt(int x, int y, int* outSlotIndex, bool* outIsMuun) const;
+		int FindPotionIndex(short sType) const;
 		int FindHPItemIndex() const;
 		int FindManaItemIndex() const;
 

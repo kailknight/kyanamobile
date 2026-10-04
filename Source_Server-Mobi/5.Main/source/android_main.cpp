@@ -916,6 +916,7 @@ extern float g_fLastTipY;
 extern float g_fLastTipW;
 extern float g_fLastTipH;
 extern bool  g_bTipSuppressBG;
+extern bool  g_bTipFixedPos;
 
 // The global teleport latch from WSclient. Declared here for the same reason as
 // the above - inside the namespace it becomes a separate internal symbol.
@@ -992,7 +993,7 @@ constexpr uint32_t kVirtualAttackRepeatMs = 140;
 // settings panel clamps and nudges each one by.
 constexpr uint32_t kVirtualComboRepeatMsDefault = 420;
 constexpr uint32_t kVirtualComboRepeatMsMin = 200;
-constexpr uint32_t kVirtualComboRepeatMsMax = 800;
+constexpr uint32_t kVirtualComboRepeatMsMax = 600; // same range as the PC auto combo
 constexpr uint32_t kVirtualComboRepeatStepMs = 20;
 constexpr uint32_t kVirtualUtilityButtonCooldownMs = 200;
 constexpr uint32_t kVirtualSkillAssignLongPressMs = 480;
@@ -2553,7 +2554,7 @@ constexpr uint32_t kVirtualComboResetMs = 2500;
 // that timeout is measured from the last press, and g_virtualComboLastMs is
 // refreshed on EVERY press including refused ones (deliberately - retrying a
 // blocked step should not itself time the chain out). Holding the attack button
-// repeats every g_virtualComboRepeatMs, i.e. 200-800ms, always well inside the
+// repeats every g_virtualComboRepeatMs, i.e. 200-600ms, always well inside the
 // 2500ms window - so a step that can never succeed (its target died, walked out
 // of range, or it is on cooldown) was held forever and the counter sat on the
 // same number until the player stopped attacking for a full 2.5s. That is the
@@ -6702,6 +6703,60 @@ bool IsBeyondPkTargetDropRange(int characterIndex)
     return (dx * dx) + (dy * dy) > (kPkTargetDropDistance * kPkTargetDropDistance);
 }
 
+// Safety net for a duel flag that outlives its duel. CheckAttack refuses every
+// player but the duel opponent while g_DuelMgr says a duel is on, and only the
+// server's duel-end packet turns that off - if it is missed (arena clean-up,
+// the opponent warped or logged out mid-load) nobody can be attacked until the
+// character is switched, which resets the whole client. A real duel keeps the
+// opponent next to the hero, so one that has been absent for this long means
+// the duel is over.
+constexpr DWORD kStaleDuelEnemyGoneMs = 10000;
+
+void UpdateAndroidStaleDuelState()
+{
+    static DWORD s_enemyGoneSince = 0;
+
+    if (!g_DuelMgr.IsDuelEnabled() || Hero == nullptr || CharactersClient == nullptr)
+    {
+        s_enemyGoneSince = 0;
+        return;
+    }
+
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        CHARACTER* c = &CharactersClient[i];
+        if (c != Hero && c->Object.Live && g_DuelMgr.IsDuelPlayer(c, DUEL_ENEMY, FALSE))
+        {
+            s_enemyGoneSince = 0;
+            return;
+        }
+    }
+
+    const DWORD now = GetTickCount();
+    if (s_enemyGoneSince == 0)
+    {
+        s_enemyGoneSince = now;
+        return;
+    }
+
+    if ((now - s_enemyGoneSince) < kStaleDuelEnemyGoneMs)
+    {
+        return;
+    }
+
+    s_enemyGoneSince = 0;
+    LOGI("Duel: opponent gone for %u ms, clearing the duel state", static_cast<unsigned>(kStaleDuelEnemyGoneMs));
+    g_DuelMgr.EnableDuel(FALSE);
+    g_DuelMgr.EnablePetDuel(FALSE);
+    if (g_pNewUISystem != nullptr)
+    {
+        g_pNewUISystem->Hide(SEASON3B::INTERFACE_DUEL_WINDOW);
+    }
+    ClearAndroidTargetLock("duel-stale");
+    ClearAndroidPkStickyTarget("duel-stale");
+    SelectedCharacter = -1;
+}
+
 // Runs every frame, so a target is let go the moment it dies, warps away or
 // walks out of range or into a safe zone - not just the next time a skill is
 // pressed, which left a dead or far-off player selected. The next cast then
@@ -6712,6 +6767,8 @@ void UpdateAndroidPkTargetState()
     {
         return;
     }
+
+    UpdateAndroidStaleDuelState();
 
     const bool hadSticky = g_androidPkSticky.active;
     const int stickyIndex = g_androidPkSticky.cachedIndex;
@@ -7353,6 +7410,91 @@ float ItemMenuHeight()
     return ItemMenuHeightFor(g_itemMenuCount > 1);
 }
 
+// Everything the player sees as the item menu, as one rectangle: the menu and,
+// with the details open, the tooltip hung off it, below the menu. Used to draw the container, to
+// decide what a touch lands on, and to clamp a drag, so the three always agree.
+//
+// The tooltip's position is worked out here from the menu's position THIS frame.
+// Only its size (which depends on the item, not on where it is drawn) comes from
+// the last frame. Reading the position back from g_fLastTip* instead, as this
+// used to, left the container and the tooltip a frame behind a dragged menu and,
+// worse, RenderTipTextList caches its y for 50 ms between calls, so the tooltip
+// stayed where it first appeared while the menu moved - the up-and-down sway.
+// The tooltip's size as the menu measured it right after drawing it. Not read from
+// g_fLastTip*: that is whatever tooltip the client drew LAST in the frame, which
+// is not always this one, and a container sized from someone else's rectangle
+// is how the text ended up outside its box.
+float g_itemMenuTipW = 0.0f;
+float g_itemMenuTipH = 0.0f;
+
+struct ItemMenuContainer
+{
+    AndroidUiRect box;
+    AndroidUiRect tip;
+    bool hasTip;
+};
+
+ItemMenuContainer ComputeItemMenuContainer(float menuX, float menuY, float menuH, bool showTooltip)
+{
+    ItemMenuContainer c{};
+    c.box = { menuX, menuY, kItemMenuWidth, menuH };
+    c.hasTip = (showTooltip && g_itemMenuTipW > 1.0f && g_itemMenuTipH > 1.0f);
+
+    if (!c.hasTip)
+    {
+        return c;
+    }
+
+    const float tipW = g_itemMenuTipW;
+    const float tipH = g_itemMenuTipH;
+    const float screenW = static_cast<float>(WindowWidth) / ((g_fScreenRate_x > 0.0f) ? g_fScreenRate_x : 1.0f);
+
+    // Same horizontal rule as RenderTipTextList: centred under the menu, kept on
+    // screen.
+    int tipX = static_cast<int>(static_cast<int>(menuX + (kItemMenuWidth * 0.5f)) - (tipW * 0.5f));
+    if (tipX < 0)
+    {
+        tipX = 0;
+    }
+    if (static_cast<float>(tipX) + tipW > screenW)
+    {
+        tipX = static_cast<int>(screenW - tipW - 1.0f);
+    }
+
+    // Always under the menu, so the picture stays on top and the text below it
+    // wherever the menu is dragged: the drag stops short of the screen bottom
+    // while the details are open (ItemMenuMaxY) instead of flipping the tooltip
+    // above. Only a tooltip taller than the room left is pulled up onto the menu.
+    const float tipY = std::clamp(menuY + menuH, 0.0f, std::max(0.0f, 480.0f - tipH));
+
+    c.tip = { static_cast<float>(tipX), tipY, tipW, tipH };
+
+    const float left   = std::min(menuX, c.tip.x - kItemMenuPad);
+    const float top    = std::min(menuY, c.tip.y - kItemMenuPad);
+    const float right  = std::max(menuX + kItemMenuWidth, c.tip.x + c.tip.w + kItemMenuPad);
+    const float bottom = std::max(menuY + menuH, c.tip.y + c.tip.h + kItemMenuPad);
+    c.box = { left, top, right - left, bottom - top };
+    return c;
+}
+
+// The live menu's container.
+ItemMenuContainer GetItemMenuContainer()
+{
+    return ComputeItemMenuContainer(g_itemMenuX, g_itemMenuY, ItemMenuHeight(), g_itemMenuShowTooltip);
+}
+
+// How far down the menu may sit: the picture, buttons and - with the details open
+// - the whole tooltip under them stay on screen.
+float ItemMenuMaxY()
+{
+    float room = 480.0f - ItemMenuHeight();
+    if (g_itemMenuShowTooltip && g_itemMenuTipH > 1.0f)
+    {
+        room -= g_itemMenuTipH + kItemMenuPad;
+    }
+    return std::max(0.0f, room);
+}
+
 void CloseItemMenu()
 {
     g_itemMenuOpen = false;
@@ -7363,6 +7505,8 @@ void CloseItemMenu()
     // drop comes into range.
     g_fLastTipW = 0.0f;
     g_fLastTipH = 0.0f;
+    g_itemMenuTipW = 0.0f;
+    g_itemMenuTipH = 0.0f;
 }
 
 // Mirrors the click-to-pick-up path in ZzzInterface so the walk, the range
@@ -7454,8 +7598,9 @@ bool HandleItemMenuFingerDown(float uiX, float uiY, SDL_FingerID fingerId)
         return false;
     }
 
-    if (uiX < g_itemMenuX || uiX > (g_itemMenuX + kItemMenuWidth)
-        || uiY < g_itemMenuY || uiY > (g_itemMenuY + ItemMenuHeight()))
+    // The whole container - menu and open tooltip - not just the menu: a touch
+    // on the tooltip must not reach the inventory or the world underneath it.
+    if (!HitTestAndroidUiRect(uiX, uiY, GetItemMenuContainer().box))
     {
         // Outside the box, the tap belongs to the game.
         return false;
@@ -7494,7 +7639,7 @@ bool HandleItemMenuFingerMotion(const SDL_TouchFingerEvent& touch)
     if (g_itemMenuDrag.moved)
     {
         g_itemMenuX = std::clamp(g_itemMenuDrag.boxStartX + dx, 0.0f, 640.0f - kItemMenuWidth);
-        g_itemMenuY = std::clamp(g_itemMenuDrag.boxStartY + dy, 0.0f, 480.0f - ItemMenuHeight());
+        g_itemMenuY = std::clamp(g_itemMenuDrag.boxStartY + dy, 0.0f, ItemMenuMaxY());
         g_itemMenuDraggedX = g_itemMenuX;
         g_itemMenuDraggedY = g_itemMenuY;
     }
@@ -7510,8 +7655,7 @@ bool HandleItemMenuTap(float uiX, float uiY)
         return false;
     }
 
-    if (uiX < g_itemMenuX || uiX > (g_itemMenuX + kItemMenuWidth)
-        || uiY < g_itemMenuY || uiY > (g_itemMenuY + ItemMenuHeight()))
+    if (!HitTestAndroidUiRect(uiX, uiY, GetItemMenuContainer().box))
     {
         // Outside the container the tap belongs to the game, so it falls
         // through to normal movement and attacking.
@@ -7559,8 +7703,10 @@ bool HandleItemMenuTap(float uiX, float uiY)
             g_itemMenuPage = (g_itemMenuPage + 1) % g_itemMenuCount;
         }
 
+        // Details stay open while paging - the tooltip is drawn for whichever
+        // drop is on the page, so it follows along instead of closing and
+        // needing another tap on the picture.
         g_itemMenuItemKey = g_itemMenuList[g_itemMenuPage];
-        g_itemMenuShowTooltip = false;
         return true;
     }
 
@@ -7699,12 +7845,15 @@ void UpdateItemMenuNearCharacter()
     g_itemMenuX = (g_itemMenuDraggedX >= 0.0f) ? g_itemMenuDraggedX : kItemMenuDefaultX;
     g_itemMenuY = (g_itemMenuDraggedY >= 0.0f) ? g_itemMenuDraggedY : kItemMenuDefaultY;
 
-    // A tooltip left open for whatever drop used to be here would be showing
-    // the wrong item's info the moment this one replaces it.
-    if (g_itemMenuItemKey != previousKey)
-    {
-        g_itemMenuShowTooltip = false;
-    }
+    // With the details open the tooltip needs room under the menu. Only the shown
+    // position moves; the dragged spot is kept, so the menu goes back to it when
+    // the details are closed.
+    g_itemMenuY = std::min(g_itemMenuY, ItemMenuMaxY());
+
+    // The details stay open when the drop on the page changes (paging, or the
+    // shown one was picked up): the tooltip is rebuilt for the current item
+    // every frame, so it never shows the old one. Only closing the menu - no
+    // drops in range - turns them off (CloseItemMenu).
 }
 
 // Everything that actually draws the menu, with the box origin, the item and
@@ -7725,22 +7874,12 @@ void DrawItemMenuBox(ITEM item, float menuX, float menuY, int page, int count, b
     // tooltip's height is only known inside RenderTipTextList, which records the
     // rect it drew into, so the box is sized from the previous frame's values.
     // Content only changes when the player pages, so the lag is never visible.
-    float boxX = menuX;
-    float boxY = menuY;
-    float boxR = menuX + kItemMenuWidth;
-    float boxB = menuY + menuH;
-
-    const bool haveTip = (showTooltip && g_fLastTipW > 1.0f && g_fLastTipH > 1.0f);
-
-    if (haveTip)
-    {
-        boxX = std::min(boxX, g_fLastTipX - kItemMenuPad);
-        boxR = std::max(boxR, g_fLastTipX + g_fLastTipW + kItemMenuPad);
-        boxB = std::max(boxB, g_fLastTipY + g_fLastTipH + kItemMenuPad);
-    }
-
-    const float boxW = boxR - boxX;
-    const float boxH = boxB - boxY;
+    // Same rectangle the touch handling uses - see ComputeItemMenuContainer.
+    const ItemMenuContainer container = ComputeItemMenuContainer(menuX, menuY, menuH, showTooltip);
+    const float boxX = container.box.x;
+    const float boxY = container.box.y;
+    const float boxW = container.box.w;
+    const float boxH = container.box.h;
 
     // Same layered shadow/fill/border treatment as RenderAndroidTargetPicker,
     // via TextDraw/DrawVirtual* instead of g_pRenderText - this is the family
@@ -7861,11 +8000,23 @@ void DrawItemMenuBox(ITEM item, float menuX, float menuY, int page, int count, b
     // Only drawn once the icon has been tapped - see g_itemMenuShowTooltip.
     if (showTooltip)
     {
+        // At the spot the container was sized for. Before the first frame has
+        // measured the tooltip there is no rect yet, so it goes under the menu.
+        const int tipDrawY = container.hasTip
+            ? static_cast<int>(container.tip.y)
+            : static_cast<int>(menuY + menuH);
+
         g_bTipSuppressBG = true;
+        g_bTipFixedPos = true;
         RenderItemInfo(static_cast<int>(menuX + kItemMenuWidth * 0.5f),
-                       static_cast<int>(menuY + menuH),
+                       tipDrawY,
                        &item, false, 0, false, false);
+        g_bTipFixedPos = false;
         g_bTipSuppressBG = false;
+
+        // Read back now, while it is still this tooltip's rectangle.
+        g_itemMenuTipW = g_fLastTipW;
+        g_itemMenuTipH = g_fLastTipH;
     }
 
     EndBitmap();
@@ -10310,6 +10461,35 @@ bool IsAndroidRawPopupWindowOpen()
     if (WindowClass.GetVisible())
     {
         return true;
+    }
+
+    return false;
+}
+
+// The plain-GL custom windows (Config System, Jewel Bank and its amount box,
+// the Features sub-windows...) keep clicks off the world with a short block that
+// they only set while the cursor is ALREADY over them when they draw. A mouse
+// gets there before it clicks; a finger lands and clicks in the same instant,
+// so the tap went through to the world and walked the character - or started
+// the floating joystick. Hit-tested against the rectangles those windows store
+// for themselves, at the moment the finger comes down.
+bool IsTouchOverAndroidCustomWindow(float uiX, float uiY)
+{
+    for (int window = eBeginWindowCustom + 1; window < eEndWindowCustom; ++window)
+    {
+        const InterfaceObject& data = gInterface.Data[window];
+        if (!data.OnShow || !data.FirstLoad || data.Width <= 0.0f || data.Height <= 0.0f)
+        {
+            continue;
+        }
+
+        // Collapsed to its title bar.
+        const float height = data.BActiveHiden ? 25.0f : data.Height;
+        if (uiX >= data.X && uiX <= (data.X + data.Width)
+            && uiY >= data.Y && uiY <= (data.Y + height))
+        {
+            return true;
+        }
     }
 
     return false;
@@ -14867,11 +15047,25 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
             || HitTestVirtualTopBarButton(uiX, uiY) != kTopBarActionNone
             || HitTestMiniMapToggleCornerButton(uiX, uiY)
             || HitTestMiniMapCornerPanel(uiX, uiY));
+    // A tap on a custom window is that window's: block the world click it
+    // turns into, and keep the joystick from starting under it.
+    const bool tapOnCustomWindow = IsTouchOverAndroidCustomWindow(uiX, uiY);
+    if (tapOnCustomWindow && g_pBCustomMenuInfo != nullptr)
+    {
+        g_pBCustomMenuInfo->SetBlockCur(TRUE);
+    }
+
     if (!tapOnOverlayButton
+        && !tapOnCustomWindow
         && IsAndroidMovementAllowedWithOpenWindows()
         && HandleVirtualJoystickFingerDown(touch))
     {
         return true;
+    }
+
+    if (tapOnCustomWindow)
+    {
+        return false;
     }
 
     // Paired with the same check in RenderVirtualPad. The controls are not on
@@ -20250,6 +20444,16 @@ void AndroidClearTargetLock()
     ClearAndroidTargetLock("map-change");
     ClearAndroidPkStickyTarget("map-change");
     CancelAndroidGroundAim("map-change");
+}
+
+// A duel starting or ending changes who may be attacked, so whatever the touch
+// target system was holding - the PK sticky target, an AIM lock, the selection -
+// belongs to the old situation. Called from the duel start and end packets.
+void AndroidResetCombatTargetsForDuel()
+{
+    ClearAndroidTargetLock("duel-change");
+    ClearAndroidPkStickyTarget("duel-change");
+    SelectedCharacter = -1;
 }
 
 // Called from the scene phase right after MoveHero. It has to run there rather

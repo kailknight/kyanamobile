@@ -3150,11 +3150,23 @@ ITEM* CNewUIMyInventory::FindEquippedItemAtPt(int x, int y, int* outSlotIndex, b
 
 	return nullptr;
 }
+// Main grid first, then the expanded inventory pages - a potion stack kept
+// in an expansion is just as drinkable for auto potion and the Helper.
+int CNewUIMyInventory::FindPotionIndex(short sType) const
+{
+	int iIndex = FindItemReverseIndex(sType);
+	if (iIndex == -1 && g_pMyInventoryExt != nullptr)
+	{
+		iIndex = g_pMyInventoryExt->FindItemReverseIndex(sType);
+	}
+
+	return iIndex;
+}
 int CNewUIMyInventory::FindHPItemIndex() const
 {
 	for (int i = ITEM_POTION; i < ITEM_POTION + 4; i++)
 	{
-		const int iIndex = FindItemReverseIndex(i);
+		const int iIndex = FindPotionIndex(i);
 		if (iIndex != -1)
 		{
 			return iIndex;
@@ -3167,7 +3179,7 @@ int CNewUIMyInventory::FindManaItemIndex() const
 {
 	for (int i = ITEM_POTION + 6; i >= ITEM_POTION + 5; i--)
 	{
-		const int iIndex = FindItemReverseIndex(i);
+		const int iIndex = FindPotionIndex(i);
 		if (iIndex != -1)
 		{
 			return iIndex;

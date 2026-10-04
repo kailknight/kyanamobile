@@ -13,6 +13,7 @@
 #include "ZzzTexture.h"
 #include "ZzzAI.h"
 #include "ZzzInterface.h"
+#include "QuickToggles.h"
 #include "ZzzInventory.h"
 #include "ZzzOpenData.h"
 #include "ZzzEffect.h"
@@ -7485,6 +7486,13 @@ void Attack(CHARACTER *c)
 		{
 			return;
 		}
+	}
+
+	// Auto combo (PC): the held skill button casts hotkeys 1, 2, 3 in turn at
+	// the player's pace instead of the selected skill over and over.
+	if (gAutoCombo.TryCast(c, Skill, Distance))
+	{
+		return;
 	}
 
 	ExecuteSkill(c, Skill, Distance);

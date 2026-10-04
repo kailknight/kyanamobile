@@ -72,6 +72,7 @@ namespace SEASON3B
 		ITEM* FindItemAtPt(int x, int y);
 		ITEM* FindItem(int iLinealPos);
 		int FindItemIndex(short sType, int iLevel = -1) const;
+		int FindItemReverseIndex(short sType, int iLevel = -1) const;
 	private:
         void Init();
 

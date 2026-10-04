@@ -9050,11 +9050,22 @@ void ReceiveDuelStart(BYTE* ReceiveBuffer)
 	{
 		g_DuelMgr.EnableDuel(TRUE);
 		g_DuelMgr.SetHeroAsDuelPlayer(DUEL_HERO);
+#if defined(__ANDROID__) || defined(MU_IOS)
+		{
+			extern void AndroidResetCombatTargetsForDuel();
+			AndroidResetCombatTargetsForDuel();
+		}
+#endif
 		g_DuelMgr.SetDuelPlayer(DUEL_ENEMY, MAKEWORD(Data->bIndexL,Data->bIndexH), Data->szID);
 		sprintf(szMessage, GlobalText[912], g_DuelMgr.GetDuelPlayerID(DUEL_ENEMY));
 		g_pChatListBox->AddText("", szMessage, SEASON3B::TYPE_ERROR_MESSAGE);
 		
-		g_pNewUISystem->Show(SEASON3B::INTERFACE_DUEL_WINDOW);
+		// The small corner score box is no longer shown: each kill now shows the
+		// score big in the middle of the screen (RenderDuelKillScore).
+		{
+			extern void ResetDuelKillScore();
+			ResetDuelKillScore();
+		}
 		PlayBuffer(SOUND_START_DUEL);
 	}
 	else if (Data->nResult == 15)
@@ -9096,6 +9107,12 @@ void ReceiveDuelEnd(BYTE* ReceiveBuffer)
 		if(g_wtMatchTimeLeft.m_Type == 2)
 			g_wtMatchTimeLeft.m_Time = 0;
 		g_DuelMgr.EnablePetDuel(FALSE);
+#if defined(__ANDROID__) || defined(MU_IOS)
+		{
+			extern void AndroidResetCombatTargetsForDuel();
+			AndroidResetCombatTargetsForDuel();
+		}
+#endif
 	}
 	else
 	{
@@ -9115,6 +9132,12 @@ void ReceiveDuelScore(BYTE* ReceiveBuffer)
 	{
 		g_DuelMgr.SetScore(DUEL_HERO, Data->btDuelScore2);
 		g_DuelMgr.SetScore(DUEL_ENEMY, Data->btDuelScore1);
+	}
+
+	// A kill: show the score big in the middle of the screen for a moment.
+	{
+		extern void NotifyDuelKillScore(int heroScore, int enemyScore);
+		NotifyDuelKillScore(g_DuelMgr.GetScore(DUEL_HERO), g_DuelMgr.GetScore(DUEL_ENEMY));
 	}
 }
 

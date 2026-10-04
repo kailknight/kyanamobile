@@ -536,6 +536,22 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				if(g_pSlotMachine) g_pSlotMachine->RecvClaimList(lpMsg);
 			}
 			break;
+			case 0xB9: // Master skill tree recommendations for this class (GCMasterRecommendSend)
+				if (size >= 6)
+				{
+					extern void SetMasterSkillRecommendations(const BYTE* entries, int count, int sample);
+
+					int count = lpMsg[5];
+
+					// 4 bytes an entry: skill low, skill high, picks, usual level.
+					if (count > (size - 6) / 4)
+					{
+						count = (size - 6) / 4;
+					}
+
+					SetMasterSkillRecommendations(lpMsg + 6, count, lpMsg[4]);
+				}
+				break;
 			case 0xB7: // NPC shop page - the item list that follows is this page of that many
 			{
 				if(g_pNPCShop) g_pNPCShop->RecvPageInfo(lpMsg);
@@ -725,13 +741,20 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				break;
 
 			case 0x7E: // Account level + auto potion rules - GCAccountLevelSend
-				if (size >= 7)
+				if (size >= 9)
 				{
 					gAutoPotion.SetServerRules(lpMsg[4], lpMsg[5], lpMsg[6]);
+					gAutoCombo.SetServerRules(lpMsg[4], lpMsg[7], lpMsg[8] * 10);
+				}
+				else if (size >= 7)
+				{
+					gAutoPotion.SetServerRules(lpMsg[4], lpMsg[5], lpMsg[6]);
+					gAutoCombo.SetServerRules(lpMsg[4], -1, -1); // GameServer without the combo rules
 				}
 				else if (size >= 5)
 				{
 					gAutoPotion.SetServerRules(lpMsg[4], -1, -1); // older GameServer
+					gAutoCombo.SetServerRules(lpMsg[4], -1, -1);
 				}
 				break;
 

@@ -1008,7 +1008,14 @@ void SEASON3B::CNewUIGuildInfoWindow::ReceiveGuildRelationShip( BYTE byRelationS
 		int nCharKey = MAKEWORD(m_MessageInfo.s_byTargetUserIndexL, m_MessageInfo.s_byTargetUserIndexH);
 		int nIndex = FindCharacterIndex(nCharKey);
 		if( nIndex < 0 || nIndex >= MAX_CHARACTERS_CLIENT )
+		{
+			// The proposer is not in our character list (out of view, or the
+			// list not yet updated). Answer "no" rather than nothing: without an
+			// answer the server held both guild masters busy and the proposer
+			// never heard back.
+			SendRequestGuildRelationShipResult( byRelationShipType, byRequestType, 0x00, byTargetUserIndexH, byTargetUserIndexL );
 			return;
+		}
 		CHARACTER* pPlayer = &CharactersClient[nIndex];
 
 		unicode::t_char szText[3][64];

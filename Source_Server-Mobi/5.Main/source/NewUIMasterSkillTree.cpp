@@ -9,6 +9,67 @@
 #include "NewUIMasterSkillTree.h"
 #include "CharacterManager.h"
 #include "NewUICustomMessageBox.h"
+#include <vector>
+#include <cmath>
+
+// Master skill recommendations, pushed by the GameServer as C1:D3:B9: the master
+// skills the top characters of this player's class learned, most popular first.
+// Kept outside the window, which may not exist yet when the packet arrives at
+// login.
+namespace
+{
+	struct MasterRecommendEntry
+	{
+		int Skill;
+		int Picks;
+		int Level; // the level most of those players took it to
+	};
+
+	std::vector<MasterRecommendEntry> g_MasterRecommend;
+	int g_MasterRecommendSample = 0;
+
+	const MasterRecommendEntry* FindMasterRecommend(int skill)
+	{
+		for (size_t n = 0; n < g_MasterRecommend.size(); n++)
+		{
+			if (g_MasterRecommend[n].Skill == skill)
+			{
+				return &g_MasterRecommend[n];
+			}
+		}
+
+		return NULL;
+	}
+
+	int GetMasterRecommendPicks(int skill)
+	{
+		for (size_t n = 0; n < g_MasterRecommend.size(); n++)
+		{
+			if (g_MasterRecommend[n].Skill == skill)
+			{
+				return g_MasterRecommend[n].Picks;
+			}
+		}
+
+		return 0;
+	}
+}
+
+void SetMasterSkillRecommendations(const BYTE* entries, int count, int sample)
+{
+	g_MasterRecommend.clear();
+
+	for (int n = 0; n < count; n++)
+	{
+		MasterRecommendEntry entry;
+		entry.Skill = entries[(n * 4) + 0] | (entries[(n * 4) + 1] << 8);
+		entry.Picks = entries[(n * 4) + 2];
+		entry.Level = entries[(n * 4) + 3];
+		g_MasterRecommend.push_back(entry);
+	}
+
+	g_MasterRecommendSample = sample;
+}
 
 #if(NEW_MASTER_SKILL_TREE == 1)
 extern int DisplayWinCDepthBox;
@@ -741,6 +802,8 @@ void SEASON3B::CNewUIMasterSkillTree::RenderIcon()
 	float v35; // [esp+84h] [ebp-12Ch]
 	float v32; // [esp+78h] [ebp-138h]
 	char Buffer[256];
+	int recommendedPoints = 0;
+	const int recommended = this->FindRecommendedSkill(&recommendedPoints);
 	for (std::map<BYTE, _MASTER_SKILLTREE_DATA>::iterator it = this->map_masterData.begin(); it != this->map_masterData.end(); it++)
 	{
 		BYTE Group = it->second.Group;
@@ -782,6 +845,33 @@ void SEASON3B::CNewUIMasterSkillTree::RenderIcon()
 		v20 = CalcY + 5.0;
 		v19 = CalcX + 8.5;
 		SEASON3B::RenderImage(IMAGE_MASTER_INTERFACE + 2, v19, v20, 20.0, 28.0, v21, v22, 0.0390625, 0.053710938, textColor);
+
+		// The next best pick: a pulsing gold frame and a PICK tag on the skill
+		// the top players of this class learned most that this player can
+		// raise right now.
+		if (Skill == recommended)
+		{
+			const float pulse = 0.55f + 0.45f * sinf((float)GetTickCount() * 0.006f);
+
+			::EnableAlphaTest();
+			glColor4f(1.0f, 0.82f, 0.15f, pulse);
+			RenderColor((float)CalcX, (float)CalcY, 50.0f, 2.0f);
+			RenderColor((float)CalcX, (float)CalcY + 36.0f, 50.0f, 2.0f);
+			RenderColor((float)CalcX, (float)CalcY, 2.0f, 38.0f);
+			RenderColor((float)CalcX + 48.0f, (float)CalcY, 2.0f, 38.0f);
+			EndRenderColor();
+			::glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+			g_pRenderText->SetFont(g_hFontBold);
+			g_pRenderText->SetBgColor(0, 0, 0, 200);
+			g_pRenderText->SetTextColor(255, 210, 40, 255);
+			char pickText[16];
+			sprintf(pickText, "PICK +%d", recommendedPoints);
+			g_pRenderText->RenderText(CalcX + 3, CalcY + 2, pickText, 0, 0, RT3_SORT_LEFT, 0);
+			g_pRenderText->SetFont(g_hFont);
+			g_pRenderText->SetBgColor(0);
+			g_pRenderText->SetTextColor(textColor);
+		}
 		//===Draw Skill Point
 
 		memset(Buffer, 0, sizeof(Buffer));
@@ -1035,6 +1125,22 @@ void SEASON3B::CNewUIMasterSkillTree::RenderToolTip()
 
 				lineCount = this->SetDivideString(buffer, 0, lineCount, iTextColor, 0, true);
 			}
+		}
+
+		// How popular this skill is among the top players of the class.
+		const MasterRecommendEntry* recommend = FindMasterRecommend(Skill);
+		int pointsToAdd = 0;
+
+		if (Skill == this->FindRecommendedSkill(&pointsToAdd))
+		{
+			sprintf(buffer, "Recommended next pick: add %d point%s", pointsToAdd, (pointsToAdd == 1) ? "" : "s");
+			lineCount = this->SetDivideString(buffer, 0, lineCount, TEXT_COLOR_YELLOW, 1, false);
+		}
+
+		if (recommend != NULL && g_MasterRecommendSample > 0)
+		{
+			sprintf(buffer, "Learned by %d of the top %d players of your class, most to level %d", recommend->Picks, g_MasterRecommendSample, recommend->Level);
+			lineCount = this->SetDivideString(buffer, 0, lineCount, TEXT_COLOR_GREEN, 0, false);
 		}
 
 		RenderTipTextList(CalcX + 8, CalcY + 33, lineCount, 0, 3, 0, 1);
@@ -1355,6 +1461,126 @@ void SEASON3B::CNewUIMasterSkillTree::SkillUpgrade(int index, char point, float 
 	}
 
 	this->CategoryPoint[it->second.Group] += it->second.RequiredPoints;
+}
+
+int SEASON3B::CNewUIMasterSkillTree::FindRecommendedSkill(int* pointsToAdd)
+{
+	int points = 0;
+
+	if (pointsToAdd != NULL)
+	{
+		*pointsToAdd = 0;
+	}
+
+	// Nothing to spend, nothing to recommend - the frame comes back with the
+	// next master level's points.
+	if (Master_Level_Data.nMLevelUpMPoint <= 0)
+	{
+		return -1;
+	}
+
+	// Most popular first; the first one this player has not yet taken to the
+	// level the top players did wins.
+	for (size_t n = 0; n < g_MasterRecommend.size(); n++)
+	{
+		const int step = this->ResolveRecommendStep(g_MasterRecommend[n].Skill, g_MasterRecommend[n].Level, 0, &points);
+
+		if (step >= 0)
+		{
+			if (pointsToAdd != NULL)
+			{
+				*pointsToAdd = points;
+			}
+
+			return step;
+		}
+	}
+
+	return -1;
+}
+
+// The skill to put a point into on the way to `skill`: the skill itself when it
+// can be raised now, or - when its parent skills are not at 10 yet - the first
+// parent on that path that can. -1 when it is maxed, not in this class's tree,
+// or blocked by something a tree click cannot fix (the base skill not learned
+// from its book, or not enough points in the rank below).
+int SEASON3B::CNewUIMasterSkillTree::ResolveRecommendStep(int skill, int wantLevel, int depth, int* pointsToAdd)
+{
+	if (skill <= 0 || skill >= MAX_SKILLS || depth > 8)
+	{
+		return -1;
+	}
+
+	for (std::map<BYTE, _MASTER_SKILLTREE_DATA>::iterator it = this->map_masterData.begin(); it != this->map_masterData.end(); it++)
+	{
+		if (it->second.Skill != skill)
+		{
+			continue;
+		}
+
+		int skillPoint = 0;
+
+		std::map<DWORD, CSkillTreeInfo>::iterator sit = this->map_skilltreeinfo.find(skill);
+
+		if (sit != this->map_skilltreeinfo.end())
+		{
+			skillPoint = sit->second.GetSkillPoint();
+		}
+
+		// Done once it is where the top players took it, rounded up to whole
+		// steps of 10 - the step that unlocks the next skill - so the advice is
+		// +10 or +20, never +9 (never past the max either).
+		int target = wantLevel;
+
+		if (target <= 0)
+		{
+			target = it->second.MaxLevel;
+		}
+		else
+		{
+			target = ((target + 9) / 10) * 10;
+		}
+
+		if (target > it->second.MaxLevel)
+		{
+			target = it->second.MaxLevel;
+		}
+
+		if (skillPoint >= target)
+		{
+			return -1;
+		}
+
+		if (this->CheckParentSkill(it->second.RequireSkill[0], it->second.RequireSkill[1]) == false)
+		{
+			for (int r = 0; r < 2; r++)
+			{
+				// A parent only has to reach 10 to unlock what is after it.
+				const int step = this->ResolveRecommendStep(it->second.RequireSkill[r], 10, depth + 1, pointsToAdd);
+
+				if (step >= 0)
+				{
+					return step;
+				}
+			}
+
+			return -1;
+		}
+
+		if (this->CheckBeforeSkill(skill, skillPoint) == false || this->CheckRankPoint(it->second.Group, SkillAttribute[skill].SkillRank, skillPoint) == false)
+		{
+			return -1;
+		}
+
+		if (pointsToAdd != NULL)
+		{
+			*pointsToAdd = target - skillPoint;
+		}
+
+		return skill;
+	}
+
+	return -1;
 }
 
 bool SEASON3B::CNewUIMasterSkillTree::IsLearnSkill(int index)

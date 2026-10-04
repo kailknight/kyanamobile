@@ -125,6 +125,11 @@ namespace SEASON3B
 		int GetBaseSkillID(int index);
 		void SkillUpgrade(int a2, char a3, float a4, float a5);
 		bool IsLearnSkill(int index);
+		// The skill the top players of this class learned most that this
+		// player can put a point into right now, or -1 (C1:D3:B9), and how
+		// many points to add to it.
+		int FindRecommendedSkill(int* pointsToAdd = NULL);
+		int ResolveRecommendStep(int skill, int wantLevel, int depth, int* pointsToAdd);
 		float GetSkillValue(int index);
 		float GetSkillCumulativeValue(int index, BYTE damage);
 		BYTE GetSkillLevel(int index);

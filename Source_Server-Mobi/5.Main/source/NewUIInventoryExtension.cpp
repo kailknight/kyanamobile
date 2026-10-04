@@ -466,6 +466,27 @@ ITEM* CNewUIInventoryExtension::FindItem(int iLinealPos)
 	return ItemGet;
 }
 
+int CNewUIInventoryExtension::FindItemReverseIndex(short sType, int iLevel) const
+{
+	// Last expanded page first, like the main grid's reverse search.
+	for (int iInv = CharacterAttribute->InventoryExtensions - 1; iInv >= 0; iInv--)
+	{
+		CNewUIInventoryCtrl* pCtrl = GetInventoryCtrl(iInv);
+		if (pCtrl == nullptr)
+		{
+			continue;
+		}
+
+		const int IndexItem = pCtrl->FindItemReverseIndex(sType, iLevel);
+		if (IndexItem != -1)
+		{
+			return IndexItem;
+		}
+	}
+
+	return -1;
+}
+
 int CNewUIInventoryExtension::FindItemIndex(short sType, int iLevel) const
 {
 	int IndexItem = -1;

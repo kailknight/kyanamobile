@@ -1,12 +1,13 @@
 #pragma once
 
 // Keyboard toggles made by pressing a key three times in a row, and the auto
-// potion they drive.
+// potion / auto combo they drive.
 //
 //   Ctrl x3   PK mode on/off (the same AutoCtrlPK the "HP and PK" button and
 //             the mobile PK button flip)
-//   Q x3      auto potion on/off
-//   hold Q    auto potion settings
+//   ~ x3      auto potion on/off
+//   hold ~    the auto menu: switches for auto potion and auto combo, and
+//             their settings (HP threshold, ms per combo skill)
 //
 // Auto potion drinks an HP potion when HP falls to a threshold, like the MU
 // Helper's potion option. Who may change the threshold, and what it is for
@@ -14,7 +15,13 @@
 // AutoPotionThreshold), sent with the account level as 0xD3:0x7E. Until that
 // arrives - or from an older GameServer - the rule is the old one: account
 // level above 0 may change it, everyone else drinks at kDefaultThreshold.
-// The gate is client-side, like the rest of this convenience feature.
+//
+// Auto combo (PC): while it is on, holding the skill button (right mouse)
+// casts the skills on hotkeys 1, 2 and 3 in turn instead of the selected one
+// over and over, waiting a set number of milliseconds after each. The ms per
+// skill follow the same rule as the potion threshold (CustomConfig.ini
+// AutoCombo_AL0..AL3 and AutoComboDelayMS, same packet).
+// The gate is client-side, like the rest of these convenience features.
 
 // Three presses of one key, each within kTripleTapGapMs of the last.
 struct CTripleTap
@@ -46,18 +53,18 @@ public:
 	// Percent of max HP at or below which a potion is used.
 	int GetThreshold() const;
 
-	// From CNewUIItemHotKey::UpdateKeyEvent. OnQPress returns true when the
-	// press was the third of a triple press and was used to toggle - the
-	// caller then skips drinking the Q-slot potion for that press.
-	bool OnQPress();
-	void OnQHeld();
+	// Every frame in the game scene, from the custom menu: the ~ key. Three
+	// quick presses toggle auto potion, holding it opens the menu.
+	void UpdateHotkey();
 
 	// Every frame in the game scene.
 	void Update();
 	void Render();
 
-	// Settings window, or a message when this account may not change them.
-	// Hold Q on PC; long-press the AutoPots button on mobile.
+	// The auto menu. On PC it always opens (the switches work for everyone;
+	// the settings in it are locked for accounts that may not change them). On
+	// mobile this is the AutoPots button's potion settings, which only open for
+	// accounts that may change the threshold.
 	void OpenSettings();
 
 private:
@@ -69,14 +76,65 @@ private:
 	int m_OwnThreshold;     // the player's own choice, when they may
 	bool m_SettingsLoaded;
 
-	CTripleTap m_QTap;
-	DWORD m_QDownTick;
-	bool m_QHoldHandled;
+	CTripleTap m_Tap;
+	DWORD m_DownTick;
+	bool m_HoldHandled;
 
 	DWORD m_NextDrinkTick;
 };
 
 extern CAutoPotion gAutoPotion;
+
+class CHARACTER;
+
+class CAutoCombo
+{
+public:
+	CAutoCombo();
+
+	static const int kSteps = 3;            // hotkeys 1, 2 and 3
+	static const int kDefaultDelayMs = 400;
+	static const int kMinDelayMs = 200;
+	static const int kMaxDelayMs = 600; // same range as the mobile combo
+	static const int kDelayStepMs = 50;
+
+	// From 0xD3:0x7E. Both are -1 from a GameServer that does not send them:
+	// the potion rule (account level above 0) decides, at the default pace.
+	void SetServerRules(int accountLevel, int canConfigure, int delayMs);
+	bool CanConfigure() const { return m_CanConfigure; }
+
+	bool IsEnabled() const { return m_Enabled; }
+	void SetEnabled(bool enabled);
+
+	// Milliseconds waited after the skill of that step (0-2).
+	int GetDelayMs(int step) const;
+	void SetOwnDelayMs(int step, int delayMs);
+	int GetServerDelayMs() const { return m_ServerDelayMs; }
+
+	// The skill button is being held and the selected skill is an attack: casts
+	// the next skill of the chain, or waits out the delay of the last. True when
+	// it took over the cast - the caller then does not cast the selected skill.
+	// Called from Attack() in ZzzInterface.cpp.
+	bool TryCast(CHARACTER* c, int selectedSkill, float selectedDistance);
+
+	void LoadSettings();
+
+private:
+	void SaveSettings();
+
+	bool m_Enabled;
+	bool m_CanConfigure;
+	int m_ServerDelayMs;
+	int m_OwnDelayMs[kSteps];   // 0 = never set, follows the server's value
+	bool m_SettingsLoaded;
+
+	int m_Step;
+	DWORD m_LastAttemptTick;
+	DWORD m_NextCastTick;
+	DWORD m_BlockedSinceTick;
+};
+
+extern CAutoCombo gAutoCombo;
 
 // Every frame in the game scene: Ctrl pressed three times toggles PK mode.
 void UpdatePkModeHotkey();

@@ -133,6 +133,12 @@ void CBAutoResetInfo::RecvProtocol(BYTE* Recv)
 	if (gCBAutoResetInfo->ViewInfoResetWindow.LoaiReset == 0)gCBAutoResetInfo->ViewInfoResetWindow.Point = 0;
 	gCBAutoResetInfo->ViewInfoResetWindow.TypeReset = mRecv->TypeReset;
 	gCBAutoResetInfo->ViewInfoResetWindow.CodeReset = mRecv->CodeReset;
+	gCBAutoResetInfo->ViewInfoResetWindow.RewardWC = mRecv->RewardWC;
+	gCBAutoResetInfo->ViewInfoResetWindow.RewardWP = mRecv->RewardWP;
+	gCBAutoResetInfo->ViewInfoResetWindow.RewardGP = mRecv->RewardGP;
+	gCBAutoResetInfo->ViewInfoResetWindow.KeepStats = mRecv->KeepStats;
+	gCBAutoResetInfo->ViewInfoResetWindow.NoLevelUpPoint = mRecv->NoLevelUpPoint;
+	gCBAutoResetInfo->ViewInfoResetWindow.ResetMove = mRecv->ResetMove;
 	
 	//==Get point def
 	for (int i = 0; i < 5; i++)
@@ -308,158 +314,97 @@ void CBAutoResetInfo::DrawWindow()
 	{
 		return;
 	}
-	float WindowW = 320;
-	float WindowH = 290;
+	// Laid out for this server's reset: stats are kept, every reset pays a coin
+	// reward and levelling gives no points (CustomConfig.ini ResetKeepStats /
+	// ResetReward* / ResetNoLevelUpPoint, sent with the reset info). Colours
+	// are TextDraw's 0xAABBGGRR.
+	const VIEWINFO_RESETLIST& info = gCBAutoResetInfo->ViewInfoResetWindow;
+
+	float WindowW = 300;
+	float WindowH = 235;
 	gInterface.Data[eWindowAutoReset].Width = WindowW;
+	gInterface.Data[eWindowAutoReset].Height = WindowH;
 	float StartX = (MAX_WIN_WIDTH / 2) - (WindowW / 2);
 	float StartY = 25.0;
-	//if (!gCBUtil.gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowAutoReset, "Auto Reset Info"))
-	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowAutoReset, "Auto Reset Info");
+	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowAutoReset, "Reset");
 
+	const DWORD colorTitle = 0xFF40D7FF;  // gold
+	const DWORD colorLabel = 0xFFFFFFFF;  // white
+	const DWORD colorValue = 0xFF40D7FF;  // gold
+	const DWORD colorOk = 0xFF60E060;     // green
+	const DWORD colorNo = 0xFF5050FF;     // red
+	const DWORD colorReward = 0xFFFFE040; // cyan
+	const DWORD colorNote = 0xFF50B0FF;   // soft orange
 
+	// The reward, from CustomConfig.ini's ResetReward*.
+	char reward[128] = { 0 };
+	{
+		char part[48];
+		if (info.RewardWC > 0)
+		{
+			sprintf(part, "%s WCoinC", gInterface.NumberFormat(info.RewardWC));
+			strcat(reward, part);
+		}
+		if (info.RewardWP > 0)
+		{
+			sprintf(part, "%s%s WCoinP", reward[0] ? ", " : "", gInterface.NumberFormat(info.RewardWP));
+			strcat(reward, part);
+		}
+		if (info.RewardGP > 0)
+		{
+			sprintf(part, "%s%s GP", reward[0] ? ", " : "", gInterface.NumberFormat(info.RewardGP));
+			strcat(reward, part);
+		}
+		if (reward[0] == 0)
+		{
+			strcpy(reward, "None");
+		}
+	}
 
-	//===Info
-	float StartInfoBoxX = StartX + 7;
-	float StartInfoBoxY = StartY + 35;
-	float WBox = 140;
-	float HBox = 65;
+	const float boxX = StartX + 10;
+	const float boxW = WindowW - 20;
+	float TextY = StartY + 35;
 
-	g_pBCustomMenuInfo->DrawInfoBox(StartInfoBoxX, StartInfoBoxY, WBox - 2, HBox, 0x00000096, 0, 0);
-	float TextX = StartInfoBoxX;
-	float TextY = StartInfoBoxY + 3;
-	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xEB8213FF, 0x0, WBox, 0, 3, "[%s] Next Reset: %d", CharacterAttribute->Name, gCBAutoResetInfo->ViewInfoResetWindow.ResetView + 1);
+	g_pBCustomMenuInfo->DrawInfoBox(boxX, TextY, boxW - 2, 75, 0x00000096, 0, 0);
+	TextY += 3;
+	TextDraw((HFONT)g_hFontBold, boxX, TextY, colorTitle, 0x0, boxW, 0, 3, "[%s] Next Reset: %d", CharacterAttribute->Name, info.ResetView + 1);
 	TextY += 7;
-	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xFFFFFFFF, 0x0, WBox + 2, 0, 3, "-------------------------------------------------------");
+	TextDraw((HFONT)g_hFontBold, boxX, TextY, colorLabel, 0x0, boxW + 2, 0, 3, "------------------------------------------------------------------");
 	TextY += 12;
-	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Required Level:");
-	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xEBE313FF, 0x0, WBox, 0, 4, "%d/%d", CharacterAttribute->Level, gCBAutoResetInfo->ViewInfoResetWindow.Level);
-	TextY += 12;
-	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- GHRS:");
-	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xEBE313FF, 0x0, WBox, 0, 4, "%d/%d", gCBAutoResetInfo->ViewInfoResetWindow.ResetDay, gCBAutoResetInfo->ViewInfoResetWindow.MaxGHRS);
-	TextY += 12;
-	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Reset Type:");
-	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0xE11FFFFF, 0x0, WBox, 0, 4, NameTypeReset[gCBAutoResetInfo->ViewInfoResetWindow.LoaiReset]);
-	TextY += 12;
-	TextDraw((HFONT)g_hFont, TextX + 3, TextY, 0xFFFFFFFF, 0x0, WBox, 0, 1, "- Points received on Reset:");
-	TextDraw((HFONT)g_hFontBold, TextX, TextY, 0x1FFFC7FF, 0x0, WBox, 0, 4, "%s", gInterface.NumberFormat(gCBAutoResetInfo->ViewInfoResetWindow.Point));
-	//TextY += 14;
-	//TextDraw((HFONT)g_hFont, TextX + 3, TextY + 1, 0xB1EB13FF, 0x0, WBox, 0, 1, "*** Nguyên Liệu Yêu Cầu:");
-	//==Show Bang Nguyen Lieu
-	//if (g_pBCustomMenuInfo->DrawButton(TextX + WBox - 50, TextY, 80, 11, "XEM", 50) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
-	//{
-	////	gInterface.WindowDieuKienResetInfo->onShow ^= 1;
-	//}
 
-	float InfoMidX = TextX + WBox + 10;
-	float InfoMidY = StartInfoBoxY + 3;
-	//===Check Type Reset
-	if (gCBAutoResetInfo->ViewInfoResetWindow.OnResetType & 1)
+	TextDraw((HFONT)g_hFont, boxX + 5, TextY, colorLabel, 0x0, boxW, 0, 1, "- Required Level:");
+	TextDraw((HFONT)g_hFontBold, boxX - 5, TextY, (CharacterAttribute->Level >= info.Level) ? colorOk : colorNo, 0x0, boxW, 0, 4, "%d / %d", CharacterAttribute->Level, info.Level);
+	TextY += 12;
+
+	TextDraw((HFONT)g_hFont, boxX + 5, TextY, colorLabel, 0x0, boxW, 0, 1, "- Reset Type:");
+	TextDraw((HFONT)g_hFontBold, boxX - 5, TextY, colorValue, 0x0, boxW, 0, 4, "%s", info.KeepStats ? "Keep Stats" : NameTypeReset[info.LoaiReset]);
+	TextY += 12;
+
+	TextDraw((HFONT)g_hFont, boxX + 5, TextY, colorLabel, 0x0, boxW, 0, 1, "- Reset Reward:");
+	TextDraw((HFONT)g_hFontBold, boxX - 5, TextY, colorReward, 0x0, boxW, 0, 4, "%s", reward);
+	TextY += 12;
+
+	TextDraw((HFONT)g_hFont, boxX + 5, TextY, colorLabel, 0x0, boxW, 0, 1, "%s", info.ResetMove ? "- Moved to town after the reset" : "- Reset on spot");
+	TextY += 24;
+
+	// The disclaimer.
+	if (info.NoLevelUpPoint)
 	{
-		if (g_pBCustomMenuInfo->RenderCheckBox(InfoMidX + 5, InfoMidY, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 1 ? 0x13EBDCFF : 0xFFFFFFFF, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 1 ? TRUE : FALSE, "Normal Reset"))
-		{
-			XULY_CGPACKET pMsg;
-			pMsg.header.set(0xD3, 0x36, sizeof(pMsg));
-			pMsg.ThaoTac = 1; //
-			DataSend((LPBYTE)& pMsg, pMsg.header.size);
-		}
+		TextDraw((HFONT)g_hFont, boxX, TextY, colorNote, 0x0, boxW, 0, 3, "Disclaimer: the Reset System only gives %s.", reward);
+		TextY += 12;
+		TextDraw((HFONT)g_hFont, boxX, TextY, colorNote, 0x0, boxW, 0, 3, "Leveling up doesn't give any LevelPoints.");
+		TextY += 12;
 	}
-	if (gCBAutoResetInfo->ViewInfoResetWindow.OnResetType & 2)
+
+	// Anything the reset costs, only when the reset table asks for something.
+	if (info.Zen != 0 || info.WC != 0 || info.WP != 0 || info.GP != 0 || !info.m_ItemCheck.empty())
 	{
-		if (g_pBCustomMenuInfo->RenderCheckBox(InfoMidX + (WBox / 2) + 10, InfoMidY, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 2 ? 0x13EBDCFF : 0xFFFFFFFF, gCBAutoResetInfo->ViewInfoResetWindow.TypeReset & 2 ? TRUE : FALSE, "Reset VIP"))
-		{
-			XULY_CGPACKET pMsg;
-			pMsg.header.set(0xD3, 0x36, sizeof(pMsg));
-			pMsg.ThaoTac = 2; //
-			DataSend((LPBYTE)& pMsg, pMsg.header.size);
-		}
+		WindowDieuKienResetInfo(boxX - 10, TextY - 30, boxW);
 	}
-	InfoMidY += 17;
-	if (gCBAutoResetInfo->ViewInfoResetWindow.LoaiReset > 0)
-	{
-		TextDraw((HFONT)g_hFont, InfoMidX + 3, InfoMidY + 1, 0xEB8213FF, 0x0, WBox, 0, 1, "Add Reset Points");
-		TextDraw((HFONT)g_hFont, InfoMidX + 3 + (WBox / 2) + 10, InfoMidY + 1, 0x13EBDCFF, 0x0, WBox, 0, 1, "Remaining Points: %s", gInterface.NumberFormat(gCBAutoResetInfo->ViewInfoResetWindow.Point - PointReAdd));
-		//===Add Point
-		char* TypeName[5] = { strdup(GlobalText[166]), strdup(GlobalText[167]),strdup(GlobalText[169]),strdup(GlobalText[168]),strdup(GlobalText[939]) };
-		//float NTCoinY = InfoMidY + 20;
-		InfoMidY += 20;
-		float XText = 75;
-		float BGW = 55;
-		float BGH = 12;
-		int Type = 0;
-		float NTCoinX = (InfoMidX + (80) - (XText + BGW) / 2);
-		int CaclPointAdd = 0;
-		for (int n = 0; n < 5; n++)
-		{
-			if ((CharacterAttribute->Class != CLASS_DARK_LORD && CharacterAttribute->Class != CLASS_LORDEMPEROR) && n == 4)
-			{
-				continue;
-			}
 
-			gInterface.DrawBarForm(NTCoinX, InfoMidY, BGW + XText, BGH, 0.29, 0.2767, 0.2581, 0.8);
-			TextDraw((HFONT)g_hFont, NTCoinX, InfoMidY + 1.5, 0xFFFFFFFF, 0x0, XText - 20, 0, 3, TypeName[Type]);
-			if (gCBAutoResetInfo->ViewInfoResetWindow.LoaiReset == 1)
-			{
-				//===Point defaut char
-				gInterface.DrawBarForm(NTCoinX + XText - 20, InfoMidY, 20, BGH, 0.95, 0.6135, 0.1425, 0.8);
-				TextDraw((HFONT)g_hFont, NTCoinX + XText - 20, InfoMidY + 1.5, 0xFFFFFFFF, 0x0, 20, 0, 3, "%d+", gCBAutoResetInfo->ViewInfoResetWindow.DefStat[n]);
-			}
-			//===input point
-			gInterface.DrawBarForm(NTCoinX + XText, InfoMidY, BGW, BGH, 1.0, 1.0, 1.0, 0.8);
-			if (!InputAddPointReset[Type])
-			{
-				InputAddPointReset[Type] = new CUITextInputBox;
-				InputAddPointReset[Type]->Init(pGameWindow, BGW, BGH, 5);
-				InputAddPointReset[Type]->SetBackColor(0, 0, 0, 0);
-				InputAddPointReset[Type]->SetTextColor(255, 0, 0, 0);
-				InputAddPointReset[Type]->SetFont((HFONT)g_hFont);
-				InputAddPointReset[Type]->SetState(UISTATE_NORMAL);
-				InputAddPointReset[Type]->SetOption(UIOPTION_NUMBERONLY);
-				InputAddPointReset[Type]->SetPosition(NTCoinX + XText, InfoMidY + 1.5);
-				InputAddPointReset[Type]->SetText("0");
-
-			}
-			else
-			{
-				InputAddPointReset[Type]->SetPosition(NTCoinX + XText, InfoMidY + 1.5);
-
-				InputAddPointReset[Type]->Render();
-
-				InputAddPointReset[Type]->GetText(TextInputAddPoint[Type], sizeof(TextInputAddPoint[Type]));
-
-				if (atoi(TextInputAddPoint[Type]) > gCBAutoResetInfo->ViewInfoResetWindow.Point - CaclPointAdd)
-				{
-					char NumberFix[10] = { 0 };
-					sprintf(NumberFix, "%d", (gCBAutoResetInfo->ViewInfoResetWindow.Point - CaclPointAdd));
-					InputAddPointReset[Type]->SetText(NumberFix);
-				}
-				else
-				{
-					CaclPointAdd += atoi(TextInputAddPoint[Type]);
-				}
-
-				if (SEASON3B::CheckMouseIn(NTCoinX + XText, InfoMidY + 1.5, BGW, BGH) == 1)
-				{
-
-					if (GetKeyState(VK_LBUTTON) & 0x8000)
-					{
-						InputAddPointReset[Type]->GiveFocus(1);
-						PlayBuffer(25, 0, 0);
-					}
-				}
-			}
-			Type++;
-			InfoMidY += 20;
-		}
-		PointReAdd = CaclPointAdd;
-		//===
-	}
-	int GetCountLine = TextDraw((HFONT)g_hFont, InfoMidX + 3, InfoMidY + 1, 0xFFFFFFFA9, 0x0, WBox, 0, 1, "*Note: add points for the next Reset,# this method will not give any reputation# points on reset");
-	InfoMidY += GetCountLine * 12;
 	float ButtonW = 80;
-	if (gCBAutoResetInfo->ViewInfoResetWindow.AutoResetEnable)
+	if (info.AutoResetEnable)
 	{
-		//==OK Reset
-		InfoMidY += 25;
 		if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 4) - (ButtonW / 2), StartY + (WindowH - 40), 150, 12, "<Turn Off Auto Reset>", ButtonW) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
 		{
 			gInterface.Data[eWindowAutoReset].EventTick = GetTickCount();
@@ -471,30 +416,27 @@ void CBAutoResetInfo::DrawWindow()
 			{
 				pMsg.AutoResetStats[i] = 0;
 			}
-			//===Code
 			memset(&pMsg.CodeReset, 0, sizeof(pMsg.CodeReset));
 			DataSend((LPBYTE)& pMsg, pMsg.header.size);
 		}
 	}
-	//==OK Reset
-	InfoMidY += 25;
 
-	if (g_pBCustomMenuInfo->DrawButton(StartX + (WindowW / 2) + (ButtonW / 2), StartY + (WindowH - 40), 150, 12, "Perform Reset", ButtonW) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
+	const float performX = info.AutoResetEnable ? (StartX + (WindowW / 2) + (ButtonW / 2)) : (StartX + (WindowW / 2) - (ButtonW / 2));
+
+	if (g_pBCustomMenuInfo->DrawButton(performX, StartY + (WindowH - 40), 150, 12, "Perform Reset", ButtonW) && (GetTickCount() - gInterface.Data[eWindowAutoReset].EventTick) > 300)
 	{
 		gInterface.Data[eWindowAutoReset].EventTick = GetTickCount();
 		RESETCODE_SEND pMsg;
 		pMsg.header.set(0xD3, 0x37, sizeof(pMsg));
-		pMsg.TypeReset = gCBAutoResetInfo->ViewInfoResetWindow.TypeReset;
+		pMsg.TypeReset = info.TypeReset;
 		for (int i = 0; i < 5; i++)
 		{
-			pMsg.AutoResetStats[i] = atoi(TextInputAddPoint[i]);
+			pMsg.AutoResetStats[i] = 0;
 		}
-		//===Code
 		memset(&pMsg.CodeReset, 0, sizeof(pMsg.CodeReset));
 		memcpy(&pMsg.CodeReset, TextInputCodeReset, sizeof(pMsg.CodeReset));
 		DataSend((LPBYTE)& pMsg, pMsg.header.size);
 	}
-	WindowDieuKienResetInfo(TextX, StartY + 75, WBox);
 
 
 }
