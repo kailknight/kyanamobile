@@ -3625,7 +3625,11 @@ void MoveJoint(JOINT * o, int iIndex)
 			}
 			else if (o->LifeTime > 80)
 			{
-				VectorScale(o->Light, powf(1.f / 1.25f, FPS_ANIMATION_FACTOR), o->Light);
+				// Fade IN over the first 10 frames: the trail starts at 1/11
+				// brightness and 1.25^10 takes it to ~0.85. The FPS conversion
+				// had this as 1/1.25, dimming an already dim trail, so the full
+				// ancient set effect was invisible on PC and mobile.
+				VectorScale(o->Light, powf(1.25f, FPS_ANIMATION_FACTOR), o->Light);
 			}
 		}
 		else if (o->SubType == 10)

@@ -234,6 +234,11 @@ private:
 	// doing it here would fight the distance attenuation the service applies.
 	float   m_CaptureGain;
 	int     m_SentLevel;
+	// Gain actually applied at the end of the last frame (levelling, boost,
+	// pause attenuation and gate fade combined). Each frame ramps from this to
+	// its own value sample by sample: a gain that jumps once per 20 ms frame is
+	// a 50 Hz buzz on everything sent.
+	float   m_AppliedGain;
 
 	// Noise gate. Complements the platform echo canceller rather than replacing
 	// it: the canceller removes what the speaker is playing, this stops steady

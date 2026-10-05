@@ -122,6 +122,18 @@ bool CSItemOption::OpenItemSetOption(const char* filename)
 				BuxConvert(pSeek, Size);
 				memcpy(&m_ItemSetOption[i], pSeek, Size);
 
+				// Unused records are filled with 0xFF, name included - no
+				// terminator anywhere. An item pointing at one (a client file
+				// older than the server's set list) used to copy that run into
+				// its name: garbage ("yyy...") on PC, an empty title on mobile. Such a
+				// record is treated as no set at all: no name, no bonus list.
+				if ((BYTE)m_ItemSetOption[i].strSetName[0] == 0xFF)
+				{
+					memset(m_ItemSetOption[i].strSetName, 0, sizeof(m_ItemSetOption[i].strSetName));
+					m_ItemSetOption[i].byOptionCount = 255;
+				}
+				m_ItemSetOption[i].strSetName[sizeof(m_ItemSetOption[i].strSetName) - 1] = 0;
+
 				pSeek += Size;
 			}
 		}
@@ -267,7 +279,15 @@ bool	CSItemOption::GetSetItemName(char* strName, const int iType, const int setT
 		if (itemSType.byOption[setItemType - 1] != 255 && itemSType.byOption[setItemType - 1] != 0)
 		{
 			ITEM_SET_OPTION& itemOption = m_ItemSetOption[itemSType.byOption[setItemType - 1]];
+
+			// A blank record (see OpenItemSetOption) is no set: plain name.
+			if (itemOption.strSetName[0] == 0)
+			{
+				return false;
+			}
+
 			memcpy(strName, itemOption.strSetName, sizeof(char) * 32);
+			strName[31] = 0;
 			int length = strlen(strName);
 			strName[length] = ' ';
 			strName[length + 1] = 0;
@@ -1315,7 +1335,7 @@ int CSItemOption::CollectSetMemberTypes(const ITEM* ip, int* pOutTypes, int iMax
 
 	BYTE bySetOption = m_ItemSetType[ip->Type].byOption[setItemType - 1];
 
-	if (bySetOption == 0 || bySetOption == 255)
+	if (bySetOption == 0 || bySetOption == 255 || m_ItemSetOption[bySetOption].strSetName[0] == 0)
 	{
 		return 0;
 	}
@@ -1488,7 +1508,7 @@ int CSItemOption::BuildSetOptionLines(const ITEM* ip, int TNum, bool bWithTitle)
 
 	BYTE bySetOption = m_ItemSetType[ip->Type].byOption[setItemType - 1];
 
-	if (bySetOption == 0 || bySetOption == 255)
+	if (bySetOption == 0 || bySetOption == 255 || m_ItemSetOption[bySetOption].strSetName[0] == 0)
 	{
 		return TNum;
 	}

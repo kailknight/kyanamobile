@@ -1,6 +1,7 @@
 // VoiceClient.cpp - see VoiceClient.h for the shape and the threading rules.
 
 #include "stdafx.h"
+#include <math.h>
 #include "VoiceClient.h"
 #include "UIControls.h"
 #include "VoiceAudio.h"
@@ -96,6 +97,7 @@ void CVoiceClient::Init() // OK
 
 	this->m_CaptureGain = 1.0f;
 	this->m_SentLevel = 0;
+	this->m_AppliedGain = 0.0f;
 
 	this->m_NoiseFloor = 0.0f;
 	this->m_GateHoldUntil = 0;
@@ -287,19 +289,41 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 		return;
 	}
 
-	// The peak of this frame as the microphone gave it, before anything is done
-	// to it. Both the gate and the levelling below key off this.
+	// Level of this frame as the microphone gave it, before anything is done to
+	// it. The gate and the levelling key off the RMS - the average energy - not
+	// the peak: background hiss is spiky, so a peak-keyed gate kept opening on
+	// single noise spikes and sending 300 ms of hiss each time. The peak is kept
+	// for the levelling's headroom check.
 	int peak = 0;
+	double energy = 0.0;
 
 	for (int n = 0; n < VOICE_FRAME_SAMPLES; n++)
 	{
-		const int a = (pSamples[n] < 0) ? -pSamples[n] : pSamples[n];
+		const int s = pSamples[n];
+		const int a = (s < 0) ? -s : s;
 
 		if (a > peak)
 		{
 			peak = a;
 		}
+
+		energy += (double)s * (double)s;
 	}
+
+	const float rms = (float)sqrt(energy / (double)VOICE_FRAME_SAMPLES);
+
+	// Gain the previous frame ended on. Each frame ramps from there to its own
+	// target, sample by sample - see m_AppliedGain.
+	const float startGain = this->m_AppliedGain;
+
+	// Whether this frame is speech rather than room noise. Decided against the
+	// learned floor; with the gate switched off there is no floor, so anything
+	// above a whisper of hiss counts.
+	bool bSpeech = (rms > 150.0f);
+
+	// Set when the gate shuts on this frame: it is still sent once, fading to
+	// silence, so the listener does not hear the cut as a click.
+	bool bClosingFrame = false;
 
 	// ---- noise gate ------------------------------------------------------
 	//
@@ -322,30 +346,32 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 			// already talking. Falls fast when the room goes quiet, rises slowly.
 			if (this->m_NoiseFloor <= 0.0f)
 			{
-				this->m_NoiseFloor = (float)((peak < 500) ? peak : 500);
+				this->m_NoiseFloor = (rms < 150.0f) ? rms : 150.0f;
 			}
-			else if ((float)peak < this->m_NoiseFloor)
+			else if (rms < this->m_NoiseFloor)
 			{
-				this->m_NoiseFloor += ((float)peak - this->m_NoiseFloor) * 0.5f;
+				this->m_NoiseFloor += (rms - this->m_NoiseFloor) * 0.5f;
 			}
 			else
 			{
-				this->m_NoiseFloor += ((float)peak - this->m_NoiseFloor) * 0.05f;
+				this->m_NoiseFloor += (rms - this->m_NoiseFloor) * 0.05f;
 			}
 
-			if (this->m_NoiseFloor > 4000.0f)
+			if (this->m_NoiseFloor > 1500.0f)
 			{
 				// A ceiling, so a genuinely loud room cannot raise the floor far
 				// enough to gate out speech entirely.
-				this->m_NoiseFloor = 4000.0f;
+				this->m_NoiseFloor = 1500.0f;
 			}
 		}
 
 		// Opens well clear of the floor, and the absolute term keeps a silent
 		// room (floor near zero) from opening on a whisper of hiss.
-		const float openAt = (this->m_NoiseFloor * 2.5f) + 300.0f;
+		const float openAt = (this->m_NoiseFloor * 2.5f) + 100.0f;
 
-		if ((float)peak >= openAt)
+		bSpeech = (rms >= openAt);
+
+		if (bSpeech)
 		{
 			if (this->m_GateOpen == false)
 			{
@@ -362,6 +388,7 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 		else if (this->m_GateOpen && (int)(now - this->m_GateHoldUntil) >= 0)
 		{
 			this->m_GateOpen = false;
+			bClosingFrame = true;
 		}
 
 		// Open for over two seconds without a single 300ms gap: that is
@@ -369,25 +396,26 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 		// quietest frame becomes the floor, so the gate can shut on it.
 		if (this->m_GateOpen)
 		{
-			if (peak < this->m_OpenMinPeak)
+			if ((int)rms < this->m_OpenMinPeak)
 			{
-				this->m_OpenMinPeak = peak;
+				this->m_OpenMinPeak = (int)rms;
 			}
 
 			if ((int)(now - this->m_GateOpenedAt) > 2000)
 			{
-				this->m_NoiseFloor = (this->m_OpenMinPeak < 4000) ? (float)this->m_OpenMinPeak : 4000.0f;
+				this->m_NoiseFloor = (this->m_OpenMinPeak < 1500) ? (float)this->m_OpenMinPeak : 1500.0f;
 				this->m_GateOpenedAt = now;
 				this->m_OpenMinPeak = 32767;
 			}
 		}
 
-		if (this->m_GateOpen == false)
+		if (this->m_GateOpen == false && bClosingFrame == false)
 		{
 			// Nothing sent at all. The frames are independent, so the listener's
 			// decoder needs no closing frame, and their speaker slot simply ages
 			// out. This is also where most of a session's bandwidth is saved.
 			this->m_SentLevel = 0;
+			this->m_AppliedGain = 0.0f;
 			return;
 		}
 	}
@@ -409,13 +437,11 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 		// leaving headroom means the loud parts of a sentence survive.
 		const int target = 19600;
 
-		// The gain is only chased on frames with actual signal in them. Below
-		// this the frame is room noise or silence, and driving the gain up
-		// there would amplify hiss and then slam it down the moment somebody
-		// spoke - the classic pumping artefact.
-		const int kSilenceFloor = 200;
-
-		if (peak > kSilenceFloor)
+		// The gain is only chased on speech. It used to chase any frame peaking
+		// over 200, and ordinary room hiss peaks above that, so in every pause
+		// the levelling "found" a very quiet voice and wound the gain up to 10x
+		// - that amplified hiss was the constant static players heard.
+		if (bSpeech && peak > 0)
 		{
 			float desired = (float)target / (float)peak;
 
@@ -449,16 +475,47 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 		// the automatic ceiling above is not enough.
 		float gain = this->m_CaptureGain * ((float)VoiceSettingGetMicBoost() / 100.0f);
 
+		// Whatever the levelling and boost ask for, the room's own hiss may not
+		// come out louder than this. A noisy microphone gets less gain; a clean
+		// one (or a phone whose voice-call processing already removed the
+		// noise) is not limited at all.
+		const float kMaxNoiseOut = 600.0f;
+
+		if (this->m_NoiseFloor > 1.0f && (gain * this->m_NoiseFloor) > kMaxNoiseOut)
+		{
+			gain = kMaxNoiseOut / this->m_NoiseFloor;
+		}
+
 		if (gain < 1.0f)
 		{
 			gain = 1.0f;
+		}
+
+		// Pauses inside an open gate - the word tails the hold keeps, the gaps
+		// between words - are mostly room noise. They go out at -10 dB rather
+		// than at full levelling gain.
+		if (bSpeech == false)
+		{
+			gain *= 0.3f;
+		}
+
+		// The gate shutting: this last frame fades to nothing.
+		if (bClosingFrame)
+		{
+			gain = 0.0f;
 		}
 
 		int sentPeak = 0;
 
 		for (int n = 0; n < VOICE_FRAME_SAMPLES; n++)
 		{
-			int v = (int)((float)pSamples[n] * gain);
+			// Linear ramp across the frame, from where the last frame ended to
+			// this frame's gain. A frame that starts from 0 (the gate just
+			// opened) fades in over 20 ms instead of switching on with a click.
+			const float t = (float)(n + 1) / (float)VOICE_FRAME_SAMPLES;
+			const float g = startGain + ((gain - startGain) * t);
+
+			int v = (int)((float)pSamples[n] * g);
 
 			// Hard clamp. A limiter would sound better, but clipping a rare
 			// transient is a far smaller problem than the whole signal being
@@ -483,7 +540,8 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 			}
 		}
 
-		this->m_SentLevel = sentPeak >> 7;   // 0-32767 down to 0-255
+		this->m_AppliedGain = gain;
+		this->m_SentLevel = bClosingFrame ? 0 : (sentPeak >> 7);   // 0-32767 down to 0-255
 	}
 
 	VOICE_C2V_FRAME_MSG msg;
@@ -999,6 +1057,7 @@ void CVoiceClient::ResetCaptureGate() // OK
 	this->m_GateOpen = false;
 	this->m_GateOpenedAt = 0;
 	this->m_OpenMinPeak = 32767;
+	this->m_AppliedGain = 0.0f;
 }
 
 void CVoiceClient::ProcLoopbackTest(DWORD dwNow) // OK
