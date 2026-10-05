@@ -2781,6 +2781,8 @@ struct AndroidTargetLock
     SHORT key = 0;
     int   cachedIndex = -1;
     char  id[MAX_ID_SIZE + 1] = {};
+    // Out of sight since (0 = in sight) - see LookupAndroidLockTarget.
+    DWORD lostSinceMs = 0;
 };
 
 AndroidTargetLock g_androidTargetLock{};
@@ -5951,8 +5953,75 @@ void ClearAndroidTargetLock(const char* reason)
     g_androidTargetLock = AndroidTargetLock{};
 }
 
-// Returns the locked character's current index, or -1 once it is gone. Clears
-// itself in the latter case so a dead target does not keep being looked up.
+// How long a locked target may be out of sight before the lock lets go. A
+// Wizard's teleport fades the body out (IsValidAutoCombatTarget refuses it
+// below 5% alpha) and the server re-sends it at the landing spot, so for a
+// moment it is invisible or missing from the list entirely. That used to read
+// as "target-gone" and drop the lock mid-fight. A target that warped to another
+// map or logged out stays missing past this, which is what ends the lock then.
+constexpr DWORD kAndroidLockLostGraceMs = 3000;
+
+enum AndroidLockLookup
+{
+    kAndroidLockFound,
+    kAndroidLockPending,
+    kAndroidLockGone,
+};
+
+// Shared by the AIM lock and the PK sticky target. Found: cachedIndex is the
+// target and it can be attacked now. Pending: out of sight for less than the
+// grace time - hold the lock but do not attack anything else. Gone: dead, or
+// out of sight too long; goneReason says which.
+AndroidLockLookup LookupAndroidLockTarget(SHORT key, int& cachedIndex, DWORD& lostSinceMs, const char*& goneReason)
+{
+    if (CharactersClient == nullptr)
+    {
+        goneReason = "no-characters";
+        return kAndroidLockGone;
+    }
+
+    int index = cachedIndex;
+    if (index < 0 || index >= MAX_CHARACTERS_CLIENT || CharactersClient[index].Key != key)
+    {
+        index = FindCharacterIndex(key);
+    }
+
+    if (index >= 0 && index < MAX_CHARACTERS_CLIENT)
+    {
+        cachedIndex = index;
+
+        if (CharactersClient[index].Dead > 0)
+        {
+            goneReason = "target-dead";
+            return kAndroidLockGone;
+        }
+
+        if (IsValidAutoCombatTarget(index))
+        {
+            lostSinceMs = 0;
+            return kAndroidLockFound;
+        }
+    }
+
+    const DWORD now = GetTickCount();
+    if (lostSinceMs == 0)
+    {
+        lostSinceMs = (now != 0) ? now : 1;
+        return kAndroidLockPending;
+    }
+
+    if ((now - lostSinceMs) >= kAndroidLockLostGraceMs)
+    {
+        goneReason = "target-gone";
+        return kAndroidLockGone;
+    }
+
+    return kAndroidLockPending;
+}
+
+// Returns the locked character's current index, or -1 while it is out of sight
+// or once it is gone. Clears itself only when it is gone (see
+// LookupAndroidLockTarget), so a teleport does not drop it.
 int ResolveAndroidLockedTargetIndex()
 {
     if (!g_androidTargetLock.active)
@@ -5968,30 +6037,35 @@ int ResolveAndroidLockedTargetIndex()
         return -1;
     }
 
-    const int cached = g_androidTargetLock.cachedIndex;
-    if (cached >= 0
-        && cached < MAX_CHARACTERS_CLIENT
-        && CharactersClient != nullptr
-        && CharactersClient[cached].Key == g_androidTargetLock.key
-        && IsValidAutoCombatTarget(cached))
+    const char* goneReason = nullptr;
+    const AndroidLockLookup lookup = LookupAndroidLockTarget(
+        g_androidTargetLock.key, g_androidTargetLock.cachedIndex, g_androidTargetLock.lostSinceMs, goneReason);
+
+    if (lookup == kAndroidLockFound)
     {
-        return cached;
+        return g_androidTargetLock.cachedIndex;
     }
 
-    const int resolved = FindCharacterIndex(g_androidTargetLock.key);
-    if (resolved >= 0 && resolved < MAX_CHARACTERS_CLIENT && IsValidAutoCombatTarget(resolved))
+    if (lookup == kAndroidLockGone)
     {
-        g_androidTargetLock.cachedIndex = resolved;
-        return resolved;
+        ClearAndroidTargetLock(goneReason);
     }
-
-    ClearAndroidTargetLock("target-gone");
     return -1;
 }
 
+// Held, whether or not the target is in sight this frame - the AIM button stays
+// lit through a teleport.
 bool IsAndroidTargetLockActive()
 {
-    return ResolveAndroidLockedTargetIndex() >= 0;
+    ResolveAndroidLockedTargetIndex();
+    return g_androidTargetLock.active;
+}
+
+// Held but out of sight (mid-teleport): attacks wait for it rather than
+// turning on whatever is nearest.
+bool IsAndroidTargetLockPending()
+{
+    return ResolveAndroidLockedTargetIndex() < 0 && g_androidTargetLock.active;
 }
 
 // AIM is for PvP - locking or fighting another player never makes sense in a
@@ -6561,6 +6635,7 @@ struct AndroidPkStickyTarget
     bool  active = false;
     SHORT key = 0;
     int   cachedIndex = -1;
+    DWORD lostSinceMs = 0;
 };
 AndroidPkStickyTarget g_androidPkSticky{};
 
@@ -6615,25 +6690,50 @@ int ResolveAndroidPkStickyTarget()
         return -1;
     }
 
-    int index = g_androidPkSticky.cachedIndex;
-    if (index < 0
-        || index >= MAX_CHARACTERS_CLIENT
-        || CharactersClient[index].Key != g_androidPkSticky.key)
-    {
-        index = FindCharacterIndex(g_androidPkSticky.key);
-    }
+    // Same rules as the AIM lock: a teleport hides the player for a moment and
+    // must not count as gone.
+    const char* goneReason = nullptr;
+    const AndroidLockLookup lookup = LookupAndroidLockTarget(
+        g_androidPkSticky.key, g_androidPkSticky.cachedIndex, g_androidPkSticky.lostSinceMs, goneReason);
 
-    if (index < 0
-        || index >= MAX_CHARACTERS_CLIENT
-        || !IsValidAutoCombatTarget(index)
-        || CharactersClient[index].Object.Kind != KIND_PLAYER)
+    if (lookup == kAndroidLockGone)
     {
-        ClearAndroidPkStickyTarget("target-gone");
+        ClearAndroidPkStickyTarget(goneReason);
         return -1;
     }
 
-    g_androidPkSticky.cachedIndex = index;
-    return index;
+    if (lookup == kAndroidLockPending)
+    {
+        return -1;
+    }
+
+    if (CharactersClient[g_androidPkSticky.cachedIndex].Object.Kind != KIND_PLAYER)
+    {
+        ClearAndroidPkStickyTarget("not-a-player");
+        return -1;
+    }
+
+    return g_androidPkSticky.cachedIndex;
+}
+
+// The PK target is held but out of sight (mid-teleport).
+bool IsAndroidPkStickyPending()
+{
+    return ResolveAndroidPkStickyTarget() < 0 && g_androidPkSticky.active;
+}
+
+// Attacks hold off while the target the player committed to - the AIM lock, or
+// in PK mode the sticky player - is out of sight. Otherwise a Wizard's teleport
+// turned the hero on whoever stood nearest, and the auto-acquire paths made
+// that stranger the new sticky target.
+bool IsAndroidAimHolding()
+{
+    if (IsAndroidTargetLockPending())
+    {
+        return true;
+    }
+
+    return IsVirtualPkTargetingEnabled() && IsAndroidPkStickyPending();
 }
 
 // SelectObjects reports a tap that landed on a player. In PK mode that is the
@@ -6656,8 +6756,9 @@ void NoteAndroidTappedCharacter(int characterIndex)
 
     SetAndroidPkStickyTarget(characterIndex);
 
-    const int locked = ResolveAndroidLockedTargetIndex();
-    if (locked >= 0 && locked != characterIndex)
+    // Compared by key, not by resolved index: a lock whose target is mid-
+    // teleport resolves to -1 but must still be replaced by the new pick.
+    if (IsAndroidTargetLockActive() && g_androidTargetLock.key != CharactersClient[characterIndex].Key)
     {
         SetAndroidTargetLock(characterIndex);
     }
@@ -6672,6 +6773,12 @@ int AcquireAndroidPkPlayerTarget(bool limitToAcquireRange)
     if (sticky >= 0)
     {
         return sticky;
+    }
+
+    // Held but out of sight: do not swap in the nearest player.
+    if (g_androidPkSticky.active)
+    {
+        return -1;
     }
 
     // Always within auto-acquire range, whatever the caller asked for: the
@@ -6689,18 +6796,6 @@ int AcquireAndroidPkPlayerTarget(bool limitToAcquireRange)
         SetAndroidPkStickyTarget(picked);
     }
     return picked;
-}
-
-// A little past the 10 tiles a target is picked within, so one standing right
-// at the edge does not flip between dropped and re-picked every step.
-constexpr float kPkTargetDropDistance = kVirtualAutoAcquireMaxDistance + 2.0f;
-
-bool IsBeyondPkTargetDropRange(int characterIndex)
-{
-    const CHARACTER* c = &CharactersClient[characterIndex];
-    const float dx = static_cast<float>(c->PositionX - Hero->PositionX);
-    const float dy = static_cast<float>(c->PositionY - Hero->PositionY);
-    return (dx * dx) + (dy * dy) > (kPkTargetDropDistance * kPkTargetDropDistance);
 }
 
 // Safety net for a duel flag that outlives its duel. CheckAttack refuses every
@@ -6757,10 +6852,17 @@ void UpdateAndroidStaleDuelState()
     SelectedCharacter = -1;
 }
 
-// Runs every frame, so a target is let go the moment it dies, warps away or
-// walks out of range or into a safe zone - not just the next time a skill is
-// pressed, which left a dead or far-off player selected. The next cast then
-// picks a new target. The hero dying clears everything, AIM lock included.
+// Runs every frame, so a target is let go the moment it ends - not just the
+// next time a skill is pressed, which left a dead player selected. The next
+// cast then picks a new target.
+//
+// A lock (AIM, or the PK sticky player) holds on that one player until:
+//   - they die,
+//   - they enter a safe zone,
+//   - they leave the map or log out (out of sight past kAndroidLockLostGraceMs),
+//   - the hero dies or changes map.
+// Distance is deliberately not on the list: a Wizard teleporting away is still
+// the fight, and used to drop the lock (12 tiles) along with the target.
 void UpdateAndroidPkTargetState()
 {
     if (!IsVirtualPadAvailable() || CharactersClient == nullptr)
@@ -6769,6 +6871,19 @@ void UpdateAndroidPkTargetState()
     }
 
     UpdateAndroidStaleDuelState();
+
+    // Character keys are reused between maps, so a lock carried through the
+    // hero's own warp could land on a stranger who inherited the key.
+    static int s_lockMap = -1;
+    if (s_lockMap != gMapManager.WorldActive)
+    {
+        if (s_lockMap != -1)
+        {
+            ClearAndroidPkStickyTarget("hero-map-change");
+            ClearAndroidTargetLock("hero-map-change");
+        }
+        s_lockMap = gMapManager.WorldActive;
+    }
 
     const bool hadSticky = g_androidPkSticky.active;
     const int stickyIndex = g_androidPkSticky.cachedIndex;
@@ -6783,21 +6898,13 @@ void UpdateAndroidPkTargetState()
     else
     {
         const int sticky = ResolveAndroidPkStickyTarget();
-        if (sticky >= 0 && IsBeyondPkTargetDropRange(sticky))
-        {
-            ClearAndroidPkStickyTarget("out-of-range");
-        }
-        else if (sticky >= 0 && IsCharacterInSafeZone(sticky))
+        if (sticky >= 0 && IsCharacterInSafeZone(sticky))
         {
             ClearAndroidPkStickyTarget("target-safe-zone");
         }
 
         const int locked = ResolveAndroidLockedTargetIndex();
-        if (locked >= 0 && IsBeyondPkTargetDropRange(locked))
-        {
-            ClearAndroidTargetLock("out-of-range");
-        }
-        else if (locked >= 0
+        if (locked >= 0
             && CharactersClient[locked].Object.Kind == KIND_PLAYER
             && IsCharacterInSafeZone(locked))
         {
@@ -6839,6 +6946,13 @@ void EnsureCombatTarget()
         return;
     }
 
+    // Locked on, but the target is out of sight mid-teleport: wait for it.
+    if (IsAndroidAimHolding())
+    {
+        SelectedCharacter = -1;
+        return;
+    }
+
     if (IsTargetAttackable(SelectedCharacter))
     {
         return;
@@ -6877,6 +6991,13 @@ void EnsureOffensiveSkillTarget()
         return;
     }
 
+    // Locked on, but the target is out of sight mid-teleport: wait for it.
+    if (IsAndroidAimHolding())
+    {
+        SelectedCharacter = -1;
+        return;
+    }
+
     // PK mode aims at players first - ahead of the keep-current check below, or
     // a monster left over in SelectedCharacter would outrank them. An area
     // spell cast at the player still hits monsters around them.
@@ -6905,8 +7026,8 @@ void EnsureOffensiveSkillTarget()
         // distance term of its own, so it would just re-adopt this same
         // still-alive-but-too-far target if this did not clear it first.
         // A locked target skips this check (see the early return for
-        // lockedTarget); UpdateAndroidPkTargetState drops it a little further
-        // out instead.
+        // lockedTarget); it is held until the player dies, enters a safe zone
+        // or leaves the map - see UpdateAndroidPkTargetState.
         SelectedCharacter = -1;
     }
 
@@ -7035,12 +7156,19 @@ void EnsureNormalAttackTarget()
         SelectedCharacter = -1;
     }
 
-    // A lock is kept here without the 10-tile check below; it is dropped only
-    // past kPkTargetDropDistance, by UpdateAndroidPkTargetState.
+    // A lock is kept here without the 10-tile check below; UpdateAndroidPkTargetState
+    // says when it ends.
     const int lockedTarget = ResolveAndroidOffensiveLockIndex();
     if (lockedTarget >= 0)
     {
         SelectedCharacter = lockedTarget;
+        return;
+    }
+
+    // Locked on, but the target is out of sight mid-teleport: wait for it.
+    if (IsAndroidAimHolding())
+    {
+        SelectedCharacter = -1;
         return;
     }
 

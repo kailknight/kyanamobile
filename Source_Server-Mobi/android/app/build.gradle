@@ -513,8 +513,14 @@ android {
         // preload screen shows error codes, never the server address; reset window
         // redesign (keep stats, reward, on spot). Local test builds 28-37 of the
         // same day were folded into this version.
-        versionCode 27
-        versionName "1.0.27"
+        // 28 (2026-10-05): a changed data.zip is updated file by file - only the
+        // archive's directory and the files whose CRC differs are fetched (ranged
+        // GETs), with the full download as the fallback. AIM lock / PK target
+        // survives the target teleporting (3 s out-of-sight grace, no 12-tile
+        // drop); it ends when the target dies, enters a safe zone or leaves the
+        // map, or the hero dies or changes map.
+        versionCode 28
+        versionName "1.0.28"
 
         // A diagnostics build can be CPU-profiled with simpleperf without
         // being debuggable (which would change its performance).

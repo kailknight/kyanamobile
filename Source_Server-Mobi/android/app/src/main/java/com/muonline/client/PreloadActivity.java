@@ -36,11 +36,18 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.CRC32;
+import java.util.zip.Inflater;
+import java.util.zip.InflaterInputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -56,6 +63,8 @@ public class PreloadActivity extends Activity {
         // AndroidManifest.xml. Moving to https would need a real CA-issued cert
         // on a hostname resolving straight to the origin - not arik-mu.online,
         // which is Cloudflare-fronted and does not proxy 8888 anyway.
+        // A test copy lives at /dl2/data.zip (C:\xampp\htdocs\dl2, aliased into
+        // the 8888 vhost) - point here at it for a test build, never commit it.
         "http://139.99.24.220:8888/data.zip"
     };
     private static final String BASIC_AUTH_USERNAME = "admin";
@@ -370,6 +379,14 @@ public class PreloadActivity extends Activity {
                     return;
                 }
 
+                // data.zip changed and this root has a working copy: fetch only
+                // the files that differ. Falls through to the full download if
+                // that cannot be done (see runIncrementalUpdate).
+                if (isDataFolderUsable(existingDataDir) && tryIncrementalUpdate(root, existingDataDir)) {
+                    mainHandler.postDelayed(this::launchGame, 650L);
+                    return;
+                }
+
                 if (isDataFolderUsable(existingDataDir) && fallbackUsableRoot == null) {
                     fallbackUsableRoot = root;
                 }
@@ -392,6 +409,9 @@ public class PreloadActivity extends Activity {
             ZipMetrics zipMetrics = inspectZip(zipFile);
             extractZipCaseInsensitive(zipFile, extractedRoot, zipMetrics);
             installExtractedData(extractedRoot, installRoot);
+            // What was just installed, so the next data.zip change can be
+            // fetched file by file instead of whole.
+            writeDataIndexFromZip(zipFile, installRoot);
             long parseDurationMs = SystemClock.elapsedRealtime() - parseStartMs;
 
             deleteRecursively(preloadCacheRoot);
@@ -446,6 +466,848 @@ public class PreloadActivity extends Activity {
                 timerText.setText("Please reopen the app and try again.");
             });
         }
+    }
+
+    //=========================== incremental update ===========================
+    //
+    // data.zip ends with a central directory: every file's name, CRC-32, size
+    // and byte offset inside the archive. The host already answers Range
+    // requests (see downloadZipParallel), so when data.zip changes only that
+    // directory - a few MB - has to be fetched to see WHICH files changed, and
+    // then only those files' bytes. Nothing changes on the server: data.zip is
+    // still uploaded exactly as before.
+    //
+    // DATA_INDEX_FILE holds the CRC and size of every file this device has
+    // installed. It is written after a full install and after every
+    // incremental one. A device installed before it existed has none, so its
+    // files are checked by CRC once instead.
+    //
+    // Anything unexpected - no range support, a zip feature this does not
+    // read, a CRC mismatch, most of the archive changed - ends in false or an
+    // exception, and the caller does the full download it always did.
+
+    private static final String DATA_INDEX_FILE = ".mu_data_index_v1";
+
+    // Past this share of the archive changed, one full parallel download is
+    // the quicker way.
+    private static final double INCREMENTAL_MAX_CHANGED_SHARE = 0.5;
+
+    // Changed files lying next to each other in the archive are fetched as
+    // one range, up to about this size.
+    private static final long INCREMENTAL_GROUP_BYTES = 8L * 1024L * 1024L;
+
+    private static final long ZIP_LOCAL_HEADER_SIG = 0x04034b50L;
+    private static final long ZIP_CENTRAL_SIG = 0x02014b50L;
+    private static final long ZIP_END_SIG = 0x06054b50L;
+    private static final long ZIP64_END_SIG = 0x06064b50L;
+    private static final long ZIP64_LOCATOR_SIG = 0x07064b50L;
+
+    private static final class RemoteZipEntry {
+        String name;          // as stored in the archive
+        String relPath;       // inside the Data folder; null when outside it
+        String key;           // relPath, lower case
+        boolean isDirectory;
+        long crc;
+        long compressedSize;
+        long size;
+        int method;
+        int flags;
+        long localOffset;
+        long spanEnd;         // where the next entry, or the directory, starts
+    }
+
+    private static final class RemoteZipDirectory {
+        final List<RemoteZipEntry> entries;
+        final long centralOffset;
+
+        RemoteZipDirectory(List<RemoteZipEntry> entries, long centralOffset) {
+            this.entries = entries;
+            this.centralOffset = centralOffset;
+        }
+    }
+
+    private static final class IndexEntry {
+        final long crc;
+        final long size;
+
+        IndexEntry(long crc, long size) {
+            this.crc = crc;
+            this.size = size;
+        }
+    }
+
+    private boolean tryIncrementalUpdate(File root, File dataDir) {
+        try {
+            return runIncrementalUpdate(root, dataDir);
+        } catch (Exception ex) {
+            Log.w(TAG, "Incremental update failed, doing the full download: " + ex.getMessage());
+            return false;
+        }
+    }
+
+    private boolean runIncrementalUpdate(File root, File dataDir) throws IOException {
+        final long startMs = SystemClock.elapsedRealtime();
+        updateStageUi("Checking for updated files...", "Reading the file list", "", 1.0);
+
+        String urlText = null;
+        boolean withAuth = false;
+        RemoteFileInfo info = null;
+        for (int c = 0; c < DATA_ZIP_URL_CANDIDATES.length && info == null; c++) {
+            for (boolean auth : new boolean[] { false, true }) {
+                try {
+                    RemoteFileInfo probed = probeRemoteFile(DATA_ZIP_URL_CANDIDATES[c], auth);
+                    if (probed != null) {
+                        urlText = DATA_ZIP_URL_CANDIDATES[c];
+                        withAuth = auth;
+                        info = probed;
+                        break;
+                    }
+                } catch (IOException probeError) {
+                    Log.i(TAG, "Incremental probe failed: " + probeError.getMessage());
+                }
+            }
+        }
+        if (info == null || !info.supportsRanges) {
+            Log.i(TAG, "Incremental update needs range support, doing the full download.");
+            return false;
+        }
+
+        RemoteZipDirectory directory = readRemoteCentralDirectory(urlText, withAuth, info.totalBytes);
+        checkCancelled();
+
+        Map<String, File> localFiles = new HashMap<>();
+        listLocalFiles(dataDir, "", localFiles);
+        Map<String, IndexEntry> index = readDataIndex(root);
+        final boolean verifyByCrc = index.isEmpty();
+
+        int fileCount = 0;
+        for (RemoteZipEntry entry : directory.entries) {
+            if (entry.relPath != null && !entry.isDirectory) {
+                fileCount++;
+            }
+        }
+
+        List<RemoteZipEntry> changed = new ArrayList<>();
+        long changedBytes = 0L;
+        int checked = 0;
+        long lastUiTick = 0L;
+        byte[] buffer = new byte[BUFFER_SIZE];
+
+        for (RemoteZipEntry entry : directory.entries) {
+            if (entry.relPath == null || entry.isDirectory) {
+                continue;
+            }
+            checkCancelled();
+
+            File local = localFiles.get(entry.key);
+            boolean same;
+            if (local == null || local.length() != entry.size) {
+                same = false;
+            } else if (!verifyByCrc) {
+                IndexEntry known = index.get(entry.key);
+                same = known != null && known.crc == entry.crc && known.size == entry.size;
+            } else {
+                same = crcOfFile(local, buffer) == entry.crc;
+            }
+
+            if (!same) {
+                changed.add(entry);
+                changedBytes += entry.spanEnd - entry.localOffset;
+            }
+
+            checked++;
+            long now = SystemClock.elapsedRealtime();
+            if (verifyByCrc && now - lastUiTick >= UI_UPDATE_INTERVAL_MS) {
+                lastUiTick = now;
+                updateStageUi("Checking local files...",
+                    "Checked " + checked + " / " + fileCount + " files",
+                    changed.size() + " to update so far",
+                    Math.min(1.0, checked / (double) Math.max(1, fileCount)) * 20.0);
+            }
+        }
+
+        Log.i(TAG, "Incremental: " + changed.size() + " of " + fileCount + " files changed, "
+            + changedBytes + " of " + info.totalBytes + " bytes (verifyByCrc=" + verifyByCrc + ")");
+
+        if (changedBytes > info.totalBytes * INCREMENTAL_MAX_CHANGED_SHARE) {
+            Log.i(TAG, "Most of data.zip changed, doing the full download.");
+            return false;
+        }
+
+        if (!changed.isEmpty()) {
+            downloadChangedEntries(urlText, withAuth, changed, dataDir, root);
+        }
+
+        writeDataIndex(root, directory.entries);
+        writeDataReadyMarker(root, dataDir, fetchRemoteDataSignature());
+
+        final int changedCount = changed.size();
+        final long fetchedBytes = changedBytes;
+        final long tookMs = SystemClock.elapsedRealtime() - startMs;
+        postUi(() -> {
+            if (cancelled) {
+                return;
+            }
+            progressBar.setProgress(1000);
+            stageText.setText(changedCount > 0 ? "Data updated. Launching game..." : "Data up to date. Launching game...");
+            detailText.setText(changedCount + " file" + (changedCount == 1 ? "" : "s") + " updated ("
+                + formatBytes(fetchedBytes) + ")");
+            timerText.setText("Update time: " + formatDuration(tookMs));
+        });
+        return true;
+    }
+
+    private RemoteZipDirectory readRemoteCentralDirectory(String urlText, boolean withAuth, long total)
+        throws IOException {
+        // The end record sits in the last 22 bytes plus a comment of up to 64 KB;
+        // the zip64 locator, when there is one, is the 20 bytes before it.
+        int tailLength = (int) Math.min(total, 65536L + 22L + 20L);
+        byte[] tail = fetchRangeBytes(urlText, withAuth, total - tailLength, total - 1L);
+
+        int end = -1;
+        for (int i = tail.length - 22; i >= 0; i--) {
+            if (le32(tail, i) == ZIP_END_SIG) {
+                end = i;
+                break;
+            }
+        }
+        if (end < 0) {
+            throw new IOException("zip end record not found");
+        }
+
+        long entryCount = le16(tail, end + 10);
+        long centralSize = le32(tail, end + 12);
+        long centralOffset = le32(tail, end + 16);
+
+        if (entryCount == 0xFFFFL || centralSize == 0xFFFFFFFFL || centralOffset == 0xFFFFFFFFL) {
+            if (end < 20 || le32(tail, end - 20) != ZIP64_LOCATOR_SIG) {
+                throw new IOException("zip64 locator not found");
+            }
+            long zip64EndOffset = le64(tail, end - 20 + 8);
+            byte[] zip64End = fetchRangeBytes(urlText, withAuth, zip64EndOffset, zip64EndOffset + 55L);
+            if (le32(zip64End, 0) != ZIP64_END_SIG) {
+                throw new IOException("zip64 end record not found");
+            }
+            entryCount = le64(zip64End, 32);
+            centralSize = le64(zip64End, 40);
+            centralOffset = le64(zip64End, 48);
+        }
+
+        if (centralSize <= 0L || centralSize > 64L * 1024L * 1024L || centralOffset + centralSize > total) {
+            throw new IOException("zip central directory out of range");
+        }
+
+        byte[] central = fetchRangeBytes(urlText, withAuth, centralOffset, centralOffset + centralSize - 1L);
+
+        List<RemoteZipEntry> entries = new ArrayList<>();
+        int p = 0;
+        while (p + 46 <= central.length && le32(central, p) == ZIP_CENTRAL_SIG) {
+            RemoteZipEntry entry = new RemoteZipEntry();
+            entry.flags = le16(central, p + 8);
+            entry.method = le16(central, p + 10);
+            entry.crc = le32(central, p + 16);
+            entry.compressedSize = le32(central, p + 20);
+            entry.size = le32(central, p + 24);
+            int nameLength = le16(central, p + 28);
+            int extraLength = le16(central, p + 30);
+            int commentLength = le16(central, p + 32);
+            entry.localOffset = le32(central, p + 42);
+
+            int nameStart = p + 46;
+            int extraEnd = nameStart + nameLength + extraLength;
+            if (extraEnd + commentLength > central.length) {
+                throw new IOException("zip central directory truncated");
+            }
+
+            // Same decoding openDataZip gives ZipFile, so a file lands at the
+            // same path a full install would put it.
+            entry.name = new String(central, nameStart, nameLength,
+                (entry.flags & 0x800) != 0 ? StandardCharsets.UTF_8 : StandardCharsets.ISO_8859_1);
+
+            // Zip64 extra field: 64-bit values for whichever fields are maxed out.
+            int e = nameStart + nameLength;
+            while (e + 4 <= extraEnd) {
+                int id = le16(central, e);
+                int size = le16(central, e + 2);
+                int d = e + 4;
+                int dataEnd = Math.min(extraEnd, d + size);
+                if (id == 0x0001) {
+                    if (entry.size == 0xFFFFFFFFL && d + 8 <= dataEnd) {
+                        entry.size = le64(central, d);
+                        d += 8;
+                    }
+                    if (entry.compressedSize == 0xFFFFFFFFL && d + 8 <= dataEnd) {
+                        entry.compressedSize = le64(central, d);
+                        d += 8;
+                    }
+                    if (entry.localOffset == 0xFFFFFFFFL && d + 8 <= dataEnd) {
+                        entry.localOffset = le64(central, d);
+                    }
+                }
+                e += 4 + size;
+            }
+
+            entry.isDirectory = entry.name.endsWith("/") || entry.name.endsWith("\\");
+            entries.add(entry);
+            p = extraEnd + commentLength;
+        }
+
+        if (entries.isEmpty()) {
+            throw new IOException("zip central directory empty");
+        }
+        if (entries.size() != entryCount && entryCount != 0xFFFFL) {
+            Log.w(TAG, "Central directory lists " + entries.size() + " entries, end record says " + entryCount);
+        }
+
+        assignDataRelativePaths(entries);
+
+        // Each entry's bytes run up to the next entry's local header (or the
+        // directory, for the last one). Fetching that span gets the local
+        // header, the data and any data descriptor in one go.
+        List<RemoteZipEntry> byOffset = new ArrayList<>(entries);
+        Collections.sort(byOffset, (a, b) -> Long.compare(a.localOffset, b.localOffset));
+        for (int i = 0; i < byOffset.size(); i++) {
+            RemoteZipEntry entry = byOffset.get(i);
+            long next = centralOffset;
+            for (int j = i + 1; j < byOffset.size(); j++) {
+                if (byOffset.get(j).localOffset > entry.localOffset) {
+                    next = byOffset.get(j).localOffset;
+                    break;
+                }
+            }
+            if (next <= entry.localOffset || next > centralOffset) {
+                throw new IOException("zip entry offsets out of order");
+            }
+            entry.spanEnd = next;
+        }
+
+        return new RemoteZipDirectory(entries, centralOffset);
+    }
+
+    // The full install keeps only the archive's Data folder (installExtractedData),
+    // or its single top-level folder when there is no Data folder. Entries get
+    // the path they have inside that folder; anything outside it gets null.
+    private static void assignDataRelativePaths(List<RemoteZipEntry> entries) throws IOException {
+        String top = null;
+        String onlyTop = null;
+        boolean severalTops = false;
+
+        for (RemoteZipEntry entry : entries) {
+            String normalized = normalizeZipPath(entry.name);
+            if (normalized.isEmpty()) {
+                continue;
+            }
+            int slash = normalized.indexOf('/');
+            String first = slash >= 0 ? normalized.substring(0, slash) : (entry.isDirectory ? normalized : null);
+            if (first == null) {
+                continue;
+            }
+            if (first.equalsIgnoreCase(DATA_FOLDER_NAME)) {
+                top = DATA_FOLDER_NAME;
+            }
+            if (onlyTop == null) {
+                onlyTop = first;
+            } else if (!onlyTop.equalsIgnoreCase(first)) {
+                severalTops = true;
+            }
+        }
+
+        if (top == null) {
+            if (onlyTop == null || severalTops) {
+                throw new IOException("data folder not found in data.zip");
+            }
+            top = onlyTop;
+        }
+
+        for (RemoteZipEntry entry : entries) {
+            String normalized = normalizeZipPath(entry.name);
+            int slash = normalized.indexOf('/');
+            if (slash <= 0 || !normalized.substring(0, slash).equalsIgnoreCase(top)) {
+                entry.relPath = null;
+                entry.key = null;
+                continue;
+            }
+            String rel = normalized.substring(slash + 1);
+            if (rel.isEmpty()) {
+                entry.relPath = null;
+                entry.key = null;
+                continue;
+            }
+            entry.relPath = rel;
+            entry.key = rel.toLowerCase(Locale.ROOT);
+        }
+    }
+
+    private void downloadChangedEntries(String urlText, boolean withAuth, List<RemoteZipEntry> changed,
+                                        File dataDir, File root) throws IOException {
+        final long startMs = SystemClock.elapsedRealtime();
+
+        // Entries back to back in the archive go in one ranged request.
+        List<RemoteZipEntry> sorted = new ArrayList<>(changed);
+        Collections.sort(sorted, (a, b) -> Long.compare(a.localOffset, b.localOffset));
+        final List<List<RemoteZipEntry>> groups = new ArrayList<>();
+        List<RemoteZipEntry> current = null;
+        long groupStart = 0L;
+        long groupEnd = 0L;
+        long totalBytes = 0L;
+        for (RemoteZipEntry entry : sorted) {
+            if (current != null && entry.localOffset == groupEnd
+                && (entry.spanEnd - groupStart) <= INCREMENTAL_GROUP_BYTES) {
+                current.add(entry);
+                groupEnd = entry.spanEnd;
+            } else {
+                current = new ArrayList<>();
+                current.add(entry);
+                groups.add(current);
+                groupStart = entry.localOffset;
+                groupEnd = entry.spanEnd;
+            }
+            totalBytes += entry.spanEnd - entry.localOffset;
+        }
+
+        final File workDir = new File(root, "preload_data_patch");
+        recreateDirectory(workDir);
+
+        final java.util.concurrent.atomic.AtomicLong progress = new java.util.concurrent.atomic.AtomicLong(0L);
+        final java.util.concurrent.atomic.AtomicInteger filesDone = new java.util.concurrent.atomic.AtomicInteger(0);
+        final java.util.concurrent.atomic.AtomicInteger nextGroup = new java.util.concurrent.atomic.AtomicInteger(0);
+        final java.util.concurrent.atomic.AtomicReference<IOException> failure =
+            new java.util.concurrent.atomic.AtomicReference<>(null);
+
+        List<Thread> workers = new ArrayList<>();
+        final int workerCount = Math.min(DOWNLOAD_CHUNK_THREADS, groups.size());
+        for (int w = 0; w < workerCount; w++) {
+            Thread worker = new Thread(() -> {
+                while (failure.get() == null && !cancelled) {
+                    final int groupIndex = nextGroup.getAndIncrement();
+                    if (groupIndex >= groups.size()) {
+                        return;
+                    }
+                    List<RemoteZipEntry> group = groups.get(groupIndex);
+                    long start = group.get(0).localOffset;
+                    long endInclusive = group.get(group.size() - 1).spanEnd - 1L;
+                    File part = new File(workDir, "g" + groupIndex + ".bin");
+
+                    IOException lastError = null;
+                    for (int attempt = 0; attempt < DOWNLOAD_CHUNK_ATTEMPTS && !cancelled; attempt++) {
+                        java.util.concurrent.atomic.AtomicLong attemptBytes =
+                            new java.util.concurrent.atomic.AtomicLong(0L);
+                        try {
+                            fetchRangeToFile(urlText, withAuth, start, endInclusive, part, progress, attemptBytes);
+                            lastError = null;
+                            break;
+                        } catch (IOException fetchError) {
+                            lastError = fetchError;
+                            progress.addAndGet(-attemptBytes.get());
+                            Log.w(TAG, "Update group " + groupIndex + " attempt " + (attempt + 1)
+                                + " failed: " + fetchError.getMessage());
+                            try {
+                                Thread.sleep(400L * (attempt + 1));
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                        }
+                    }
+
+                    if (lastError == null) {
+                        try {
+                            applyEntriesFromPart(part, start, group, dataDir);
+                            filesDone.addAndGet(group.size());
+                        } catch (IOException applyError) {
+                            lastError = applyError;
+                        }
+                    }
+                    deleteQuietly(part);
+
+                    if (lastError != null) {
+                        failure.compareAndSet(null, lastError);
+                        return;
+                    }
+                }
+            }, "mu-patch-" + w);
+            worker.start();
+            workers.add(worker);
+        }
+
+        final int fileTotal = changed.size();
+        long lastUiTick = 0L;
+        long windowStartMs = startMs;
+        long windowStartBytes = 0L;
+        double recentSpeed = 0.0;
+        while (true) {
+            boolean anyAlive = false;
+            for (Thread worker : workers) {
+                if (worker.isAlive()) {
+                    anyAlive = true;
+                    break;
+                }
+            }
+
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastUiTick >= UI_UPDATE_INTERVAL_MS) {
+                lastUiTick = now;
+                long soFar = progress.get();
+                long windowMs = now - windowStartMs;
+                if (windowMs >= 1000L) {
+                    recentSpeed = (soFar - windowStartBytes) / (windowMs / 1000.0);
+                    windowStartMs = now;
+                    windowStartBytes = soFar;
+                }
+                double share = Math.min(1.0, soFar / (double) Math.max(1L, totalBytes));
+                long etaMs = recentSpeed > 0.0 ? (long) (((totalBytes - soFar) / recentSpeed) * 1000.0) : 0L;
+                updateStageUi(
+                    String.format(Locale.US, "Updating changed files %.1f%%", share * 100.0),
+                    filesDone.get() + " / " + fileTotal + " files | "
+                        + formatBytes(soFar) + " / " + formatBytes(totalBytes),
+                    "Speed " + formatBytes((long) recentSpeed) + "/s | ETA " + formatDuration(Math.max(0L, etaMs)),
+                    20.0 + share * 78.0);
+            }
+
+            if (!anyAlive || cancelled) {
+                break;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        for (Thread worker : workers) {
+            try {
+                worker.join();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        deleteRecursivelyQuietly(workDir);
+
+        if (cancelled) {
+            throw new IOException("Preload cancelled");
+        }
+        IOException groupFailure = failure.get();
+        if (groupFailure != null) {
+            throw groupFailure;
+        }
+    }
+
+    // Unpacks the entries of one fetched range. Each file is written next to
+    // its target and only renamed over it once its CRC matches the directory,
+    // so a bad fetch never leaves a half-written game file behind.
+    private void applyEntriesFromPart(File part, long partStart, List<RemoteZipEntry> entries, File dataDir)
+        throws IOException {
+        byte[] buffer = new byte[BUFFER_SIZE];
+        byte[] header = new byte[30];
+
+        try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(part, "r")) {
+            for (RemoteZipEntry entry : entries) {
+                checkCancelled();
+
+                if ((entry.flags & 0x1) != 0) {
+                    throw new IOException("encrypted entry: " + entry.relPath);
+                }
+                if (entry.method != 0 && entry.method != 8) {
+                    throw new IOException("unsupported compression " + entry.method + ": " + entry.relPath);
+                }
+
+                long base = entry.localOffset - partStart;
+                input.seek(base);
+                input.readFully(header);
+                if (le32(header, 0) != ZIP_LOCAL_HEADER_SIG) {
+                    throw new IOException("bad local header: " + entry.relPath);
+                }
+                long dataStart = base + 30L + le16(header, 26) + le16(header, 28);
+                if (dataStart + entry.compressedSize > input.length()) {
+                    throw new IOException("entry data cut short: " + entry.relPath);
+                }
+
+                File target = resolvePathCaseInsensitive(dataDir, entry.relPath, false);
+                assertUnderRoot(dataDir, target);
+                File temp = new File(target.getParentFile(), target.getName() + ".mu_patch");
+
+                CRC32 crc = new CRC32();
+                long written = 0L;
+                input.seek(dataStart);
+                Inflater inflater = entry.method == 8 ? new Inflater(true) : null;
+                try {
+                    InputStream raw = new RangeInputStream(input, entry.compressedSize, inflater != null);
+                    InputStream data = inflater != null ? new InflaterInputStream(raw, inflater, BUFFER_SIZE) : raw;
+                    try (OutputStream output = new BufferedOutputStream(new FileOutputStream(temp, false), BUFFER_SIZE)) {
+                        int read;
+                        while ((read = data.read(buffer)) != -1) {
+                            output.write(buffer, 0, read);
+                            crc.update(buffer, 0, read);
+                            written += read;
+                        }
+                        output.flush();
+                    }
+                } catch (IOException writeError) {
+                    deleteQuietly(temp);
+                    throw writeError;
+                } finally {
+                    if (inflater != null) {
+                        inflater.end();
+                    }
+                }
+
+                if (crc.getValue() != entry.crc || written != entry.size) {
+                    deleteQuietly(temp);
+                    throw new IOException("CRC mismatch: " + entry.relPath);
+                }
+
+                if (target.exists() && !target.delete()) {
+                    deleteQuietly(temp);
+                    throw new IOException("cannot replace " + entry.relPath);
+                }
+                if (!temp.renameTo(target)) {
+                    deleteQuietly(temp);
+                    throw new IOException("cannot install " + entry.relPath);
+                }
+            }
+        }
+    }
+
+    // A window of a RandomAccessFile. With dummyByte, one extra zero byte
+    // follows the window: a raw ("nowrap") Inflater may ask for one more byte
+    // than the deflate stream holds, which is what ZipFile does for it too.
+    private static final class RangeInputStream extends InputStream {
+        private final java.io.RandomAccessFile file;
+        private long remaining;
+        private boolean dummyPending;
+
+        RangeInputStream(java.io.RandomAccessFile file, long length, boolean dummyByte) {
+            this.file = file;
+            this.remaining = length;
+            this.dummyPending = dummyByte;
+        }
+
+        @Override
+        public int read() throws IOException {
+            byte[] one = new byte[1];
+            int read = read(one, 0, 1);
+            return read < 0 ? -1 : (one[0] & 0xFF);
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (len == 0) {
+                return 0;
+            }
+            if (remaining <= 0L) {
+                if (dummyPending) {
+                    dummyPending = false;
+                    b[off] = 0;
+                    return 1;
+                }
+                return -1;
+            }
+            int read = file.read(b, off, (int) Math.min(len, remaining));
+            if (read < 0) {
+                return -1;
+            }
+            remaining -= read;
+            return read;
+        }
+    }
+
+    private HttpURLConnection openRangeConnection(String urlText, boolean withAuth, long start, long endInclusive)
+        throws IOException {
+        URL url = new URL(urlText);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setConnectTimeout(15000);
+        connection.setReadTimeout(30000);
+        connection.setRequestProperty("Accept-Encoding", "identity");
+        connection.setRequestProperty("User-Agent", "MuMain-Android-Preload/1.0");
+        connection.setRequestProperty("Range", "bytes=" + start + "-" + endInclusive);
+        connection.setInstanceFollowRedirects(true);
+        if (withAuth) {
+            applyBasicAuthorization(connection, BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD);
+        }
+        connection.connect();
+
+        int responseCode = connection.getResponseCode();
+        if (responseCode != HttpURLConnection.HTTP_PARTIAL) {
+            connection.disconnect();
+            throw new HttpStatusException(responseCode,
+                "HTTP " + responseCode + " for range " + start + "-" + endInclusive);
+        }
+        return connection;
+    }
+
+    private byte[] fetchRangeBytes(String urlText, boolean withAuth, long start, long endInclusive)
+        throws IOException {
+        long length = endInclusive - start + 1L;
+        if (start < 0L || length <= 0L || length > 64L * 1024L * 1024L) {
+            throw new IOException("bad range " + start + "-" + endInclusive);
+        }
+
+        HttpURLConnection connection = openRangeConnection(urlText, withAuth, start, endInclusive);
+        try {
+            byte[] data = new byte[(int) length];
+            int filled = 0;
+            try (InputStream input = connection.getInputStream()) {
+                while (filled < data.length) {
+                    int read = input.read(data, filled, data.length - filled);
+                    if (read < 0) {
+                        break;
+                    }
+                    filled += read;
+                }
+            }
+            if (filled != data.length) {
+                throw new IOException("range cut short: " + filled + " of " + data.length);
+            }
+            return data;
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private void fetchRangeToFile(String urlText, boolean withAuth, long start, long endInclusive, File output,
+                                  java.util.concurrent.atomic.AtomicLong progress,
+                                  java.util.concurrent.atomic.AtomicLong attemptBytes) throws IOException {
+        long expected = endInclusive - start + 1L;
+        HttpURLConnection connection = openRangeConnection(urlText, withAuth, start, endInclusive);
+        try {
+            long written = 0L;
+            byte[] buffer = new byte[BUFFER_SIZE];
+            try (InputStream input = new BufferedInputStream(connection.getInputStream(), BUFFER_SIZE);
+                 OutputStream out = new BufferedOutputStream(new FileOutputStream(output, false), BUFFER_SIZE)) {
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    if (cancelled) {
+                        throw new IOException("Preload cancelled");
+                    }
+                    out.write(buffer, 0, read);
+                    written += read;
+                    progress.addAndGet(read);
+                    attemptBytes.addAndGet(read);
+                }
+                out.flush();
+            }
+            if (written != expected) {
+                throw new IOException("range cut short: " + written + " of " + expected);
+            }
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private static void listLocalFiles(File dir, String prefix, Map<String, File> out) {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            String rel = prefix.isEmpty() ? child.getName() : prefix + "/" + child.getName();
+            if (child.isDirectory()) {
+                listLocalFiles(child, rel, out);
+            } else {
+                out.put(rel.toLowerCase(Locale.ROOT), child);
+            }
+        }
+    }
+
+    private static long crcOfFile(File file, byte[] buffer) throws IOException {
+        CRC32 crc = new CRC32();
+        try (InputStream input = new FileInputStream(file)) {
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                crc.update(buffer, 0, read);
+            }
+        }
+        return crc.getValue();
+    }
+
+    private static Map<String, IndexEntry> readDataIndex(File root) {
+        Map<String, IndexEntry> index = new HashMap<>();
+        File file = new File(root, DATA_INDEX_FILE);
+        if (!file.isFile()) {
+            return index;
+        }
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+            new java.io.InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split("\t", 3);
+                if (parts.length != 3) {
+                    continue;
+                }
+                try {
+                    index.put(parts[2], new IndexEntry(Long.parseLong(parts[0], 16), Long.parseLong(parts[1])));
+                } catch (NumberFormatException ignored) {
+                    // skip a damaged line; that file is simply re-checked
+                }
+            }
+        } catch (IOException readError) {
+            Log.w(TAG, "Could not read the data index: " + readError.getMessage());
+            index.clear();
+        }
+        return index;
+    }
+
+    private static void writeDataIndex(File root, Collection<RemoteZipEntry> entries) {
+        File file = new File(root, DATA_INDEX_FILE);
+        File temp = new File(root, DATA_INDEX_FILE + ".tmp");
+        StringBuilder builder = new StringBuilder();
+        for (RemoteZipEntry entry : entries) {
+            if (entry.key == null || entry.isDirectory) {
+                continue;
+            }
+            builder.append(Long.toHexString(entry.crc)).append('\t')
+                .append(entry.size).append('\t')
+                .append(entry.key).append('\n');
+        }
+        try (OutputStream output = new FileOutputStream(temp, false)) {
+            output.write(builder.toString().getBytes(StandardCharsets.UTF_8));
+            output.flush();
+        } catch (IOException writeError) {
+            Log.w(TAG, "Could not write the data index: " + writeError.getMessage());
+            deleteQuietly(temp);
+            return;
+        }
+        deleteQuietly(file);
+        if (!temp.renameTo(file)) {
+            Log.w(TAG, "Could not install the data index");
+            deleteQuietly(temp);
+        }
+    }
+
+    // After a full install the archive is still on disk: record its contents.
+    // Best effort - without an index the next update checks files by CRC.
+    private static void writeDataIndexFromZip(File zipFile, File root) {
+        try (ZipFile zip = openDataZip(zipFile)) {
+            List<RemoteZipEntry> entries = new ArrayList<>();
+            Enumeration<? extends ZipEntry> all = zip.entries();
+            while (all.hasMoreElements()) {
+                ZipEntry zipEntry = all.nextElement();
+                RemoteZipEntry entry = new RemoteZipEntry();
+                entry.name = zipEntry.getName();
+                entry.isDirectory = zipEntry.isDirectory();
+                entry.crc = zipEntry.getCrc();
+                entry.size = zipEntry.getSize();
+                entries.add(entry);
+            }
+            assignDataRelativePaths(entries);
+            writeDataIndex(root, entries);
+        } catch (IOException indexError) {
+            Log.w(TAG, "Could not index data.zip: " + indexError.getMessage());
+            deleteQuietly(new File(root, DATA_INDEX_FILE));
+        }
+    }
+
+    private static int le16(byte[] b, int at) {
+        return (b[at] & 0xFF) | ((b[at + 1] & 0xFF) << 8);
+    }
+
+    private static long le32(byte[] b, int at) {
+        return ((long) le16(b, at)) | (((long) le16(b, at + 2)) << 16);
+    }
+
+    private static long le64(byte[] b, int at) {
+        return le32(b, at) | (le32(b, at + 4) << 32);
     }
 
     private List<File> collectDataRoots() {
@@ -1819,64 +2681,64 @@ public class PreloadActivity extends Activity {
         long totalBytes;
     }
 
-    // What the player sees when the sync fails: a short code instead of the
-    // exception text, which carries the server's address and port. The full
-    // message still goes to the log (Log.e / Log.w above).
-    //   E101 host name not resolved       E102 cannot connect (down / port closed)
-    //   E103 timed out                    E104 secure connection failed
-    //   E4xx / E5xx the server's HTTP status
-    //   E301 data empty or incomplete     E302 archive damaged
-    //   E303 cannot write to storage      E199 anything else
-    private static String errorCode(Throwable ex) {
-        if (ex == null) {
-            return "E199";
-        }
-        if (ex instanceof HttpStatusException) {
-            return "E" + ((HttpStatusException) ex).statusCode;
-        }
-        if (ex instanceof java.net.UnknownHostException) {
-            return "E101";
-        }
-        if (ex instanceof java.net.ConnectException || ex instanceof java.net.NoRouteToHostException) {
-            return "E102";
-        }
-        if (ex instanceof java.net.SocketTimeoutException) {
-            return "E103";
-        }
-        if (ex instanceof javax.net.ssl.SSLException) {
-            return "E104";
-        }
-        if (ex instanceof java.util.zip.ZipException) {
-            return "E302";
-        }
-        final String message = (ex.getMessage() != null) ? ex.getMessage().toLowerCase(Locale.US) : "";
-        if (message.contains("empty") || message.contains("incomplete") || message.contains("not found in downloaded")) {
-            return "E301";
-        }
-        if (message.contains("invalid zip")) {
-            return "E302";
-        }
-        if (message.contains("writable") || message.contains("create directory") || message.contains("unable to delete")
-                || message.contains("finalise") || message.contains("not a directory")) {
-            return "E303";
-        }
-        if (ex.getCause() != null && ex.getCause() != ex) {
-            return errorCode(ex.getCause());
-        }
-        return "E199";
-    }
-
-    // Safety net for every status line: no address or port reaches the screen,
-    // whatever a message happens to contain.
-    private static String hideAddress(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text
-            .replaceAll("(?i)https?://\\S+", "server")
-            .replaceAll("\\b\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?\\b", "server");
-    }
-
+    // What the player sees when the sync fails: a short code instead of the
+    // exception text, which carries the server's address and port. The full
+    // message still goes to the log (Log.e / Log.w above).
+    //   E101 host name not resolved       E102 cannot connect (down / port closed)
+    //   E103 timed out                    E104 secure connection failed
+    //   E4xx / E5xx the server's HTTP status
+    //   E301 data empty or incomplete     E302 archive damaged
+    //   E303 cannot write to storage      E199 anything else
+    private static String errorCode(Throwable ex) {
+        if (ex == null) {
+            return "E199";
+        }
+        if (ex instanceof HttpStatusException) {
+            return "E" + ((HttpStatusException) ex).statusCode;
+        }
+        if (ex instanceof java.net.UnknownHostException) {
+            return "E101";
+        }
+        if (ex instanceof java.net.ConnectException || ex instanceof java.net.NoRouteToHostException) {
+            return "E102";
+        }
+        if (ex instanceof java.net.SocketTimeoutException) {
+            return "E103";
+        }
+        if (ex instanceof javax.net.ssl.SSLException) {
+            return "E104";
+        }
+        if (ex instanceof java.util.zip.ZipException) {
+            return "E302";
+        }
+        final String message = (ex.getMessage() != null) ? ex.getMessage().toLowerCase(Locale.US) : "";
+        if (message.contains("empty") || message.contains("incomplete") || message.contains("not found in downloaded")) {
+            return "E301";
+        }
+        if (message.contains("invalid zip")) {
+            return "E302";
+        }
+        if (message.contains("writable") || message.contains("create directory") || message.contains("unable to delete")
+                || message.contains("finalise") || message.contains("not a directory")) {
+            return "E303";
+        }
+        if (ex.getCause() != null && ex.getCause() != ex) {
+            return errorCode(ex.getCause());
+        }
+        return "E199";
+    }
+
+    // Safety net for every status line: no address or port reaches the screen,
+    // whatever a message happens to contain.
+    private static String hideAddress(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+            .replaceAll("(?i)https?://\\S+", "server")
+            .replaceAll("\\b\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?\\b", "server");
+    }
+
     private static final class HttpStatusException extends IOException {
         final int statusCode;
 
