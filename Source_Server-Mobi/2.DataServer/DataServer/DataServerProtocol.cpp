@@ -40,6 +40,7 @@
 #endif
 #include "NewUIMyInventory.h"
 #include "RedeemCode.h"
+#include "FriendMail.h"
 #include "SpinClaim.h"
 #include "SlotClaim.h"
 void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
@@ -941,6 +942,27 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x36: //==Master skill tree recommendations - request
 				gMasterSkillTree.GDMasterRecommendRecv((SDHP_MASTER_RECOMMEND_RECV*)lpMsg, index);
+				break;
+			case 0x40: //==Friend mail - friend details
+				gFriendMail.OnDetailRequest((SDHP_FRIENDMAIL_NAME_REQ*)lpMsg, index);
+				break;
+			case 0x41: //==Friend mail - may this letter be sent
+				gFriendMail.OnCheckRequest((SDHP_FRIENDMAIL_CHECK_REQ*)lpMsg, index);
+				break;
+			case 0x42: //==Friend mail - store letter + items
+				gFriendMail.OnStoreRequest((SDHP_FRIENDMAIL_STORE_REQ*)lpMsg, index);
+				break;
+			case 0x43: //==Friend mail - a letter's waiting items
+				gFriendMail.OnItemsRequest((SDHP_FRIENDMAIL_MEMO_REQ*)lpMsg, index);
+				break;
+			case 0x44: //==Friend mail - claim
+				gFriendMail.OnClaimRequest((SDHP_FRIENDMAIL_MEMO_REQ*)lpMsg, index);
+				break;
+			case 0x45: //==Friend mail - undo an incomplete claim
+				gFriendMail.OnUnclaimRequest((SDHP_FRIENDMAIL_UNCLAIM_REQ*)lpMsg);
+				break;
+			case 0x46: //==Friend mail - attachment counts (+ expiry sweep)
+				gFriendMail.OnCountsRequest((SDHP_FRIENDMAIL_NAME_REQ*)lpMsg, index);
 				break;
 			}
 			break;

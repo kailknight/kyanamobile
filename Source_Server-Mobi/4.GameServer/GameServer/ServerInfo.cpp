@@ -155,6 +155,7 @@
 #include "CustomVongQuay.h"
 #include "SlotMachine.h"
 #include "FakeOnline.h"
+#include "FriendMail.h"
 
 CServerInfo gServerInfo;
 
@@ -5190,6 +5191,83 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 
 	this->m_DevilSquareMiniBoss = GetPrivateProfileInt(section, "DevilSquareMiniBoss", 0, path);
 	this->m_DevilSquareMiniBossMinPlayers = GetPrivateProfileInt(section, "DevilSquareMiniBossMinPlayers", 1, path);
+
+	// Modern friend window and item mail: see the header.
+	this->m_FriendWindowModern = GetPrivateProfileInt(section, "FriendWindowModern", 1, path);
+	this->m_MailItemFeeType = GetPrivateProfileInt(section, "MailItemFeeType", 0, path);
+	this->m_MailItemFee = GetPrivateProfileInt(section, "MailItemFee", 100000, path);
+	this->m_MailItemMaxPerLetter = GetPrivateProfileInt(section, "MailItemMaxPerLetter", 3, path);
+	this->m_MailItemExpireDays = GetPrivateProfileInt(section, "MailItemExpireDays", 7, path);
+
+	if (this->m_MailItemFeeType < 0 || this->m_MailItemFeeType > 4)
+	{
+		this->m_MailItemFeeType = 0;
+	}
+
+	if (this->m_MailItemFee < 0)
+	{
+		this->m_MailItemFee = 0;
+	}
+
+	if (this->m_MailItemMaxPerLetter < 1)
+	{
+		this->m_MailItemMaxPerLetter = 1;
+	}
+
+	if (this->m_MailItemMaxPerLetter > FRIENDMAIL_MAX_ITEMS)
+	{
+		this->m_MailItemMaxPerLetter = FRIENDMAIL_MAX_ITEMS;
+	}
+
+	if (this->m_MailItemExpireDays < 0 || this->m_MailItemExpireDays > 255)
+	{
+		this->m_MailItemExpireDays = 7;
+	}
+
+	// Wizard Teleport cooldown in ms, counted from reappearing (0 = none).
+	this->m_TeleportCooldownMS = GetPrivateProfileInt(section, "TeleportCooldownMS", 1000, path);
+
+	if (this->m_TeleportCooldownMS < 0)
+	{
+		this->m_TeleportCooldownMS = 0;
+	}
+
+	// Postage: zen for every letter, plain or not (was a fixed 1000).
+	this->m_MailSendZen = GetPrivateProfileInt(section, "MailSendZen", 1000, path);
+
+	if (this->m_MailSendZen < 0)
+	{
+		this->m_MailSendZen = 0;
+	}
+
+	// Coins that can be mailed, and the most per letter (0 = no limit).
+	this->m_MailCoinTypes = 0;
+	this->m_MailCoinTypes |= (GetPrivateProfileInt(section, "MailSendWCoinC", 1, path) != 0) ? 1 : 0;
+	this->m_MailCoinTypes |= (GetPrivateProfileInt(section, "MailSendWCoinP", 0, path) != 0) ? 2 : 0;
+	this->m_MailCoinTypes |= (GetPrivateProfileInt(section, "MailSendGoblinPoint", 0, path) != 0) ? 4 : 0;
+	this->m_MailCoinMaxPerLetter = GetPrivateProfileInt(section, "MailCoinMaxPerLetter", 0, path);
+
+	if (this->m_MailCoinMaxPerLetter < 0)
+	{
+		this->m_MailCoinMaxPerLetter = 0;
+	}
+
+	{
+		char szFeeItem[64] = { 0 };
+		int feeSection = 14, feeIndex = 13, feeLevel = 0;
+
+		GetPrivateProfileString(section, "MailItemFeeItem", "14,13,0", szFeeItem, sizeof(szFeeItem), path);
+
+		if (sscanf_s(szFeeItem, "%d,%d,%d", &feeSection, &feeIndex, &feeLevel) < 2)
+		{
+			feeSection = 14;
+			feeIndex = 13;
+			feeLevel = 0;
+		}
+
+		this->m_MailItemFeeItem = GET_ITEM(feeSection, feeIndex);
+		this->m_MailItemFeeItemLevel = (feeLevel < 0) ? 0 : feeLevel;
+	}
 
 	static const int DevilSquareMiniBossDefault[7] = {38,49,59,291,77,440,501};
 

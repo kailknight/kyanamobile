@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "CSProtocol.h"
+#include "FriendMail.h"
 #include "CharacterManager.h"
 #include "Protect.h"
 #include "QueryManager.h"
@@ -241,7 +242,7 @@ void FriendAddRequest(FHP_FRIEND_ADD_REQ* lpMsg,int index)
 
 				memcpy(pMsg.FriendName,lpMsg->Name,sizeof(pMsg.FriendName));
 
-				pMsg.State = (BYTE)GetServerCodeByName(lpMsg->FriendName);
+				pMsg.State = (BYTE)GetServerCodeByName(lpMsg->Name); // the requester's state, sent to FriendName
 
 				CServerManager* lpServerManager = FindServerByCode(CharacterInfo.GameServerCode);
 
@@ -329,6 +330,13 @@ void WaitFriendAddRequest(FHP_WAITFRIEND_ADD_REQ* lpMsg,int index)
 
 		gQueryManager.Close();
 
+		if(pMsg.Result == 1)
+		{
+			// Name accepted FriendName's request: make FriendName's own row
+			// count too, or the pair stays one-sided (see CompleteFriendship).
+			gFriendMail.CompleteFriendship(lpMsg->Name,lpMsg->FriendName);
+		}
+
 		CSDataSend(index,(BYTE*)&pMsg,pMsg.h.size);
 
 		if(pMsg.Result == 1)
@@ -347,7 +355,9 @@ void WaitFriendAddRequest(FHP_WAITFRIEND_ADD_REQ* lpMsg,int index)
 
 				memcpy(pMsg.FriendName,lpMsg->Name,sizeof(pMsg.FriendName));
 
-				pMsg.State = (BYTE)GetServerCodeByName(lpMsg->FriendName);
+				// The state of the friend being reported (the acceptor), not
+				// of the requester it is sent to.
+				pMsg.State = (BYTE)GetServerCodeByName(lpMsg->Name);
 
 				CServerManager* lpServerManager = FindServerByCode(CharacterInfo.GameServerCode);
 
@@ -563,6 +573,15 @@ void FriendMemoDelReq(FHP_FRIEND_MEMO_DEL_REQ* lpMsg,int index)
 	pMsg.Number = lpMsg->Number;
 
 	memcpy(pMsg.Name,lpMsg->Name,sizeof(pMsg.Name));
+
+	// A letter still holding unclaimed items stays: deleting it would lose
+	// them (FriendMail.cpp). Result 0 is the client's generic "could not
+	// delete"; the modern window explains it before it ever gets here.
+	if(gFriendMail.CountWaitingItems(lpMsg->Name,lpMsg->MemoIndex) > 0)
+	{
+		CSDataSend(index,(BYTE*)&pMsg,pMsg.h.size);
+		return;
+	}
 
 	gQueryManager.ExecQuery("WZ_DelMail '%s',%d",lpMsg->Name,lpMsg->MemoIndex);
 

@@ -256,6 +256,20 @@ void CMove::CGTeleportRecv(PMSG_TELEPORT_RECV* lpMsg,int aIndex) // OK
 
 		CSkill* lpSkill = gSkillManager.GetSkill(lpObj,SKILL_TELEPORT);
 
+		// Cooldown, counted from the moment the last teleport ended (the
+		// character reappeared - ObjectSetStateCreate), not from the cast.
+		// The client starts its own countdown when it sees that reappear,
+		// later than this tick by the round trip, so a fair client is never
+		// refused; the small margin covers its frame-timer rounding. The
+		// reply is the same "stay where you are" the area check above sends,
+		// which also releases the client's teleport latch.
+		if(lpSkill != 0 && gServerInfo.m_TeleportCooldownMS > 0 && lpObj->TeleportEndTick != 0
+			&& (GetTickCount() - lpObj->TeleportEndTick) + 150 < (DWORD)gServerInfo.m_TeleportCooldownMS)
+		{
+			this->GCTeleportSend(lpObj->Index,0,lpObj->Map,(BYTE)lpObj->X,(BYTE)lpObj->Y,lpObj->Dir);
+			return;
+		}
+
 		if(lpSkill != 0)
 		{
 			if(IT_MAP_RANGE(lpObj->Map) != 0 && gIllusionTemple.GetState(GET_IT_LEVEL(lpObj->Map)) != IT_STATE_START)

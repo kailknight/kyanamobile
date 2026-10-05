@@ -2225,3 +2225,11 @@ struct PMSG_CHAT_COLORS_SEND
 	BYTE color[8][2][4];
 };
 void GCChatColorsSend(int aIndex);
+
+// 0xD3:0xE6, server -> client: skill rules from CustomConfig.ini.
+struct PMSG_SKILL_RULES_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:E6
+	DWORD TeleportCooldownMS;	// from reappearing; 0 = none
+};
+void GCSkillRulesSend(int aIndex);

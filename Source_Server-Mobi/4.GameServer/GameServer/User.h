@@ -626,6 +626,7 @@ struct OBJECTSTRUCT
 	DWORD LastMoveTime;
 	DWORD LastAttackTime;
 	DWORD TeleportTime;
+	DWORD TeleportEndTick;		// when the last magic teleport finished (reappear) - TeleportCooldownMS counts from here
 	char Teleport;
 	char KillerType;
 	char DieRegen;

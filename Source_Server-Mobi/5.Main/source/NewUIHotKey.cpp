@@ -18,6 +18,7 @@
 #include "MapManager.h"
 #include "CharacterManager.h"
 #include "CBInterface.h"
+#include "FriendMailWindow.h"
 #include "Protocol.h"
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "GameShop/InGameShopSystem.h"
@@ -200,7 +201,7 @@ bool SEASON3B::CNewUIHotKey::UpdateKeyEvent()
 		}
 		else
 		{
-			g_pNewUISystem->Toggle(SEASON3B::INTERFACE_FRIEND);
+			ToggleFriendWindowRouted();
 		}
 		
 		PlayBuffer(SOUND_CLICK01);

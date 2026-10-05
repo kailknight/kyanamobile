@@ -165,6 +165,13 @@ namespace SEASON3B
 		std::map<DWORD, CSkillTreeInfo> map_skilltreeinfo;
 		std::map<BYTE, _MASTER_SKILLTREE_DATA> map_masterData;
 		std::map<DWORD, _MASTER_SKILL_TOOLTIP> map_masterSkillToolTip;
+		// Touch: the first tap on a skill selects it and pins its details, a
+		// second tap on the same skill shortly after adds a point. Appended
+		// last on purpose - CheckMouse reads earlier members by raw offset
+		// ((int*)this + i + 12).
+		int m_TouchSkill;
+		DWORD m_TouchTick;
+		bool m_TouchHit;
 	};
 }
 

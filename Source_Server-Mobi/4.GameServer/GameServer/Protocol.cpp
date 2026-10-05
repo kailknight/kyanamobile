@@ -65,6 +65,7 @@
 #include "Quest.h"
 #include "QuestWorld.h"
 #include "ServerInfo.h"
+#include "FriendMail.h"
 #include "SkillManager.h"
 #include "Trade.h"
 #include "Util.h"
@@ -1533,6 +1534,24 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			switch (((lpMsg[0] == 0xC1) ? lpMsg[3] : lpMsg[4]))
 			{
 #if(REDEEMCODE)
+			case 0xE0: //Friend mail - friend details (modern friend window)
+				gFriendMail.CGDetailRequest(aIndex);
+				break;
+			case 0xE1: //Friend mail - send a letter with items
+				if (lpMsg[0] == 0xC2 && size >= (int)(sizeof(PMSG_FRIENDMAIL_SEND_RECV) - FRIENDMAIL_MEMO_MAX))
+				{
+					PMSG_FRIENDMAIL_SEND_RECV* mlpMsg = (PMSG_FRIENDMAIL_SEND_RECV*)lpMsg;
+					const int memoRoom = size - (int)(sizeof(PMSG_FRIENDMAIL_SEND_RECV) - FRIENDMAIL_MEMO_MAX);
+					if (mlpMsg->MemoSize > memoRoom) { mlpMsg->MemoSize = (WORD)memoRoom; } // never trust the length field over the packet
+					gFriendMail.CGSendRequest(mlpMsg, aIndex);
+				}
+				break;
+			case 0xE2: //Friend mail - list a letter's items
+				if (size >= (int)sizeof(PMSG_FRIENDMAIL_MEMO_RECV)) { gFriendMail.CGItemsRequest((PMSG_FRIENDMAIL_MEMO_RECV*)lpMsg, aIndex); }
+				break;
+			case 0xE3: //Friend mail - claim a letter's items
+				if (size >= (int)sizeof(PMSG_FRIENDMAIL_MEMO_RECV)) { gFriendMail.CGClaimRequest((PMSG_FRIENDMAIL_MEMO_RECV*)lpMsg, aIndex); }
+				break;
 			case 0xA0: //Redeem code - "Check Code" (non-binding preview)
 			{
 				PMSG_REDEEM_CODE_SEND* mlpMsg = (PMSG_REDEEM_CODE_SEND*)lpMsg;
@@ -6604,6 +6623,23 @@ void GCAccountLevelSend(int aIndex) // OK
 	// Rides along: this already goes out on entering the game and whenever the
 	// rules change, which is when the client needs the chat colours too.
 	GCChatColorsSend(aIndex);
+	GCSkillRulesSend(aIndex);
+}
+
+void GCSkillRulesSend(int aIndex) // OK
+{
+	if (OBJECT_RANGE(aIndex) == 0)
+	{
+		return;
+	}
+
+	PMSG_SKILL_RULES_SEND pMsg;
+
+	pMsg.header.set(0xD3, 0xE6, sizeof(pMsg));
+
+	pMsg.TeleportCooldownMS = (DWORD)gServerInfo.m_TeleportCooldownMS;
+
+	DataSend(aIndex, (BYTE*)&pMsg, pMsg.header.size);
 }
 
 void GCChatColorsSend(int aIndex) // OK

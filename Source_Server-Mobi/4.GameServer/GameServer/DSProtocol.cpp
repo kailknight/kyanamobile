@@ -50,6 +50,7 @@
 #include "QuestWorld.h"
 #include "Reconnect.h"
 #include "ServerInfo.h"
+#include "FriendMail.h"
 #include "Util.h"
 #include "Viewport.h"
 #include "Warehouse.h"
@@ -122,6 +123,24 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x36: //Master skill tree recommendations, one per class
 				gMasterSkillTree.DGMasterRecommendRecv((SDHP_MASTER_RECOMMEND_RECV*)lpMsg);
+				break;
+			case 0x40: //Friend mail - friend details
+				gFriendMail.DGDetailRecv((SDHP_FRIENDMAIL_DETAIL_RECV*)lpMsg);
+				break;
+			case 0x41: //Friend mail - may this letter be sent
+				gFriendMail.DGCheckRecv((SDHP_FRIENDMAIL_CHECK_RECV*)lpMsg);
+				break;
+			case 0x42: //Friend mail - letter stored
+				gFriendMail.DGStoreRecv((SDHP_FRIENDMAIL_STORE_RECV*)lpMsg);
+				break;
+			case 0x43: //Friend mail - a letter's waiting items
+				gFriendMail.DGItemsRecv((SDHP_FRIENDMAIL_ITEMS_RECV*)lpMsg);
+				break;
+			case 0x44: //Friend mail - claim result
+				gFriendMail.DGClaimRecv((SDHP_FRIENDMAIL_ITEMS_RECV*)lpMsg);
+				break;
+			case 0x46: //Friend mail - attachment counts
+				gFriendMail.DGCountsRecv((SDHP_FRIENDMAIL_COUNTS_RECV*)lpMsg);
 				break;
 			}
 			break;

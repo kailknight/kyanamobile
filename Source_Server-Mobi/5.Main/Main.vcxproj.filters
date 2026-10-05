@@ -1375,6 +1375,9 @@
     <ClCompile Include="source\RedeemCodeWindow.cpp">
       <Filter>MU\Client\BCustomLoad</Filter>
     </ClCompile>
+    <ClCompile Include="source\FriendMailWindow.cpp">
+      <Filter>MU\Client\BCustomLoad</Filter>
+    </ClCompile>
     <ClCompile Include="source\CB_InfoCustomMix.cpp">
       <Filter>MU\Client\BCustomLoad</Filter>
     </ClCompile>
@@ -2749,6 +2752,9 @@
       <Filter>MU\Client\BCustomLoad</Filter>
     </ClInclude>
     <ClInclude Include="source\RedeemCodeWindow.h">
+      <Filter>MU\Client\BCustomLoad</Filter>
+    </ClInclude>
+    <ClInclude Include="source\FriendMailWindow.h">
       <Filter>MU\Client\BCustomLoad</Filter>
     </ClInclude>
     <ClInclude Include="source\CB_InfoCustomMix.h">

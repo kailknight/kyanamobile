@@ -885,6 +885,7 @@ void gObjCharZeroSet(int aIndex) // OK
 	lpObj->SendQuestInfo = 0;
 	lpObj->CheckLifeTime = 0;
 	lpObj->LastTeleportTime = 0;
+	lpObj->TeleportEndTick = 0;
 	lpObj->SkillNovaState = 0;
 	lpObj->SkillNovaCount = 0;
 	lpObj->SkillNovaTime = 0;

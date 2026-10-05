@@ -1420,6 +1420,27 @@ public:
 	int m_DevilSquareMiniBoss;
 	int m_DevilSquareMiniBossMinPlayers;
 	int m_DevilSquareMiniBossClass[7];
+	// Modern friend window and item mail (CustomConfig.ini), FriendMail.cpp.
+	// FriendWindowModern: 0 = legacy window, 1 = modern (sent to the client).
+	// MailItemFeeType: what the per-item fee is paid in - 0 zen, 1 an item
+	// (MailItemFeeItem = section,index,level), 2 WCoinC, 3 WCoinP, 4 Goblin Points.
+	int m_FriendWindowModern;
+	int m_MailItemFeeType;
+	int m_MailItemFee;
+	int m_MailItemFeeItem;
+	int m_MailItemFeeItemLevel;
+	int m_MailItemMaxPerLetter;
+	int m_MailItemExpireDays;
+	// MailSendZen: postage in zen for every letter. MailSendWCoinC / WCoinP /
+	// GoblinPoint (0/1): which coins can be mailed - kept as a bitmask 1/2/4.
+	// MailCoinMaxPerLetter: most coins in one letter, 0 = no limit.
+	int m_MailSendZen;
+	// TeleportCooldownMS: Wizard Teleport cooldown, counted from the moment the
+	// character reappears (not from the cast). 0 = no cooldown. Sent to the
+	// client in 0xD3:0xE6 so its hotkey shows the same countdown.
+	int m_TeleportCooldownMS;
+	int m_MailCoinTypes;
+	int m_MailCoinMaxPerLetter;
 };
 
 extern CServerInfo gServerInfo;

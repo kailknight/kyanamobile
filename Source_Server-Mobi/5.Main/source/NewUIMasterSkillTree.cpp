@@ -100,6 +100,12 @@ SEASON3B::CNewUIMasterSkillTree::CNewUIMasterSkillTree()
 
 	this->CurSkillID = 0;
 
+	this->m_TouchSkill = -1;
+
+	this->m_TouchTick = 0;
+
+	this->m_TouchHit = false;
+
 	this->classCode = 0;
 
 	this->CategoryTextIndex = 0;
@@ -539,6 +545,21 @@ int SEASON3B::CNewUIMasterSkillTree::SetDivideString(char* text, int isItemTollT
 
 bool SEASON3B::CNewUIMasterSkillTree::Render()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Render only runs while the window is open: a gap means it was closed in
+	// between (X, Esc, another window), so start again with nothing selected.
+	static DWORD s_LastRenderTick = 0;
+	const DWORD renderNow = GetTickCount();
+
+	if ((renderNow - s_LastRenderTick) > 500)
+	{
+		this->m_TouchSkill = -1;
+		this->m_TouchTick = 0;
+	}
+
+	s_LastRenderTick = renderNow;
+#endif
+
 	EnableAlphaTest();
 
 	glColor4f(1.0, 1.0, 1.0, 1.0);
@@ -971,10 +992,19 @@ void SEASON3B::CNewUIMasterSkillTree::RenderToolTip()
 
 		int CalcY = (int)(this->categoryPos[group].y + (p->SkillRank - 1) * 41.0f);
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+		// Touch: the details of the tapped (selected) skill stay up - there is
+		// no hover to keep them open.
+		if (Skill != this->m_TouchSkill)
+		{
+			continue;
+		}
+#else
 		if (SEASON3B::IsPress(VK_LBUTTON) == true || SEASON3B::CheckMouseIn(CalcX + 8, CalcY + 5, 20, 28) == false)
 		{
 			continue;
 		}
+#endif
 
 		std::map<DWORD, _MASTER_SKILL_TOOLTIP>::iterator mtit = this->map_masterSkillToolTip.find(Skill);
 
@@ -1193,6 +1223,13 @@ bool SEASON3B::CNewUIMasterSkillTree::CheckBtn()
 		}
 	}
 	
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// This runs every frame, not only on a tap - only a frame with a tap may
+	// clear the selection below.
+	const bool tappedThisFrame = SEASON3B::IsPress(VK_LBUTTON);
+	this->m_TouchHit = false;
+#endif
+
 	for (std::map<BYTE, _MASTER_SKILLTREE_DATA>::iterator it = this->map_masterData.begin(); it != this->map_masterData.end(); it++)
 	{
 		BYTE Group = it->second.Group;
@@ -1210,6 +1247,15 @@ bool SEASON3B::CNewUIMasterSkillTree::CheckBtn()
 			break;
 		}
 	}
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// A tap that landed on no skill puts the pinned details away.
+	if (tappedThisFrame && this->m_TouchHit == false)
+	{
+		this->m_TouchSkill = -1;
+		this->m_TouchTick = 0;
+	}
+#endif
 
 	return true;
 }
@@ -1236,6 +1282,28 @@ bool SEASON3B::CNewUIMasterSkillTree::CheckAttributeArea(int group, int index, i
 
 	if (SEASON3B::IsPress(1) && SEASON3B::CheckMouseIn(posX + 8, posY + 5, 20, 28))
 	{
+#if defined(__ANDROID__) || defined(MU_IOS)
+		// No hover on a touch screen, so a tap used to add a point straight
+		// away with no way to read the skill first. First tap: select it and
+		// show its details (RenderToolTip). A second tap on it within
+		// kDoubleTapMs: carry on below and add the point.
+		const DWORD kDoubleTapMs = 600;
+		const DWORD now = GetTickCount();
+
+		this->m_TouchHit = true;
+
+		if (this->m_TouchSkill != (int)Skill || this->m_TouchTick == 0 || (now - this->m_TouchTick) > kDoubleTapMs)
+		{
+			this->m_TouchSkill = (int)Skill;
+			this->m_TouchTick = now;
+			PlayBuffer(SOUND_CLICK01);
+			return 1;
+		}
+
+		// Used up: the next point needs another double tap, not one more tap.
+		this->m_TouchTick = 0;
+#endif
+
 		std::map<DWORD, CSkillTreeInfo>::iterator it = this->map_skilltreeinfo.find(Skill);
 		std::map<BYTE, _MASTER_SKILLTREE_DATA>::iterator bp = this->map_masterData.find(index);
 

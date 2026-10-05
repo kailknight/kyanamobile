@@ -2038,7 +2038,7 @@ void SEASON3B::CNewUISystem::EndItem3DFreeBatch()
 // tightly around just this one RenderItem3D() call so any 2D draw that
 // runs before the next call (or after the last one) sees the normal 2D
 // GL state, exactly as if RenderItem3DFree() had been called directly.
-void SEASON3B::CNewUISystem::RenderItem3DInBatch(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp, float Scale, bool FixY)
+void SEASON3B::CNewUISystem::RenderItem3DInBatch(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp, float Scale, bool FixY, float ItemScale)
 {
 	float x = sx;
 	float y = sy;
@@ -2070,7 +2070,7 @@ void SEASON3B::CNewUISystem::RenderItem3DInBatch(float sx, float sy, float Width
 	EnableDepthTest();
 	EnableDepthMask();
 
-	RenderItem3D(x, y, Width, Height, Type, Level, Option1, ExtOption, PickUp);
+	RenderItem3D(x, y, Width, Height, Type, Level, Option1, ExtOption, PickUp, ItemScale);
 
 	UpdateMousePositionn();
 

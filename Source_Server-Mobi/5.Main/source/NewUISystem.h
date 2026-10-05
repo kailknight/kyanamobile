@@ -150,7 +150,7 @@ namespace SEASON3B
 		// Call this per item between Begin/End above instead of RenderItem3D()
 		// directly - same draw, plus the per-item 3D projection/camera setup
 		// and depth-test toggling that must stay scoped to just this call.
-		void RenderItem3DInBatch(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp, float Scale = 1.0f, bool FixY = true);
+		void RenderItem3DInBatch(float sx, float sy, float Width, float Height, int Type, int Level, int Option1, int ExtOption, bool PickUp, float Scale = 1.0f, bool FixY = true, float ItemScale = 1.0f);
 
 		static CNewUISystem* GetInstance();
 

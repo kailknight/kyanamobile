@@ -68,6 +68,7 @@
 #include "RedeemCodeWindow.h"
 #include "VoiceClient.h"
 #include "QuickToggles.h"
+#include "FriendMailWindow.h"
 
 extern int g_iLimitAttackTimeSet;
 bool StatusAutoReset = false;
@@ -483,6 +484,38 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 			}
 			break;
 #endif
+			case 0xE6: // Skill rules (CustomConfig) - Teleport cooldown
+				if (size >= (int)(sizeof(PSBMSG_HEAD) + sizeof(DWORD)))
+				{
+					DWORD cooldown = 0;
+					memcpy(&cooldown, lpMsg + sizeof(PSBMSG_HEAD), sizeof(cooldown));
+					g_TeleportCooldownMs = (cooldown > 600000) ? 600000 : (int)cooldown;
+				}
+				break;
+			case 0xE0: // Friends window - friend details (C2)
+				if (gFriendMailWindow && size >= (int)(sizeof(PSWMSG_HEAD) + 1) && size >= (int)(sizeof(PSWMSG_HEAD) + 1 + lpMsg[sizeof(PSWMSG_HEAD)] * sizeof(PMSG_FRIENDMAIL_DETAIL)))
+				{
+					gFriendMailWindow->RecvDetails((PMSG_FRIENDMAIL_DETAIL_RECV*)lpMsg);
+				}
+				break;
+			case 0xE1: // Friends window - letter with items sent
+				if (gFriendMailWindow && size >= (int)sizeof(PMSG_FRIENDMAIL_RESULT_RECV)) gFriendMailWindow->RecvSendResult((PMSG_FRIENDMAIL_RESULT_RECV*)lpMsg);
+				break;
+			case 0xE2: // Friends window - a letter's waiting items
+				if (gFriendMailWindow && size >= (int)sizeof(PMSG_FRIENDMAIL_ITEMS_RECV)) gFriendMailWindow->RecvItems((PMSG_FRIENDMAIL_ITEMS_RECV*)lpMsg);
+				break;
+			case 0xE3: // Friends window - claim result
+				if (gFriendMailWindow && size >= (int)sizeof(PMSG_FRIENDMAIL_CLAIM_RECV)) gFriendMailWindow->RecvClaimResult((PMSG_FRIENDMAIL_CLAIM_RECV*)lpMsg);
+				break;
+			case 0xE4: // Friends window - server config (sent at login)
+				if (gFriendMailWindow && size >= (int)sizeof(PMSG_FRIENDMAIL_CONFIG_RECV)) gFriendMailWindow->RecvConfig((PMSG_FRIENDMAIL_CONFIG_RECV*)lpMsg);
+				break;
+			case 0xE5: // Friends window - waiting item count per letter (C2)
+				if (gFriendMailWindow && size >= (int)(sizeof(PSWMSG_HEAD) + 1) && size >= (int)(sizeof(PSWMSG_HEAD) + 1 + lpMsg[sizeof(PSWMSG_HEAD)] * sizeof(PMSG_FRIENDMAIL_COUNT)))
+				{
+					gFriendMailWindow->RecvCounts((PMSG_FRIENDMAIL_COUNTS_RECV*)lpMsg);
+				}
+				break;
 			case 0x7A: // Proximity voice chat - where the service is, and our token
 			{
 				if (size >= (int)sizeof(PMSG_VOICE_INFO_RECV))

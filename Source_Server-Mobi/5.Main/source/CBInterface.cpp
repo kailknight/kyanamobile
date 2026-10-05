@@ -65,6 +65,7 @@
 
 #include "MocDonate.h"
 #include "Input.h"
+#include "FriendMailWindow.h"
 
 namespace
 {
@@ -674,6 +675,8 @@ void Interface::Init()
 	gCB_RedeemCodeWindow = new CB_RedeemCodeWindow;
 	ANDROID_IF_STAGE("RedeemCodeWindow ok");
 #endif
+	gFriendMailWindow = new CFriendMailWindow;
+	ANDROID_IF_STAGE("FriendMailWindow ok");
 #if(CB_CUSTOMMIXINFO)
 	gCB_InfoCustomMix = new CB_InfoCustomMix;
 	ANDROID_IF_STAGE("InfoCustomMix ok");
@@ -792,6 +795,7 @@ void Interface::Work()
 #if(REDEEMCODE)
 	if (gCB_RedeemCodeWindow) gCB_RedeemCodeWindow->DrawWindow();
 #endif
+	if (gFriendMailWindow) gFriendMailWindow->DrawWindow();
 #if(CUSTOM_WINDOWLOCKITEM)
 	if(gCB_LockItem) gCB_LockItem->DrawWindow();
 #endif

@@ -133,9 +133,50 @@ float CSkillManager::GetSkillDistance(int Index, CHARACTER* c)
     return Distance;
 }
 #include "NewUISystem.h"
+
+int g_TeleportCooldownMs = -1;
+
+void StartTeleportCooldown()
+{
+	if (g_TeleportCooldownMs <= 0 || CharacterAttribute == NULL)
+	{
+		return;
+	}
+
+	// The same slots CalcSkillDelay counts down - a delay put anywhere else
+	// would never run out.
+	const int slots = min(CharacterAttribute->SkillNumber + 2, MAX_SKILLS);
+
+	for (int i = 0; i < slots; ++i)
+	{
+		if (CharacterAttribute->Skill[i] == AT_SKILL_TELEPORT)
+		{
+			CharacterAttribute->SkillDelay[i] = g_TeleportCooldownMs;
+		}
+	}
+}
+
+int GetSkillCooldownLength(int skillType)
+{
+	if (skillType == AT_SKILL_TELEPORT && g_TeleportCooldownMs >= 0)
+	{
+		return g_TeleportCooldownMs;
+	}
+
+	return SkillAttribute[skillType].Delay;
+}
+
 bool CSkillManager::CheckSkillDelay ( int SkillIndex )
 {
 	int Skill = CharacterAttribute->Skill[SkillIndex];
+
+	// Teleport's cooldown is started by the reappear (StartTeleportCooldown),
+	// not here at the cast, so it never runs while the wizard is still
+	// vanished. Casting only has to wait for it.
+	if (Skill == AT_SKILL_TELEPORT && g_TeleportCooldownMs >= 0)
+	{
+		return CharacterAttribute->SkillDelay[SkillIndex] <= 0;
+	}
 
     int Delay = SkillAttribute[Skill].Delay;
 	g_ConsoleDebug->Write(MCD_ERROR, "CheckSkillDelay Get SKill RF %d %d Key (%d)", Skill, SkillIndex, SelectedCharacter);

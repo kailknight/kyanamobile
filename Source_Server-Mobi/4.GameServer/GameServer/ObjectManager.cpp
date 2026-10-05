@@ -172,6 +172,10 @@ void CObjectManager::ObjectSetStateCreate(int aIndex) // OK
 
 		gMove.GCTeleportSend(aIndex,0,lpObj->Map,(BYTE)lpObj->X,(BYTE)lpObj->Y,lpObj->Dir);
 
+		// The character is visible again: Teleport's cooldown starts now, not
+		// at the cast (CGTeleportRecv, TeleportCooldownMS).
+		lpObj->TeleportEndTick = GetTickCount();
+
 		gObjViewportListProtocolCreate(lpObj);
 
 		this->CharacterUpdateMapEffect(lpObj);

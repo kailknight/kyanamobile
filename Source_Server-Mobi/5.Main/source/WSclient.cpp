@@ -89,6 +89,7 @@
 #if(CB_CUSTOMOFFTRADE)
 #include "CB_OffTrade.h"
 #endif
+#include "FriendMailWindow.h"
 
 #if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
 #include <cstdarg>
@@ -1987,6 +1988,9 @@ BOOL ReceiveTeleport(BYTE *ReceiveBuffer, BOOL bEncrypted)
 	{
         CreateTeleportEnd(o);
 		Teleport = false;
+
+		// Visible again: Teleport's cooldown starts now (TeleportCooldownMS).
+		StartTeleportCooldown();
 	}
 	else
 	{
@@ -9645,6 +9649,18 @@ void ReceiveFriendList(BYTE* ReceiveBuffer)
 	}
 }
 
+// The legacy friend pop-ups belong to the legacy window's own window manager;
+// with the modern Friends window on, its notice line shows them instead.
+static void FriendResultPopup(const char* text)
+{
+	if (gFriendMailWindow != NULL && gFriendMailWindow->OnLegacyMessage(text))
+	{
+		return;
+	}
+
+	g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, text);
+}
+
 void ReceiveAddFriendResult(BYTE* ReceiveBuffer)
 {
 	LPFS_FRIEND_RESULT Data = (LPFS_FRIEND_RESULT)ReceiveBuffer;
@@ -9658,7 +9674,7 @@ void ReceiveAddFriendResult(BYTE* ReceiveBuffer)
 	{
 	case 0x00:
 		strcat(szText, GlobalText[1047]);
-		g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, szText);
+		FriendResultPopup(szText);
 		break;
 	case 0x01:
 		{
@@ -9671,19 +9687,19 @@ void ReceiveAddFriendResult(BYTE* ReceiveBuffer)
 		break;
 	case 0x03:
 		strcpy(szText, GlobalText[1048]);
-		g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, szText);
+		FriendResultPopup(szText);
 		break;
 	case 0x04:
 		strcat(szText, GlobalText[1049]);
-		g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, szText);
+		FriendResultPopup(szText);
 		break;
 	case 0x05:
 		strcpy(szText, GlobalText[1050]);
-		g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, szText);
+		FriendResultPopup(szText);
 		break;
 	case 0x06:
 		strcpy(szText, GlobalText[1068]);
-		g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, szText);
+		FriendResultPopup(szText);
 		break;
 	default:
 		break;
@@ -9700,7 +9716,14 @@ void ReceiveRequestAcceptAddFriend(BYTE* ReceiveBuffer)
 	strncpy(szText, (const char *)Data->Name, MAX_ID_SIZE);
 	szText[MAX_ID_SIZE] = '\0';
 	strcat(szText, GlobalText[1051]);
-	
+
+	// Modern window: the request shows as an Accept/Decline banner there.
+	if (gFriendMailWindow != NULL && gFriendMailWindow->OnFriendRequest(szName))
+	{
+		PlayBuffer(SOUND_FRIEND_LOGIN_ALERT);
+		return;
+	}
+
 	if(g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND) == false)
 	{
 		g_pNewUISystem->Show(SEASON3B::INTERFACE_FRIEND);
@@ -9723,7 +9746,7 @@ void ReceiveDeleteFriendResult(BYTE* ReceiveBuffer)
 	switch(Data->Result)
 	{
 	case 0x00:
-		g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, GlobalText[1052]);
+		FriendResultPopup(GlobalText[1052]);
 		break;
 	case 0x01:
 		g_pFriendList->RemoveFriend(szName);
@@ -9773,6 +9796,14 @@ void ReceiveFriendStateChange(BYTE* ReceiveBuffer)
 void ReceiveLetterSendResult(BYTE* ReceiveBuffer)
 {
 	LPFS_SEND_LETTER_RESULT Data = (LPFS_SEND_LETTER_RESULT)ReceiveBuffer;
+
+	// Sent from the modern window: there is no legacy write window behind
+	// this id, and the cases below would dereference a NULL GetWindow().
+	if (gFriendMailWindow != NULL && gFriendMailWindow->OnLetterSendResult(Data->WindowGuid, Data->Result))
+	{
+		return;
+	}
+
 	switch(Data->Result)
 	{
 	case 0x00:
@@ -9877,7 +9908,13 @@ void ReceiveLetterText(BYTE* ReceiveBuffer)
 	if (pLetter == NULL) return;
 	pLetter->m_bIsRead = TRUE;
 	g_pWindowMgr->RefreshMainWndLetterList();
-	
+
+	// Opened from the modern window: it shows the text itself.
+	if (gFriendMailWindow != NULL && gFriendMailWindow->OnLetterText(Data->Index, (const char*)Data->Memo))
+	{
+		return;
+	}
+
 	char tempTxt[MAX_TEXT_LENGTH + 1];
 	sprintf(tempTxt, GlobalText[1054], pLetter->m_szText);
 	DWORD dwUIID = 0;
@@ -9921,11 +9958,12 @@ void ReceiveLetterDeleteResult(BYTE* ReceiveBuffer)
 	switch(Data->Result)
 	{
 	case 0x00:
-		g_pWindowMgr->AddWindow(UIWNDTYPE_OK_FORCE, UIWND_DEFAULT, UIWND_DEFAULT, GlobalText[1055]);
+		FriendResultPopup(GlobalText[1055]);
 		break;
 	case 0x01:
 		g_pLetterList->RemoveLetter(Data->Index);
 		g_pLetterList->RemoveLetterTextCache(Data->Index);
+		if (gFriendMailWindow != NULL) gFriendMailWindow->OnLetterDeleted(Data->Index);
 		break;
 	default:
 		break;

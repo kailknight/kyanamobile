@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include "CGFxMainUi.h"
+#include "FriendMailWindow.h"
 #include "WSclient.h"
 #include "wsclientinline.h"
 #include "ZzzBMD.h"
@@ -5053,7 +5054,7 @@ void CMainUIFSCHandler::Callback(GFxMovieView* pmovie, const char* pcommand, con
 		}
 		else
 		{
-			g_pNewUISystem->Toggle(SEASON3B::INTERFACE_FRIEND);
+			ToggleFriendWindowRouted();
 		}
 
 		PlayBuffer(SOUND_CLICK01);

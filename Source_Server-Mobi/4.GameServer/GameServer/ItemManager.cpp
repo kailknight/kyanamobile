@@ -2024,7 +2024,7 @@ void CItemManager::DeleteInventoryItemCount(LPOBJ lpObj,int index,int level,int 
 {
 	int MaxValue = this->GetInventoryMaxValue(lpObj);
 
-	for(int n=0;n < MaxValue,count > 0;n++)
+	for(int n=0;n < MaxValue && count > 0;n++) // was "n < MaxValue,count > 0": the comma dropped the bound
 	{
 		if(lpObj->Inventory[n].IsItem() != 0)
 		{

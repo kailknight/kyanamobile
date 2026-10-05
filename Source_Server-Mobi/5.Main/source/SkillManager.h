@@ -540,3 +540,14 @@ public:
 };
 
 extern CSkillManager gSkillManager;
+
+// Teleport cooldown from the server (CustomConfig TeleportCooldownMS, 0xD3:0xE6),
+// counted from the moment the hero reappears rather than from the cast.
+// -1 = an older server sent nothing: Teleport keeps its Skill.bmd delay.
+extern int g_TeleportCooldownMs;
+
+// The hero reappeared after a teleport (ReceiveTeleport): start the countdown.
+void StartTeleportCooldown();
+
+// The full length of a skill's cooldown, for drawing how much is left.
+int GetSkillCooldownLength(int skillType);

@@ -133,6 +133,7 @@ typedef int32_t jint;
 #include "VoiceAudio.h"
 #include "GameConfig/GameConfigConstants.h"
 #include "RedeemCodeWindow.h"
+#include "FriendMailWindow.h"
 #include "WindowClass.h"
 #include "Translation/i18n.h"
 #include "Time/Timer.h"
@@ -5217,7 +5218,7 @@ void ToggleFriendListByVirtualButton()
         return;
     }
 
-    g_pNewUISystem->Toggle(SEASON3B::INTERFACE_FRIEND);
+    ToggleFriendWindowRouted();
     LOGI("VirtualPad: friend list toggled");
 }
 
@@ -10397,7 +10398,8 @@ bool IsVirtualRightPanelUtilityActionActive(int button)
     case kVirtualRightPanelUtilityActionCommand:
         return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_COMMAND);
     case kVirtualRightPanelUtilityActionFriend:
-        return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND);
+        return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND)
+            || (gFriendMailWindow != nullptr && gFriendMailWindow->IsOpen());
     case kVirtualRightPanelUtilityActionGuild:
         return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO);
 #if(REDEEMCODE)
@@ -10576,6 +10578,7 @@ bool IsAndroidRawPopupWindowOpen()
                              // bar's own "Code" button, not just the Features
                              // menu, so it needs this entry either way.
 #endif
+        eWindowFriendMail,   // Friends (modern) - opens from the friend button.
     };
 
     for (const ObjectID window : kAndroidMenuSubWindows)
@@ -10919,6 +10922,7 @@ bool IsVirtualRightPanelUtilityWindowVisible()
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_OPTION)
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_COMMAND)
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_FRIEND)
+            || (gFriendMailWindow != nullptr && gFriendMailWindow->IsOpen())
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_GUILDINFO)
             || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL));
 }

@@ -34,6 +34,7 @@
 #include "GameShop/InGameShopSystem.h"
 #endif //PBG_ADD_INGAMESHOP_UI_MAINFRAME
 #include "CBInterface.h"
+#include "FriendMailWindow.h"
 #include "CustomEventTime.h"
 #include "CustomRanking.h"
 #include "QuickToggles.h"
@@ -1628,7 +1629,7 @@ bool SEASON3B::CNewUIMainFrameWindow::BtnProcess()
 			if (SEASON3B::IsPress(VK_LBUTTON))
 			{
 
-				g_pNewUISystem->Toggle(SEASON3B::INTERFACE_FRIEND);
+				ToggleFriendWindowRouted();
 				PlayBuffer(SOUND_CLICK01);
 				return true;
 			}
@@ -1738,7 +1739,7 @@ bool SEASON3B::CNewUIMainFrameWindow::BtnProcess()
 			}
 			else
 			{
-				g_pNewUISystem->Toggle(SEASON3B::INTERFACE_FRIEND);
+				ToggleFriendWindowRouted();
 			}
 			PlayBuffer(SOUND_CLICK01);
 			return true;
@@ -4201,7 +4202,12 @@ void SEASON3B::CNewUISkillList::RenderSkillDelay(int iIndex, float x, float y, f
 			}
 		}
 
-		int iSkillMaxDelay = SkillAttribute[iSkillType].Delay;
+		int iSkillMaxDelay = GetSkillCooldownLength(iSkillType);
+
+		if (iSkillMaxDelay <= 0)
+		{
+			return;
+		}
 
 		float fPersent = (float)(iSkillDelay / (float)iSkillMaxDelay);
 

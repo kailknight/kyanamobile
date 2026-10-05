@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "CSProtocol.h"
+#include "FriendMail.h"
 #include "GameMain.h"
 #include "Protect.h"
 #include "ServerInfo.h"
@@ -143,6 +144,9 @@ void FriendListRequest(int aIndex)
 	pMsg.pServer = (BYTE)gServerInfo.m_ServerCode;
 
 	CSDataSend((BYTE*)&pMsg, pMsg.h.size);
+
+	// Modern friend window config + item-mail attachment counts.
+	gFriendMail.OnFriendListRequested(aIndex);
 }
 
 void FriendListResult(LPBYTE lpMsg)
@@ -419,7 +423,7 @@ void FriendMemoSend(PMSG_FRIEND_MEMO * lpMsg, int aIndex)
 		return;
 	}
 
-	if ( gObj[aIndex].Money < 1000 )
+	if ( gObj[aIndex].Money < (DWORD)gServerInfo.m_MailSendZen ) // postage (CustomConfig MailSendZen, was 1000)
 	{
 		FHP_FRIEND_MEMO_SEND_RESULT pResult;
 
@@ -500,9 +504,9 @@ void FriendMemoSendResult(FHP_FRIEND_MEMO_SEND_RESULT * lpMsg)
 
 	if ( pMsg.Result == 1 )
 	{
-		if ( gObj[lpMsg->Number].Money >= ((DWORD)1000) )
+		if ( gObj[lpMsg->Number].Money >= (DWORD)gServerInfo.m_MailSendZen )
 		{
-			gObj[lpMsg->Number].Money -= 1000;
+			gObj[lpMsg->Number].Money -= (DWORD)gServerInfo.m_MailSendZen;
 			GCMoneySend(gObj[lpMsg->Number].Index, gObj[lpMsg->Number].Money);
 		}
 	}

@@ -232,6 +232,7 @@ enum ObjectID
 #endif
 #if(REDEEMCODE)
 	eWindowRedeemCode,
+	eWindowFriendMail,
 #endif
 #if(CB_NEWQUESTFF)
 	eWindowNewQuest,
