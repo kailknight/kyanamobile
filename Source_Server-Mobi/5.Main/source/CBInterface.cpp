@@ -66,6 +66,7 @@
 #include "MocDonate.h"
 #include "Input.h"
 #include "FriendMailWindow.h"
+#include "TradeCoinPanel.h"
 
 namespace
 {
@@ -677,6 +678,8 @@ void Interface::Init()
 #endif
 	gFriendMailWindow = new CFriendMailWindow;
 	ANDROID_IF_STAGE("FriendMailWindow ok");
+	gTradeCoinPanel = new CTradeCoinPanel;
+	ANDROID_IF_STAGE("TradeCoinPanel ok");
 #if(CB_CUSTOMMIXINFO)
 	gCB_InfoCustomMix = new CB_InfoCustomMix;
 	ANDROID_IF_STAGE("InfoCustomMix ok");
@@ -796,6 +799,7 @@ void Interface::Work()
 	if (gCB_RedeemCodeWindow) gCB_RedeemCodeWindow->DrawWindow();
 #endif
 	if (gFriendMailWindow) gFriendMailWindow->DrawWindow();
+	if (gTradeCoinPanel) gTradeCoinPanel->Draw();
 #if(CUSTOM_WINDOWLOCKITEM)
 	if(gCB_LockItem) gCB_LockItem->DrawWindow();
 #endif

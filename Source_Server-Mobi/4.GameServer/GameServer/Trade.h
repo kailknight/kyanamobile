@@ -90,6 +90,31 @@ struct PMSG_TRADE_RESULT_SEND
 	BYTE result;
 };
 
+// Coins in a trade: WCoinC, WCoinP and Goblin Points next to the zen.
+#define TRADE_COIN_TYPES		3
+#define MAX_TRADE_COIN			1000000000
+
+// Packed: the client sends exactly 9 bytes (TradeCoinPanel.h). Unpacked, the
+// DWORD is padded to offset 8, the struct is 12, and the size check in
+// Protocol.cpp silently dropped every offer.
+#pragma pack(push,1)
+
+struct PMSG_TRADE_COIN_RECV
+{
+	PSBMSG_HEAD header; // C1:D3:E8
+	BYTE type;			// 0 WCoinC, 1 WCoinP, 2 Goblin Points
+	DWORD amount;		// 0 takes that coin back out
+};
+
+struct PMSG_TRADE_COIN_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:E7
+	DWORD mine[TRADE_COIN_TYPES];
+	DWORD theirs[TRADE_COIN_TYPES];
+};
+
+#pragma pack(pop)
+
 //**********************************************//
 //**********************************************//
 //**********************************************//
@@ -115,6 +140,13 @@ public:
 	void GCTradeMoneySend(int aIndex,DWORD money);
 	void GCTradeOkButtonSend(int aIndex,BYTE flag);
 	void GCTradeResultSend(int aIndex,BYTE result);
+	// Coins.
+	void CGTradeCoinRecv(PMSG_TRADE_COIN_RECV* lpMsg,int aIndex);
+	void GCTradeCoinSend(int aIndex);
+	bool CheckTradeCoins(LPOBJ lpObj,LPOBJ lpTarget);
+	bool TransferTradeCoins(LPOBJ lpObj,LPOBJ lpTarget);
+private:
+	bool MoveCoins(LPOBJ lpObj,const int* coins,int sign);
 };
 
 extern CTrade gTrade;

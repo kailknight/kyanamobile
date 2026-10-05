@@ -10,6 +10,7 @@
 #include "wsclientinline.h"
 #include "CComGem.h"
 #include "CB_BotTrader.h"
+#include "TradeCoinPanel.h"
 using namespace SEASON3B;
 
 CNewUITrade::CNewUITrade()
@@ -302,15 +303,10 @@ void CNewUITrade::RenderText()
 	g_pRenderText->RenderText(m_Pos.x+134, m_Pos.y+48, "Lv.");
     g_pRenderText->RenderText(m_Pos.x+148, m_Pos.y+48, szTemp);
 
-    ::ConvertGold(m_nYourTradeGold, szTemp);
-	g_pRenderText->SetTextColor(::getGoldColor(m_nYourTradeGold));
-	g_pRenderText->RenderText(
-		m_Pos.x+170, m_Pos.y+150+8, szTemp, 0, 0, RT3_WRITE_RIGHT_TO_LEFT);
-
-	::ConvertGold(m_nMyTradeGold, szTemp);
-	g_pRenderText->SetTextColor(::getGoldColor(m_nMyTradeGold));
-	g_pRenderText->RenderText(
-		m_Pos.x+170, m_Pos.y+356+8, szTemp, 0, 0, RT3_WRITE_RIGHT_TO_LEFT);
+	// Each money bar shows what that side offers: "Zen" or a coin, and the
+	// amount (TradeCoinPanel.cpp).
+	TradeCoinRenderOfferBar(false, m_Pos.x, m_Pos.y+150, m_nYourTradeGold);
+	TradeCoinRenderOfferBar(true, m_Pos.x, m_Pos.y+356, m_nMyTradeGold);
 
 	g_pRenderText->SetTextColor(210, 230, 255, 255);
 	g_pRenderText->RenderText(m_Pos.x+20, m_Pos.y+253, Hero->ID);
@@ -708,8 +704,19 @@ void CNewUITrade::ProcessCloseBtn()
 
 bool CNewUITrade::ProcessBtns()
 {
+	// 150 steps of 40 ms = the server's 6 s confirm wait (Trade.cpp). Counted
+	// per frame it was 6 s only at the original 25 FPS - 2.5 s at 60 - so the
+	// button came back before the server would accept it.
 	if (m_nMyTradeWait > 0)
-		--m_nMyTradeWait;
+	{
+		static DWORD s_dwTradeWaitTick = 0;
+		const DWORD dwNow = GetTickCount();
+		if (dwNow - s_dwTradeWaitTick >= 40)
+		{
+			s_dwTradeWaitTick = dwNow;
+			--m_nMyTradeWait;
+		}
+	}
 
 	if (m_abtn[BTN_CLOSE].UpdateMouseEvent())
 	{
@@ -726,8 +733,8 @@ bool CNewUITrade::ProcessBtns()
 	}
 	else if (m_abtn[BTN_ZEN_INPUT].UpdateMouseEvent())
 	{
-		SEASON3B::CreateMessageBox(
-			MSGBOX_LAYOUT_CLASS(SEASON3B::CTradeZenMsgBoxLayout));
+		// Zen or a coin: the chooser opens the matching amount box.
+		TradeCoinOpenChooser();
 		::PlayBuffer(SOUND_CLICK01);
 		return true;
 	}

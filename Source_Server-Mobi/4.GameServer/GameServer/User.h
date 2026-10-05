@@ -749,6 +749,7 @@ struct OBJECTSTRUCT
 	CItem* Trade;
 	BYTE* TradeMap;
 	int TradeMoney;
+	int TradeCoin[3];		// WCoinC, WCoinP, Goblin Points offered in the current trade
 	bool TradeOk;
 	CItem* Warehouse;
 	BYTE* WarehouseMap;

@@ -24,6 +24,10 @@
 #include "MapManager.h"
 #include "Notice.h"
 CTrade gTrade;
+
+// Wire sizes the client's TradeCoinPanel.h sends and expects.
+static_assert(sizeof(PMSG_TRADE_COIN_RECV) == 9, "trade coin offer must be 9 bytes on the wire");
+static_assert(sizeof(PMSG_TRADE_COIN_SEND) == 28, "trade coin update must be 28 bytes on the wire");
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -82,6 +86,7 @@ void CTrade::ResetTrade(int aIndex) // OK
 	lpObj->TradeOk = 0;
 	lpObj->TradeOkTime = 0;
 	lpObj->TradeMoney = 0;
+	memset(lpObj->TradeCoin,0,sizeof(lpObj->TradeCoin));
 }
 
 bool CTrade::ExchangeTradeItem(LPOBJ lpObj,LPOBJ lpTarget) // OK
@@ -329,6 +334,7 @@ void CTrade::CGTradeResponseRecv(PMSG_TRADE_RESPONSE_RECV* lpMsg,int aIndex) // 
 	lpObj->TradeOk = 0;
 	lpObj->TradeOkTime = 0;
 	lpObj->TradeMoney = 0;
+	memset(lpObj->TradeCoin,0,sizeof(lpObj->TradeCoin));
 
 	this->GCTradeResponseSend(aIndex,1,lpTarget->Name,lpTarget->Level,lpTarget->GuildNumber);
 
@@ -340,6 +346,7 @@ void CTrade::CGTradeResponseRecv(PMSG_TRADE_RESPONSE_RECV* lpMsg,int aIndex) // 
 	lpTarget->TradeOk = 0;
 	lpTarget->TradeOkTime = 0;
 	lpTarget->TradeMoney = 0;
+	memset(lpTarget->TradeCoin,0,sizeof(lpTarget->TradeCoin));
 
 	this->GCTradeResponseSend(bIndex,1,lpObj->Name,lpObj->Level,lpObj->GuildNumber);
 
@@ -419,6 +426,14 @@ void CTrade::CGTradeMoneyRecv(PMSG_TRADE_MONEY_RECV* lpMsg,int aIndex) // OK
 
 	lpObj->TradeMoney = lpMsg->money;
 	this->GCTradeMoneySend(bIndex,lpMsg->money);
+
+	// One currency per side (CGTradeCoinRecv): zen replaces any coin offer.
+	if(lpMsg->money > 0 && (lpObj->TradeCoin[0] != 0 || lpObj->TradeCoin[1] != 0 || lpObj->TradeCoin[2] != 0))
+	{
+		memset(lpObj->TradeCoin,0,sizeof(lpObj->TradeCoin));
+		this->GCTradeCoinSend(aIndex);
+		this->GCTradeCoinSend(bIndex);
+	}
 }
 
 void CTrade::CGTradeOkButtonRecv(PMSG_TRADE_OK_BUTTON_RECV* lpMsg,int aIndex) // OK
@@ -465,8 +480,16 @@ void CTrade::CGTradeOkButtonRecv(PMSG_TRADE_OK_BUTTON_RECV* lpMsg,int aIndex) //
 		return;
 	}
 
-	if((GetTickCount()-lpObj->TradeOkTime) < 6000)
+	// An Accept inside the wait after an offer change used to be dropped
+	// without a word: the button stayed pressed on screen, the server had it
+	// un-pressed, and the trade sat there until it was toggled again. Now the
+	// client is told - its button pops back up with the wait shown (flag 2),
+	// and the partner's real state is re-sent. Un-accepting is always honoured.
+	if(lpMsg->flag == 1 && (GetTickCount()-lpObj->TradeOkTime) < 6000)
 	{
+		lpObj->TradeOk = 0;
+		this->GCTradeOkButtonSend(aIndex,2);
+		this->GCTradeOkButtonSend(aIndex,lpTarget->TradeOk);
 		return;
 	}
 
@@ -511,6 +534,19 @@ void CTrade::CGTradeOkButtonRecv(PMSG_TRADE_OK_BUTTON_RECV* lpMsg,int aIndex) //
 		return;
 	}
 
+	// Both sides must still have the coins they offered, and each must be able
+	// to receive the other's without passing the coin ceiling.
+	if(this->CheckTradeCoins(lpObj,lpTarget) == 0 || this->CheckTradeCoins(lpTarget,lpObj) == 0)
+	{
+		this->ResetTrade(aIndex);
+		gNotice.GCNoticeSend(aIndex,1,0,0,0,0,0,"Trade cancelled: not enough coins, or too many to receive.");
+		this->GCTradeResultSend(aIndex,0);
+		this->ResetTrade(bIndex);
+		gNotice.GCNoticeSend(bIndex,1,0,0,0,0,0,"Trade cancelled: not enough coins, or too many to receive.");
+		this->GCTradeResultSend(bIndex,0);
+		return;
+	}
+
 	if(this->ExchangeTradeItem(lpObj,lpTarget) == 0 || this->ExchangeTradeItem(lpTarget,lpObj) == 0)
 	{
 		this->ResetTrade(aIndex);
@@ -526,6 +562,20 @@ void CTrade::CGTradeOkButtonRecv(PMSG_TRADE_OK_BUTTON_RECV* lpMsg,int aIndex) //
 		this->GCTradeResultSend(aIndex,2);
 		this->ResetTrade(bIndex);
 		this->GCTradeResultSend(bIndex,2);
+		return;
+	}
+
+	// Last step that can still refuse, so it goes before anything is
+	// committed: if the coins cannot move, ResetTrade still rolls the items
+	// back as if nothing happened.
+	if(this->TransferTradeCoins(lpObj,lpTarget) == 0)
+	{
+		this->ResetTrade(aIndex);
+		gNotice.GCNoticeSend(aIndex,1,0,0,0,0,0,"Trade cancelled: the coins could not be moved.");
+		this->GCTradeResultSend(aIndex,0);
+		this->ResetTrade(bIndex);
+		gNotice.GCNoticeSend(bIndex,1,0,0,0,0,0,"Trade cancelled: the coins could not be moved.");
+		this->GCTradeResultSend(bIndex,0);
 		return;
 	}
 
@@ -592,6 +642,7 @@ void CTrade::CGTradeOkButtonRecv(PMSG_TRADE_OK_BUTTON_RECV* lpMsg,int aIndex) //
 	lpObj->TradeOk = 0;
 	lpObj->TradeOkTime = 0;
 	lpObj->TradeMoney = 0;
+	memset(lpObj->TradeCoin,0,sizeof(lpObj->TradeCoin));
 
 	this->GCTradeResultSend(aIndex,1);
 
@@ -602,6 +653,7 @@ void CTrade::CGTradeOkButtonRecv(PMSG_TRADE_OK_BUTTON_RECV* lpMsg,int aIndex) //
 	lpTarget->TradeOk = 0;
 	lpTarget->TradeOkTime = 0;
 	lpTarget->TradeMoney = 0;
+	memset(lpTarget->TradeCoin,0,sizeof(lpTarget->TradeCoin));
 
 	this->GCTradeResultSend(bIndex,1);
 }
@@ -728,6 +780,200 @@ void CTrade::GCTradeOkButtonSend(int aIndex,BYTE flag) // OK
 	pMsg.flag = flag;
 
 	DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
+}
+
+// -----------------------------------------------------------------------------
+// Coins (WCoinC / WCoinP / Goblin Points), alongside the zen.
+// -----------------------------------------------------------------------------
+
+void CTrade::CGTradeCoinRecv(PMSG_TRADE_COIN_RECV* lpMsg,int aIndex)
+{
+	LPOBJ lpObj = &gObj[aIndex];
+
+	if(gObjIsConnectedGP(aIndex) == 0)
+	{
+		return;
+	}
+
+	int bIndex = lpObj->TargetNumber;
+
+	if(gObjIsConnectedGP(bIndex) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpTarget = &gObj[bIndex];
+
+	if(lpObj->Interface.use == 0 || lpObj->Interface.type != INTERFACE_TRADE || lpObj->Interface.state == 0)
+	{
+		return;
+	}
+
+	if(lpTarget->Interface.use == 0 || lpTarget->Interface.type != INTERFACE_TRADE || lpTarget->Interface.state == 0)
+	{
+		return;
+	}
+
+	if(lpMsg->type >= TRADE_COIN_TYPES || lpMsg->amount > MAX_TRADE_COIN)
+	{
+		return;
+	}
+
+	int owned[TRADE_COIN_TYPES] = { lpObj->Coin1, lpObj->Coin2, lpObj->Coin3 };
+
+	if((int)lpMsg->amount > owned[lpMsg->type])
+	{
+		gNotice.GCNoticeSend(aIndex,1,0,0,0,0,0,"You do not have that many coins.");
+		return;
+	}
+
+	// One currency per side: the trade window has one money bar per player,
+	// labelled with whatever is offered. Coins replace any zen offer.
+	memset(lpObj->TradeCoin,0,sizeof(lpObj->TradeCoin));
+	lpObj->TradeCoin[lpMsg->type] = (int)lpMsg->amount;
+
+	if(lpMsg->amount > 0 && lpObj->TradeMoney > 0)
+	{
+		lpObj->TradeMoney = 0;
+		GCMoneySend(aIndex,lpObj->Money);		// the bag shows the full zen again
+		this->GCTradeMoneySend(bIndex,0);
+	}
+
+	// A changed offer un-confirms both sides and restarts the confirm wait,
+	// exactly as changing the zen does - so nobody can swap the amount under
+	// the other player's already-pressed OK.
+	// Only the partner has to wait before accepting the new offer - that is
+	// the anti-switch protection. The player who changed it knows what they
+	// offered, so their Accept counts straight away.
+	lpObj->TradeOk = 0;
+	lpObj->TradeOkTime = 0;
+	this->GCTradeOkButtonSend(aIndex,0);
+
+	lpTarget->TradeOk = 0;
+	lpTarget->TradeOkTime = GetTickCount();
+	this->GCTradeOkButtonSend(bIndex,2);
+
+	this->GCTradeCoinSend(aIndex);
+	this->GCTradeCoinSend(bIndex);
+}
+
+void CTrade::GCTradeCoinSend(int aIndex)
+{
+	if(OBJECT_RANGE(aIndex) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[aIndex];
+
+	PMSG_TRADE_COIN_SEND pMsg;
+	memset(&pMsg,0,sizeof(pMsg));
+	pMsg.header.set(0xD3,0xE7,sizeof(pMsg));
+
+	for(int n = 0; n < TRADE_COIN_TYPES; n++)
+	{
+		pMsg.mine[n] = (DWORD)lpObj->TradeCoin[n];
+	}
+
+	if(OBJECT_RANGE(lpObj->TargetNumber) != 0)
+	{
+		for(int n = 0; n < TRADE_COIN_TYPES; n++)
+		{
+			pMsg.theirs[n] = (DWORD)gObj[lpObj->TargetNumber].TradeCoin[n];
+		}
+	}
+
+	DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
+}
+
+// lpObj still has what it offered, and lpTarget can take it in.
+bool CTrade::CheckTradeCoins(LPOBJ lpObj,LPOBJ lpTarget)
+{
+	int owned[TRADE_COIN_TYPES] = { lpObj->Coin1, lpObj->Coin2, lpObj->Coin3 };
+	int other[TRADE_COIN_TYPES] = { lpTarget->Coin1, lpTarget->Coin2, lpTarget->Coin3 };
+
+	for(int n = 0; n < TRADE_COIN_TYPES; n++)
+	{
+		int give = lpObj->TradeCoin[n];
+
+		if(give < 0 || give > owned[n])
+		{
+			return 0;
+		}
+
+		// The receiver ends with other - what it gives + what it gets.
+		__int64 after = (__int64)other[n] - lpTarget->TradeCoin[n] + give;
+
+		if(after < 0 || after >= INT_MAX)
+		{
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+// GDSetCoinSend changes the balance on the spot but silently does nothing when
+// a balance would go negative or overflow - the balance itself is the only
+// proof it worked. sign -1 takes, +1 gives.
+bool CTrade::MoveCoins(LPOBJ lpObj,const int* coins,int sign)
+{
+	if(coins[0] == 0 && coins[1] == 0 && coins[2] == 0)
+	{
+		return 1;
+	}
+
+	int before[TRADE_COIN_TYPES] = { lpObj->Coin1, lpObj->Coin2, lpObj->Coin3 };
+
+	GDSetCoinSend(lpObj->Index,sign*coins[0],sign*coins[1],sign*coins[2],"Trade");
+
+	return lpObj->Coin1 == before[0] + sign*coins[0]
+		&& lpObj->Coin2 == before[1] + sign*coins[1]
+		&& lpObj->Coin3 == before[2] + sign*coins[2];
+}
+
+// Takes both offers first, then pays them out. Any refusal puts back every
+// step already done, so either everything moves or nothing does.
+bool CTrade::TransferTradeCoins(LPOBJ lpObj,LPOBJ lpTarget)
+{
+	const int* a = lpObj->TradeCoin;
+	const int* b = lpTarget->TradeCoin;
+
+	if(a[0] == 0 && a[1] == 0 && a[2] == 0 && b[0] == 0 && b[1] == 0 && b[2] == 0)
+	{
+		return 1;
+	}
+
+	if(this->MoveCoins(lpObj,a,-1) == 0)
+	{
+		return 0;
+	}
+
+	if(this->MoveCoins(lpTarget,b,-1) == 0)
+	{
+		this->MoveCoins(lpObj,a,+1);
+		return 0;
+	}
+
+	bool paidA = this->MoveCoins(lpObj,b,+1);
+	bool paidB = this->MoveCoins(lpTarget,a,+1);
+
+	if(paidA == 0 || paidB == 0)
+	{
+		if(paidA) { this->MoveCoins(lpObj,b,-1); }
+		if(paidB) { this->MoveCoins(lpTarget,a,-1); }
+
+		this->MoveCoins(lpObj,a,+1);
+		this->MoveCoins(lpTarget,b,+1);
+
+		LogAdd(LOG_RED,"[Trade] coin transfer %s <-> %s refused, rolled back",lpObj->Name,lpTarget->Name);
+		return 0;
+	}
+
+	gLog.Output(LOG_TRADE,"[TradeCoin] %s | %s -> %s | %s: WC %d, WP %d, GP %d / back WC %d, WP %d, GP %d",
+		lpObj->Account,lpObj->Name,lpTarget->Account,lpTarget->Name,a[0],a[1],a[2],b[0],b[1],b[2]);
+
+	return 1;
 }
 
 void CTrade::GCTradeResultSend(int aIndex,BYTE result) // OK

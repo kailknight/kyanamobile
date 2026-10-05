@@ -92,6 +92,7 @@ namespace SEASON3B
 		void Release();
 		
 		void SetPos(int x, int y);
+		POINT GetPos() const { return m_Pos; }	// the Coins panel (TradeCoinPanel.cpp) docks beside it
 		
 		bool UpdateMouseEvent();
 		bool UpdateKeyEvent();
@@ -114,6 +115,9 @@ namespace SEASON3B
 
 		void GetYourID(char* pszYourID);
 		void SetYourTradeGold(int nGold){ m_nYourTradeGold = nGold; }
+		void ClearMyTradeGold() { m_nMyTradeGold = 0; }	// a coin offer replaced the zen (TradeCoinPanel.cpp)
+		bool IsMyConfirm() const { return m_bMyConfirm; }
+		void SetMyConfirmOff() { m_bMyConfirm = false; }	// caller tells the server (SendRequestTradeResult)
 
 		void SendRequestMyGoldInput(int nInputGold);
 		//===Auto Move

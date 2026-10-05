@@ -1552,6 +1552,9 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			case 0xE3: //Friend mail - claim a letter's items
 				if (size >= (int)sizeof(PMSG_FRIENDMAIL_MEMO_RECV)) { gFriendMail.CGClaimRequest((PMSG_FRIENDMAIL_MEMO_RECV*)lpMsg, aIndex); }
 				break;
+			case 0xE8: //Trade - offer coins (WCoinC / WCoinP / Goblin Points)
+				if (size >= (int)sizeof(PMSG_TRADE_COIN_RECV)) { gTrade.CGTradeCoinRecv((PMSG_TRADE_COIN_RECV*)lpMsg, aIndex); }
+				break;
 			case 0xA0: //Redeem code - "Check Code" (non-binding preview)
 			{
 				PMSG_REDEEM_CODE_SEND* mlpMsg = (PMSG_REDEEM_CODE_SEND*)lpMsg;

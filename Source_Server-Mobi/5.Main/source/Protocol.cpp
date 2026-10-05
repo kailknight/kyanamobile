@@ -69,6 +69,7 @@
 #include "VoiceClient.h"
 #include "QuickToggles.h"
 #include "FriendMailWindow.h"
+#include "TradeCoinPanel.h"
 
 extern int g_iLimitAttackTimeSet;
 bool StatusAutoReset = false;
@@ -484,6 +485,9 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 			}
 			break;
 #endif
+			case 0xE7: // Trade - both coin offers
+				if (gTradeCoinPanel && size >= (int)sizeof(PMSG_TRADE_COIN_RECV)) gTradeCoinPanel->RecvCoins((PMSG_TRADE_COIN_RECV*)lpMsg);
+				break;
 			case 0xE6: // Skill rules (CustomConfig) - Teleport cooldown
 				if (size >= (int)(sizeof(PSBMSG_HEAD) + sizeof(DWORD)))
 				{
