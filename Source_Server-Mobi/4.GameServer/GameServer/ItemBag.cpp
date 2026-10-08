@@ -429,6 +429,15 @@ bool CItemBag::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 	int Option1 = lpInfo->Option1;	//Skill
 	int Option2 = lpInfo->Option2;	//Luck
 	int Option3 = lpInfo->Option3;	//Op
+
+	// Skill / Luck column: 0 never, 1 may (the rolls below - ItemDropType's
+	// coin flip, CheckOptionsDrop's SkillPecent/LuckPecent), 2 always. A bag
+	// row could only ever say "may" before, so a box sold as "with Skill and
+	// Luck" still dropped items without them.
+	const bool alwaysSkill = (lpInfo->Option1 >= 2);
+	const bool alwaysLuck = (lpInfo->Option2 >= 2);
+	Option1 = (Option1 != 0) ? 1 : 0;
+	Option2 = (Option2 != 0) ? 1 : 0;
 	//=== Phan Loai Itme Drop
 	int NewOption = 0;
 	//LogAdd(LOG_RED,"DEBUG %d  m_CheckOptionsDrop %d, %d", lpInfo->Index,gServerInfo.m_CheckOptionsDrop,gItemManager.GetItemSlotByIndex(lpInfo->Index));
@@ -441,6 +450,15 @@ bool CItemBag::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 		NewOption = this->GetItemNewOption(lpInfo);
 	}
 	int SetOption = this->GetItemSetOption(lpInfo);
+
+	// Excellent column: a positive value is how many random options (as
+	// always); a NEGATIVE value is the exact option bits, so a bag can hand
+	// out a specific item. Fenrir: -1 black (destroy), -2 blue (protect),
+	// -4 gold (illusion). Armour/weapons: add the bits, e.g. -63 = all six.
+	if (lpInfo->NewOption < 0)
+	{
+		NewOption = (-lpInfo->NewOption) & 0x3F;
+	}
 
 	if (this->m_ItemDropType != 0)
 	{
@@ -513,6 +531,16 @@ bool CItemBag::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 		//LogAdd(LOG_RED,"DEBUG OPt Life %d",Option3);
 	}
 
+	if (alwaysSkill)
+	{
+		Option1 = 1;
+	}
+
+	if (alwaysLuck)
+	{
+		Option2 = 1;
+	}
+
 	BYTE SocketOption[MAX_SOCKET_OPTION] = { SOCKET_ITEM_OPTION_NONE,SOCKET_ITEM_OPTION_NONE,SOCKET_ITEM_OPTION_NONE,SOCKET_ITEM_OPTION_NONE,SOCKET_ITEM_OPTION_NONE };
 
 	if (gSocketItemType.CheckSocketItemType(lpInfo->Index) != 0)
@@ -532,6 +560,19 @@ bool CItemBag::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 	}
 
 	lpItem->m_Level = level;
+
+	// A Horn of Fenrir only ever has its type: 1 black, 2 blue, 4 gold. A bag
+	// row's Skill/Luck/Option/extra excellent bits (often copied from a weapon
+	// row) otherwise land on it and show up as Force Wave, Luck and weapon
+	// excellent lines that a real Fenrir never has.
+	if (lpInfo->Index == GET_ITEM(13, 37))
+	{
+		Option1 = 0;
+		Option2 = 0;
+		Option3 = 0;
+		NewOption &= 7;
+		SetOption = 0;
+	}
 
 	lpItem->Convert(lpInfo->Index, Option1, Option2, Option3, NewOption, SetOption, 0, 0, SocketOption, 0xFF);
 	return 1;

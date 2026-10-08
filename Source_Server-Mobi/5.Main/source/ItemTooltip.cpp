@@ -121,6 +121,28 @@ bool CheckItemSlotOpt(int IndexItem, int Level, int Exl , int style)
 	}
 	return 0;
 }
+
+// An entry with no title and none of its text lines present would print only
+// a blank title and the "MuOnline" footer - which is what a misread or stale
+// CBTextInfo.bin looks like. Such an entry is not shown at all.
+static bool nInfoHasContent(const nInformation& info)
+{
+	if (info.OptionName[0] != 0)
+	{
+		return true;
+	}
+
+	for (int n = 0; n < 15; n++)
+	{
+		if (nGetTextNum(info.TextIndex[n]))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 #include "CBInterface.h"
 int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 {
@@ -166,6 +188,10 @@ int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 		//gInterface.DrawMessage(1, "Get Set %d ~ %d/%d ", ItemSearch->Type, this->m_CustomInfoSet[i].ItemIndexMin, this->m_CustomInfoSet[i].ItemIndexMax);
 		if (GetIndexItemSet >= this->m_CustomInfoSet[i].ItemIndexMin && GetIndexItemSet <= this->m_CustomInfoSet[i].ItemIndexMax)
 		{
+			if (nInfoHasContent(this->m_CustomInfoSet[i]) == false)
+			{
+				continue;
+			}
 
 			// "%s" and a bounded write, NOT wsprintf(dst, OptionName). Passing
 			// config data straight in as the format string made any '%' an
@@ -212,6 +238,10 @@ int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 
 		if (ItemSearch->Type >= this->m_CustomInfo[iT].ItemIndexMin && ItemSearch->Type <= this->m_CustomInfo[iT].ItemIndexMax)
 		{
+			if (nInfoHasContent(this->m_CustomInfo[iT]) == false)
+			{
+				continue;
+			}
 
 			// Same format-string fix as the set-option loop above.
 			snprintf(TextList[TextNum], sizeof(TextList[TextNum]), "%s", this->m_CustomInfo[iT].OptionName);

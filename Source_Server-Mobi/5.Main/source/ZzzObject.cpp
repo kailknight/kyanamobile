@@ -8333,6 +8333,18 @@ void CreateItem(ITEM_t *ip,BYTE *Item,vec3_t Position,int CreateFlag)
 		BYTE b = ( ( (Item[5] & 0x08) << 4) >>7);
 		n->option_380 = b;
 
+		// Items[] slots are reused drop after drop, and nothing here cleared
+		// the previous occupant's converted stats. The tooltip only converts a
+		// ground item whose Defense/DamageMin/SpecialNum are all still zero
+		// (RenderItemInfo), so the new item inherited the old one's options: a
+		// Horn of Fenrir dropped where a Soleil Scepter had lain showed Force
+		// Wave, Luck and the scepter's excellent lines - until picked up and
+		// rebuilt by the inventory path. Clear them so it converts from its own
+		// bytes on first hover.
+		n->SpecialNum = 0;
+		n->Defense = 0;
+		n->DamageMin = 0;
+
 		// Ground/viewport items carry the same 12-byte wire format as an
 		// inventory item (see CNewUIItemMng::CreateItem) - bytes 6..11 are
 		// Harmony + the 5 socket seeds, but this path never read them, so a

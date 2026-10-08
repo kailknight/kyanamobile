@@ -231,6 +231,17 @@ bool CItemBagEx::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 
 			gItemOptionRate.MakeSocketOption(ItemIndex,ItemSocketOption[0],&ItemSocketOption[0]);
 
+			// Horn of Fenrir: its type only (1 black, 2 blue, 4 gold) - see
+			// CItemBag::GetItem.
+			if(ItemIndex == GET_ITEM(13,37))
+			{
+				ItemOption1 = 0;
+				ItemOption2 = 0;
+				ItemOption3 = 0;
+				ItemSetOption = 0;
+				ItemNewOption = ((ItemNewOption == 0) ? lpItemBagItemInfo->Grade : ItemNewOption) & 7;
+			}
+
 			lpItem->m_Level = ItemLevel;
 
 			lpItem->Convert(ItemIndex,ItemOption1,ItemOption2,ItemOption3,((ItemNewOption==0)?lpItemBagItemInfo->Grade:ItemNewOption),ItemSetOption,0,0,ItemSocketOption,0xFF);
@@ -321,6 +332,17 @@ bool CItemBagEx::DropItem(LPOBJ lpObj,int map,int x,int y) // OK
 			gItemOptionRate.MakeSetOption(ItemIndex,ItemSetOption,&ItemSetOption);
 
 			gItemOptionRate.MakeSocketOption(ItemIndex,ItemSocketOption[0],&ItemSocketOption[0]);
+
+			// Horn of Fenrir: its type only (1 black, 2 blue, 4 gold) - see
+			// CItemBag::GetItem.
+			if(ItemIndex == GET_ITEM(13,37))
+			{
+				ItemOption1 = 0;
+				ItemOption2 = 0;
+				ItemOption3 = 0;
+				ItemSetOption = 0;
+				ItemNewOption = ((ItemNewOption == 0) ? lpItemBagItemInfo->Grade : ItemNewOption) & 7;
+			}
 
 			GDCreateItemSend(lpObj->Index,map,px,py,ItemIndex,ItemLevel,0,ItemOption1,ItemOption2,ItemOption3,lpObj->Index,((ItemNewOption==0)?lpItemBagItemInfo->Grade:ItemNewOption),ItemSetOption,0,0,ItemSocketOption,0xFF,((lpItemBagItemInfo->Duration>0)?((DWORD)time(0)+lpItemBagItemInfo->Duration):0));
 

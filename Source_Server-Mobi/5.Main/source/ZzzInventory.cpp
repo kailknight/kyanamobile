@@ -3457,6 +3457,31 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 		}
 	}
 
+	// RenderTipTextList stops at the first empty line, so one line left empty
+	// by the tooltip data (a template whose text is missing, e.g. a stale
+	// ItemTooltip_eng.bmd on a phone) hid every line after it - the options,
+	// the set list. Squeeze empty lines out instead; newline spacers are kept.
+	int keptLines = 0;
+	for (int i = 0; i < TextNum && i < 60; ++i)
+	{
+		if (TextList[i][0] == 0)
+		{
+			continue;
+		}
+		if (keptLines != i)
+		{
+			memcpy(TextList[keptLines], TextList[i], sizeof(TextList[keptLines]));
+			TextListColor[keptLines] = TextListColor[i];
+			TextBold[keptLines] = TextBold[i];
+		}
+		++keptLines;
+	}
+	for (int i = keptLines; i < TextNum && i < 60; ++i)
+	{
+		TextList[i][0] = 0;
+	}
+	TextNum = keptLines;
+
 	bool isrendertooltip = true;
 
 	if (isrendertooltip)
@@ -12651,8 +12676,8 @@ void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t 
 	}
 	if (ItemTRSData.GetItemTRSData(Type - MODEL_ITEM))
 	{
-		Position[0] = ItemTRSData.GetItemTRSDataTransLationX(Type - MODEL_ITEM);
-		Position[1] = ItemTRSData.GetItemTRSDataTransLationY(Type - MODEL_ITEM);
+		// Translation is already ADDED to Position above (TypePosition case 1). Assigning it here put the item at the
+		// screen origin (the middle of the screen) instead of on its cell / under the cursor.
 		Vector(ItemTRSData.GetItemTRSDataRotationX(Type - MODEL_ITEM), ItemTRSData.GetItemTRSDataRotationY(Type - MODEL_ITEM), ItemTRSData.GetItemTRSDataRotationZ(Type - MODEL_ITEM), ObjectSelect.Angle);
 	}
 
