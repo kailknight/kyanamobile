@@ -404,7 +404,22 @@ void VoiceChatProcInput()
 		// happens to be there.
 		if (iKey > 0 && iKey <= 254)
 		{
-			const bool bKeyDown = (SEASON3B::IsPress(iKey) || SEASON3B::IsRepeat(iKey));
+			const bool bKeyRaw = (SEASON3B::IsPress(iKey) || SEASON3B::IsRepeat(iKey));
+
+			// Ctrl + the talk key switches between Nearby and Party instead of
+			// talking. Edge-triggered, and never counts as holding the talk key.
+			const bool bCtrlDown = (SEASON3B::IsPress(VK_CONTROL) || SEASON3B::IsRepeat(VK_CONTROL));
+			static bool s_bSwitchWasDown = false;
+			const bool bSwitchDown = (bKeyRaw && bCtrlDown);
+
+			if (bSwitchDown && s_bSwitchWasDown == false)
+			{
+				gVoiceClient.ToggleChannel();
+			}
+
+			s_bSwitchWasDown = bSwitchDown;
+
+			const bool bKeyDown = (bKeyRaw && bCtrlDown == false);
 
 			if (bToggleMode)
 			{

@@ -656,16 +656,6 @@ static void InitializeTakumiProtectState()
     // the connection settings and skip publishing decoration built from bytes
     // we cannot vouch for.
     const bool fullyTrusted = (mainGot == sizeof(MAIN_FILE_INFO));
-    if (fullyTrusted)
-    {
-        gMainLoad.ApplyProtectData();
-    }
-    else
-    {
-        LOGW("CBGetMain.bin read %zu of %zu bytes: using connection//reconnect"
-             " settings but skipping ApplyProtectData (custom text/items stay empty)",
-             mainGot, sizeof(MAIN_FILE_INFO));
-    }
 
     snprintf(g_protectLoadStatus, sizeof(g_protectLoadStatus) - 1,
              "GETMAIN %s %s:%u rc=%u shop=%u",
@@ -679,13 +669,51 @@ static void InitializeTakumiProtectState()
     // are empty, so a missing file should not knock out the server address too.
     static TEXT_FILE_INFO textInfo {};   // like mainInfo: far too big for the stack
 
-    if (readProtectBlob("Data/Local/CBTextInfo.bin", &textInfo, sizeof(textInfo)) == sizeof(TEXT_FILE_INFO))
+    // Exact size only, as PC's ReadTextFile demands. readProtectBlob happily
+    // reads the overlapping prefix of a file from another GetMainInfo build,
+    // and here that is not harmless: the tooltip records are fixed arrays, so a
+    // shifted file turns into entries that match random items with blank names
+    // - ancient items showed a bare "MuOnline" block (ItemTooltip.cpp).
+    long textInfoSize = -1;
+    if (FILE* probe = fopen("Data/Local/CBTextInfo.bin", "rb"))	// same open as readProtectBlob
+    {
+        std::fseek(probe, 0, SEEK_END);
+        textInfoSize = std::ftell(probe);
+        std::fclose(probe);
+    }
+
+    if (textInfoSize == static_cast<long>(sizeof(TEXT_FILE_INFO))
+        && readProtectBlob("Data/Local/CBTextInfo.bin", &textInfo, sizeof(textInfo)) == sizeof(TEXT_FILE_INFO))
     {
         std::memcpy(&gProtect.m_TextInfo, &textInfo, sizeof(TEXT_FILE_INFO));
     }
     else
     {
-        LOGW("CBTextInfo.bin not loaded; custom text will be empty");
+        LOGW("CBTextInfo.bin not loaded (size %ld, this build expects %zu); custom text will be empty",
+             textInfoSize, sizeof(TEXT_FILE_INFO));
+
+        // Zeroed records are not "no records": an entry of item 0..0 matches
+        // every Bronze piece (index 0 of each armour group). Terminate the
+        // lists so the loaders stop at once.
+        gProtect.m_TextInfo.m_TRSTooltipData[0].ItemIndexMin = -1;
+        gProtect.m_TextInfo.m_TRSTooltipSetData[0].ItemIndexMin = -1;
+        gProtect.m_TextInfo.m_TRSTooltipText[0].Index = -1;
+    }
+
+    // After CBTextInfo.bin, not before: ApplyProtectData also hands the custom
+    // item tooltips (m_TextInfo) to GInfo. Called first, it loaded the still-
+    // zeroed struct - thousands of "item 0 to 0" entries with no text, so every
+    // Bronze item (Mist's Bronze Helm, Pants...) grew empty "MuOnline" blocks
+    // while PC, which reads both files first (MainLoad::Load), showed none.
+    if (fullyTrusted)
+    {
+        gMainLoad.ApplyProtectData();
+    }
+    else
+    {
+        LOGW("CBGetMain.bin read %zu of %zu bytes: using connection//reconnect"
+             " settings but skipping ApplyProtectData (custom text/items stay empty)",
+             mainGot, sizeof(MAIN_FILE_INFO));
     }
 
     LOGI(
@@ -5404,6 +5432,7 @@ int HitTestVirtualMirrorHotKeySlot(float uiX, float uiY);
 int HitTestVirtualAttackButton(float uiX, float uiY);
 int HitTestVirtualSkillButton(float uiX, float uiY);
 bool HitTestVoicePttButton(float uiX, float uiY);
+bool HitTestVoiceChannelButton(float uiX, float uiY);
 
 bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
 {
@@ -5442,7 +5471,8 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
         || HitTestVirtualSkillButton(bUiX, bUiY) >= kVirtualSkillButtonBase
         // The mic button toggles on finger-down: a tap on it with a thumb
         // already on the joystick must toggle, not start a pinch.
-        || HitTestVoicePttButton(bUiX, bUiY);
+        || HitTestVoicePttButton(bUiX, bUiY)
+        || HitTestVoiceChannelButton(bUiX, bUiY);
 
     if (g_androidPinch.fingerB == static_cast<SDL_FingerID>(-1)
         && touch.fingerId != g_androidPinch.fingerA
@@ -9962,6 +9992,96 @@ void RenderVoicePttButton()
 
     // Restore what the pass changed, so the next control is not handed a state
     // it did not set up - which is the exact fault this function had.
+    EndBitmap();
+}
+
+// Right beside the mic, same size. Tapping it switches what the mic reaches:
+// one person = Nearby (proximity), three people = Party (your party, anywhere),
+// lit blue while on Party.
+AndroidUiRect GetVoiceChannelButtonRect()
+{
+    const AndroidUiRect mic = GetVoiceMicButtonRect();
+
+    return {
+        mic.x + mic.w + kTopBarButtonGap,
+        mic.y,
+        mic.w,
+        mic.h
+    };
+}
+
+bool HitTestVoiceChannelButton(float uiX, float uiY)
+{
+    if (!VoiceChatPttButtonVisible())
+    {
+        return false;
+    }
+
+    const AndroidUiRect rect = GetVoiceChannelButtonRect();
+    const float pad = 4.0f;
+
+    return (uiX >= (rect.x - pad) && uiX <= (rect.x + rect.w + pad)
+         && uiY >= (rect.y - pad) && uiY <= (rect.y + rect.h + pad));
+}
+
+void RenderVoiceChannelButton()
+{
+    if (VoiceChatPttButtonVisible() == false)
+    {
+        return;
+    }
+
+    const AndroidUiRect rect = GetVoiceChannelButtonRect();
+    const bool party = (gVoiceClient.GetChannel() == VOICE_CHANNEL_PARTY);
+
+    // Same GL set-up as the mic button, for the same reason: the primitives have
+    // no texture coordinates, so a texture left bound makes them draw nothing.
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
+                          party ? 0.04f : 0.0f,
+                          party ? 0.16f : 0.0f,
+                          party ? 0.42f : 0.0f,
+                          party ? 0.82f : 0.45f);
+
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                           party ? 0.42f : 0.85f,
+                           party ? 0.68f : 0.85f,
+                           party ? 1.00f : 0.90f,
+                           party ? 0.95f : 0.35f, 1.0f);
+
+    const float cx = rect.x + (rect.w * 0.5f);
+    const float cy = rect.y + (rect.h * 0.5f);
+    const float u = rect.h / 34.0f;
+
+    const float gr = party ? 0.80f : 1.0f;
+    const float gg = party ? 0.90f : 1.0f;
+    const float gb = 1.0f;
+
+    // One person: a head over a pair of shoulders.
+    auto person = [&](float px, float py, float scale)
+    {
+        DrawVirtualCircle(px, py - (5.0f * u * scale), 3.2f * u * scale, gr, gg, gb, 1.0f, true);
+        DrawVirtualRectFilled(px - (5.0f * u * scale), py - (0.5f * u * scale),
+                              10.0f * u * scale, 6.0f * u * scale, gr, gg, gb, 1.0f);
+        DrawVirtualCircle(px, py - (0.5f * u * scale), 5.0f * u * scale, gr, gg, gb, 1.0f, true);
+    };
+
+    if (party)
+    {
+        person(cx - (8.5f * u), cy + (3.0f * u), 0.72f);
+        person(cx + (8.5f * u), cy + (3.0f * u), 0.72f);
+        person(cx, cy + (4.5f * u), 0.95f);
+    }
+    else
+    {
+        person(cx, cy + (3.5f * u), 1.15f);
+    }
+
     EndBitmap();
 }
 
@@ -15350,6 +15470,18 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // The channel button, right of the mic: Nearby <-> Party. Same
+    // finger-down toggle; the release is swallowed the same way.
+    if (VoiceChatPttButtonVisible() && HitTestVoiceChannelButton(uiX, uiY))
+    {
+        g_voicePttFingerId = touch.fingerId;
+
+        gVoiceClient.ToggleChannel();
+
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
     // Ahead of the attack button: GetVirtualButtonHitRadius pads that circle by
     // 8, so testing it first would let it claim taps meant for this one.
     if (IsAndroidAimAvailable() && HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
@@ -20179,6 +20311,7 @@ void RenderVirtualPad()
     // otherwise leave the microphone open indefinitely.
     ReleaseVoicePttIfFingerGone();
     RenderVoicePttButton();
+    RenderVoiceChannelButton();
     RenderAndroidTeleportRangeRing();
     RenderAndroidGroundAim();
     RenderAndroidTradePicker();

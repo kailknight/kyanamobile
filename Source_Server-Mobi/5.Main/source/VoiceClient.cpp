@@ -8,6 +8,8 @@
 #include "ZzzOpenglUtil.h"
 #include "ZzzCharacter.h"
 #include "ZzzInterface.h"
+#include "NewUISystem.h"
+#include "NewUIChatLogWindow.h"
 #include "./Utilities/Log/muConsoleDebug.h"
 
 
@@ -17,8 +19,8 @@ CVoiceClient gVoiceClient;
 // programs with no version negotiation, so a silent size mismatch is the exact
 // failure mode to guard against. 5 head + 1 + 2 + 8 + 64.
 static_assert(sizeof(PMSG_VOICE_INFO_RECV) == 80, "PMSG_VOICE_INFO_RECV must match the GameServer's PMSG_VOICE_INFO_SEND");
-static_assert(sizeof(VOICE_C2V_FRAME_MSG) == 1 + 8 + 2 + 1 + VOICE_FRAME_BYTES, "VOICE_C2V_FRAME_MSG is not packed as expected");
-static_assert(sizeof(VOICE_V2C_FRAME_MSG) == 1 + 2 + 1 + 2 + 1 + VOICE_FRAME_BYTES, "VOICE_V2C_FRAME_MSG is not packed as expected");
+static_assert(sizeof(VOICE_C2V_FRAME_MSG) == 1 + 8 + 2 + 1 + 1 + VOICE_FRAME_BYTES, "VOICE_C2V_FRAME_MSG is not packed as expected");
+static_assert(sizeof(VOICE_V2C_FRAME_MSG) == 1 + 2 + 1 + 2 + 1 + 1 + VOICE_FRAME_BYTES, "VOICE_V2C_FRAME_MSG is not packed as expected");
 
 // Winsock and POSIX disagree on exactly two things here and agree on the rest.
 // Wrapping just those two keeps the body of this file identical on both.
@@ -94,6 +96,7 @@ void CVoiceClient::Init() // OK
 	this->m_PlayerEnabled = true;
 	this->m_MuteOthers = false;
 	this->m_PlaybackVolume = 100;
+	this->m_Channel = VOICE_CHANNEL_PROXIMITY;
 
 	this->m_CaptureGain = 1.0f;
 	this->m_SentLevel = 0;
@@ -548,6 +551,7 @@ void CVoiceClient::SendFrameLocked(const short* pSamples, bool bBypassGate) // O
 	msg.Type = VOICE_C2V_FRAME;
 	msg.Token = this->m_Token;
 	msg.Seq = this->m_SendSeq++;
+	msg.Channel = (VBYTE)((this->m_Channel == VOICE_CHANNEL_PARTY) ? VOICE_CHANNEL_PARTY : VOICE_CHANNEL_PROXIMITY);
 
 	const int written = VoiceEncodeFrame(&this->m_EncodeState, boosted, VOICE_FRAME_SAMPLES,
 		msg.Data, VOICE_FRAME_BYTES);
@@ -583,7 +587,20 @@ void CVoiceClient::SendCaptureFrame(const short* pSamples) // OK
 
 void CVoiceClient::PumpReceive() // OK
 {
-	if (this->m_Socket == INVALID_SOCKET)
+	// Called from the game loop AND from the playback callback (PullPlayback),
+	// so the socket and the service's address are copied out under the lock:
+	// either thread may be the one that closes or reopens the socket.
+	SOCKET socketNow = INVALID_SOCKET;
+	sockaddr_in serverAddr;
+
+	{
+		std::lock_guard<std::mutex> lock(this->m_Lock);
+
+		socketNow = this->m_Socket;
+		serverAddr = this->m_ServerAddr;
+	}
+
+	if (socketNow == INVALID_SOCKET)
 	{
 		return;
 	}
@@ -600,7 +617,7 @@ void CVoiceClient::PumpReceive() // OK
 
 		VOICE_SOCKLEN fromLength = (VOICE_SOCKLEN)sizeof(from);
 
-		const int received = recvfrom(this->m_Socket, (char*)buffer, sizeof(buffer), 0,
+		const int received = recvfrom(socketNow, (char*)buffer, sizeof(buffer), 0,
 			(sockaddr*)&from, &fromLength);
 
 		if (received <= 0)
@@ -610,8 +627,8 @@ void CVoiceClient::PumpReceive() // OK
 
 		// Only the service talks to this socket. Anything from elsewhere is
 		// either stray or somebody trying their luck.
-		if (from.sin_addr.s_addr != this->m_ServerAddr.sin_addr.s_addr
-			|| from.sin_port != this->m_ServerAddr.sin_port)
+		if (from.sin_addr.s_addr != serverAddr.sin_addr.s_addr
+			|| from.sin_port != serverAddr.sin_port)
 		{
 			continue;
 		}
@@ -713,6 +730,7 @@ void CVoiceClient::HandleFrameIn(const VOICE_V2C_FRAME_MSG* lpMsg) // OK
 	pSpeaker->LastSeq = lpMsg->Seq;
 	pSpeaker->HasSeq = true;
 	pSpeaker->Volume = lpMsg->Volume;
+	pSpeaker->Channel = (lpMsg->Channel == VOICE_CHANNEL_PARTY) ? VOICE_CHANNEL_PARTY : VOICE_CHANNEL_PROXIMITY;
 	pSpeaker->LastFrameTick = GetTickCount();
 
 	short pcm[VOICE_FRAME_SAMPLES];
@@ -834,14 +852,30 @@ void CVoiceClient::PullPlayback(short* pOut, int iCount) // OK
 	// never has to special-case "nobody is talking".
 	memset(pOut, 0, sizeof(short) * (size_t)iCount);
 
+	// Read the socket here, on the playback clock, as well as from the game
+	// loop. Playback is steady (every 20 ms); the game loop is not - on a phone
+	// at 22 FPS or a client in a siege it can go 50-100 ms between frames,
+	// leaving every packet sitting unread in the kernel and then delivering
+	// four of them at once. That burst-then-gap is what played back chopped.
+	this->PumpReceive();
+
+	const DWORD dwNow = GetTickCount();
+
 	std::lock_guard<std::mutex> lock(this->m_Lock);
 
 	for (int n = 0; n < VOICE_MAX_SPEAKERS; n++)
 	{
 		VOICE_SPEAKER* pSpeaker = &this->m_Speaker[n];
 
-		if (pSpeaker->Used == false || pSpeaker->Fill <= 0)
+		if (pSpeaker->Used == false)
 		{
+			continue;
+		}
+
+		if (pSpeaker->Fill <= 0)
+		{
+			// Ran dry: the next burst has to build its cushion again.
+			pSpeaker->Primed = false;
 			continue;
 		}
 
@@ -862,6 +896,24 @@ void CVoiceClient::PullPlayback(short* pOut, int iCount) // OK
 			continue;
 		}
 
+		// Hold playback back until a cushion has built up. If the sender has
+		// stopped for good (nothing for 60 ms) whatever is left is just the
+		// tail of the last word, and plays out at once rather than waiting for
+		// frames that are not coming.
+		if (pSpeaker->Primed == false)
+		{
+			const bool bCushion = (pSpeaker->Fill >= VOICE_PREBUFFER_SAMPLES);
+			const bool bTail = ((dwNow - pSpeaker->LastFrameTick) > 60);
+
+			if (bCushion == false && bTail == false)
+			{
+				continue;
+			}
+
+			pSpeaker->Primed = true;
+			pSpeaker->FadeIn = 32;
+		}
+
 		int available = pSpeaker->Fill;
 
 		if (available > iCount)
@@ -869,11 +921,26 @@ void CVoiceClient::PullPlayback(short* pOut, int iCount) // OK
 			available = iCount;
 		}
 
+		// Running out inside this buffer: ramp to zero over the last samples,
+		// so the stop is a short fade rather than a click.
+		const bool bEnding = (available < iCount);
+
 		for (int s = 0; s < available; s++)
 		{
-			const int sample = (int)pSpeaker->Pcm[pSpeaker->Read];
+			int sample = (int)pSpeaker->Pcm[pSpeaker->Read];
 
 			pSpeaker->Read = (pSpeaker->Read + 1) % VOICE_JITTER_SAMPLES;
+
+			if (pSpeaker->FadeIn > 0)
+			{
+				sample = (sample * (32 - pSpeaker->FadeIn)) / 32;
+				pSpeaker->FadeIn--;
+			}
+
+			if (bEnding && (available - s) <= 24)
+			{
+				sample = (sample * (available - s)) / 24;
+			}
 
 			// Distance attenuation, then the player's own volume. Integer
 			// throughout, because this runs inside an audio callback where a
@@ -904,6 +971,11 @@ void CVoiceClient::PullPlayback(short* pOut, int iCount) // OK
 		}
 
 		pSpeaker->Fill -= available;
+
+		if (pSpeaker->Fill <= 0)
+		{
+			pSpeaker->Primed = false;
+		}
 	}
 }
 
@@ -1007,6 +1079,31 @@ bool CVoiceClient::IsSpeaking(int iPlayerIndex) // OK
 	}
 
 	return ((GetTickCount() - this->m_Speaker[slot].LastFrameTick) < VOICE_SPEAKING_HOLD_MS);
+}
+
+int CVoiceClient::GetSpeakerChannel(int iPlayerIndex) // OK
+{
+	std::lock_guard<std::mutex> lock(this->m_Lock);
+
+	const int slot = this->FindSpeaker((VWORD)iPlayerIndex);
+
+	return (slot < 0) ? (int)VOICE_CHANNEL_PROXIMITY : (int)this->m_Speaker[slot].Channel;
+}
+
+void CVoiceClient::SetChannel(int iChannel) // OK
+{
+	std::lock_guard<std::mutex> lock(this->m_Lock);
+
+	this->m_Channel = (iChannel == VOICE_CHANNEL_PARTY) ? VOICE_CHANNEL_PARTY : VOICE_CHANNEL_PROXIMITY;
+}
+
+void CVoiceClient::ToggleChannel() // OK
+{
+	this->SetChannel((this->m_Channel == VOICE_CHANNEL_PARTY) ? VOICE_CHANNEL_PROXIMITY : VOICE_CHANNEL_PARTY);
+
+	g_pChatListBox->AddText("", (this->m_Channel == VOICE_CHANNEL_PARTY)
+		? "Voice channel: Party - only your party hears you, wherever they are."
+		: "Voice channel: Nearby - players close to you hear you.", SEASON3B::TYPE_SYSTEM_MESSAGE);
 }
 
 int CVoiceClient::GetSpeakingCount() // OK
@@ -1165,13 +1262,19 @@ void RenderVoiceSpeakingMarks() // OK
 		glColor4f(0.1f, 0.1f, 0.1f, 0.6f);
 		RenderColor((float)(ScreenX - 7), (float)(ScreenY - 1), 14.f, 12.f);
 
-		glColor4f(0.4f, 1.0f, 0.4f, 1.0f);
+		// Green for someone nearby, blue when they are speaking to their party.
+		const bool bParty = (gVoiceClient.GetSpeakerChannel(c->Key) == VOICE_CHANNEL_PARTY);
+		const float mr = bParty ? 0.35f : 0.4f;
+		const float mg = bParty ? 0.65f : 1.0f;
+		const float mb = bParty ? 1.0f : 0.4f;
+
+		glColor4f(mr, mg, mb, 1.0f);
 		RenderColor((float)(ScreenX - 5), (float)(ScreenY + 6), 3.f, 4.f);
 
-		glColor4f(0.4f, 1.0f, 0.4f, 0.85f);
+		glColor4f(mr, mg, mb, 0.85f);
 		RenderColor((float)(ScreenX - 1), (float)(ScreenY + 3), 3.f, 7.f);
 
-		glColor4f(0.4f, 1.0f, 0.4f, 0.7f);
+		glColor4f(mr, mg, mb, 0.7f);
 		RenderColor((float)(ScreenX + 3), (float)(ScreenY), 3.f, 10.f);
 
 		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
@@ -1232,8 +1335,10 @@ void RenderVoiceChatDebug() // OK
 
 		if (bLive)
 		{
-			g_pRenderText->RenderText(x + 16, y,
-				gVoiceClient.GetLoopbackTest() ? "MIC LIVE (test tone)" : "MIC LIVE");
+			char szLive[64];
+			sprintf(szLive, "%s - %s", gVoiceClient.GetLoopbackTest() ? "MIC LIVE (test tone)" : "MIC LIVE", gVoiceClient.GetChannelName());
+
+			g_pRenderText->RenderText(x + 16, y, szLive);
 		}
 		else
 		{

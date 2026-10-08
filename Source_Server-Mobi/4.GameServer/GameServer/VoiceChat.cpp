@@ -135,6 +135,7 @@ void CVoiceChat::SendSession(LPOBJ lpObj) // OK
 
 	msg.Type = VOICE_G2V_SESSION;
 	msg.Token = lpObj->m_VoiceToken;
+	msg.ServerCode = (VWORD)gServerInfo.m_ServerCode;
 	msg.PlayerIndex = (VWORD)lpObj->Index;
 
 	memcpy(msg.Name, lpObj->Name, VOICE_NAME_LENGTH - 1);
@@ -149,7 +150,12 @@ void CVoiceChat::SendPosition(LPOBJ lpObj) // OK
 	memset(&msg, 0, sizeof(msg));
 
 	msg.Type = VOICE_G2V_POS;
+	msg.ServerCode = (VWORD)gServerInfo.m_ServerCode;
 	msg.PlayerIndex = (VWORD)lpObj->Index;
+
+	// Party numbers are per GameServer, which is why the service pairs this with
+	// ServerCode. 0 is "no party", so the number is shifted up by one.
+	msg.PartyId = (lpObj->PartyNumber >= 0) ? (VWORD)(lpObj->PartyNumber + 1) : (VWORD)0;
 	msg.Map = (VBYTE)lpObj->Map;
 	msg.X = (VBYTE)lpObj->X;
 	msg.Y = (VBYTE)lpObj->Y;
@@ -163,6 +169,7 @@ void CVoiceChat::SendDrop(int aIndex, VQWORD Token) // OK
 	memset(&msg, 0, sizeof(msg));
 
 	msg.Type = VOICE_G2V_DROP;
+	msg.ServerCode = (VWORD)gServerInfo.m_ServerCode;
 	msg.PlayerIndex = (VWORD)aIndex;
 
 	this->SendToService(&msg, sizeof(msg));

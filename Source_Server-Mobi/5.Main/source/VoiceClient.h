@@ -41,6 +41,16 @@
 
 #define VOICE_JITTER_SAMPLES    (VOICE_JITTER_FRAMES * VOICE_FRAME_SAMPLES)
 
+// A speaker is not played until this many frames have arrived, and again after
+// every underrun. Packets reach us in bursts (the network, and before this the
+// game's own frame rate), while playback drains at a perfectly steady 8000
+// samples a second; without a cushion every gap between bursts played as
+// silence in the middle of a word, which is the "morse code" chopping.
+// Three frames is 60 ms - the price of the cushion, and about what it takes to
+// ride out a 40 ms stutter.
+#define VOICE_PREBUFFER_FRAMES  3
+#define VOICE_PREBUFFER_SAMPLES (VOICE_PREBUFFER_FRAMES * VOICE_FRAME_SAMPLES)
+
 // A speaker is considered to have stopped this long after their last frame.
 // Only drives the "who is talking" readout; audio already stops when frames do.
 #define VOICE_SPEAKING_HOLD_MS  400
@@ -100,6 +110,14 @@ struct VOICE_SPEAKER
 	bool  HasSeq;
 	DWORD LastFrameTick;
 
+	// eVoiceChannel of the last frame, for the speaking marker's colour.
+	VBYTE Channel;
+
+	// Whether playback has built up its cushion (VOICE_PREBUFFER_FRAMES), and
+	// how many samples of fade-in are left after (re)starting.
+	bool  Primed;
+	int   FadeIn;
+
 	// Decoded PCM waiting to be played, as a ring of samples.
 	short Pcm[VOICE_JITTER_SAMPLES];
 	int   Read;
@@ -150,6 +168,18 @@ public:
 	// True while the given game index is talking. Phase 5 puts an indicator
 	// over their head with this.
 	bool IsSpeaking(int iPlayerIndex);
+
+	// The channel that person is speaking on (eVoiceChannel), PROXIMITY if they
+	// are not speaking.
+	int  GetSpeakerChannel(int iPlayerIndex);
+
+	// The channel THIS player talks on. Not persisted, like the open microphone:
+	// every session starts on proximity. Party reaches the player's party
+	// wherever they are; proximity reaches whoever is nearby.
+	int  GetChannel() const { return this->m_Channel; }
+	void SetChannel(int iChannel);
+	void ToggleChannel();
+	const char* GetChannelName() const { return (this->m_Channel == VOICE_CHANNEL_PARTY) ? "Party" : "Nearby"; }
 
 	int  GetSpeakingCount();
 
@@ -258,6 +288,10 @@ private:
 	int     m_OpenMinPeak;
 
 	VOICE_SPEAKER m_Speaker[VOICE_MAX_SPEAKERS];
+
+	// eVoiceChannel this player talks on. Read by the capture thread under the
+	// lock, written by SetChannel under it.
+	volatile int m_Channel;
 
 	DWORD   m_FramesSent;
 	DWORD   m_FramesRecv;

@@ -640,6 +640,28 @@ void SEASON3B::CNewUIOptionWindow::RenderVoiceMicRows()
 	}
 #endif
 
+	// -- channel ---------------------------------------------------------
+	//
+	// Both platforms. Nearby: whoever is close to you on this server hears you,
+	// quieter with distance. Party: only your party hears you, on any map and
+	// at any distance. On PC Ctrl + the talk key flips it without opening this.
+	{
+		const bool bParty = (gVoiceClient.GetChannel() == VOICE_CHANNEL_PARTY);
+
+		TextDraw(g_hFont, (int)x, (int)y, bParty ? 0xFFFFA860 : 0xFFCC00C8, 0x0, 0, 0, 1,
+			"Channel: %s", bParty ? "Party (anywhere)" : "Nearby (proximity)");
+
+		if (bClickReady && SEASON3B::CheckMouseIn(x, y, (int)rowW, (int)rowH) == 1)
+		{
+			gInterface.Data[eTIME].EventTick = GetTickCount();
+			PlayBuffer(SOUND_CLICK01);
+
+			gVoiceClient.ToggleChannel();
+		}
+
+		y += 17.f;
+	}
+
 	// -- noise gate -------------------------------------------------------
 	//
 	// A real checkbox here, because unlike the rows above this genuinely is a

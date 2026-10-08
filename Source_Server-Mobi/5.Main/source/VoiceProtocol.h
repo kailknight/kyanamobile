@@ -31,6 +31,19 @@ typedef unsigned short      VWORD;
 typedef unsigned int        VDWORD;
 typedef unsigned long long  VQWORD;
 
+// Which channel a frame is spoken on. Chosen by the speaker's client.
+//
+//   PROXIMITY  heard by everyone on the SAME GameServer, on the same map and
+//              within the service's radius, quieter with distance.
+//   PARTY      heard by the speaker's party members on the same GameServer,
+//              wherever they are - any map, any distance, full volume. A
+//              speaker who is not in a party is heard by nobody on this channel.
+enum eVoiceChannel
+{
+    VOICE_CHANNEL_PROXIMITY = 0,
+    VOICE_CHANNEL_PARTY     = 1,
+};
+
 // One frame of audio. 8000 Hz mono, 20ms per frame = 160 samples.
 //
 // IMA ADPCM packs 2 samples per byte, so a frame is 80 bytes plus the 4-byte
@@ -102,6 +115,11 @@ struct VOICE_C2V_FRAME_MSG
     VWORD  Seq;
 
     VBYTE  Length;
+
+    // eVoiceChannel. Anything unknown is treated as proximity, so an old
+    // client's frames (which had no such byte) never become party-wide.
+    VBYTE  Channel;
+
     VBYTE  Data[VOICE_FRAME_BYTES];
 };
 
@@ -151,6 +169,11 @@ struct VOICE_V2C_FRAME_MSG
 
     VWORD  Seq;
     VBYTE  Length;
+
+    // eVoiceChannel the frame was spoken on, so the client can tell a party
+    // member from a passer-by.
+    VBYTE  Channel;
+
     VBYTE  Data[VOICE_FRAME_BYTES];
 };
 
@@ -158,6 +181,14 @@ struct VOICE_V2C_FRAME_MSG
 // GameServer -> service
 // -------------------------------------------------------------------------
 
+// Every control packet names the GameServer it comes from. Each GameServer has
+// its own player index space (index 5 on one is a different person from index 5
+// on another) and its own parties, and several of them share this one service,
+// so a player is identified by (ServerCode, PlayerIndex) - never by the index
+// alone. Keying on the index alone made two players on different servers
+// overwrite each other's session, and let them hear each other whenever they
+// stood on the same map number.
+//
 // Issues or refreshes a session. Sent when a player enters the world; the
 // same token goes to the client down the game connection, and the client
 // presents it in HELLO.
@@ -165,6 +196,7 @@ struct VOICE_G2V_SESSION_MSG
 {
     VBYTE  Type;
     VQWORD Token;
+    VWORD  ServerCode;
     VWORD  PlayerIndex;
     char   Name[VOICE_NAME_LENGTH];
 };
@@ -176,15 +208,21 @@ struct VOICE_G2V_SESSION_MSG
 struct VOICE_G2V_POS_MSG
 {
     VBYTE  Type;
+    VWORD  ServerCode;
     VWORD  PlayerIndex;
     VBYTE  Map;
     VBYTE  X;
     VBYTE  Y;
+
+    // 0 when the player is in no party, otherwise the GameServer's party
+    // number + 1. Only meaningful together with ServerCode.
+    VWORD  PartyId;
 };
 
 struct VOICE_G2V_DROP_MSG
 {
     VBYTE  Type;
+    VWORD  ServerCode;
     VWORD  PlayerIndex;
 };
 
