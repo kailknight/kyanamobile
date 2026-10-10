@@ -37,6 +37,8 @@ CNewUIInGameShop::~CNewUIInGameShop()
 void CNewUIInGameShop::Init()
 {
 	m_ItemAngle = false;
+	m_bRechargeOpen = false;
+	m_iRechargeSelected = 0;
 	m_bDraggingWindow = false;
 	m_ptDragGrab.x = 0;
 	m_ptDragGrab.y = 0;
@@ -101,6 +103,8 @@ bool CNewUIInGameShop::Render()
 	RenderBanner();
 	RenderListBox();
 	RenderDisplayItems();
+	if( m_bRechargeOpen )
+		RenderRechargePanel();
 	DisableAlphaBlend();
 	return true;
 }
@@ -847,7 +851,14 @@ void CNewUIInGameShop::RenderDisplayItems()
 }
 	
 bool CNewUIInGameShop::BtnProcess()
-{	
+{
+	// Modal over the shelf: while it is open nothing under it takes input.
+	if( m_bRechargeOpen )
+	{
+		if( UpdateRechargePanel() )
+			return true;
+	}
+
 	if( g_InGameShopSystem->IsRequestEventPackge() == true )
 	{
 		if( m_ZoneButton.UpdateMouseEvent() != -1 )
@@ -907,6 +918,10 @@ bool CNewUIInGameShop::BtnProcess()
 
 	if( m_CashChargeButton.UpdateMouseEvent() == true )
 	{
+#if defined(__ANDROID__)
+		OpenRecharge();
+		return true;
+#endif
 		CMsgBoxIGSCommon* pMsgBox = NULL;
 		CreateMessageBox(MSGBOX_LAYOUT_CLASS(CMsgBoxIGSCommonLayout), &pMsgBox);
 		pMsgBox->Initialize(GlobalText[2937], GlobalText[2938]);
@@ -1261,6 +1276,8 @@ bool CNewUIInGameShop::Update()
 	if( IsVisible() == false )
 		return true;
 
+	PollRechargeResults();
+
 	// A banner fetched on the worker thread is applied here, because InitBanner
 	// loads a texture and that has to happen on the render thread.
 	unicode::t_char szBannerPath[MAX_PATH] = {0};
@@ -1609,6 +1626,7 @@ void CNewUIInGameShop::OpeningProcess()
 void CNewUIInGameShop::ClosingProcess()
 {
 	PlayBuffer(SOUND_CLICK01);
+	m_bRechargeOpen = false;
 	m_ListBoxTabButton.ChangeFrame(IGS_SAFEKEEPING_LISTBOX);
 	ClearAllStorageItem();
 }
@@ -2001,4 +2019,282 @@ void CNewUIInGameShop::UnloadImages()
 	DeleteBitmap(IMAGE_IGS_MODERN_ICON_REFRESH);
 }
 
+
+// ---------------------------------------------------------------------------
+// WCoin (C) recharge
+// ---------------------------------------------------------------------------
+
+#if defined(__ANDROID__)
+#include "Platform/MobilePlatform.h"
+#endif
+
+namespace
+{
+	/*
+		The website's recharge packs. The product ids are the ones created in
+		Play Console (MuBilling.PRODUCT_IDS); the peso price is only shown until
+		Google's own price, in the player's currency, has loaded.
+	*/
+	struct RechargePack
+	{
+		const char* ProductId;
+		const char* Name;
+		int Coins;
+		int Bonus;
+		const char* FallbackPrice;
+		const char* Ribbon;
+	};
+
+	const RechargePack kRechargePacks[6] =
+	{
+		{ "wcoin_c_20",   "HANDFUL",   20,   0,   "P20",    "" },
+		{ "wcoin_c_110",  "PACKAGE",  110,  10,   "P99",    "" },
+		{ "wcoin_c_320",  "POUCH",    320,  20,   "P249",   "POPULAR" },
+		{ "wcoin_c_540",  "CHEST",    540,  40,   "P499",   "BEST" },
+		{ "wcoin_c_1100", "COFFER",  1100, 100,   "P999",   "STEAL DEAL!" },
+		{ "wcoin_c_2750", "VAULT",   2750, 250,   "P2,499", "BEST VALUE!" },
+	};
+
+	// Panel geometry, inside the shop window, over the shelf and banner.
+	const int RC_X = 94, RC_Y = 66, RC_W = 368, RC_H = 360;
+	const int RC_TILE_X = 98, RC_TILE_Y = 96, RC_TILE_W = 116, RC_TILE_H = 126;
+	const int RC_TILE_DX = 122, RC_TILE_DY = 132;
+	const int RC_PAY_X = 98, RC_PAY_Y = 362, RC_PAY_W = 360, RC_PAY_H = 22;
+	const int RC_CLOSE_X = 420, RC_CLOSE_Y = 70, RC_CLOSE_W = 38, RC_CLOSE_H = 18;
+
+	void FormatThousands(int value, char* out, int outSize)
+	{
+		char raw[16];
+		sprintf(raw, "%d", value);
+		const int len = (int)strlen(raw);
+		int o = 0;
+		for (int i = 0; i < len && o < outSize - 2; ++i)
+		{
+			if (i > 0 && (len - i) % 3 == 0)
+				out[o++] = ',';
+			out[o++] = raw[i];
+		}
+		out[o] = '\0';
+	}
+
+	void RechargeMessage(const char* title, const char* text)
+	{
+		CMsgBoxIGSCommon* pMsgBox = NULL;
+		CreateMessageBox(MSGBOX_LAYOUT_CLASS(CMsgBoxIGSCommonLayout), &pMsgBox);
+		if (pMsgBox != NULL)
+			pMsgBox->Initialize(title, text);
+	}
+}
+
+void CNewUIInGameShop::OpenRecharge()
+{
+	m_bRechargeOpen = !m_bRechargeOpen;
+	PlayBuffer(SOUND_CLICK01);
+#if defined(__ANDROID__)
+	if (m_bRechargeOpen)
+		MU_MobileBilling("init", "", NULL, 0);
+#endif
+}
+
+bool CNewUIInGameShop::UpdateRechargePanel()
+{
+	const int X = m_Pos.x;
+	const int Y = m_Pos.y;
+
+	if (!SEASON3B::CheckMouseIn(X + RC_X, Y + RC_Y, RC_W, RC_H))
+		return false;
+
+	if (SEASON3B::IsRelease(VK_LBUTTON))
+	{
+		if (SEASON3B::CheckMouseIn(X + RC_CLOSE_X, Y + RC_CLOSE_Y, RC_CLOSE_W, RC_CLOSE_H))
+		{
+			m_bRechargeOpen = false;
+			PlayBuffer(SOUND_CLICK01);
+			return true;
+		}
+
+		for (int i = 0; i < 6; ++i)
+		{
+			const int tx = X + RC_TILE_X + (i % 3) * RC_TILE_DX;
+			const int ty = Y + RC_TILE_Y + (i / 3) * RC_TILE_DY;
+			if (SEASON3B::CheckMouseIn(tx, ty, RC_TILE_W, RC_TILE_H))
+			{
+				m_iRechargeSelected = i;
+				PlayBuffer(SOUND_CLICK01);
+				return true;
+			}
+		}
+
+		if (SEASON3B::CheckMouseIn(X + RC_PAY_X, Y + RC_PAY_Y, RC_PAY_W, RC_PAY_H))
+		{
+			PlayBuffer(SOUND_CLICK01);
+#if defined(__ANDROID__)
+			if (!MU_MobileBilling("buy", kRechargePacks[m_iRechargeSelected].ProductId, NULL, 0))
+				RechargeMessage("Recharge", "Google Play is not available on this device.");
+#else
+			RechargeMessage("Recharge", "Recharge from the website on PC.");
+#endif
+			return true;
+		}
+	}
+
+	// Inside the panel but not on a control: still ours, not the shelf's.
+	return true;
+}
+
+void CNewUIInGameShop::PollRechargeResults()
+{
+#if defined(__ANDROID__)
+	char result[1024];
+	for (int guard = 0; guard < 4; ++guard)
+	{
+		if (!MU_MobileBilling("poll", "", result, sizeof(result)) || result[0] == '\0')
+			return;
+
+		// status|productId|purchaseToken|orderId
+		char* fields[4] = { result, NULL, NULL, NULL };
+		for (int f = 1; f < 4; ++f)
+		{
+			char* bar = strchr(fields[f - 1], '|');
+			if (bar == NULL) break;
+			*bar = '\0';
+			fields[f] = bar + 1;
+		}
+		const char* status = fields[0];
+		const char* orderId = fields[3] ? fields[3] : "";
+
+		if (strcmp(status, "ok") == 0)
+		{
+			/*
+				Paid. Crediting is the server's job: it has to check the token
+				with Google before adding WCoin, and acknowledge the purchase
+				after. Until that step exists the purchase stays unacknowledged,
+				Play re-reports it on every shop open, and refunds it after
+				three days if it is never acknowledged.
+			*/
+			char text[256];
+			sprintf(text, "Payment received (order %.80s). Your WCoin will be added once the server confirms it.", orderId);
+			RechargeMessage("Recharge", text);
+		}
+		else if (strcmp(status, "pending") == 0)
+		{
+			RechargeMessage("Recharge", "Your payment is pending. The WCoin will be added once it clears.");
+		}
+		else if (strncmp(status, "error:", 6) == 0)
+		{
+			RechargeMessage("Recharge", status + 6);
+		}
+		// "cancelled": the player closed the sheet, nothing to say.
+	}
+#endif
+}
+
+void CNewUIInGameShop::RenderRechargePanel()
+{
+	const int X = m_Pos.x;
+	const int Y = m_Pos.y;
+	char szText[128];
+
+	// Backdrop over the shelf.
+	RenderFillRect(X + RC_X, Y + RC_Y, RC_W, RC_H, 0.04f, 0.035f, 0.06f, 0.97f);
+
+	g_pRenderText->SetBgColor(0, 0, 0, 0);
+
+	// Heading: coin, title, balance.
+	RenderFillRect(X + RC_TILE_X, Y + 72, 16, 16, 0.86f, 0.66f, 0.20f, 1.0f);
+	g_pRenderText->SetFont(g_hFontBold);
+	g_pRenderText->SetTextColor(40, 26, 6, 255);
+	g_pRenderText->RenderText(X + RC_TILE_X, Y + 76, "W", 16, 0, RT3_SORT_CENTER);
+	g_pRenderText->SetTextColor(245, 222, 160, 255);
+	g_pRenderText->RenderText(X + RC_TILE_X + 22, Y + 76, "WCoin (C)", 120, 0, RT3_SORT_LEFT);
+
+	char szBalance[32];
+	FormatThousands(g_InGameShopSystem->GetCashCreditCard(), szBalance, sizeof(szBalance));
+	sprintf(szText, "balance %s", szBalance);
+	g_pRenderText->SetFont(g_hFont);
+	g_pRenderText->SetTextColor(130, 125, 150, 255);
+	g_pRenderText->RenderText(X + 250, Y + 76, szText, 164, 0, RT3_SORT_RIGHT);
+
+	// Back.
+	const bool overClose = SEASON3B::CheckMouseIn(X + RC_CLOSE_X, Y + RC_CLOSE_Y, RC_CLOSE_W, RC_CLOSE_H) != 0;
+	RenderFillRect(X + RC_CLOSE_X, Y + RC_CLOSE_Y, RC_CLOSE_W, RC_CLOSE_H, 0.25f, 0.22f, 0.30f, overClose ? 1.0f : 0.8f);
+	g_pRenderText->SetTextColor(230, 230, 235, 255);
+	g_pRenderText->RenderText(X + RC_CLOSE_X, Y + RC_CLOSE_Y + 4, "Back", RC_CLOSE_W, 0, RT3_SORT_CENTER);
+
+	for (int i = 0; i < 6; ++i)
+	{
+		const RechargePack& pack = kRechargePacks[i];
+		const int tx = X + RC_TILE_X + (i % 3) * RC_TILE_DX;
+		const int ty = Y + RC_TILE_Y + (i / 3) * RC_TILE_DY;
+		const bool selected = (i == m_iRechargeSelected);
+
+		// Card, gold border when selected.
+		if (selected)
+			RenderFillRect(tx - 1, ty - 1, RC_TILE_W + 2, RC_TILE_H + 2, 0.86f, 0.66f, 0.20f, 1.0f);
+		else
+			RenderFillRect(tx - 1, ty - 1, RC_TILE_W + 2, RC_TILE_H + 2, 0.18f, 0.17f, 0.22f, 1.0f);
+		RenderFillRect(tx, ty, RC_TILE_W, RC_TILE_H, 0.09f, 0.08f, 0.12f, 1.0f);
+
+		// Ribbon.
+		if (pack.Ribbon[0] != '\0')
+		{
+			RenderFillRect(tx + RC_TILE_W - 58, ty + 2, 56, 11, 0.75f, 0.16f, 0.20f, 1.0f);
+			g_pRenderText->SetFont(g_hFont);
+			g_pRenderText->SetTextColor(255, 255, 255, 255);
+			g_pRenderText->RenderText(tx + RC_TILE_W - 58, ty + 3, pack.Ribbon, 56, 0, RT3_SORT_CENTER);
+		}
+
+		// Coin.
+		const int coinX = tx + (RC_TILE_W - 30) / 2;
+		RenderFillRect(coinX - 1, ty + 15, 32, 32, 0.55f, 0.40f, 0.10f, 1.0f);
+		RenderFillRect(coinX, ty + 16, 30, 30, 0.93f, 0.74f, 0.27f, 1.0f);
+		g_pRenderText->SetFont(g_hFontBold);
+		g_pRenderText->SetTextColor(40, 26, 6, 255);
+		g_pRenderText->RenderText(coinX, ty + 26, "W", 30, 0, RT3_SORT_CENTER);
+
+		// Name, amount, bonus.
+		g_pRenderText->SetFont(g_hFont);
+		g_pRenderText->SetTextColor(150, 145, 165, 255);
+		g_pRenderText->RenderText(tx, ty + 52, pack.Name, RC_TILE_W, 0, RT3_SORT_CENTER);
+
+		char szCoins[16];
+		FormatThousands(pack.Coins, szCoins, sizeof(szCoins));
+		sprintf(szText, "%s WCoin (C)", szCoins);
+		g_pRenderText->SetFont(g_hFontBold);
+		g_pRenderText->SetTextColor(245, 200, 100, 255);
+		g_pRenderText->RenderText(tx, ty + 66, szText, RC_TILE_W, 0, RT3_SORT_CENTER);
+
+		if (pack.Bonus > 0)
+		{
+			sprintf(szText, "includes +%d bonus", pack.Bonus);
+			g_pRenderText->SetFont(g_hFont);
+			g_pRenderText->SetTextColor(60, 210, 160, 255);
+			g_pRenderText->RenderText(tx, ty + 82, szText, RC_TILE_W, 0, RT3_SORT_CENTER);
+		}
+
+		// Price: Google's, in the player's currency, once loaded.
+		char szPrice[64] = { 0 };
+#if defined(__ANDROID__)
+		MU_MobileBilling("price", pack.ProductId, szPrice, sizeof(szPrice));
+#endif
+		if (szPrice[0] == '\0')
+			strcpy(szPrice, pack.FallbackPrice);
+		g_pRenderText->SetFont(g_hFontBold);
+		g_pRenderText->SetTextColor(235, 235, 240, 255);
+		g_pRenderText->RenderText(tx, ty + 104, szPrice, RC_TILE_W, 0, RT3_SORT_CENTER);
+	}
+
+	// Pay.
+	const RechargePack& sel = kRechargePacks[m_iRechargeSelected];
+	const bool overPay = SEASON3B::CheckMouseIn(X + RC_PAY_X, Y + RC_PAY_Y, RC_PAY_W, RC_PAY_H) != 0;
+	RenderFillRect(X + RC_PAY_X, Y + RC_PAY_Y, RC_PAY_W, RC_PAY_H, 0.86f, 0.66f, 0.20f, overPay ? 1.0f : 0.88f);
+	char szSelCoins[16];
+	FormatThousands(sel.Coins, szSelCoins, sizeof(szSelCoins));
+	sprintf(szText, "Pay with Google Play  -  %s WCoin (C)", szSelCoins);
+	g_pRenderText->SetFont(g_hFontBold);
+	g_pRenderText->SetTextColor(30, 20, 5, 255);
+	g_pRenderText->RenderText(X + RC_PAY_X, Y + RC_PAY_Y + 6, szText, RC_PAY_W, 0, RT3_SORT_CENTER);
+
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+}
 #endif //PBG_ADD_INGAMESHOP_UI_ITEMSHOP

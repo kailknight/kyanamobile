@@ -1311,7 +1311,7 @@ constexpr std::array<int, kTopBarButtonCount> kTopBarActions = {
 
 constexpr std::array<const TCHAR*, kTopBarButtonCount> kTopBarLabels = {
     _T("Guild"),
-    _T("Shop"),
+    _T("Kira Shop"),
     _T("Settings"),
     _T("Bags"),
     _T("Friend"),
@@ -11157,6 +11157,18 @@ void TriggerVirtualRightPanelUtilityAction(int button)
         // the server open the shop. Banner download is skipped: it's a
         // separate, PC-only-triggered subsystem not needed for shop content.
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
+        // IsInGameShopOpen refuses silently while the hero is moving, which on
+        // a phone (joystick, tap-walk) read as a dead button. Say why.
+        if (Hero != nullptr && Hero->Movement
+            && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == false)
+        {
+            if (g_pChatListBox != nullptr)
+            {
+                g_pChatListBox->AddText("", "Stop moving to open the Kira Shop.", SEASON3B::TYPE_SYSTEM_MESSAGE);
+            }
+            break;
+        }
+
         if (g_pInGameShop->IsInGameShopOpen() == false)
         {
             break;
@@ -11174,10 +11186,17 @@ void TriggerVirtualRightPanelUtilityAction(int button)
 
         if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == false)
         {
-            if (g_InGameShopSystem->GetIsRequestShopOpenning() == false)
+            // The "request in flight" flag is only cleared by the server's
+            // answer, so one lost answer locked the button for the session.
+            // Treat a request older than a few seconds as lost and send again.
+            static uint32_t s_shopOpenRequestMs = 0;
+            const uint32_t nowMs = MU_MobileGetTicks();
+            if (g_InGameShopSystem->GetIsRequestShopOpenning() == false
+                || nowMs - s_shopOpenRequestMs > 4000)
             {
                 SendRequestIGS_CashShopOpen(0);
                 g_InGameShopSystem->SetIsRequestShopOpenning(true);
+                s_shopOpenRequestMs = nowMs;
                 PlayBuffer(SOUND_CLICK01);
             }
         }
@@ -16038,18 +16057,13 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 
         if (heldMs >= kComboSettingsLongPressMs)
         {
-            g_virtualComboSettingsOpen = true;
-            PlayBuffer(SOUND_CLICK01);
+            // The PC auto menu, showing only its Auto Combo part.
+            gAutoPotion.OpenSettings(CAutoPotion::kMenuCombo);
         }
         else
         {
-            g_virtualComboEnabled = !g_virtualComboEnabled;
-            g_virtualComboStep = 0;
-            g_virtualComboBlockedSinceMs = 0;
-            g_virtualSkillSlotsDirty = true;
-            SaveVirtualSkillSlots();
+            MU_MobileComboSetEnabled(!g_virtualComboEnabled);
             PlayBuffer(SOUND_CLICK01);
-            LOGI("VirtualPad: auto-combo %s", g_virtualComboEnabled ? "on" : "off");
         }
         return true;
     }
@@ -16063,7 +16077,7 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 
         if (heldMs >= kComboSettingsLongPressMs)
         {
-            gAutoPotion.OpenSettings();
+            gAutoPotion.OpenSettings(CAutoPotion::kMenuPotion);
         }
         else
         {
@@ -26637,6 +26651,41 @@ bool ShouldThrottleAdaptiveEffectSpawn(int kind, int type, vec3_t Position, int 
     ++s_spawnCounter;
     const uint32_t threshold = static_cast<uint32_t>(scale * 1000.0f);
     return (s_spawnCounter * 2654435761u) % 1000u >= threshold;
+}
+
+// The attack wheel's combo, for the Auto Combo part of the auto menu
+// (QuickToggles.cpp) - the same switch and ms per step the Combo button and
+// the old Combo Speed panel used.
+bool MU_MobileComboIsEnabled()
+{
+    return g_virtualComboEnabled;
+}
+
+void MU_MobileComboSetEnabled(bool on)
+{
+    g_virtualComboEnabled = on;
+    g_virtualComboStep = 0;
+    g_virtualComboBlockedSinceMs = 0;
+    g_virtualSkillSlotsDirty = true;
+    SaveVirtualSkillSlots();
+    LOGI("VirtualPad: auto-combo %s", on ? "on" : "off");
+}
+
+int MU_MobileComboGetDelayMs(int step)
+{
+    if (step < 0 || step >= kVirtualComboSlotCount) return 0;
+    return static_cast<int>(g_virtualComboRepeatMs[step]);
+}
+
+void MU_MobileComboAddDelayMs(int step, int sign)
+{
+    if (step < 0 || step >= kVirtualComboSlotCount) return;
+    uint32_t& ms = g_virtualComboRepeatMs[step];
+    ms = (sign < 0)
+        ? std::max(kVirtualComboRepeatMsMin, ms - kVirtualComboRepeatStepMs)
+        : std::min(kVirtualComboRepeatMsMax, ms + kVirtualComboRepeatStepMs);
+    g_virtualSkillSlotsDirty = true;
+    SaveVirtualSkillSlots();
 }
 
 #endif // __ANDROID__

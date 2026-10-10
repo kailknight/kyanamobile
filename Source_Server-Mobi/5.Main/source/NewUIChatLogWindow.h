@@ -212,6 +212,9 @@ namespace SEASON3B
 		void SetSizeAuto();
 		void SetNumberOfShowingLines(int nShowingLines, OUT LPSIZE lpBoxSize = NULL);
 		size_t GetNumberOfShowingLines() const;
+		// Top edge of the log in UI units, for anything that must stay clear of it
+		// (mobile golden notices, RenderNotices).
+		int GetWindowTopY() const { return m_WndPos.y - m_WndSize.cy; }
 		void SetBackAlphaAuto();
 		void SetBackAlpha(float fAlpha);
 		float GetBackAlpha() const;

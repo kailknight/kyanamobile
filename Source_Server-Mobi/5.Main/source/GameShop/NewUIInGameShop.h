@@ -426,7 +426,20 @@ namespace SEASON3B
 
 	private:
 		bool UpdateBanner();
-		
+
+		/*
+			WCoin (C) recharge through the phone's store (Google Play on
+			Android), opened by the Charge button. Drawn over the shelf, like
+			the website's recharge page: six packs, tap one, then Pay.
+		*/
+		void OpenRecharge();
+		void RenderRechargePanel();
+		bool UpdateRechargePanel();	// true = input used
+		void PollRechargeResults();
+
+		bool	m_bRechargeOpen;
+		int		m_iRechargeSelected;
+
 	private:
 		CNewUIManager* m_pNewUIMng;
 		POINT m_Pos;

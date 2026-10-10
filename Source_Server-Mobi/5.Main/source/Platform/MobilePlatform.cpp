@@ -58,6 +58,7 @@ jmethodID g_showKeyboardMethod = nullptr;
 jmethodID g_batteryPercentMethod = nullptr;
 jmethodID g_wifiRssiMethod = nullptr;
 jmethodID g_bannerStartMethod = nullptr;
+jmethodID g_billingMethod = nullptr;
 jmethodID g_bannerPollMethod = nullptr;
 jmethodID g_hideKeyboardMethod = nullptr;
 jmethodID g_hasMicPermissionMethod = nullptr;
@@ -84,6 +85,7 @@ void MU_ClearKeyboardBridge(JNIEnv* env)
     g_batteryPercentMethod = nullptr;
     g_wifiRssiMethod = nullptr;
     g_bannerStartMethod = nullptr;
+    g_billingMethod = nullptr;
     g_bannerPollMethod = nullptr;
     g_hasMicPermissionMethod = nullptr;
     g_requestMicPermissionMethod = nullptr;
@@ -250,6 +252,72 @@ int MU_MobilePollBannerDownload()
     return result;
 #else
     return 0;
+#endif
+}
+
+bool MU_MobileBilling(const char* cmd, const char* arg, char* out, int outSize)
+{
+    if (out != nullptr && outSize > 0)
+    {
+        out[0] = '\0';
+    }
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr || cmd == nullptr)
+    {
+        return false;
+    }
+
+    if (g_billingMethod == nullptr)
+    {
+        g_billingMethod = env->GetStaticMethodID(
+            g_keyboardBridgeClass, "billingFromNative",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            g_billingMethod = nullptr;
+            return false;
+        }
+    }
+
+    jstring jCmd = env->NewStringUTF(cmd);
+    jstring jArg = env->NewStringUTF(arg != nullptr ? arg : "");
+    bool ok = false;
+
+    if (jCmd != nullptr && jArg != nullptr)
+    {
+        jstring jResult = static_cast<jstring>(
+            env->CallStaticObjectMethod(g_keyboardBridgeClass, g_billingMethod, jCmd, jArg));
+        if (env->ExceptionCheck())
+        {
+            env->ExceptionClear();
+            jResult = nullptr;
+        }
+        else
+        {
+            ok = true;
+        }
+
+        if (jResult != nullptr)
+        {
+            const char* utf = env->GetStringUTFChars(jResult, nullptr);
+            if (utf != nullptr && out != nullptr && outSize > 0)
+            {
+                strncpy(out, utf, outSize - 1);
+                out[outSize - 1] = '\0';
+            }
+            if (utf != nullptr) env->ReleaseStringUTFChars(jResult, utf);
+            env->DeleteLocalRef(jResult);
+        }
+    }
+
+    if (jCmd != nullptr) env->DeleteLocalRef(jCmd);
+    if (jArg != nullptr) env->DeleteLocalRef(jArg);
+    return ok;
+#else
+    (void)arg;
+    return false;
 #endif
 }
 

@@ -61,6 +61,22 @@ namespace
 		return Hero != NULL && gCharacterManager.GetBaseClass(Hero->Class) == CLASS_KNIGHT;
 	}
 
+	// The menu's combo part drives whichever combo this platform has: the PC
+	// hotkey 1-2-3 chain, or the mobile attack wheel's combo (android_main.cpp).
+#if defined(__ANDROID__) || defined(MU_IOS)
+	bool MenuComboEnabled() { return MU_MobileComboIsEnabled(); }
+	void MenuComboSetEnabled(bool on) { MU_MobileComboSetEnabled(on); }
+	int MenuComboDelay(int step) { return MU_MobileComboGetDelayMs(step); }
+	void MenuComboAddDelay(int step, int sign) { MU_MobileComboAddDelayMs(step, sign); }
+	bool MenuComboCanConfigure() { return true; }
+#else
+	bool MenuComboEnabled() { return gAutoCombo.IsEnabled(); }
+	void MenuComboSetEnabled(bool on) { gAutoCombo.SetEnabled(on); }
+	int MenuComboDelay(int step) { return gAutoCombo.GetDelayMs(step); }
+	void MenuComboAddDelay(int step, int sign) { gAutoCombo.SetOwnDelayMs(step, gAutoCombo.GetDelayMs(step) + sign * CAutoCombo::kDelayStepMs); }
+	bool MenuComboCanConfigure() { return gAutoCombo.CanConfigure(); }
+#endif
+
 	int ClampComboDelay(int delayMs)
 	{
 		if (delayMs < CAutoCombo::kMinDelayMs)
@@ -150,6 +166,7 @@ bool CTripleTap::Press()
 
 CAutoPotion::CAutoPotion()
 {
+	this->m_MenuSection = kMenuAll;
 	this->m_CanConfigure = false;
 	this->m_ServerThreshold = kDefaultThreshold;
 	this->m_OwnThreshold = kDefaultThreshold;
@@ -239,18 +256,11 @@ void CAutoPotion::UpdateHotkey()
 	}
 }
 
-void CAutoPotion::OpenSettings()
+void CAutoPotion::OpenSettings(int section)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
-	if (!this->m_CanConfigure)
-	{
-		char text[128];
-		sprintf_s(text, sizeof(text), "Auto potion settings are not available for your account. It drinks at %d%% HP.", this->m_ServerThreshold);
-		SystemMessage(text);
-		return;
-	}
-#endif
-
+	// Accounts that may not change the threshold still get the menu, with the
+	// server's value shown locked - the same as PC.
+	this->m_MenuSection = section;
 	this->LoadSettings();
 	gAutoCombo.LoadSettings();
 
@@ -351,24 +361,27 @@ void CAutoPotion::Render()
 	}
 
 #if defined(__ANDROID__) || defined(MU_IOS)
-	const float windowW = 190.0f;
-	const float windowH = 150.0f;
+	// Mobile combo works for every class (the attack wheel's chain).
+	const bool comboClass = true;
 #else
-	const bool showCombo = IsAutoComboClass();
-	const float windowW = 200.0f;
-	const float windowH = showCombo ? 282.0f : 150.0f;
+	const bool comboClass = IsAutoComboClass();
 #endif
+	const bool showPotion = this->m_MenuSection != kMenuCombo;
+	const bool showCombo = this->m_MenuSection != kMenuPotion && comboClass;
+
+	const char* title = "Auto Menu";
+	if (this->m_MenuSection == kMenuPotion) title = "Auto Potion";
+	else if (this->m_MenuSection == kMenuCombo) title = "Auto Combo";
+
+	const float windowW = 200.0f;
+	const float windowH = (showPotion && showCombo) ? 282.0f : (showCombo ? 182.0f : 150.0f);
 	float startX = (MAX_WIN_WIDTH - windowW) / 2.0f;
 	float startY = 120.0f;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
-	g_pBCustomMenuInfo->DrawWindowCustomMini(&startX, &startY, windowW, windowH, eAutoPotionConfig, "Auto Potion");
-#else
 	// The size is only taken on the window's first draw; keep it in step with
-	// the class, which changes on a character switch.
+	// the section and the class, which change on a reopen or character switch.
 	gInterface.Data[eAutoPotionConfig].Height = windowH;
-	g_pBCustomMenuInfo->DrawWindowCustomMini(&startX, &startY, windowW, windowH, eAutoPotionConfig, "Auto Menu");
-#endif
+	g_pBCustomMenuInfo->DrawWindowCustomMini(&startX, &startY, windowW, windowH, eAutoPotionConfig, title);
 
 	if (!gInterface.Data[eAutoPotionConfig].OnShow || gInterface.Data[eAutoPotionConfig].BActiveHiden)
 	{
@@ -377,89 +390,59 @@ void CAutoPotion::Render()
 
 	gInterface.DrawBarForm(startX, startY + 25.0f, windowW, windowH - 25.0f, 0.0f, 0.0f, 0.0f, 0.8f);
 
-#if defined(__ANDROID__) || defined(MU_IOS)
-	float posX = startX + 10.0f;
-	float posY = startY + 32.0f;
-
-	// On/off, the same as the AutoPots button.
-	const bool enabled = this->IsEnabled();
-	if (g_pBCustomMenuInfo->DrawButton(posX, posY, 100, 12, " ", 55))
-	{
-		this->SetEnabled(!enabled);
-	}
-	TextDraw(g_hFontBold, posX, posY + 6, enabled ? 0xFFC738FF : 0xFFFFFFFF, 0x0, 55, 0, 3, enabled ? "ON" : "OFF");
-
-	// Threshold, drawn exactly like the MU Helper's potion bar.
-	posY += 30.0f;
-	g_pBCustomMenuInfo->RenderGroupBox((int)posX, (int)posY, 170, 62, 90, 20);
-	TextDraw(g_hFontBold, posX + 5, posY + 5, 0xffffffff, 0x0, 0, 0, 1, "HP potion below");
-	posY += 26.0f;
-
-	int steps = this->m_OwnThreshold / 10;
-	g_pBCustomMenuInfo->RederBarOptionW((int)posX + 25, (int)posY, &steps);
-	if (steps < 1) steps = 1;
-	if (steps > 9) steps = 9;
-
-	if (steps * 10 != this->m_OwnThreshold)
-	{
-		this->m_OwnThreshold = steps * 10;
-		this->SaveSettings();
-	}
-	TextDraw(g_hFont, posX, posY + 17, 0xffffffff, 0x0, 170, 0, 3, "%d%%", this->m_OwnThreshold);
-
-	TextDraw(g_hFont, startX, startY + windowH - 16.0f, 0xFFB0B0B0, 0x0, windowW, 0, 3, "AutoPots: tap on/off, hold for settings");
-#else
 	this->LoadSettings();
 	gAutoCombo.LoadSettings();
 
 	const float left = startX + 10.0f;
 	const float rowW = windowW - 20.0f;
-
-	// ---- Auto potion -------------------------------------------------------
 	float posY = startY + 32.0f;
 
-	TextDraw(g_hFontBold, left, posY + 6, 0xFFFFFFFF, 0x0, 0, 0, 1, "Auto Potion");
-	const bool potionOn = this->IsEnabled();
-	if (g_pBCustomMenuInfo->DrawButton(left + rowW - 55.0f, posY, 100, 12, " ", 55))
+	// ---- Auto potion -------------------------------------------------------
+	if (showPotion)
 	{
-		this->SetEnabled(!potionOn);
-	}
-	TextDraw(g_hFontBold, left + rowW - 55.0f, posY + 6, potionOn ? 0xFFC738FF : 0xFFFFFFFF, 0x0, 55, 0, 3, potionOn ? "ON" : "OFF");
-
-	posY += 26.0f;
-	g_pBCustomMenuInfo->RenderGroupBox((int)left, (int)posY, (int)rowW, 62, 90, 20);
-	TextDraw(g_hFontBold, left + 5, posY + 5, 0xffffffff, 0x0, 0, 0, 1, "HP potion below");
-
-	if (this->m_CanConfigure)
-	{
-		int steps = this->m_OwnThreshold / 10;
-		g_pBCustomMenuInfo->RederBarOptionW((int)left + 25, (int)posY + 26, &steps);
-		if (steps < 1) steps = 1;
-		if (steps > 9) steps = 9;
-
-		if (steps * 10 != this->m_OwnThreshold)
-		{
-			this->m_OwnThreshold = steps * 10;
-			this->SaveSettings();
-		}
-		TextDraw(g_hFont, left, posY + 43, 0xffffffff, 0x0, rowW, 0, 3, "%d%%", this->m_OwnThreshold);
-	}
-	else
-	{
-		TextDraw(g_hFont, left, posY + 30, 0xFFFFFFFF, 0x0, rowW, 0, 3, "%d%%", this->m_ServerThreshold);
-		TextDraw(g_hFont, left, posY + 44, 0xFF909090, 0x0, rowW, 0, 3, "set by the server for your account");
-	}
-
-	if (showCombo)
-	{
-		// ---- Auto combo --------------------------------------------------------
-		posY += 74.0f;
-
-		TextDraw(g_hFontBold, left, posY + 6, 0xFFFFFFFF, 0x0, 0, 0, 1, "Auto Combo");
-		const bool comboOn = gAutoCombo.IsEnabled();
+		TextDraw(g_hFontBold, left, posY + 6, 0xFFFFFFFF, 0x0, 0, 0, 1, "Auto Potion");
+		const bool potionOn = this->IsEnabled();
 		if (g_pBCustomMenuInfo->DrawButton(left + rowW - 55.0f, posY, 100, 12, " ", 55))
 		{
-			gAutoCombo.SetEnabled(!comboOn);
+			this->SetEnabled(!potionOn);
+		}
+		TextDraw(g_hFontBold, left + rowW - 55.0f, posY + 6, potionOn ? 0xFFC738FF : 0xFFFFFFFF, 0x0, 55, 0, 3, potionOn ? "ON" : "OFF");
+
+		posY += 26.0f;
+		g_pBCustomMenuInfo->RenderGroupBox((int)left, (int)posY, (int)rowW, 62, 90, 20);
+		TextDraw(g_hFontBold, left + 5, posY + 5, 0xffffffff, 0x0, 0, 0, 1, "HP potion below");
+
+		if (this->m_CanConfigure)
+		{
+			int steps = this->m_OwnThreshold / 10;
+			g_pBCustomMenuInfo->RederBarOptionW((int)left + 25, (int)posY + 26, &steps);
+			if (steps < 1) steps = 1;
+			if (steps > 9) steps = 9;
+
+			if (steps * 10 != this->m_OwnThreshold)
+			{
+				this->m_OwnThreshold = steps * 10;
+				this->SaveSettings();
+			}
+			TextDraw(g_hFont, left, posY + 43, 0xffffffff, 0x0, rowW, 0, 3, "%d%%", this->m_OwnThreshold);
+		}
+		else
+		{
+			TextDraw(g_hFont, left, posY + 30, 0xFFFFFFFF, 0x0, rowW, 0, 3, "%d%%", this->m_ServerThreshold);
+			TextDraw(g_hFont, left, posY + 44, 0xFF909090, 0x0, rowW, 0, 3, "set by the server for your account");
+		}
+
+		posY += 74.0f;
+	}
+
+	// ---- Auto combo --------------------------------------------------------
+	if (showCombo)
+	{
+		TextDraw(g_hFontBold, left, posY + 6, 0xFFFFFFFF, 0x0, 0, 0, 1, "Auto Combo");
+		const bool comboOn = MenuComboEnabled();
+		if (g_pBCustomMenuInfo->DrawButton(left + rowW - 55.0f, posY, 100, 12, " ", 55))
+		{
+			MenuComboSetEnabled(!comboOn);
 		}
 		TextDraw(g_hFontBold, left + rowW - 55.0f, posY + 6, comboOn ? 0xFFC738FF : 0xFFFFFFFF, 0x0, 55, 0, 3, comboOn ? "ON" : "OFF");
 
@@ -470,11 +453,15 @@ void CAutoPotion::Render()
 		for (int step = 0; step < CAutoCombo::kSteps; ++step)
 		{
 			const float rowY = posY + 24.0f + (float)step * 21.0f;
-			const int delayMs = gAutoCombo.GetDelayMs(step);
+			const int delayMs = MenuComboDelay(step);
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+			TextDraw(g_hFont, left + 10, rowY + 5, 0xFFFFFFFF, 0x0, 0, 0, 1, "Skill %d", step + 1);
+#else
 			TextDraw(g_hFont, left + 10, rowY + 5, 0xFFFFFFFF, 0x0, 0, 0, 1, "Skill %d (key %d)", step + 1, step + 1);
+#endif
 
-			if (gAutoCombo.CanConfigure())
+			if (MenuComboCanConfigure())
 			{
 				const float btnW = 22.0f;
 				const float minusX = left + rowW - 98.0f;
@@ -482,10 +469,15 @@ void CAutoPotion::Render()
 
 				if (g_pBCustomMenuInfo->DrawButton(minusX, rowY, 70, 12, "-", btnW))
 				{
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 					EndComboDelayEdit(false);
-					gAutoCombo.SetOwnDelayMs(step, delayMs - CAutoCombo::kDelayStepMs);
+#endif
+					MenuComboAddDelay(step, -1);
 				}
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+				TextDraw(g_hFontBold, minusX + btnW, rowY + 5, 0xFFFFFFFF, 0x0, plusX - (minusX + btnW), 0, 3, "%d", delayMs);
+#else
 				// The number itself: click it to type a value, Enter or a click
 				// anywhere else keeps it.
 				const float cellX = minusX + btnW + 4.0f;
@@ -528,11 +520,14 @@ void CAutoPotion::Render()
 						PlayBuffer(25, 0, 0);
 					}
 				}
+#endif
 
 				if (g_pBCustomMenuInfo->DrawButton(plusX, rowY, 70, 12, "+", btnW))
 				{
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 					EndComboDelayEdit(false);
-					gAutoCombo.SetOwnDelayMs(step, delayMs + CAutoCombo::kDelayStepMs);
+#endif
+					MenuComboAddDelay(step, 1);
 				}
 			}
 			else
@@ -541,23 +536,32 @@ void CAutoPotion::Render()
 			}
 		}
 
-		if (!gAutoCombo.CanConfigure())
+		if (!MenuComboCanConfigure())
 		{
 			TextDraw(g_hFont, left, posY + 94, 0xFF909090, 0x0, rowW, 0, 3, "set by the server for your account");
 		}
 		else
 		{
+#if defined(__ANDROID__) || defined(MU_IOS)
+			TextDraw(g_hFont, left, posY + 94, 0xFF909090, 0x0, rowW, 0, 3, "tap - / + to change (%d-%d)", CAutoCombo::kMinDelayMs, CAutoCombo::kMaxDelayMs);
+#else
 			TextDraw(g_hFont, left, posY + 94, 0xFF909090, 0x0, rowW, 0, 3, "click a number to type it (%d-%d)", CAutoCombo::kMinDelayMs, CAutoCombo::kMaxDelayMs);
+#endif
 		}
-
 	}
+#if !defined(__ANDROID__) && !defined(MU_IOS)
 	else
 	{
 		EndComboDelayEdit(true);
 	}
-
-	TextDraw(g_hFont, startX, startY + windowH - 16.0f, 0xFFB0B0B0, 0x0, windowW, 0, 3, "~ x3: potion on/off   Hold ~: this menu");
 #endif
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	const char* footer = showPotion ? "AutoPots: tap on/off, hold for this menu" : "Combo: tap on/off, hold for this menu";
+#else
+	const char* footer = "~ x3: potion on/off   Hold ~: this menu";
+#endif
+	TextDraw(g_hFont, startX, startY + windowH - 16.0f, 0xFFB0B0B0, 0x0, windowW, 0, 3, footer);
 }
 
 // -----------------------------------------------------------------------------

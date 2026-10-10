@@ -249,6 +249,16 @@ public class MuMainNativeActivity extends NativeActivity {
         return bannerState.getAndSet(0);
     }
 
+    // Cash shop WCoin recharge - see MuBilling and MU_MobileBilling.
+    public static String billingFromNative(String cmd, String arg) {
+        try {
+            return MuBilling.handle(instance, cmd, arg);
+        } catch (Throwable t) {
+            Log.e(TAG, "billing " + cmd + " failed", t);
+            return "";
+        }
+    }
+
     // Sticky-broadcast read rather than a registered receiver: ACTION_BATTERY_CHANGED
     // is always latched by the system, so passing a null receiver to
     // registerReceiver returns the last broadcast immediately without needing to

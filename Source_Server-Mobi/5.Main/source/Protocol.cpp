@@ -263,7 +263,24 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 						memcpy(szText, lpMsg + 4, iTextMax);
 
 						const bool bOnline = (size >= 133 && lpMsg[132] == 1);
-						g_pChatListBox->AddText("", szText, bOnline ? SEASON3B::TYPE_ONLINE_MESSAGE : SEASON3B::TYPE_POST_ITEM);
+
+						// A /post arrives as "name: text" with no name field, so the
+						// line had no ID and right click / tap had nobody to whisper.
+						// Split a leading character name off and pass it as the ID;
+						// the log draws it back as "name : text".
+						std::string strPostID;
+						const char* pText = szText;
+						if (!bOnline)
+						{
+							const char* pColon = strstr(szText, ": ");
+							const int iNameLen = (pColon != NULL) ? (int)(pColon - szText) : 0;
+							if (iNameLen > 0 && iNameLen <= MAX_ID_SIZE && strcspn(szText, " []") >= (size_t)iNameLen)
+							{
+								strPostID.assign(szText, iNameLen);
+								pText = pColon + 2;
+							}
+						}
+						g_pChatListBox->AddText(strPostID, pText, bOnline ? SEASON3B::TYPE_ONLINE_MESSAGE : SEASON3B::TYPE_POST_ITEM);
 					}
 					return 1;
 				}

@@ -2782,11 +2782,11 @@ namespace TextCache
 	// LIMIT_WIDTH in RenderText and LIMIT_HEIGHT in WriteText.
 	const int SLOT_W = 256;
 	const int SLOT_H = 32;
-	const int COLS = 4;
+	const int COLS = 8;
 	const int ROWS = 64;
-	const int SLOTS = COLS * ROWS;          // 256 cached sections
-	const int TEX_W = SLOT_W * COLS;        // 1024
-	const int TEX_H = SLOT_H * ROWS;        // 2048, so 8MB RGBA
+	const int SLOTS = COLS * ROWS;          // 512 cached sections - 256 ran out on a busy screen
+	const int TEX_W = SLOT_W * COLS;        // 2048
+	const int TEX_H = SLOT_H * ROWS;        // 2048, so 16MB RGBA (2048x2048 rather than 1024x4096: every GLES2 GPU takes 2048)
 	const int MAX_SECTIONS = 4;             // longer strings use the old path
 
 	struct Extent
@@ -2892,7 +2892,7 @@ namespace TextCache
 	}
 
 	// Least-recently-used eviction. Only runs on a miss with a full atlas, and
-	// the scan is over 256 entries, so it stays off the hot path.
+	// the scan is over 512 entries, so it stays off the hot path.
 	int AcquireSlot()
 	{
 		if (s_freeSlots > 0)
@@ -2918,7 +2918,12 @@ namespace TextCache
 				oldestKey = it->first;
 			}
 		}
-		if (oldestKey == 0)
+		// Never evict a string already drawn this frame. Its quad is still in
+		// the batch, so uploading new pixels into the slot changes what that
+		// quad shows - a stat value drawn as a piece of some later string
+		// ("Dan" from the class name in the Strength box). The caller draws
+		// uncached instead when every slot is in use this frame.
+		if (oldestKey == 0 || oldestFrame == s_frame)
 			return -1;
 
 		std::unordered_map<unsigned long long, Section>::iterator victim = s_sections.find(oldestKey);
@@ -3583,7 +3588,13 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const unicode::t_
 				}
 			}
 			if (slot < 0)
+			{
+				// Atlas full of this frame's strings: draw through the scratch
+				// texture like an uncacheable string rather than dropping it.
+				WriteText(LIMIT_WIDTH*i*3+iClipMove, RealSectionLine.cx, RealSectionLine.cy);
+				UploadText(RealBoxPos.x+LIMIT_WIDTH*i+iTab, RealBoxPos.y, RealSectionLine.cx, RealSectionLine.cy);
 				continue;
+			}
 
 			const unsigned long long profWriteStart = TextProfNow();
 			WriteText(LIMIT_WIDTH*i*3+iClipMove, RealSectionLine.cx, RealSectionLine.cy);

@@ -74,6 +74,16 @@ void MU_MobileKeepRenderingWhileUnfocused();
 bool MU_MobileStartBannerDownload(const char* url, const char* destPath);
 int  MU_MobilePollBannerDownload();
 
+// Google Play Billing, in MuMainNativeActivity.billingFromNative. One call for
+// every command so the bridge stays one method:
+//   "init"  - connect and load the WCoin products (call when the shop opens)
+//   "price" - arg = product id, out = the store's localised price, or ""
+//   "buy"   - arg = product id, opens the Play payment sheet
+//   "poll"  - out = next purchase result "status|productId|purchaseToken|orderId"
+//             (status: ok, pending, cancelled, error:<text>), or "" for none
+// False when there is no bridge (PC, iOS, or before the activity is up).
+bool MU_MobileBilling(const char* cmd, const char* arg, char* out, int outSize);
+
 // Battery percentage 0-100, or -1 if not yet known.
 int MU_MobileGetBatteryPercent();
 // Wifi RSSI in dBm (roughly -30 excellent .. -90 unusable), or INT32_MIN if

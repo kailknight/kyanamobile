@@ -65,12 +65,16 @@ public:
 	// the settings in it are locked for accounts that may not change them). On
 	// mobile this is the AutoPots button's potion settings, which only open for
 	// accounts that may change the threshold.
-	void OpenSettings();
+	// Which part of the menu to show. PC holds ~ for both; on mobile holding
+	// AutoPots shows only the potion part and holding Combo only the combo part.
+	enum { kMenuAll = 0, kMenuPotion = 1, kMenuCombo = 2 };
+	void OpenSettings(int section = kMenuAll);
 
 private:
 	void LoadSettings();
 	void SaveSettings();
 
+	int m_MenuSection;
 	bool m_CanConfigure;
 	int m_ServerThreshold;  // for players who may not change it
 	int m_OwnThreshold;     // the player's own choice, when they may
@@ -138,3 +142,12 @@ extern CAutoCombo gAutoCombo;
 
 // Every frame in the game scene: Ctrl pressed three times toggles PK mode.
 void UpdatePkModeHotkey();
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+// The attack wheel's combo (android_main.cpp), driven by the auto menu's Auto
+// Combo part on mobile.
+bool MU_MobileComboIsEnabled();
+void MU_MobileComboSetEnabled(bool on);
+int MU_MobileComboGetDelayMs(int step);
+void MU_MobileComboAddDelayMs(int step, int sign);
+#endif

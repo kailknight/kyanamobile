@@ -564,6 +564,24 @@ void MoveNotices()
 }
 
 float NoticeInverse = 0;
+
+// Where the first notice line goes. On a phone the chat log sits much higher
+// than PC's, so the fixed 300 put the golden notices on top of it: there the
+// whole block ends just above the log instead.
+static int GetNoticeStartY()
+{
+	int y = 300 + DisplayHeightExt;
+#if defined(__ANDROID__) || defined(MU_IOS)
+	if (g_pChatListBox != NULL && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATLOGWINDOW))
+	{
+		const int aboveChat = g_pChatListBox->GetWindowTopY() - MAX_NOTICE * 13 - 4;
+		if (aboveChat < y)
+			y = (aboveChat > 0) ? aboveChat : 0;
+	}
+#endif
+	return y;
+}
+
 #if(ShadowText)
 void RenderNotices()
 {
@@ -604,11 +622,11 @@ void RenderNotices()
 		
 		if (g_bUseChatListBox == TRUE)
 		{
-			g_pRenderText->RenderText(DisplayWinMid, (300+ DisplayHeightExt )+i*13, n->Text, 0, 0, RT3_WRITE_CENTER);
+			g_pRenderText->RenderText(DisplayWinMid, GetNoticeStartY()+i*13, n->Text, 0, 0, RT3_WRITE_CENTER);
 		}
 		else
 		{
-			g_pRenderText->RenderText(DisplayWinMid, (300+ DisplayHeightExt )+i*13, n->Text, 0, 0, RT3_WRITE_CENTER);
+			g_pRenderText->RenderText(DisplayWinMid, GetNoticeStartY()+i*13, n->Text, 0, 0, RT3_WRITE_CENTER);
 		}
 	}
 	g_pRenderText->SetShadowText(0);
@@ -652,11 +670,11 @@ void RenderNotices()
 
 		if (g_bUseChatListBox == TRUE)
 		{
-			g_pRenderText->RenderText(DisplayWinMid, (300 + DisplayHeightExt) + i * 13, n->Text, 0, 0, RT3_WRITE_CENTER);
+			g_pRenderText->RenderText(DisplayWinMid, GetNoticeStartY() + i * 13, n->Text, 0, 0, RT3_WRITE_CENTER);
 		}
 		else
 		{
-			g_pRenderText->RenderText(DisplayWinMid, (300 + DisplayHeightExt) + i * 13, n->Text, 0, 0, RT3_WRITE_CENTER);
+			g_pRenderText->RenderText(DisplayWinMid, GetNoticeStartY() + i * 13, n->Text, 0, 0, RT3_WRITE_CENTER);
 		}
 	}
 	NoticeInverse += FPS_ANIMATION_FACTOR;
@@ -1105,7 +1123,7 @@ void RenderBoolean(int x, int y, CHAT* c)
 			if (c->Guild && c->Guild[0])
 			{
 				::CreateGuildMark(c->Owner->GuildMarkIndex);
-				::RenderBitmap(BITMAP_GUILD, float(x - 20), float(y), 18, 18);// ��� ��ũ
+				::RenderBitmap(BITMAP_GUILD, float(x - 20), float((RenderPos.y - y - 18) / 2 + y), 18, 18); // left of the tag, level with the Gens mark on the right// ��� ��ũ
 			}
 #endif
 		}
@@ -1347,7 +1365,7 @@ void RenderBoolean(int x, int y, CHAT* c)
 			if (c->Guild && c->Guild[0])
 			{
 				::CreateGuildMark(c->Owner->GuildMarkIndex);
-				::RenderBitmap(BITMAP_GUILD, float(x - 20), float(y), 18, 18);// ��� ��ũ
+				::RenderBitmap(BITMAP_GUILD, float(x - 20), float((RenderPos.y - y - 18) / 2 + y), 18, 18); // left of the tag, level with the Gens mark on the right// ��� ��ũ
 			}
 		}
 #endif
@@ -9822,6 +9840,27 @@ void RenderHPBar()
 			SetBooleanPosition(ci);
 			ci->x = ScreenX-(ci->Width/2);
 			ci->y = ScreenY-ci->Height;
+
+			// The name tag sits at head+60 but RenderHPBar draws a player's HP
+			// and SD bars at head+100, so the bars landed on the name. When the
+			// owner has bars up, stack the tag above them instead.
+			if (ci->Owner != NULL && ci->Owner != Hero && gProtect.m_MainInfo.OnHealBar == 1
+				&& !gMapManager.InBloodCastle() && !gMapManager.InChaosCastle())
+			{
+				CHARACTER* owner = ci->Owner;
+				OBJECT* o = &owner->Object;
+				const bool bBarShown = o->Live && owner->InfoHealBar.Life >= 1 && o->Kind == owner->InfoHealBar.Type
+					&& (mShowHPBar || (SelectedCharacter >= 0 && &CharactersClient[SelectedCharacter] == owner));
+				if (bBarShown)
+				{
+					vec3_t BarPos;
+					int BarX, BarY;
+					Vector(o->Position[0], o->Position[1], o->Position[2] + o->BoundingBoxMax[2] + 100.f, BarPos);
+					Projection(BarPos, &BarX, &BarY);
+					if (ci->y > BarY - ci->Height - 2)
+						ci->y = BarY - ci->Height - 2;
+				}
+			}
 		}
 	}
 
