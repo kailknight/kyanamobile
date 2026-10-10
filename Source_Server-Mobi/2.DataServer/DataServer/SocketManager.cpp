@@ -713,6 +713,35 @@ DWORD WINAPI CSocketManager::ServerQueueThread(CSocketManager* lpSocketManager) 
 	return 0;
 }
 
+bool CSocketManager::PostInternal(int index,BYTE head,BYTE* lpMsg,DWORD size)
+{
+	if(size == 0 || size > sizeof(((QUEUE_INFO*)0)->buff))
+	{
+		return 0;
+	}
+
+	QUEUE_INFO* lpInfo = new QUEUE_INFO;
+
+	lpInfo->index = index;
+
+	lpInfo->head = head;
+
+	memcpy(lpInfo->buff,lpMsg,size);
+
+	lpInfo->size = size;
+
+	bool result = this->m_ServerQueue.AddToQueue(lpInfo);
+
+	delete lpInfo;
+
+	if(result != 0)
+	{
+		ReleaseSemaphore(this->m_ServerQueueSemaphore,1,0);
+	}
+
+	return result;
+}
+
 DWORD CSocketManager::GetQueueSize() // OK
 {
 	return this->m_ServerQueue.GetQueueSize();

@@ -14,6 +14,9 @@
 #include "MsgBoxIGSGiftStorageItemInfo.h"
 #include "MsgBoxIGSDeleteItemConfirm.h"
 #include "MapManager.h"
+#if defined(__ANDROID__)
+#include "Platform/MobilePlatform.h"
+#endif
 extern int DisplayWinCDepthBox;
 extern int DisplayWin;
 extern int DisplayHeight;
@@ -1621,7 +1624,13 @@ void CNewUIInGameShop::OpeningProcess()
 	g_InGameShopSystem->SelectCategory(0);
 	InitCategoryBtn();
 	g_InGameShopSystem->SetRequestEventPackge();
-} 
+#if defined(__ANDROID__)
+	// Connects Play Billing and re-reports any paid purchase the server has
+	// not finished yet (lost answer, server down), so it gets credited without
+	// the player having to open the recharge panel.
+	MU_MobileBilling("init", "", NULL, 0);
+#endif
+}
 
 void CNewUIInGameShop::ClosingProcess()
 {
@@ -2084,6 +2093,59 @@ namespace
 		if (pMsgBox != NULL)
 			pMsgBox->Initialize(title, text);
 	}
+
+#pragma pack(push, 1)
+	// Client -> GameServer, 0xD3/0xF0 (GameServer PlayBilling.h PMSG_PLAY_PURCHASE_RECV).
+	struct PMSG_PLAY_PURCHASE_SEND_CLIENT
+	{
+		PSWMSG_HEAD header;
+		char ProductId[32];
+		char Token[512];
+	};
+
+	// GameServer -> client, 0xD3/0xF1 (GameServer PlayBilling.h PMSG_PLAY_PURCHASE_SEND).
+	struct PMSG_PLAY_PURCHASE_RESULT_CLIENT
+	{
+		PSBMSG_HEAD header;
+		BYTE Result;
+		DWORD WCoinC;
+		char ProductId[32];
+	};
+#pragma pack(pop)
+}
+
+void CNewUIInGameShop::OnPlayPurchaseResult(const BYTE* lpMsg, int size)
+{
+	if (size < (int)sizeof(PMSG_PLAY_PURCHASE_RESULT_CLIENT))
+		return;
+
+	PMSG_PLAY_PURCHASE_RESULT_CLIENT msg;
+	memcpy(&msg, lpMsg, sizeof(msg));
+
+	char text[256];
+
+	switch (msg.Result)
+	{
+	case 0: // credited
+		sprintf(text, "+%u WCoin (C) added to your account. Thank you!", (unsigned)msg.WCoinC);
+		RechargeMessage("Recharge", text);
+		break;
+	case 1: // already credited earlier - Play re-reported a finished purchase
+		break;
+	case 2:
+	case 6:
+		RechargeMessage("Recharge", "Google Play did not confirm this purchase, so no WCoin was added.");
+		break;
+	case 3:
+		RechargeMessage("Recharge", "Your payment is still pending. The WCoin will be added once it clears.");
+		break;
+	case 5:
+		RechargeMessage("Recharge", "Recharge is not switched on for this server yet. If the WCoin is not added within 3 days, Google refunds the payment automatically.");
+		break;
+	default: // 4: Google or the server busy
+		RechargeMessage("Recharge", "Your payment is safe, but it could not be confirmed right now. It will be added the next time you open the shop.");
+		break;
+	}
 }
 
 void CNewUIInGameShop::OpenRecharge()
@@ -2166,15 +2228,27 @@ void CNewUIInGameShop::PollRechargeResults()
 		if (strcmp(status, "ok") == 0)
 		{
 			/*
-				Paid. Crediting is the server's job: it has to check the token
-				with Google before adding WCoin, and acknowledge the purchase
-				after. Until that step exists the purchase stays unacknowledged,
-				Play re-reports it on every shop open, and refunds it after
-				three days if it is never acknowledged.
+				Paid. Hand the token to the server, which checks it with Google,
+				adds the WCoin and finishes (consumes) the purchase - the answer
+				comes back as 0xD3/0xF1 (OnPlayPurchaseResult). If that never
+				happens the purchase stays unfinished and Play reports it again
+				on the next shop open, so this simply runs again.
 			*/
-			char text[256];
-			sprintf(text, "Payment received (order %.80s). Your WCoin will be added once the server confirms it.", orderId);
-			RechargeMessage("Recharge", text);
+			(void)orderId;
+			const char* productId = fields[1] ? fields[1] : "";
+			const char* token = fields[2] ? fields[2] : "";
+			if (productId[0] != '\0' && token[0] != '\0')
+			{
+				PMSG_PLAY_PURCHASE_SEND_CLIENT pMsg;
+				memset(&pMsg, 0, sizeof(pMsg));
+				strncpy(pMsg.ProductId, productId, sizeof(pMsg.ProductId) - 1);
+				strncpy(pMsg.Token, token, sizeof(pMsg.Token) - 1);
+				pMsg.header.set(0xD3, 0xF0, sizeof(pMsg));
+				DataSend((LPBYTE)&pMsg, sizeof(pMsg));
+
+				if (g_pChatListBox != NULL)
+					g_pChatListBox->AddText("", "Payment received - adding your WCoin (C)...", SEASON3B::TYPE_SYSTEM_MESSAGE);
+			}
 		}
 		else if (strcmp(status, "pending") == 0)
 		{

@@ -84,6 +84,9 @@ final class MuBilling {
     }
 
     private static void connect(Activity activity) {
+        // Every shop open hands unfinished purchases to the server again; the
+        // server dedupes by token, so a repeat costs nothing.
+        reported.clear();
         if (client != null && client.isReady()) {
             loadProducts();
             reportOwned();

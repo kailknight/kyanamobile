@@ -68,6 +68,7 @@
 #include "CustomVongQuay.h"
 #include "SlotMachine.h"
 #include "RedeemCode.h"
+#include "PlayBilling.h"
 #include "NewUIMyInventory.h"
 #include "CB_NewQuest.h"
 #include "CB_ActiveInvasions.h"
@@ -113,6 +114,9 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 				gRedeemCode.OnCommitReply((SDHP_REDEEM_CODE_COMMIT_RECV*)lpMsg);
 				break;
 #endif
+			case 0x37: //Google Play WCoin purchase - verify result
+				gPlayBilling.DGPurchaseRecv((SDHP_PLAY_PURCHASE_RECV*)lpMsg);
+				break;
 			case 0x34: //Slot machine reward box - load result
 #if(SLOTMACHINE)
 				gSlotMachine.DGSlotClaimRecv((SDHP_SLOTCLAIM_SEND*)lpMsg);

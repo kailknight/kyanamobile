@@ -104,6 +104,7 @@
 #include "ShopManager.h"
 #include "FakeOnline.h"
 #include "RedeemCode.h"
+#include "PlayBilling.h"
 
 namespace
 {
@@ -1551,6 +1552,9 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 				break;
 			case 0xE3: //Friend mail - claim a letter's items
 				if (size >= (int)sizeof(PMSG_FRIENDMAIL_MEMO_RECV)) { gFriendMail.CGClaimRequest((PMSG_FRIENDMAIL_MEMO_RECV*)lpMsg, aIndex); }
+				break;
+			case 0xF0: //Google Play WCoin purchase - relay to the DataServer for verification
+				gPlayBilling.CGPurchaseRecv((PMSG_PLAY_PURCHASE_RECV*)lpMsg, aIndex, size);
 				break;
 			case 0xE8: //Trade - offer coins (WCoinC / WCoinP / Goblin Points)
 				if (size >= (int)sizeof(PMSG_TRADE_COIN_RECV)) { gTrade.CGTradeCoinRecv((PMSG_TRADE_COIN_RECV*)lpMsg, aIndex); }

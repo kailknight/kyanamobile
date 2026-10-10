@@ -13,6 +13,7 @@
 #include "Util.h"
 #if(CB_AutoBanking)
 #include "CB_AutoNapGame.h"
+#include "PlayBilling.h"
 #endif
 HINSTANCE hInst;
 TCHAR szTitle[MAX_LOADSTRING];
@@ -110,6 +111,10 @@ int APIENTRY WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine
 				gAllowableIpList.Load("AllowableIpList.txt");
 
 				gBadSyntax.Load("BadSyntax.txt");
+
+				gPlayBilling.LoadConfig();
+
+				gPlayBilling.StartWorker();
 
 				SetTimer(hWnd,TIMER_1000,1000,0);
 

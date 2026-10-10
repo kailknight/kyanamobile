@@ -480,6 +480,7 @@
     <ClInclude Include="MiningSystem.h" />
     <ClInclude Include="MocNap.h" />
     <ClInclude Include="RedeemCode.h" />
+    <ClInclude Include="PlayBilling.h" />
     <ClInclude Include="FriendMail.h" />
     <ClInclude Include="FriendMailProtocol.h" />
     <ClInclude Include="Monster.h" />
@@ -768,6 +769,7 @@
     <ClCompile Include="MiningSystem.cpp" />
     <ClCompile Include="MocNap.cpp" />
     <ClCompile Include="RedeemCode.cpp" />
+    <ClCompile Include="PlayBilling.cpp" />
     <ClCompile Include="FriendMail.cpp" />
     <ClCompile Include="Monster.cpp" />
     <ClCompile Include="MonsterAI.cpp" />

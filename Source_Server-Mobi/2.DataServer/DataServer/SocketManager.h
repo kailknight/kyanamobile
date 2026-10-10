@@ -75,6 +75,10 @@ public:
 	static DWORD WINAPI ServerWorkerThread(CSocketManager* lpSocketManager);
 	static DWORD WINAPI ServerQueueThread(CSocketManager* lpSocketManager);
 	DWORD GetQueueSize();
+	// Queues a message as if it had arrived from that GameServer connection, so
+	// a worker thread's result is handled on ServerQueueThread like any other
+	// packet (PlayBilling).
+	bool PostInternal(int index,BYTE head,BYTE* lpMsg,DWORD size);
 private:
 	SOCKET m_listen;
 	HANDLE m_CompletionPort;

@@ -490,6 +490,11 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 		case 0xD3:
 			switch (((lpMsg[0] == 0xC1) ? lpMsg[3] : lpMsg[4]))
 			{
+			case 0xF1: //Google Play WCoin purchase - server's answer
+#ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
+				if (g_pInGameShop) g_pInGameShop->OnPlayPurchaseResult(lpMsg, size);
+#endif
+				break;
 #if(REDEEMCODE)
 			case 0xA1: //Redeem code - preview result
 			{

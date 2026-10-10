@@ -40,6 +40,7 @@
 #endif
 #include "NewUIMyInventory.h"
 #include "RedeemCode.h"
+#include "PlayBilling.h"
 #include "FriendMail.h"
 #include "SpinClaim.h"
 #include "SlotClaim.h"
@@ -939,6 +940,12 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x35: //==Slot machine reward box - save
 				gSlotClaim.GDSlotClaimSaveRecv((SDHP_SLOTCLAIM_SAVE_RECV*)lpMsg);
+				break;
+			case 0x37: //==Google Play WCoin purchase - verify request
+				gPlayBilling.OnPurchaseRequest((SDHP_PLAY_PURCHASE_RECV*)lpMsg, index);
+				break;
+			case 0x38: //==Google Play WCoin purchase - verified (posted by the PlayBilling worker)
+				gPlayBilling.OnPurchaseVerified((SDHP_PLAY_PURCHASE_VERIFIED*)lpMsg, index);
 				break;
 			case 0x36: //==Master skill tree recommendations - request
 				gMasterSkillTree.GDMasterRecommendRecv((SDHP_MASTER_RECOMMEND_RECV*)lpMsg, index);

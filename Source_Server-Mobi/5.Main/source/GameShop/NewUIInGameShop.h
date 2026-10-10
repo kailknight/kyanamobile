@@ -424,6 +424,10 @@ namespace SEASON3B
 	public:
 		void SetBannerTargetPackage(int iPackageSeq) { m_iBannerTargetPackage = iPackageSeq; }
 
+		// 0xD3/0xF1: the server's answer to a Google Play purchase this phone
+		// handed over (GameServer/DataServer PlayBilling).
+		void OnPlayPurchaseResult(const BYTE* lpMsg, int size);
+
 	private:
 		bool UpdateBanner();
 
