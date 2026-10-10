@@ -338,6 +338,17 @@ int CItemBag::GetItemSetOption(ITEM_BAG_INFO* lpInfo) // OK
 		return 0;
 	}
 
+	// Exact form: tier bits (1 = tier 1, 2 = tier 2) + stat bits (4 = +5, 8 = +10),
+	// e.g. 5/6 = tier 1/2 +5, 9/10 = tier 1/2 +10. Items in two sets (Ring of Earth:
+	// Ceto/Vicious) otherwise roll either. Falls back to random if the item lacks that tier.
+	int ExactTier = lpInfo->SetOption & 3;
+	int ExactStat = lpInfo->SetOption & 12;
+
+	if((ExactTier == 1 || ExactTier == 2) && (ExactStat == 4 || ExactStat == 8) && gSetItemType.GetSetItemOptionIndex(lpInfo->Index,ExactTier-1) > 0)
+	{
+		return ExactTier | ExactStat;
+	}
+
 	int SetOption = 0;
 
 	for(int n=0;n < MAX_SET_ITEM_OPTION_INDEX;n++)
