@@ -63,6 +63,9 @@ void  AndroidGDI_Shutdown();
 HBITMAP AndroidCreateDIBSection(const void* bmiPtr, void** ppvBits);
 HDC     AndroidCreateCompatibleDC(HDC src);
 HFONT   AndroidCreateFont(int height, int weight);   // weight: FW_NORMAL=400, FW_SEMIBOLD=600, FW_BOLD=700
+// Changes an existing font's size in place, for the Options window's text size.
+void    AndroidResizeFont(HFONT font, int height);
+void    AndroidGDI_SetDefaultFontSize(int defaultFontSizePx);
 HGDIOBJ AndroidSelectObject(HDC hdc, HGDIOBJ obj);
 void    AndroidSelectBitmap(HDC hdc, HBITMAP bmp);
 void    AndroidSelectFont(HDC hdc, HFONT font);

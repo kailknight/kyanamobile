@@ -6838,11 +6838,54 @@ int AcquireAndroidPkPlayerTarget(bool limitToAcquireRange)
 // the duel is over.
 constexpr DWORD kStaleDuelEnemyGoneMs = 10000;
 
+// The opponent of the duel last cleared below, so the duel can be taken back up
+// if it was not over after all (ResumeAndroidStaleDuel).
+static int s_staleDuelEnemyKey = -1;
+static char s_staleDuelEnemyID[MAX_ID_SIZE + 1] = {};
+
+// From ReceiveDuelScore, before it matches the fighters. The server only sends
+// the hero a duel score while the duel is on, so one naming the hero and the
+// opponent of a duel cleared here as stale means that duel never ended - a
+// field duel where the opponent respawned in town and took a while to come
+// back. Without this, every kill after that showed no score.
+void ResumeAndroidStaleDuel(WORD index1, WORD index2)
+{
+    if (g_DuelMgr.IsDuelEnabled() || Hero == nullptr || s_staleDuelEnemyKey < 0)
+    {
+        return;
+    }
+
+    const int heroKey = Hero->Key;
+    const bool match = (index1 == heroKey && index2 == s_staleDuelEnemyKey)
+        || (index2 == heroKey && index1 == s_staleDuelEnemyKey);
+    if (!match)
+    {
+        return;
+    }
+
+    LOGI("Duel: score for the duel cleared as stale, resuming it");
+    g_DuelMgr.EnableDuel(TRUE);
+    g_DuelMgr.SetHeroAsDuelPlayer(DUEL_HERO);
+    g_DuelMgr.SetDuelPlayer(DUEL_ENEMY, s_staleDuelEnemyKey, s_staleDuelEnemyID);
+}
+
 void UpdateAndroidStaleDuelState()
 {
     static DWORD s_enemyGoneSince = 0;
 
     if (!g_DuelMgr.IsDuelEnabled() || Hero == nullptr || CharactersClient == nullptr)
+    {
+        s_enemyGoneSince = 0;
+        return;
+    }
+
+    // Not in a duel room. The server ends every duel there itself - at 10 kills,
+    // when the room's 20 minutes run out, or when a fighter leaves the map - and
+    // moves both fighters out when it does. Meanwhile the opponent is often out
+    // of sight for longer than this allows, dead and waiting to respawn or across
+    // the room, and clearing the duel then threw away every score that followed:
+    // the score stopped showing in long duels.
+    if (gMapManager.WorldActive == WD_64DUELARENA)
     {
         s_enemyGoneSince = 0;
         return;
@@ -6872,6 +6915,9 @@ void UpdateAndroidStaleDuelState()
 
     s_enemyGoneSince = 0;
     LOGI("Duel: opponent gone for %u ms, clearing the duel state", static_cast<unsigned>(kStaleDuelEnemyGoneMs));
+    s_staleDuelEnemyKey = g_DuelMgr.GetDuelPlayerIndex(DUEL_ENEMY);
+    strncpy(s_staleDuelEnemyID, g_DuelMgr.GetDuelPlayerID(DUEL_ENEMY), MAX_ID_SIZE);
+    s_staleDuelEnemyID[MAX_ID_SIZE] = '\0';
     g_DuelMgr.EnableDuel(FALSE);
     g_DuelMgr.EnablePetDuel(FALSE);
     if (g_pNewUISystem != nullptr)
@@ -18071,6 +18117,15 @@ bool IsPointInAndroidChatLogBody(float uiX, float uiY)
     return !(uiX < left || uiX > right || uiY < top || uiY > kChatLogBottomY);
 }
 
+// How wide a chat line may be, for the log's word wrap (NewUIChatLogWindow.cpp
+// SeparateText). The panel above starts 4 left of kChatLogX and the log draws
+// its text 4 right of it (WND_LEFT_RIGHT_EDGE), so 8 goes on the left; 4 more
+// keeps the last glyph off the panel's right edge.
+float ComputeAndroidChatLogTextWidth()
+{
+    return ((kChatTabW + kChatTabGap) * kChatTabCount) + 8.0f - 12.0f;
+}
+
 // ---- Chat log drag-to-scroll ---------------------------------------------
 // A press in the log body is HELD here rather than acted on: a vertical drag
 // scrolls the history, and only a release that never became a drag counts as the
@@ -20721,6 +20776,18 @@ void AndroidResetCombatTargetsForDuel()
     SelectedCharacter = -1;
 }
 
+// ReceiveDuelScore (WSclient.cpp) and the chat log's word wrap
+// (NewUIChatLogWindow.cpp), for the same anonymous-namespace reason.
+void AndroidResumeStaleDuel(WORD index1, WORD index2)
+{
+    ResumeAndroidStaleDuel(index1, index2);
+}
+
+float GetAndroidChatLogTextWidth()
+{
+    return ComputeAndroidChatLogTextWidth();
+}
+
 // Called from the scene phase right after MoveHero. It has to run there rather
 // than from the touch handler: turning the aim point into a terrain tile uses
 // the same camera matrices and terrain pick that MoveHero relies on, and those
@@ -22288,17 +22355,71 @@ static void ComputeAndroidRenderSize(int screenW, int screenH, int& renderW, int
 // whatever the aspect, and reproduces the current font on every surface that
 // already lays out correctly (837 -> 14, 810 -> 14, 900 -> 15), so this only
 // changes the short surfaces that are broken today (720p native -> 12).
+//
+// On top of that sits the player's text size from the Options window, as a
+// percent of the tuned size. An iPhone starts at 120: it shows the whole
+// 640x480 layout on a screen about 2.5 inches tall, where the tuned size is
+// about 1 mm tall (font 14 on an iPhone 12) and hard to read. The top step stays
+// clear of the +35% at which the login labels overflowed their controls.
+constexpr int kAndroidTextSizeMinPercent = 80;
+constexpr int kAndroidTextSizeMaxPercent = 130;
+constexpr int kAndroidTextSizeStepPercent = 10;
+static const char* const kAndroidTextSizeKey = "Option.TextSize";
+
+static int GetAndroidDefaultTextSizePercent()
+{
+#if defined(MU_IOS) && defined(MU_TOUCH_UI)
+    if (MU_IosIsPhone())
+    {
+        return 120;
+    }
+#endif
+    return 100;
+}
+
+int GetAndroidTextSizePercent()
+{
+    const int percent = MobileSettingsGetInt(kAndroidTextSizeKey, GetAndroidDefaultTextSizePercent());
+    return std::clamp(percent, kAndroidTextSizeMinPercent, kAndroidTextSizeMaxPercent);
+}
+
 static int ComputeAndroidUiFontSize()
 {
     constexpr float kTunedFontPerRate = 14.0f / 1.744f;
 
     const float rate = std::min(g_fScreenRate_x, g_fScreenRate_y);
+    const float textScale = static_cast<float>(GetAndroidTextSizePercent()) / 100.0f;
 
-    int fontSize = static_cast<int>(std::lround(kTunedFontPerRate * rate));
+    int fontSize = static_cast<int>(std::lround(kTunedFontPerRate * rate * textScale));
 
     if (fontSize < 10) fontSize = 10;
 
     return fontSize;
+}
+
+// The Options window's text size row: one step bigger, wrapping round to the
+// smallest. Applied at once by resizing the existing font handles in place,
+// since copies of them are held all over the UI. Chat lines already wrapped
+// keep their old breaks; new ones wrap at the new size.
+void CycleAndroidTextSize()
+{
+    int next = GetAndroidTextSizePercent() + kAndroidTextSizeStepPercent;
+    if (next > kAndroidTextSizeMaxPercent)
+    {
+        next = kAndroidTextSizeMinPercent;
+    }
+    MobileSettingsSetInt(kAndroidTextSizeKey, next);
+
+    const int fontSize = ComputeAndroidUiFontSize();
+    AndroidGDI_SetDefaultFontSize(fontSize);
+    AndroidResizeFont(g_hFont, fontSize);
+    AndroidResizeFont(g_hFontBold, fontSize);
+    AndroidResizeFont(g_hFontBig, fontSize * 2);
+    FontHeight = fontSize + 1;
+
+    extern void MU_ResetTextRenderCache();   // UIControls.cpp
+    MU_ResetTextRenderCache();
+    LOGI("Text size %d%%: font size=%d", next, fontSize);
 }
 
 // TEMP profiling: worst frame in a rolling window, with its bucket breakdown
@@ -25170,12 +25291,17 @@ static void IosVoiceHeartbeat(uint32_t frameMs)
 }
 #endif
 
+#if defined(MU_IOS)
+void MU_IosScreenshotPoll(int width, int height);   // ios/src/IosScreenshot.cpp
+#endif
+
 static void OnAndroidSappFrame()
 {
 #if defined(MU_IOS)
     const uint32_t frameStart = MU_MobileGetTicks();
     RunAndroidGameFrame();
     IosVoiceHeartbeat(MU_MobileGetTicks() - frameStart);
+    MU_IosScreenshotPoll(static_cast<int>(WindowWidth), static_cast<int>(WindowHeight));
 #else
     RunAndroidGameFrame();
 #endif

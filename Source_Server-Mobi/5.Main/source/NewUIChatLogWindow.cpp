@@ -15,6 +15,11 @@ extern int DisplayWinMid;
 extern int DisplayHeightExt;
 extern int DisplayWinExt;
 extern int DisplayWinReal;
+// At file scope on purpose. Declared inside a SEASON3B member function, clang
+// binds the name to SEASON3B::g_fScreenRate_x - a 1.0 stand-in in
+// android_link_stubs.cpp - so every width measured here came out 2-3x too big
+// on the phone, and chat lines broke after about 22 characters.
+extern float g_fScreenRate_x;
 using namespace SEASON3B;
 
 SEASON3B::CNewUIChatLogWindow::CNewUIChatLogWindow()
@@ -442,104 +447,23 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 #endif
 	};
 
+	// One wrapped line into this type's list, All, System (see above) and, for
+	// an error routed to another tab, that tab as well. Only the first line of a
+	// message carries its ID; the rest show text alone.
 	int nScrollLines = 0;
-	if (strText.size() >= 20)
+	auto pushLine = [&](const type_string& id, const type_string& text)
 	{
-		type_string	strText1, strText2;
-		SeparateText(strID, strText, strText1, strText2);
-		if (!strText1.empty())
+		if (GetNumberOfLines(MsgType) >= MAX_NUMBER_OF_LINES)
 		{
-			const auto pMsgText = new CMessageText;
-			if (!pMsgText->Create(strID, strText1, MsgType, MemoryData))
-				delete pMsgText;
-			else
-			{
-				pvecMsgs->push_back(pMsgText);
-			}
-
-			const auto pAllMsgText = new CMessageText;
-			if (!pAllMsgText->Create(strID, strText1, MsgType, MemoryData))
-			{
-				delete pAllMsgText;
-			}
-			else
-			{
-				m_vecAllMsgs.push_back(pAllMsgText);
-			}
-
-			mirrorToSystem(strID, strText1);
-
-			if ((MsgType == TYPE_ERROR_MESSAGE) && (ErrMsgType != TYPE_ERROR_MESSAGE && ErrMsgType != TYPE_ALL_MESSAGE))
-			{
-				type_vector_msgs* pErrvecMsgs = GetMsgs(ErrMsgType);
-				if (pErrvecMsgs == nullptr)
-				{
-					assert(!"Error Chat");
-					return;
-				}
-
-				const auto pErrMsgText = new CMessageText;
-				if (!pErrMsgText->Create(strID, strText1, MsgType, MemoryData))
-					delete pErrMsgText;
-				else
-				{
-					pErrvecMsgs->push_back(pErrMsgText);
-				}
-			}
-
-			if (GetCurrentMsgType() == TYPE_ALL_MESSAGE || GetCurrentMsgType() == MsgType)
-			{
-				nScrollLines++;
-			}
+			RemoveFrontLine(MsgType);
 		}
-		if (!strText2.empty())
+		if (GetNumberOfLines(TYPE_ALL_MESSAGE) >= MAX_NUMBER_OF_LINES)
 		{
-			const auto pMsgText = new CMessageText;
-			if (!pMsgText->Create("", strText2, MsgType, MemoryData))
-				delete pMsgText;
-			else
-			{
-				pvecMsgs->push_back(pMsgText);
-			}
-
-			const auto pAllMsgText = new CMessageText;
-			if (!pAllMsgText->Create("", strText2, MsgType, MemoryData))
-				delete pAllMsgText;
-			else
-			{
-				m_vecAllMsgs.push_back(pAllMsgText);
-			}
-
-			mirrorToSystem("", strText2);
-
-			if ((MsgType == TYPE_ERROR_MESSAGE) && (ErrMsgType != TYPE_ERROR_MESSAGE && ErrMsgType != TYPE_ALL_MESSAGE))
-			{
-				type_vector_msgs* pErrvecMsgs = GetMsgs(ErrMsgType);
-				if (pErrvecMsgs == nullptr)
-				{
-					assert(!"Error chat 2");
-					return;
-				}
-
-				const auto pErrMsgText = new CMessageText;
-				if (!pErrMsgText->Create("", strText2, MsgType, MemoryData))
-					delete pErrMsgText;
-				else
-				{
-					pErrvecMsgs->push_back(pErrMsgText);
-				}
-			}
-
-			if (GetCurrentMsgType() == TYPE_ALL_MESSAGE || GetCurrentMsgType() == MsgType)
-			{
-				nScrollLines++;
-			}
+			RemoveFrontLine(TYPE_ALL_MESSAGE);
 		}
-	}
-	else
-	{
+
 		const auto pMsgText = new CMessageText;
-		if (!pMsgText->Create(strID, strText, MsgType, MemoryData))
+		if (!pMsgText->Create(id, text, MsgType, MemoryData))
 			delete pMsgText;
 		else
 		{
@@ -547,27 +471,26 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 		}
 
 		const auto pAllMsgText = new CMessageText;
-		if (!pAllMsgText->Create(strID, strText, MsgType, MemoryData))
+		if (!pAllMsgText->Create(id, text, MsgType, MemoryData))
 			delete pAllMsgText;
 		else
 		{
 			m_vecAllMsgs.push_back(pAllMsgText);
 		}
 
-		mirrorToSystem(strID, strText);
+		mirrorToSystem(id, text);
 
-		if ((MsgType == TYPE_ERROR_MESSAGE)
-			&& (ErrMsgType != TYPE_ERROR_MESSAGE && ErrMsgType != TYPE_ALL_MESSAGE))
+		if ((MsgType == TYPE_ERROR_MESSAGE) && (ErrMsgType != TYPE_ERROR_MESSAGE && ErrMsgType != TYPE_ALL_MESSAGE))
 		{
 			type_vector_msgs* pErrvecMsgs = GetMsgs(ErrMsgType);
 			if (pErrvecMsgs == nullptr)
 			{
-				assert(!"Error chat 3");
+				assert(!"Error Chat");
 				return;
 			}
 
 			const auto pErrMsgText = new CMessageText;
-			if (!pErrMsgText->Create(strID, strText, MsgType, MemoryData))
+			if (!pErrMsgText->Create(id, text, MsgType, MemoryData))
 				delete pErrMsgText;
 			else
 			{
@@ -579,6 +502,35 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 		{
 			nScrollLines++;
 		}
+	};
+
+	// As many lines as the text needs, each as full as the log is wide. Measured
+	// in the font RenderMessages draws this type in. The cap only guards against
+	// a runaway; a chat line is far shorter.
+	const HFONT hFont = (MsgType == TYPE_GM_MESSAGE) ? g_hFontBold : g_hFont;
+	const int kMaxWrappedLines = 8;
+	type_string strLineID = strID;
+	type_string strRest = strText;
+	for (int iLine = 0; iLine < kMaxWrappedLines; ++iLine)
+	{
+		type_string strLine, strNext;
+		if (iLine == kMaxWrappedLines - 1)
+		{
+			strLine = strRest;
+		}
+		else
+		{
+			SeparateText(strLineID, strRest, strLine, strNext, hFont);
+		}
+
+		pushLine(strLineID, strLine);
+
+		if (strNext.empty())
+		{
+			break;
+		}
+		strLineID.clear();
+		strRest = strNext;
 	}
 
 	pvecMsgs = GetMsgs(GetCurrentMsgType());
@@ -797,8 +749,6 @@ void SEASON3B::CNewUIChatLogWindow::AddItemPost(ITEM* Data)
 }
 bool SEASON3B::CNewUIChatLogWindow::UpdateMouseEvent()
 {
-	extern float g_fScreenRate_x;
-
 	if (m_EventState == EVENT_NONE && false == MouseLButtonPush &&
 		SEASON3B::CheckMouseIn(m_WndPos.x, m_WndPos.y - m_WndSize.cy, m_WndSize.cx, m_WndSize.cy))
 	{
@@ -1081,34 +1031,91 @@ bool SEASON3B::CNewUIChatLogWindow::CheckChatRedundancy(const type_string& strTe
 	return false;
 }
 
-void SEASON3B::CNewUIChatLogWindow::SeparateText(IN const type_string& strID, IN const type_string& strText, OUT type_string& strText1, OUT type_string& strText2)
+#if defined(MU_TOUCH_UI)
+float GetAndroidChatLogTextWidth();   // android_main.cpp
+#endif
+
+// Splits off as much of strText as fits on one log line after "<id> : ", at the
+// last space that fits, or mid-word when not even the first word does. strText2
+// is the rest, without the space it broke at; empty when it all fits.
+//
+// Measured in hFont, the font RenderMessages draws the line in, rather than
+// whatever font the shared text DC was last left on.
+void SEASON3B::CNewUIChatLogWindow::SeparateText(IN const type_string& strID, IN const type_string& strText, OUT type_string& strText1, OUT type_string& strText2, HFONT hFont)
 {
-	extern float g_fScreenRate_x;
+	strText1.clear();
+	strText2.clear();
 
-	SIZE TextSize;
-	type_string strIDPart = strID + " : ";
-	std::wstring wstrUTF16 = L"";
+	// The phone's log is the tab panel along the bottom, narrower than the PC
+	// window CLIENT_WIDTH describes.
+#if defined(MU_TOUCH_UI)
+	float fMaxWidth = GetAndroidChatLogTextWidth();
+#else
+	float fMaxWidth = (float)CLIENT_WIDTH;
+#endif
 
-	g_pMultiLanguage->ConvertCharToWideStr(wstrUTF16, strIDPart.c_str());
-	g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), wstrUTF16.c_str(), wstrUTF16.length(), &TextSize);
-	size_t MaxFirstLineWidth = CLIENT_WIDTH - (size_t)(TextSize.cx / g_fScreenRate_x);
+	const HFONT hPrevFont = g_pRenderText->GetFont();
+	g_pRenderText->SetFont(hFont);
+	HDC hDC = g_pRenderText->GetFontDC();
 
-	g_pMultiLanguage->ConvertCharToWideStr(wstrUTF16, strText.c_str());
-	g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), wstrUTF16.c_str(), wstrUTF16.length(), &TextSize);
-
-	BOOL bSpaceExist = (wstrUTF16.find_last_of(L" ") != std::wstring::npos) ? TRUE : FALSE;
-	int iLocToken = wstrUTF16.length();
-
-	while (((size_t)(TextSize.cx / g_fScreenRate_x) > MaxFirstLineWidth) && (iLocToken > -1))
+	auto widthOf = [&](const std::wstring& wstr, size_t len) -> float
 	{
-		iLocToken = (bSpaceExist) ? wstrUTF16.find_last_of(L" ", iLocToken - 1) : iLocToken - 1;
+		SIZE TextSize = { 0, 0 };
+		if (len > 0)
+		{
+			g_pMultiLanguage->_GetTextExtentPoint32(hDC, wstr.c_str(), (int)len, &TextSize);
+		}
+		return (g_fScreenRate_x > 0.f) ? (TextSize.cx / g_fScreenRate_x) : 0.f;
+	};
 
-		g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), (wstrUTF16.substr(0, iLocToken)).c_str(), iLocToken, &TextSize);
+	if (!strID.empty())
+	{
+		std::wstring wstrIDPart;
+		g_pMultiLanguage->ConvertCharToWideStr(wstrIDPart, (strID + " : ").c_str());
+		fMaxWidth -= widthOf(wstrIDPart, wstrIDPart.length());
 	}
 
-	g_pMultiLanguage->ConvertWideCharToStr(strText1, (wstrUTF16.substr(0, iLocToken)).c_str(), CP_UTF8);
-	g_pMultiLanguage->ConvertWideCharToStr(strText2, (wstrUTF16.substr(iLocToken, wstrUTF16.length() - iLocToken)).c_str(), CP_UTF8);
+	std::wstring wstrUTF16;
+	g_pMultiLanguage->ConvertCharToWideStr(wstrUTF16, strText.c_str());
+
+	size_t iCut = wstrUTF16.length();
+	if (iCut > 1 && widthOf(wstrUTF16, iCut) > fMaxWidth)
+	{
+		// The longest prefix that fits, at least one character so the caller's
+		// loop always moves on. Width only grows with length, so halving works.
+		size_t lo = 1, hi = wstrUTF16.length() - 1;
+		while (lo < hi)
+		{
+			const size_t mid = (lo + hi + 1) / 2;
+			if (widthOf(wstrUTF16, mid) <= fMaxWidth)
+				lo = mid;
+			else
+				hi = mid - 1;
+		}
+
+		// Back to the last space inside it; the space itself goes.
+		const size_t iSpace = wstrUTF16.find_last_of(L' ', lo);
+		iCut = (iSpace != std::wstring::npos && iSpace > 0) ? iSpace : lo;
+	}
+
+	size_t iNext = iCut;
+	while (iNext < wstrUTF16.length() && wstrUTF16[iNext] == L' ')
+	{
+		++iNext;
+	}
+
+	g_pMultiLanguage->ConvertWideCharToStr(strText1, wstrUTF16.substr(0, iCut).c_str(), CP_UTF8);
+	if (iNext < wstrUTF16.length())
+	{
+		g_pMultiLanguage->ConvertWideCharToStr(strText2, wstrUTF16.substr(iNext).c_str(), CP_UTF8);
+	}
+
+	if (hPrevFont != NULL)
+	{
+		g_pRenderText->SetFont(hPrevFont);
+	}
 }
+
 bool SEASON3B::CNewUIChatLogWindow::CheckFilterText(const type_string& strTestText)
 {
 	auto vi_filters = m_vecFilters.begin();
@@ -1231,8 +1238,6 @@ SEASON3B::MESSAGE_TYPE SEASON3B::CNewUIChatLogWindow::GetCurrentMsgType() const
 
 bool SEASON3B::CNewUIChatLogWindow::GetAndroidChatMessageIDAt(float uiX, float uiY, std::string& outID)
 {
-	extern float g_fScreenRate_x;
-
 	outID.clear();
 
 	type_vector_msgs* pvecMsgs = GetMsgs(GetCurrentMsgType());

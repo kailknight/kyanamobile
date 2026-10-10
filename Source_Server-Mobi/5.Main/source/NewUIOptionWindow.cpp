@@ -46,6 +46,11 @@ static const char* const kMobileGraphicsKeys[SEASON3B::CNewUIOptionWindow::eEndO
 	"Graphics.ExcellentEffect",
 	"Graphics.BMDZen",
 };
+
+// Text size, android_main.cpp. Declared here at file scope: inside the member
+// functions below they would bind to SEASON3B:: names that do not exist.
+int GetAndroidTextSizePercent();
+void CycleAndroidTextSize();
 #endif
 
 //////////////////////////////////////////////////////////////////////
@@ -518,6 +523,31 @@ void SEASON3B::CNewUIOptionWindow::RenderCustomFrame()
 		// instead. The left panel has a genuinely empty strip below the render
 		// level bar, which is where they belong.
 	}
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Text size. Each tap goes one step bigger and wraps round to the smallest,
+	// the same way the microphone boost row cycles; it applies at once. The last
+	// row here: with voice on it ends at y+269 of the window's 275.
+	y = y + 17;
+	{
+		const float rowX = x + 15.f;
+		const float rowY = y + 15.f;
+
+		TextDraw(g_hFont, (int)rowX, (int)rowY, 0xFFCC00C8, 0x0, 0, 0, 1,
+			"Text size: %d%%   (tap to change)", GetAndroidTextSizePercent());
+
+		const bool bClickReady =
+			((GetKeyState(VK_LBUTTON) & 0x8000) != 0)
+			&& (GetTickCount() - gInterface.Data[eTIME].EventTick > 500);
+
+		if (bClickReady && SEASON3B::CheckMouseIn(rowX, rowY, 160, 15) == 1)
+		{
+			gInterface.Data[eTIME].EventTick = GetTickCount();
+			PlayBuffer(SOUND_CLICK01);
+			CycleAndroidTextSize();
+		}
+	}
+#endif
 }
 
 // Microphone settings, in the empty strip at the bottom of the left panel.

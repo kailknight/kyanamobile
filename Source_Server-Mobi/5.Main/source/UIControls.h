@@ -727,6 +727,7 @@ public:
 	virtual void SetBgColor(DWORD dwColor) = 0;
 	virtual void SetShadowText(int Type) = 0;
 	virtual void SetFont(HFONT hFont) = 0;
+	virtual HFONT GetFont() const = 0;
 
 	virtual void RenderText(int iPos_x, int iPos_y, const char* pszText, int iBoxWidth = 0, int iBoxHeight = 0, 
 		int iSort = RT3_SORT_LEFT, OUT SIZE* lpTextSize = NULL) = 0;
@@ -768,6 +769,7 @@ public:
 	void SetShadowText(int Type);
 
 	void SetFont(HFONT hFont);
+	HFONT GetFont() const;
 
 	void RenderText(int iPos_x, int iPos_y, const unicode::t_char* pszText, int iBoxWidth = 0, int iBoxHeight = 0, 
 		int iSort = RT3_SORT_LEFT, OUT SIZE* lpTextSize = NULL);
@@ -806,6 +808,7 @@ public:
 	void SetShadowText(int Type);
 
 	void SetFont(HFONT hFont);
+	HFONT GetFont() const;
 
 	void RenderText(int iPos_x, int iPos_y, const char* pszText, int iBoxWidth = 0, int iBoxHeight = 0, 
 		int iSort = RT3_SORT_LEFT, OUT SIZE* lpTextSize = NULL);

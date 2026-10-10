@@ -2706,6 +2706,13 @@ void CUIRenderText::SetFont(HFONT hFont)
 		m_pRenderText->SetFont(hFont);
 }
 
+HFONT CUIRenderText::GetFont() const
+{
+	if(m_pRenderText)
+		return m_pRenderText->GetFont();
+	return NULL;
+}
+
 #if defined(__ANDROID__) || defined(MU_IOS)
 // TEMP profiling: every RenderText call re-rasterises the string with FreeType,
 // runs two scalar per-pixel copy loops over it and re-uploads it, every frame.
@@ -3088,6 +3095,14 @@ namespace TextCache
 			s_extents.clear();
 	}
 }
+
+// For a font that changed size in place (AndroidResizeFont). The cache is keyed
+// by the font handle, which stays the same, so it would go on drawing and
+// measuring every cached string at the old size.
+void MU_ResetTextRenderCache()
+{
+	TextCache::Reset();
+}
 #endif
 
 void CUIRenderText::RenderText(int iPos_x, int iPos_y, const char* pszText, int iBoxWidth /* = 0 */, int iBoxHeight /* = 0 */, int iSort /* = RT3_SORT_LEFT */, OUT SIZE* lpTextSize /* = NULL */)
@@ -3178,6 +3193,7 @@ void CUIRenderTextOriginal::SetShadowText(int Type) { m_TypeShadow = Type; }
 void CUIRenderTextOriginal::SetBgColor(DWORD dwColor) { m_dwBackColor = dwColor; }
 
 void CUIRenderTextOriginal::SetFont(HFONT hFont) { SelectObject(m_hFontDC, hFont); m_hCurFont = hFont; }
+HFONT CUIRenderTextOriginal::GetFont() const { return m_hCurFont; }
 
 void CUIRenderTextOriginal::WriteText(int iOffset, int iWidth, int iHeight)
 {

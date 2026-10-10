@@ -9127,6 +9127,14 @@ void ReceiveDuelScore(BYTE* ReceiveBuffer)
 {
 	LPPMSG_DUEL_SCORE_BROADCAST Data = (LPPMSG_DUEL_SCORE_BROADCAST)ReceiveBuffer;
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// The duel may have been cleared on this side as stale; take it back up.
+	{
+		extern void AndroidResumeStaleDuel(WORD index1, WORD index2);
+		AndroidResumeStaleDuel(MAKEWORD(Data->bIndexL1, Data->bIndexH1), MAKEWORD(Data->bIndexL2, Data->bIndexH2));
+	}
+#endif
+
 	if(g_DuelMgr.IsDuelPlayer(MAKEWORD(Data->bIndexL1, Data->bIndexH1), DUEL_HERO))
 	{
 		g_DuelMgr.SetScore(DUEL_HERO, Data->btDuelScore1);

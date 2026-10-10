@@ -279,6 +279,24 @@ HFONT AndroidCreateFont(int height, int weight) {
     return f;
 }
 
+// Points an existing font at another size. The game copies g_hFont and friends
+// into windows, DCs and caches all over, so changing the handle in place is
+// what lets a new text size reach all of them. Left as it was if no font opens.
+void AndroidResizeFont(HFONT font, int height) {
+    if (!font || height <= 0) return;
+    TTF_Font* f = GetCachedFont(height, font->bold);
+    if (!f) return;
+    font->ttfFont = f;
+    font->size    = height;
+}
+
+void AndroidGDI_SetDefaultFontSize(int defaultFontSizePx) {
+    if (defaultFontSizePx <= 0) return;
+    s_DefaultFontSize = defaultFontSizePx;
+    GetCachedFont(defaultFontSizePx, false);
+    GetCachedFont(defaultFontSizePx, true);
+}
+
 HGDIOBJ AndroidSelectObject(HDC hdc, HGDIOBJ obj) {
     if (!hdc || !obj) return nullptr;
     // Try to detect type: check if it's an AndroidBitmap or AndroidFont by guessing

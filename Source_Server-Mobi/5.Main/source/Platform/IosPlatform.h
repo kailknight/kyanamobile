@@ -19,6 +19,10 @@ void MU_IosSetIdleTimerDisabled(bool disabled);
 // fractions of its width/height, so they apply to any framebuffer scale.
 void MU_IosGetSafeAreaFractions(float* left, float* top, float* right, float* bottom);
 
+// True on an iPhone (iPod), false on an iPad and on the Mac. The phone's screen
+// is about half as tall, so the same layout shows everything half the size.
+bool MU_IosIsPhone();
+
 // Battery 0-100, or -1 when unknown (simulator, or monitoring not ready yet).
 int MU_IosGetBatteryPercent();
 

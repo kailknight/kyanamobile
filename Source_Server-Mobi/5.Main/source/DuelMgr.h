@@ -49,6 +49,7 @@ public:
 	void SetSD(int iPlayerNum, int iRate);
 
 	char * GetDuelPlayerID(int iPlayerNum);
+	int GetDuelPlayerIndex(int iPlayerNum);
 	int GetScore(int iPlayerNum);
 	float GetHP(int iPlayerNum);
 	float GetSD(int iPlayerNum);

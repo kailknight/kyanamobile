@@ -9,6 +9,7 @@
 #include "ZzzCharacter.h"
 #include "UIControls.h"
 #include "DuelMgr.h"
+#include "NewUIRenderNumber.h"
 
 using namespace SEASON3B;
 
@@ -114,11 +115,16 @@ float SEASON3B::CNewUIDuelWindow::GetLayerDepth()
 void SEASON3B::CNewUIDuelWindow::LoadImages()
 {
 	LoadBitmap("Interface\\newui_Figure_ground.tga", IMAGE_DUEL_BACK, GL_LINEAR);
+	// The kill score's digits (RenderDuelKillScore below). CNewUIRenderNumber
+	// only loads them the first time something asks it for its instance, and
+	// nothing ever does, so the score drew as plain tinted boxes.
+	LoadBitmap("Interface\\newui_number1.tga", CNewUIRenderNumber::IMAGE_NUMBER1, GL_LINEAR);
 }
 
 void SEASON3B::CNewUIDuelWindow::UnloadImages()
 {
 	DeleteBitmap(IMAGE_DUEL_BACK);
+	DeleteBitmap(CNewUIRenderNumber::IMAGE_NUMBER1);
 }
 
 // -----------------------------------------------------------------------------
@@ -133,8 +139,6 @@ void SEASON3B::CNewUIDuelWindow::UnloadImages()
 // The names and scores are copied when the kill is reported, so the final kill
 // of a duel still shows after DuelMgr has been reset by the duel's end.
 // -----------------------------------------------------------------------------
-
-#include "NewUIRenderNumber.h"
 
 extern int DisplayWinMid;
 extern int DisplayHeight;
@@ -189,6 +193,16 @@ void ResetDuelKillScore()
 void NotifyDuelKillScore(int heroScore, int enemyScore)
 {
 	const int total = heroScore + enemyScore;
+
+	// A different pair, or a total that went down, is a new duel even without a
+	// start packet: a spectator in a duel room never gets one, so after watching
+	// a long duel the next one's kills never beat the old total and never showed.
+	if (total < g_DuelKillScoreLastTotal
+		|| strncmp(g_DuelKillScoreHero, g_DuelMgr.GetDuelPlayerID(DUEL_HERO), MAX_ID_SIZE) != 0
+		|| strncmp(g_DuelKillScoreEnemy, g_DuelMgr.GetDuelPlayerID(DUEL_ENEMY), MAX_ID_SIZE) != 0)
+	{
+		g_DuelKillScoreLastTotal = 0;
+	}
 
 	if (total > g_DuelKillScoreLastTotal)
 	{

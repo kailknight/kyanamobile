@@ -991,9 +991,13 @@ void Fail(const std::string& message)
 {
     Log("preload failed: %s", message.c_str());
     EndBackgroundTask();
+    // Worked out here, not in the block: a block captures a C++ reference as a
+    // reference, and by the time it runs the caller's string is gone (TestFlight
+    // 1.0.28 (29) crashed reading the dead stack).
+    NSString* detail = NS(message);
     dispatch_async(dispatch_get_main_queue(), ^{
         [g_overlay setStage:@"Preload failed"
-                     detail:NS(message)
+                     detail:detail
                       timer:@"Check your connection, then tap Retry."
                     percent:-1];
         [g_overlay showRetry:YES];

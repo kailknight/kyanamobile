@@ -98,6 +98,11 @@ void MU_IosGetSafeAreaFractions(float* left, float* top, float* right, float* bo
     *bottom = static_cast<float>(insets.bottom / size.height);
 }
 
+bool MU_IosIsPhone()
+{
+    return [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+}
+
 int MU_IosGetBatteryPercent()
 {
     UIDevice* device = [UIDevice currentDevice];

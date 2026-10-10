@@ -6,6 +6,9 @@
 #include "NewUISystem.h"
 #include "DuelMgr.h"
 
+// File scope: inside the member function below it would bind to the 1.0
+// SEASON3B:: stand-in in android_link_stubs.cpp (see NewUIChatLogWindow.cpp).
+extern float g_fScreenRate_y;
 using namespace SEASON3B;
 
 CNewUIDuelWatchUserListWindow::CNewUIDuelWatchUserListWindow()
@@ -87,8 +90,6 @@ bool CNewUIDuelWatchUserListWindow::Render()
 	
 	RenderFrame();
 	
-	extern float g_fScreenRate_y;
-
 	SIZE TextSize;
 
 	g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), "Q", 1, &TextSize);

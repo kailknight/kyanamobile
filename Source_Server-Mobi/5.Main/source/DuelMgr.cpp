@@ -96,6 +96,11 @@ char * CDuelMgr::GetDuelPlayerID(int iPlayerNum)
 	return m_DuelPlayer[iPlayerNum].m_szID;
 }
 
+int CDuelMgr::GetDuelPlayerIndex(int iPlayerNum)
+{
+	return m_DuelPlayer[iPlayerNum].m_iIndex;
+}
+
 int CDuelMgr::GetScore(int iPlayerNum)
 {
 	return m_DuelPlayer[iPlayerNum].m_iScore;

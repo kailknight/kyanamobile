@@ -101,6 +101,7 @@ set(IOS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPlatform.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreload.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreloadCore.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/IosScreenshot.cpp"
     "${THIRDPARTY_DIR}/miniz/miniz.c"
 )
 
