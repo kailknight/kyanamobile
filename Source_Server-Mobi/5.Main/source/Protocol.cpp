@@ -490,6 +490,13 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 		case 0xD3:
 			switch (((lpMsg[0] == 0xC1) ? lpMsg[3] : lpMsg[4]))
 			{
+			case 0xF2: //Devil Square time left (C1:D3:F2, WORD seconds)
+				if (size >= 6)
+				{
+					extern void SetDevilSquareTimer(int seconds);
+					SetDevilSquareTimer((int)(lpMsg[4] | (lpMsg[5] << 8)));
+				}
+				break;
 			case 0xF1: //Google Play WCoin purchase - server's answer
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 				if (g_pInGameShop) g_pInGameShop->OnPlayPurchaseResult(lpMsg, size);

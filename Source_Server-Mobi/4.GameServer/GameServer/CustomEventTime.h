@@ -69,6 +69,13 @@ public:
 	// A schedule entry using this gate that is an invasion running right now:
 	// where it spawned (CInvasionManager::GetSpawnPosition).
 	bool FindInvasionSpawnByGate(int gate,int* map,int* x,int* y);
+	// True when an event listed with this gate is running right now (its
+	// countdown reads 0, "Online" in the client's Event Schedule window).
+	bool IsGateEventOnline(int gate);
+	// One row of the Event Schedule window (the index the client was sent):
+	// true when that event is running, with its gate and - for a running
+	// invasion - where its monster spawned (map -1 = use the gate).
+	bool GetRowTeleport(int row,int* gate,int* map,int* x,int* y);
 	std::vector <DATA_CUSTOMEVENTTIME> m_SendClientDataEventTime;
 	int m_Enable;
 private:

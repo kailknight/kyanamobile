@@ -148,6 +148,65 @@ void CCustomEventTime::GCReqEventTime(int Index, PMSG_CUSTOM_EVENTTIME_RECV* lpM
 #endif
 	return;
 }
+bool CCustomEventTime::GetRowTeleport(int row,int* gate,int* map,int* x,int* y) // OK
+{
+	*map = -1;
+	*x = -1;
+	*y = -1;
+
+	if(row < 0 || row >= (int)this->m_SendClientDataEventTime.size())
+	{
+		return 0;
+	}
+
+	const DATA_CUSTOMEVENTTIME& info = this->m_SendClientDataEventTime[row];
+
+	if(info.NumberGate < 0 || info.NumberEvent < 0 || info.NumberEvent >= (int)this->DataEventTime.size())
+	{
+		return 0;
+	}
+
+	const int* time = this->DataEventTime[info.NumberEvent].TimeEvent;
+
+	if(time == 0 || *time != 0)
+	{
+		return 0;
+	}
+
+	*gate = info.NumberGate;
+
+	// NumberEvent 0-29 are the invasions: land on this one's own spawn, not
+	// another invasion that happens to share the gate.
+	if(info.NumberEvent < MAX_INVASION && gInvasionManager.GetSpawnPosition(info.NumberEvent,map,x,y) == 0)
+	{
+		*map = -1;
+	}
+
+	return 1;
+}
+
+bool CCustomEventTime::IsGateEventOnline(int gate) // OK
+{
+	for(int n=0;n < (int)this->m_SendClientDataEventTime.size();n++)
+	{
+		const DATA_CUSTOMEVENTTIME& info = this->m_SendClientDataEventTime[n];
+
+		if(info.NumberGate != gate || info.NumberEvent < 0 || info.NumberEvent >= (int)this->DataEventTime.size())
+		{
+			continue;
+		}
+
+		const int* time = this->DataEventTime[info.NumberEvent].TimeEvent;
+
+		if(time != 0 && *time == 0)
+		{
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 bool CCustomEventTime::FindInvasionSpawnByGate(int gate,int* map,int* x,int* y) // OK
 {
 	// NumberEvent 0-29 are the invasions (LoadData adds them first, in order).

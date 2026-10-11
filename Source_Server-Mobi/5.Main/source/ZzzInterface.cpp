@@ -565,6 +565,75 @@ void MoveNotices()
 
 float NoticeInverse = 0;
 
+// Devil Square time left (0xD3/0xF2, once a second from the GameServer while
+// the square runs). Counted down locally between packets so it moves smoothly.
+static int s_DevilSquareTimerSeconds = 0;
+static DWORD s_DevilSquareTimerTick = 0;
+
+void SetDevilSquareTimer(int seconds)
+{
+	s_DevilSquareTimerSeconds = seconds;
+	s_DevilSquareTimerTick = GetTickCount();
+}
+
+static void RenderDevilSquareTimer()
+{
+	if (s_DevilSquareTimerSeconds <= 0 || !gMapManager.InDevilSquare())
+	{
+		return;
+	}
+
+	const int elapsed = (int)((GetTickCount() - s_DevilSquareTimerTick) / 1000);
+	const int left = s_DevilSquareTimerSeconds - elapsed;
+
+	// No packet for a while (left the square, server gone): stop showing it.
+	if (left <= 0 || elapsed > 10)
+	{
+		return;
+	}
+
+	// A framed panel under [Boss Info], not plain text: in the square the
+	// screen is full of item and monster names in the same colours.
+	const bool urgent = (left <= 30);
+	const float pulse = urgent ? (0.55f + 0.45f * sinf(GetTickCount() * 0.008f)) : 1.0f;
+
+	const float w = 120.0f;
+	const float h = 36.0f;
+	const float x = (float)DisplayWinMid - w * 0.5f;
+	const float y = 30.0f;
+
+	EnableAlphaTest();
+	glColor4f(0.04f, 0.03f, 0.02f, 0.85f);
+	RenderColor(x, y, w, h);
+	if (urgent)
+		glColor4f(0.95f, 0.25f, 0.15f, pulse);
+	else
+		glColor4f(0.86f, 0.66f, 0.20f, 1.0f);
+	RenderColor(x, y, w, 1.5f);
+	RenderColor(x, y + h - 1.5f, w, 1.5f);
+	RenderColor(x, y, 1.5f, h);
+	RenderColor(x + w - 1.5f, y, 1.5f, h);
+	EndRenderColor();
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+	g_pRenderText->SetBgColor(0);
+
+	g_pRenderText->SetFont(g_hFontBold);
+	g_pRenderText->SetTextColor(200, 190, 170, 255);
+	g_pRenderText->RenderText((int)x, (int)y + 4, "DEVIL SQUARE", (int)w, 0, RT3_SORT_CENTER);
+
+	char text[32];
+	sprintf(text, "%02d:%02d", left / 60, left % 60);
+	g_pRenderText->SetFont(g_hFontBig != NULL ? g_hFontBig : g_hFontBold);
+	if (urgent)
+		g_pRenderText->SetTextColor(255, 80, 50, (BYTE)(255 * pulse));
+	else
+		g_pRenderText->SetTextColor(255, 215, 90, 255);
+	g_pRenderText->RenderText((int)x, (int)y + 16, text, (int)w, 0, RT3_SORT_CENTER);
+
+	g_pRenderText->SetFont(g_hFont);
+}
+
 // Where the first notice line goes. On a phone the chat log sits much higher
 // than PC's, so the fixed 300 put the golden notices on top of it: there the
 // whole block ends just above the log instead.
@@ -585,6 +654,7 @@ static int GetNoticeStartY()
 #if(ShadowText)
 void RenderNotices()
 {
+	RenderDevilSquareTimer();
 
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 	if( g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == true)
@@ -635,6 +705,7 @@ void RenderNotices()
 #else
 void RenderNotices()
 {
+	RenderDevilSquareTimer();
 
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 	if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == true)

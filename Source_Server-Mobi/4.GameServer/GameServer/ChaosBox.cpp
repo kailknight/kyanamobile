@@ -574,17 +574,12 @@ void CChaosBox::PlusItemLevelMix(LPOBJ lpObj,int type) // OK
 			break;
 	}
 
-	// SoulSuccessRate_ALx (GameServerInfo - Common.ini): flat per-account-level
-	// bonus documented in CustomConfig.ini's own header comment ("item-upgrade
-	// rate also gets a bonus luck % configured in Common") as applying to every
-	// tier of this mix. It was being loaded (ServerInfo.cpp) and used by the
-	// unrelated direct Jewel-of-Soul apply (ObjectManager.cpp, for +0..+8) but
-	// never added here - so it affected neither the rate shown to the player
-	// nor the roll actually used when the Chaos Machine mix executes (both
-	// come from this same ChaosSuccessRate value, set once here and read again
-	// down at the real roll below).
-	lpObj->ChaosSuccessRate += gServerInfo.m_SoulSuccessRate[lpObj->AccountLevel];
+	// No SoulSuccessRate here: that is the direct Jewel of Soul's own rate
+	// (ObjectManager.cpp, +0..+8). Added to this mix it put +40 on every tier,
+	// so the PlusItemLevelMixRate values were never the real odds. The rate is
+	// the tier rate, plus the item's Luck bonus and any talismans.
 
+	// Item has Luck: AddLuckSuccessRate2_ALx (GameServerInfo - Common.ini).
 	if(lpObj->ChaosBox[ItemSlot].m_Option2 != 0)
 	{
 		lpObj->ChaosSuccessRate += gServerInfo.m_AddLuckSuccessRate2[lpObj->AccountLevel];

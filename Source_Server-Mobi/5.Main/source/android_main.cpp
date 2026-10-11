@@ -17,6 +17,7 @@
 #include "stdafx.h"
 #include "CB_DangKyInGame.h"
 #include "QuickToggles.h"
+#include "GMBattleCastle.h"
 #ifdef min
 #undef min
 #endif
@@ -6515,9 +6516,97 @@ bool IsTargetAttackable(int characterIndex)
     return canAttack;
 }
 
+// Castle Siege running, the hero on the siege map wearing a side's mark. The
+// other side is attackable without PK there (CheckAttack's battle castle
+// branch), so player targeting runs as if PK were on - see
+// IsVirtualPkTargetingEnabled - with the siege rules in FindAndroidSiegeTarget.
+constexpr int kAndroidSiegeAimRangeTiles = 6;
+
+bool IsAndroidSiegeAutoAim()
+{
+    if (Hero == nullptr || !gMapManager.InBattleCastle() || !battleCastle::IsBattleCastleStart())
+    {
+        return false;
+    }
+
+    switch (Hero->EtcPart)
+    {
+    case PARTS_ATTACK_KING_TEAM_MARK:
+    case PARTS_ATTACK_TEAM_MARK:
+    case PARTS_ATTACK_KING_TEAM_MARK2:
+    case PARTS_ATTACK_TEAM_MARK2:
+    case PARTS_ATTACK_KING_TEAM_MARK3:
+    case PARTS_ATTACK_TEAM_MARK3:
+    case PARTS_DEFENSE_KING_TEAM_MARK:
+    case PARTS_DEFENSE_TEAM_MARK:
+        return true;
+    default:
+        return false;
+    }
+}
+
+int GetAndroidTileDistance2(int characterIndex)
+{
+    const CHARACTER* c = &CharactersClient[characterIndex];
+    const int dx = c->PositionX - Hero->PositionX;
+    const int dy = c->PositionY - Hero->PositionY;
+    return (dx * dx) + (dy * dy);
+}
+
 bool IsVirtualPkTargetingEnabled()
 {
-    return g_pBCustomMenuInfo != nullptr && g_pBCustomMenuInfo->AutoCtrlPK;
+    if (g_pBCustomMenuInfo != nullptr && g_pBCustomMenuInfo->AutoCtrlPK)
+    {
+        return true;
+    }
+
+    return IsAndroidSiegeAutoAim();
+}
+
+// The siege pick: an attackable player of the other side within
+// kAndroidSiegeAimRangeTiles. In a crowd it takes the nearest, and between
+// two about as near the one with less HP - a kill takes a body off the field,
+// spreading damage over five full-HP players does not. The current target is
+// kept until it dies or leaves the range (ResolveAndroidPkStickyTarget), so the
+// aim does not flick between people every frame.
+int FindAndroidSiegeTarget()
+{
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return -1;
+    }
+
+    const int maxDist2 = kAndroidSiegeAimRangeTiles * kAndroidSiegeAimRangeTiles;
+    int bestIndex = -1;
+    int bestScore = 0;
+
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        CHARACTER* c = &CharactersClient[i];
+        if (!IsValidAutoCombatTarget(i) || c->Object.Kind != KIND_PLAYER || !c->Object.Visible)
+        {
+            continue;
+        }
+
+        const int dist2 = GetAndroidTileDistance2(i);
+        if (dist2 > maxDist2 || !IsTargetAttackable(i) || IsCharacterInSafeZone(i))
+        {
+            continue;
+        }
+
+        // Distance in tenths of a tile, nudged by HP: 100% HP costs one tile.
+        // HP is the over-head percentage, 100 when this client has none.
+        const int lifePct = (c->InfoHealBar.Life > 0 && c->InfoHealBar.Life <= 100) ? c->InfoHealBar.Life : 100;
+        const int score = static_cast<int>(sqrtf(static_cast<float>(dist2)) * 10.0f) + (lifePct / 10);
+
+        if (bestIndex < 0 || score < bestScore)
+        {
+            bestIndex = i;
+            bestScore = score;
+        }
+    }
+
+    return bestIndex;
 }
 
 // Read off the tile rather than CHARACTER::SafeZone, which MoveCharacter only
@@ -6744,6 +6833,14 @@ int ResolveAndroidPkStickyTarget()
         return -1;
     }
 
+    // Siege: past the range, let go so the next pick takes someone in reach.
+    if (IsAndroidSiegeAutoAim()
+        && GetAndroidTileDistance2(g_androidPkSticky.cachedIndex) > kAndroidSiegeAimRangeTiles * kAndroidSiegeAimRangeTiles)
+    {
+        ClearAndroidPkStickyTarget("siege-out-of-range");
+        return -1;
+    }
+
     return g_androidPkSticky.cachedIndex;
 }
 
@@ -6764,7 +6861,9 @@ bool IsAndroidAimHolding()
         return true;
     }
 
-    return IsVirtualPkTargetingEnabled() && IsAndroidPkStickyPending();
+    // In a siege the fight does not wait for one player to come back from a
+    // teleport: the next enemy in range is taken instead (AcquireAndroidPkPlayerTarget).
+    return IsVirtualPkTargetingEnabled() && !IsAndroidSiegeAutoAim() && IsAndroidPkStickyPending();
 }
 
 // SelectObjects reports a tap that landed on a player. In PK mode that is the
@@ -6804,6 +6903,22 @@ int AcquireAndroidPkPlayerTarget(bool limitToAcquireRange)
     if (sticky >= 0)
     {
         return sticky;
+    }
+
+    if (IsAndroidSiegeAutoAim())
+    {
+        // Out of sight (teleported) counts as gone in a siege.
+        if (g_androidPkSticky.active)
+        {
+            ClearAndroidPkStickyTarget("siege-retarget");
+        }
+
+        const int siegePick = FindAndroidSiegeTarget();
+        if (siegePick >= 0)
+        {
+            SetAndroidPkStickyTarget(siegePick);
+        }
+        return siegePick;
     }
 
     // Held but out of sight: do not swap in the nearest player.

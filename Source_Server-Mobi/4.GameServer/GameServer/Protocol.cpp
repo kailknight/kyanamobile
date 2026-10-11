@@ -1902,6 +1902,37 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 				lpObj->ClickClientSend = GetTickCount();
 				XULY_CGPACKET* mlpMsg = (XULY_CGPACKET*)lpMsg;
 				if (mlpMsg->ThaoTac < 0)return;
+				// Current clients send 10000 + the row clicked in the Event
+				// Schedule window. Many rows share one gate (802 is Chaos Castle
+				// and most invasions), so the row is what says which event - and
+				// which event's spawn - was meant.
+				if (mlpMsg->ThaoTac >= 10000)
+				{
+					int rowGate = -1, rowMap = -1, rowX = -1, rowY = -1;
+
+					if (gCustomEventTime.GetRowTeleport(mlpMsg->ThaoTac - 10000, &rowGate, &rowMap, &rowX, &rowY) == 0)
+					{
+						gNotice.GCNoticeSend(aIndex, 1, 0, 0, 0, 0, 0, "This event has not started yet.");
+						return;
+					}
+
+					if (rowMap >= 0)
+					{
+						gObjMoveGate(aIndex, rowGate, rowMap, rowX, rowY);
+					}
+					else
+					{
+						gObjMoveGate(aIndex, rowGate);
+					}
+					return;
+				}
+				// Older clients send the gate itself. The Event Schedule window
+				// teleports to an event only while it is running.
+				if (gCustomEventTime.IsGateEventOnline(mlpMsg->ThaoTac) == 0)
+				{
+					gNotice.GCNoticeSend(aIndex, 1, 0, 0, 0, 0, 0, "This event has not started yet.");
+					return;
+				}
 				if (OBJECT_RANGE(aIndex) != 0)
 				{
 					// A running invasion on this entry: land where it spawned rather

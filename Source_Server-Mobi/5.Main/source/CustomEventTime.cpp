@@ -223,7 +223,9 @@ void CCustomEventTime::DrawEventTimePanelWindow()
 				//int BODY_Y1 = GetPrivateProfileIntA("TEST", "BODY_Y1", 0, "./config.ini");
 				//int BODY_W1 = GetPrivateProfileIntA("TEST", "BODY_W1", 0, "./config.ini");
 				//int BODY_H1 = GetPrivateProfileIntA("TEST", "BODY_H1", 0, "./config.ini");
-				if (SEASON3B::CheckMouseIn(StartX + 10, StartBody + 57 + (line), 300, 13))
+				// Only a running event (countdown at 0, "Online") teleports - the
+				// server checks the same thing (IsGateEventOnline).
+				if (this->mNewDataEventTime[i].time == 0 && SEASON3B::CheckMouseIn(StartX + 10, StartBody + 57 + (line), 300, 13))
 				{
 					TextDraw((HFONT)g_hFont, StartX + 10, StartBody + 57 + (line), 0xFFFFFFFF, 0x00FBFF69, 300, 13, 1, " "); // Màu
 
@@ -231,7 +233,9 @@ void CCustomEventTime::DrawEventTimePanelWindow()
 					{
 						XULY_CGPACKET pMsg;
 						pMsg.header.set(0xD3, 0x01, sizeof(pMsg));
-						pMsg.ThaoTac = this->mNewDataEventTime[i].NumberGate;
+						// The row, not the gate: many events share gate 802, and the
+						// server needs to know which one (10000 + row, Protocol.cpp).
+						pMsg.ThaoTac = 10000 + this->mNewDataEventTime[i].index;
 						DataSend((LPBYTE)&pMsg, pMsg.header.size);
 						gInterface.Data[eWindowEventTime].OnShow = false;
 					}

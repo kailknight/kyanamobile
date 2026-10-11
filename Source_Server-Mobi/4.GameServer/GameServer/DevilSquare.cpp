@@ -363,9 +363,36 @@ void CDevilSquare::ProcState_STAND(DEVIL_SQUARE_LEVEL* lpLevel) // OK
 	}
 }
 
+#pragma pack(push, 1)
+// GameServer -> client, 0xD3/0xF2: Devil Square time left, for the on-screen
+// timer. Sent once a second while the square runs, 0 when it ends.
+struct PMSG_DEVIL_SQUARE_TIMER_SEND
+{
+	PSBMSG_HEAD header;
+	WORD Seconds;
+};
+#pragma pack(pop)
+
+static void SendDevilSquareTimer(CDevilSquare* lpDevilSquare,DEVIL_SQUARE_LEVEL* lpLevel,int seconds)
+{
+	PMSG_DEVIL_SQUARE_TIMER_SEND pMsg;
+	pMsg.header.set(0xD3,0xF2,sizeof(pMsg));
+	pMsg.Seconds = (WORD)((seconds < 0) ? 0 : ((seconds > 0xFFFF) ? 0xFFFF : seconds));
+	lpDevilSquare->DataSendToAll(lpLevel,(BYTE*)&pMsg,pMsg.header.size);
+}
+
 void CDevilSquare::ProcState_START(DEVIL_SQUARE_LEVEL* lpLevel) // OK
 {
 	this->CheckUser(lpLevel);
+
+	// Once per second of RemainTime, whatever the tick rate.
+	static int s_lastTimerSent[MAX_DS_LEVEL] = { -1, -1, -1, -1, -1, -1, -1 };
+
+	if(DS_LEVEL_RANGE(lpLevel->Level) != 0 && s_lastTimerSent[lpLevel->Level] != lpLevel->RemainTime)
+	{
+		s_lastTimerSent[lpLevel->Level] = lpLevel->RemainTime;
+		SendDevilSquareTimer(this,lpLevel,lpLevel->RemainTime);
+	}
 
 	if(this->GetUserCount(lpLevel) == 0)
 	{
@@ -406,6 +433,8 @@ void CDevilSquare::ProcState_START(DEVIL_SQUARE_LEVEL* lpLevel) // OK
 	if(lpLevel->RemainTime <= 0)
 	{
 		this->NoticeSendToAll(lpLevel,0,gMessage.GetMessage(148));
+
+		SendDevilSquareTimer(this,lpLevel,0);
 
 		this->SetState(lpLevel,DS_STATE_CLEAN);
 	}

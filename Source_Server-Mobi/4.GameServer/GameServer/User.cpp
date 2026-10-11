@@ -3093,10 +3093,13 @@ BOOL gObjMoveGate(int aIndex,int gate,int forceMap,int forceX,int forceY) // OK
 		goto ERROR_JUMP;
 	}
 
-	// A caller-chosen spot on the gate's map (the event schedule sending a
-	// player to where a running invasion spawned).
-	if(forceMap == map && forceX >= 0 && forceY >= 0)
+	// A caller-chosen spot (the event schedule sending a player to where a
+	// running invasion spawned). Its own map, not just the gate's: invasions
+	// like Red Dragon spawn on maps other than the gate the schedule lists.
+	// The gate's level requirement and every other check still apply.
+	if(MAP_RANGE(forceMap) != 0 && forceX >= 0 && forceY >= 0)
 	{
+		map = forceMap;
 		x = forceX;
 		y = forceY;
 	}
