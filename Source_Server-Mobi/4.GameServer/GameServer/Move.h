@@ -69,6 +69,7 @@ public:
 	bool GetInfo(int index,MOVE_INFO* lpInfo);
 	bool GetInfoByName(char* name,MOVE_INFO* lpInfo);
 	void Move(LPOBJ lpObj,int index);
+	int GetMoveIndexByMap(int map);
 	void CGTeleportRecv(PMSG_TELEPORT_RECV* lpMsg,int aIndex);
 	void CGTeleportMoveRecv(PMSG_TELEPORT_MOVE_RECV* lpMsg,int aIndex);
 	void GCTeleportSend(int aIndex,int gate,BYTE map,BYTE x,BYTE y,BYTE dir);

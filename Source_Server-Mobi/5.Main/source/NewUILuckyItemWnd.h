@@ -17,7 +17,7 @@ namespace SEASON3B
 	#define	LUCKYITEMMAXLINE	20
 	enum eNEWUIFRAME		{ eFrame_BG, eFrame_T, eFrame_L, eFrame_R, eFrame_B, eFrame_END };
 	enum eIMGLIST			{ eImgList_MixBtn = eFrame_END, eImgList_END };
-	enum eLUCKYITEMTYPE		{ eLuckyItemType_None = 0, eLuckyItemType_Trade, eLuckyItemType_Refinery, eLuckyItemAct_End };
+	enum eLUCKYITEMTYPE		{ eLuckyItemType_None = 0, eLuckyItemType_Trade, eLuckyItemType_Refinery, eLuckyItemType_Elevation, eLuckyItemAct_End };
 	enum eLUCKYITEM			{ eLuckyItem_None = 0, eLuckyItem_Move, eLuckyItem_Act, eLuckyITem_Result, eLuckyItem_End };
 
 	struct sImgList 
@@ -92,6 +92,7 @@ namespace SEASON3B
 		void	Process_InventoryCtrl_DeleteItem(int iIndex);
 		bool	Check_LuckyItem( ITEM* _pItem );
 		bool	Check_LuckyItem_InWnd( void );
+		bool	CanAddLuckyItem( ITEM* _pItem );
 
 		//-Virtual Function [lem_2010.9.1]
 		bool	Create(CNewUIManager* pNewUIMng, int x, int y);

@@ -371,6 +371,7 @@ public:
 	int m_SummonScrollMixRate3[MAX_ACCOUNT_LEVEL];
 	int m_LuckyItemRefineMixRate1[MAX_ACCOUNT_LEVEL];
 	int m_LuckyItemRefineMixRate2[MAX_ACCOUNT_LEVEL];
+	int m_ElevationJewelMixRate[MAX_ACCOUNT_LEVEL];
 	int m_MonsterWingMixRate[MAX_ACCOUNT_LEVEL];
 	int m_SocketWeaponMixRate[MAX_ACCOUNT_LEVEL];
 	int m_PentagramMithrilMixRate[MAX_ACCOUNT_LEVEL];

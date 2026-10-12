@@ -2729,6 +2729,42 @@ bool CNewUIMyInventory::HandleInventoryActions(CNewUIInventoryCtrl * targetContr
 		{
 			g_pMyInventory->BMoveItemNew(MOVE_INV_TO_MIX);
 		}
+#ifdef LEM_ADD_LUCKYITEM
+		else if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_LUCKYITEMWND))
+		{
+			// Right click a ticket (or lucky armour when refining) into the lucky
+			// window. The server's quick-move (0x79) doesn't know flags 15/16, so
+			// send the same move a drag sends; the window holds one item. Pick the
+			// item up (hidden) exactly like a drag, so the inventory drops its copy
+			// and a refused move puts it back - without this the ticket stayed
+			// drawn in the inventory after the server had moved it.
+			ITEM* pItem = targetControl->FindItemAtPt(MouseX, MouseY);
+			if (pItem && !EquipmentItem && CNewUIInventoryCtrl::GetPickedItem() == nullptr
+				&& g_pLuckyItemWnd->CanAddLuckyItem(pItem))
+			{
+				const ITEM_ATTRIBUTE* pAttr = &ItemAttribute[pItem->Type];
+				const int nDstIndex = g_pLuckyItemWnd->GetInventoryCtrl()->FindEmptySlot(pAttr->Width, pAttr->Height);
+				const int nMoveIndex = g_pLuckyItemWnd->SetWndAction(eLuckyItem_Move);
+				if (nDstIndex != -1 && nMoveIndex != -1 && CNewUIInventoryCtrl::CreatePickedItem(targetControl, pItem))
+				{
+					CNewUIPickedItem* pPicked = CNewUIInventoryCtrl::GetPickedItem();
+					const int nSrcIndex = pPicked->GetSourceLinealPos();
+					targetControl->RemoveItem(pItem);
+					pPicked->HidePickedItem();
+
+					if (SendRequestEquipmentItem(REQUEST_EQUIPMENT_INVENTORY, nSrcIndex, pPicked->GetItem(), nMoveIndex, nDstIndex))
+					{
+						PlayBuffer(SOUND_GET_ITEM01);
+					}
+					else
+					{
+						CNewUIInventoryCtrl::BackupPickedItem();
+					}
+				}
+			}
+			return true;
+		}
+#endif // LEM_ADD_LUCKYITEM
 		return false;
 	}
 

@@ -519,8 +519,8 @@ android {
         // survives the target teleporting (3 s out-of-sight grace, no 12-tile
         // drop); it ends when the target dies, enters a safe zone or leaves the
         // map, or the hero dies or changes map.
-        versionCode 32
-        versionName "1.0.32"
+        versionCode 33
+        versionName "1.0.33"
 
         // A diagnostics build can be CPU-profiled with simpleperf without
         // being debuggable (which would change its performance).

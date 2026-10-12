@@ -1164,7 +1164,7 @@ void Interface::DrawWindowMuaVIP()
 
 	// ----
 	float MainWidth = 230.0;
-	float MainHeight = 270;
+	float MainHeight = 312;
 	
 	float StartY = 40.0;
 	float StartX = (MAX_WIN_WIDTH / 2) - (MainWidth / 2);
@@ -1179,41 +1179,45 @@ void Interface::DrawWindowMuaVIP()
 	LineY = gInterface.DrawFormat(eGold, (int)StartX + 30, (int)LineY, 210, 1, gCustomMessage.GetMessage(14));
 	LineY = gInterface.DrawFormat(eWhite, (int)StartX + 30, (int)LineY, 210, 1, gCustomMessage.GetMessage(7));
 	LineY = gInterface.DrawFormat(eWhite, (int)StartX + 30, (int)LineY, 210, 1, gCustomMessage.GetMessage(8));
+	// VIP benefits (CustomMessage.txt 100-102, editable without a rebuild).
+	LineY = gInterface.DrawFormat(eExcellent, (int)StartX + 30, (int)LineY, 210, 1, gCustomMessage.GetMessage(100));
+	LineY = gInterface.DrawFormat(eExcellent, (int)StartX + 30, (int)LineY, 210, 1, gCustomMessage.GetMessage(101));
+	LineY = gInterface.DrawFormat(eExcellent, (int)StartX + 30, (int)LineY, 210, 1, gCustomMessage.GetMessage(102));
 
 	// ----
 	//gInterface.DrawGUI(eVip_DIV, StartX, StartBody + 70);
-	gInterface.DrawFormat(eGold, (int)StartX + 30, (int)StartBody + 95 - 2, 210, 1, "Plan");
-	gInterface.DrawFormat(eGold, (int)StartX + 80, (int)StartBody + 95 - 2, 210, 1, "Exp");
-	gInterface.DrawFormat(eGold, (int)StartX + 130, (int)StartBody + 95 - 2, 210, 1, "Drop");
-	gInterface.DrawFormat(eGold, (int)StartX + 170, (int)StartBody + 95 - 2, 210, 1, "Time");
+	gInterface.DrawFormat(eGold, (int)StartX + 30, (int)StartBody + 131 - 2, 210, 1, "Plan");
+	gInterface.DrawFormat(eGold, (int)StartX + 80, (int)StartBody + 131 - 2, 210, 1, "Exp");
+	gInterface.DrawFormat(eGold, (int)StartX + 130, (int)StartBody + 131 - 2, 210, 1, "Drop");
+	gInterface.DrawFormat(eGold, (int)StartX + 170, (int)StartBody + 131 - 2, 210, 1, "Time");
 	// ----
 	int HoverSelect = -1;
 	for (int i = 0; i < MAX_CUSTOM_BUYVIP; i++)
 	{
 		if (gCustomBuyVip.m_CustomBuyVipInfo[i].Index == -1) continue;
 
-		gInterface.DrawFormat(eWhite, (int)StartX + 30, (int)StartBody + 110 + (12 * i) - 5, 210, 1, gCustomBuyVip.m_CustomBuyVipInfo[i].VipName);
+		gInterface.DrawFormat(eWhite, (int)StartX + 30, (int)StartBody + 146 + (12 * i) - 5, 210, 1, gCustomBuyVip.m_CustomBuyVipInfo[i].VipName);
 		// ----
-		gInterface.DrawFormat(eWhite, (int)StartX + 80, (int)StartBody + 110 + (12 * i) - 5, 210, 1, "+%d%%", gCustomBuyVip.m_CustomBuyVipInfo[i].Exp);
+		gInterface.DrawFormat(eWhite, (int)StartX + 80, (int)StartBody + 146 + (12 * i) - 5, 210, 1, "+%d%%", gCustomBuyVip.m_CustomBuyVipInfo[i].Exp);
 		// ----
-		gInterface.DrawFormat(eWhite, (int)StartX + 130, (int)StartBody + 110 + (12 * i) - 5, 210, 1, "+%d%%", gCustomBuyVip.m_CustomBuyVipInfo[i].Drop);
+		gInterface.DrawFormat(eWhite, (int)StartX + 130, (int)StartBody + 146 + (12 * i) - 5, 210, 1, "+%d%%", gCustomBuyVip.m_CustomBuyVipInfo[i].Drop);
 		// ----
-		gInterface.DrawFormat(eWhite, (int)StartX + 170, (int)StartBody + 110 + (12 * i) - 5, 210, 1, "%d day(s)", gCustomBuyVip.m_CustomBuyVipInfo[i].Days);
+		gInterface.DrawFormat(eWhite, (int)StartX + 170, (int)StartBody + 146 + (12 * i) - 5, 210, 1, "%d day(s)", gCustomBuyVip.m_CustomBuyVipInfo[i].Days);
 
-		RenderImage(CNewUIWindowMenu::IMAGE_WINDOW_MENU_LINE, StartX + 30, StartBody + 110 + (12 * i) + 9 - 5, 82.0, 2.0);
-		RenderImage(CNewUIWindowMenu::IMAGE_WINDOW_MENU_LINE, StartX + 30 + 82, StartBody + 110 + (12 * i) + 9 - 5, 82.0, 2.0);
+		RenderImage(CNewUIWindowMenu::IMAGE_WINDOW_MENU_LINE, StartX + 30, StartBody + 146 + (12 * i) + 9 - 5, 82.0, 2.0);
+		RenderImage(CNewUIWindowMenu::IMAGE_WINDOW_MENU_LINE, StartX + 30 + 82, StartBody + 146 + (12 * i) + 9 - 5, 82.0, 2.0);
 
 		//==Button VIP
-		if (g_pBCustomMenuInfo->DrawButton((int)StartX + 60, (int)StartBody + 160 + (25 * i) - 5, 120, 12, gCustomBuyVip.m_CustomBuyVipInfo[i].VipName))
+		if (g_pBCustomMenuInfo->DrawButton((int)StartX + 60, (int)StartBody + 196 + (25 * i) - 5, 120, 12, gCustomBuyVip.m_CustomBuyVipInfo[i].VipName))
 		{
 			gCustomBuyVip.BuyStatus(i+1);
 		}
-		if (SEASON3B::CheckMouseIn((int)StartX + 60, (int)StartBody + 160 + (25 * i) - 5, 120, 25) == 1)
+		if (SEASON3B::CheckMouseIn((int)StartX + 60, (int)StartBody + 196 + (25 * i) - 5, 120, 25) == 1)
 		{
-			gInterface.DrawFormat(eGold, (int)StartX + 30, (int)StartBody + 142, 210, 1, gCustomMessage.GetMessage(10));
-			gInterface.DrawFormat(eGold, (int)StartX + 70, (int)StartBody + 142, 210, 1, gCustomMessage.GetMessage(11), gCustomBuyVip.m_CustomBuyVipInfo[i].Coin1);
-			gInterface.DrawFormat(eGold, (int)StartX + 120, (int)StartBody + 142, 210, 1, gCustomMessage.GetMessage(12), gCustomBuyVip.m_CustomBuyVipInfo[i].Coin2);
-			gInterface.DrawFormat(eGold, (int)StartX + 160, (int)StartBody + 142, 210, 1, gCustomMessage.GetMessage(13), gCustomBuyVip.m_CustomBuyVipInfo[i].Coin3);
+			gInterface.DrawFormat(eGold, (int)StartX + 30, (int)StartBody + 178, 210, 1, gCustomMessage.GetMessage(10));
+			gInterface.DrawFormat(eGold, (int)StartX + 70, (int)StartBody + 178, 210, 1, gCustomMessage.GetMessage(11), gCustomBuyVip.m_CustomBuyVipInfo[i].Coin1);
+			gInterface.DrawFormat(eGold, (int)StartX + 120, (int)StartBody + 178, 210, 1, gCustomMessage.GetMessage(12), gCustomBuyVip.m_CustomBuyVipInfo[i].Coin2);
+			gInterface.DrawFormat(eGold, (int)StartX + 160, (int)StartBody + 178, 210, 1, gCustomMessage.GetMessage(13), gCustomBuyVip.m_CustomBuyVipInfo[i].Coin3);
 		}
 	}
 

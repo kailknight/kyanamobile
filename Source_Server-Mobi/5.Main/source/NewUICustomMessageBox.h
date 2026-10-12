@@ -901,6 +901,7 @@ namespace SEASON3B
 		static CALLBACK_RESULT LButtonUp(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
 		static CALLBACK_RESULT LuckyItemTradeBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
 		static CALLBACK_RESULT LuckyItemRefineryBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+		static CALLBACK_RESULT LuckyItemElevationBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
 		static CALLBACK_RESULT ExitBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
 		
 	private:
@@ -914,6 +915,7 @@ namespace SEASON3B
 		// buttons
 		CNewUIMessageBoxButton m_BtnTrade;
 		CNewUIMessageBoxButton m_BtnRefinery;
+		CNewUIMessageBoxButton m_BtnElevation;
 		CNewUIMessageBoxButton m_BtnExit;
 		
 		int m_iMiddleCount;

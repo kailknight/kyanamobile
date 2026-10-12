@@ -1956,6 +1956,19 @@ bool  SEASON3B::CLuckyItemMsgBoxLayout::SetLayout()
 	int				nTextIndex[10]	= {0, };
 	eLUCKYITEMTYPE	eAct		 = g_pLuckyItemWnd->GetAct();
 	
+	if( eAct == eLuckyItemType_Elevation )
+	{
+		// No GlobalText entries for this refine, so the lines are literal.
+		pMsgBox->AddMsg("Refine Jewel of Elevation", RGBA(255, 255, 0, 255), MSGBOX_FONT_BOLD);
+		pMsgBox->AddMsg(" ");
+		pMsgBox->AddMsg("Combine the two jewels?", RGBA(255, 255, 255, 255), MSGBOX_FONT_NORMAL);
+		pMsgBox->AddMsg("Failure destroys both jewels.", RGBA(255, 255, 255, 255), MSGBOX_FONT_NORMAL);
+
+		pMsgBox->AddCallbackFunc(CLuckyItemMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
+		pMsgBox->AddCallbackFunc(CLuckyItemMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
+		return true;
+	}
+
 	switch( eAct )
 	{
 	case eLuckyItemType_Trade:

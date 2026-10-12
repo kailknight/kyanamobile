@@ -5768,7 +5768,7 @@ bool SEASON3B::CLuckyTradeMenuMsgBoxLayout::SetLayout()
 
 SEASON3B::CLuckyTradeMenuMsgBox::CLuckyTradeMenuMsgBox()
 {
-	m_iMiddleCount = 7;
+	m_iMiddleCount = 9;
 }
 
 SEASON3B::CLuckyTradeMenuMsgBox::~CLuckyTradeMenuMsgBox()
@@ -5785,6 +5785,7 @@ bool SEASON3B::CLuckyTradeMenuMsgBox::Update()
 {
 	m_BtnTrade.Update();
 	m_BtnRefinery.Update();
+	m_BtnElevation.Update();
 	m_BtnExit.Update();
 	
 	return true;
@@ -5832,6 +5833,11 @@ CALLBACK_RESULT SEASON3B::CLuckyTradeMenuMsgBox::LButtonUp(class CNewUIMessageBo
 			g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_USER_CUSTOM_LUCKYITEM_REFINERY);
 			return CALLBACK_BREAK;
 		}
+		if(pMsgBox->m_BtnElevation.IsMouseIn() == true)
+		{
+			g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_USER_CUSTOM_LUCKYITEM_ELEVATION);
+			return CALLBACK_BREAK;
+		}
 		if(pMsgBox->m_BtnExit.IsMouseIn() == true)
 		{
 			g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_USER_COMMON_CANCEL);
@@ -5865,6 +5871,17 @@ CALLBACK_RESULT SEASON3B::CLuckyTradeMenuMsgBox::LuckyItemRefineryBtnDown(class 
 	return CALLBACK_BREAK;
 }
 
+CALLBACK_RESULT SEASON3B::CLuckyTradeMenuMsgBox::LuckyItemElevationBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+	g_pLuckyItemWnd->SetAct( eLuckyItemType_Elevation );
+	g_pNewUISystem->Show(SEASON3B::INTERFACE_LUCKYITEMWND);
+
+	PlayBuffer(SOUND_CLICK01);
+	g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+	return CALLBACK_BREAK;
+}
+
 CALLBACK_RESULT SEASON3B::CLuckyTradeMenuMsgBox::ExitBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
 {
 	SendRequestMixExit();
@@ -5880,6 +5897,7 @@ void SEASON3B::CLuckyTradeMenuMsgBox::SetAddCallbackFunc()
 	AddCallbackFunc(SEASON3B::CLuckyTradeMenuMsgBox::LButtonUp, MSGBOX_EVENT_MOUSE_LBUTTON_UP);
 	AddCallbackFunc(SEASON3B::CLuckyTradeMenuMsgBox::LuckyItemTradeBtnDown, MSGBOX_EVENT_USER_CUSTOM_LUCKYITEM_TRADE);
 	AddCallbackFunc(SEASON3B::CLuckyTradeMenuMsgBox::LuckyItemRefineryBtnDown, MSGBOX_EVENT_USER_CUSTOM_LUCKYITEM_REFINERY);
+	AddCallbackFunc(SEASON3B::CLuckyTradeMenuMsgBox::LuckyItemElevationBtnDown, MSGBOX_EVENT_USER_CUSTOM_LUCKYITEM_ELEVATION);
 	AddCallbackFunc(SEASON3B::CLuckyTradeMenuMsgBox::ExitBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
 }
 
@@ -5896,11 +5914,15 @@ void SEASON3B::CLuckyTradeMenuMsgBox::SetButtonInfo()
 	x = GetPos().x + msgboxhalfwidth - btnhalfwidth;
 	y = GetPos().y + 85;
 	m_BtnTrade.SetInfo(CNewUIMessageBoxMng::IMAGE_MSGBOX_BTN_EMPTY, x, y, width, height, CNewUIMessageBoxButton::MSGBOX_BTN_SIZE_EMPTY);
-	m_BtnTrade.SetText("럭키아이템 교환");	// "GlobalText"
+	m_BtnTrade.SetText("Exchange Lucky Ticket");	// "GlobalText"
 
 	y = GetPos().y + 120;
 	m_BtnRefinery.SetInfo(CNewUIMessageBoxMng::IMAGE_MSGBOX_BTN_EMPTY, x, y, width, height, CNewUIMessageBoxButton::MSGBOX_BTN_SIZE_EMPTY);
-	m_BtnRefinery.SetText("럭키아이템 제련");	// "GlobalText"
+	m_BtnRefinery.SetText("Refine Lucky Item");	// "GlobalText"
+
+	y = GetPos().y + 155;
+	m_BtnElevation.SetInfo(CNewUIMessageBoxMng::IMAGE_MSGBOX_BTN_EMPTY, x, y, width, height, CNewUIMessageBoxButton::MSGBOX_BTN_SIZE_EMPTY);
+	m_BtnElevation.SetText("Refine Jewel of Elevation");
 
 	width = MSGBOX_BTN_EMPTY_SMALL_WIDTH;
 	btnhalfwidth = width / 2.f;
@@ -5940,12 +5962,12 @@ void SEASON3B::CLuckyTradeMenuMsgBox::RenderTexts()
 	g_pRenderText->SetBgColor(0, 0, 0, 0);
 	g_pRenderText->SetTextColor(255, 255, 255, 255);
 	g_pRenderText->SetFont(g_hFontBold);
-	sprintf( szText, "럭키아이템 교환NPC" );	// "LuckyItem Trade NPC"
+	sprintf( szText, "Lucky Item NPC" );	// "LuckyItem Trade NPC"
 	g_pRenderText->RenderText(fPos_x, fPos_y, szText, MSGBOX_WIDTH - 20.0f, 0, RT3_SORT_CENTER);
 	
 	fPos_y += 15;
 	g_pRenderText->SetFont(g_hFont);
-	sprintf( szText, "럭키아이템으로 교환하거나 제련할 수 있습니�." );
+	sprintf( szText, "Exchange tickets or refine Lucky Items." );
 	g_pRenderText->RenderText(fPos_x, fPos_y+1*18, szText, MSGBOX_WIDTH - 20.0f, 0, RT3_SORT_CENTER);
 }
 
@@ -5953,6 +5975,7 @@ void SEASON3B::CLuckyTradeMenuMsgBox::RenderButtons()
 {
 	m_BtnTrade.Render();
 	m_BtnRefinery.Render();
+	m_BtnElevation.Render();
 	m_BtnExit.Render();
 }
 #endif // LEM_ADD_LUCKYITEM

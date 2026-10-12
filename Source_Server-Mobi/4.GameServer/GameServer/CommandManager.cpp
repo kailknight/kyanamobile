@@ -832,7 +832,11 @@ bool CCommandManager::CommandPost(LPOBJ lpObj,char* arg) // OK
 		while (tmpservercode >= 20) { tmpservercode -= 20; }
 		tmpservercode += 1;
 		char szTemp[256];
-		wsprintf(szTemp, "[Sub-%d] %s", tmpservercode, arg);
+		// Tag /post with ServerName from Common.ini; "Sub-N" only if it is blank.
+		if (gServerInfo.m_ServerName[0] != 0)
+			wsprintf(szTemp, "[%s] %s", gServerInfo.m_ServerName, arg);
+		else
+			wsprintf(szTemp, "[Sub-%d] %s", tmpservercode, arg);
 
 		GDGlobalPostSend(gMapServerManager.GetMapServerGroup(), 1, lpObj->Name, szTemp);
 	//	GDGlobalPostSend(gMapServerManager.GetMapServerGroup(), 1, lpObj->Name, arg); //Gốc
@@ -843,7 +847,11 @@ bool CCommandManager::CommandPost(LPOBJ lpObj,char* arg) // OK
 		while (tmpservercode >= 20) { tmpservercode -= 20; }
 		tmpservercode += 1;
 		char szTemp[256];
-		wsprintf(szTemp, "[Sub-%d] %s", tmpservercode, arg);
+		// Tag /post with ServerName from Common.ini; "Sub-N" only if it is blank.
+		if (gServerInfo.m_ServerName[0] != 0)
+			wsprintf(szTemp, "[%s] %s", gServerInfo.m_ServerName, arg);
+		else
+			wsprintf(szTemp, "[Sub-%d] %s", tmpservercode, arg);
 
 
 		GDGlobalPostSend(gMapServerManager.GetMapServerGroup(), 2, lpObj->Name, szTemp);
@@ -855,7 +863,11 @@ bool CCommandManager::CommandPost(LPOBJ lpObj,char* arg) // OK
 		while (tmpservercode >= 20) { tmpservercode -= 20; }
 		tmpservercode += 1;
 		char szTemp[256];
-		wsprintf(szTemp, "[Sub-%d] %s", tmpservercode, arg);
+		// Tag /post with ServerName from Common.ini; "Sub-N" only if it is blank.
+		if (gServerInfo.m_ServerName[0] != 0)
+			wsprintf(szTemp, "[%s] %s", gServerInfo.m_ServerName, arg);
+		else
+			wsprintf(szTemp, "[Sub-%d] %s", tmpservercode, arg);
 		GDGlobalPostSend(gMapServerManager.GetMapServerGroup(), 3, lpObj->Name, szTemp);
 		//GDGlobalPostSend(gMapServerManager.GetMapServerGroup(), 3, lpObj->Name, arg);
 	}

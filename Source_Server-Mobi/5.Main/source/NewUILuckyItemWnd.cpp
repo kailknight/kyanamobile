@@ -18,6 +18,25 @@
 #include "wsclientinline.h"
 #include "DSPlaySound.h"
 
+extern int DisplayWinCDepthBox;
+
+// Text lines for the Jewel of Elevation refine, which has no GlobalText entries.
+// AddText() takes LUCKY_CUSTOM_TEXT + n for these.
+#define LUCKY_CUSTOM_TEXT 900000
+static const char* g_szLuckyCustomText[] =
+{
+	"Place a Jewel of Harmony and a Jewel of Guardian.",
+	"Combine them into a Jewel of Elevation.",
+	"Failure destroys both jewels.",
+};
+
+static const char* LuckyTextLine(int nIndex)
+{
+	if (nIndex >= LUCKY_CUSTOM_TEXT)
+		return g_szLuckyCustomText[nIndex - LUCKY_CUSTOM_TEXT];
+	return GlobalText[nIndex];
+}
+
 using namespace SEASON3B;
 CNewUILuckyItemWnd::CNewUILuckyItemWnd()
 {
@@ -98,7 +117,7 @@ void CNewUILuckyItemWnd::Render_Frame( void )
 
 		g_pRenderText->SetFont(g_hFont);
 		g_pRenderText->SetTextColor( m_sText[i].s_dwColor );
-		g_pRenderText->RenderText(m_ptPos.x +10, fTextY + 11.0f*i, GlobalText[m_sText[i].s_nTextIndex], m_fSizeX-20, 0, m_sText[i].s_nLine);
+		g_pRenderText->RenderText(m_ptPos.x +10, fTextY + 11.0f*i, LuckyTextLine(m_sText[i].s_nTextIndex), m_fSizeX-20, 0, m_sText[i].s_nLine);
 	}
 
 	
@@ -116,6 +135,10 @@ int CNewUILuckyItemWnd::SetWndAction( eLUCKYITEM _eType )
 		case eLuckyItemType_Refinery:
 			if( m_eWndAction		== eLuckyItem_Move )	return 16;
 			else if( m_eWndAction	== eLuckyItem_Act )		return 52;
+		break;
+		case eLuckyItemType_Elevation:
+			if( m_eWndAction		== eLuckyItem_Move )	return 15;
+			else if( m_eWndAction	== eLuckyItem_Act )		return 53;
 		break;
 	}
 
@@ -184,7 +207,7 @@ void CNewUILuckyItemWnd::GetResult( BYTE _byResult, int _nIndex, BYTE* _pbyItemP
 	switch( m_eWndAction )
 	{
 		case eLuckyItem_Move:
-			bInitInven	= true;
+			bInitInven	= ( m_eType != eLuckyItemType_Elevation );	// elevation holds two jewels
 			nAddInven	= _nIndex;
 		break;
 		case eLuckyItem_Act:
@@ -204,6 +227,11 @@ void CNewUILuckyItemWnd::GetResult( BYTE _byResult, int _nIndex, BYTE* _pbyItemP
 				else if( m_eType == eLuckyItemType_Refinery )	
 				{
 					bInitInven	= true;
+				}
+				else if( m_eType == eLuckyItemType_Elevation )
+				{
+					bInitInven	= true;
+					g_pChatListBox->AddText("", "Refining failed. The jewels were destroyed.", SEASON3B::TYPE_ERROR_MESSAGE);
 				}
 			}
 
@@ -335,6 +363,14 @@ void CNewUILuckyItemWnd::OpeningProcess( void )
 			AddText(3302, 0xFF0000FF);
 			m_BtnMix.ChangeToolTipText(GlobalText[2061], true); // มฆทร
 		break;
+		case eLuckyItemType_Elevation:
+			unicode::_sprintf( m_szSubject, "%s", "Refine Jewel of Elevation");
+			AddText(LUCKY_CUSTOM_TEXT + 0, 0xFF0000FF, RT3_SORT_LEFT ), AddText(0), AddText(0);
+			AddText(LUCKY_CUSTOM_TEXT + 1);
+			AddText(0), AddText(0);
+			AddText(LUCKY_CUSTOM_TEXT + 2, 0xFF0000FF);
+			m_BtnMix.ChangeToolTipText(GlobalText[2061], true);
+		break;
 	}
 }
 
@@ -407,6 +443,20 @@ bool CNewUILuckyItemWnd::Check_LuckyItem_InWnd( void )
 	return false;
 }
 
+// Trade and refine take one item. Elevation takes one Jewel of Harmony and one
+// Jewel of Guardian, so a second item is fine as long as it's the other jewel.
+bool CNewUILuckyItemWnd::CanAddLuckyItem( ITEM* _pItem )
+{
+	if( !_pItem || !Check_LuckyItem( _pItem ) )	return false;
+	if( m_eType != eLuckyItemType_Elevation )	return !Check_LuckyItem_InWnd();
+
+	for( int i=0; i< (int)m_pNewInventoryCtrl->GetNumberOfItems(); i++ )
+	{
+		if( m_pNewInventoryCtrl->GetItem(i)->Type == _pItem->Type )	return false;
+	}
+	return m_pNewInventoryCtrl->GetNumberOfItems() < 2;
+}
+
 bool CNewUILuckyItemWnd::Check_LuckyItem( ITEM* _pItem )
 {
 	switch( m_eType )
@@ -416,6 +466,9 @@ bool CNewUILuckyItemWnd::Check_LuckyItem( ITEM* _pItem )
 		break;
 		case eLuckyItemType_Refinery:
 			if( Check_LuckyItem_Refinery( _pItem ) )	return true;
+		break;
+		case eLuckyItemType_Elevation:
+			if( _pItem->Type == ITEM_POTION+42 || _pItem->Type == ITEM_POTION+31 )	return true;
 		break;
 	}
 
@@ -449,7 +502,7 @@ bool CNewUILuckyItemWnd::Process_InventoryCtrl( void )
 	ITEM*	pItemObj	= pPickedItem->GetItem();
 	bool	bAct		= Check_LuckyItem( pItemObj );
 
-	if( !bAct || Check_LuckyItem_InWnd() )
+	if( !bAct || !CanAddLuckyItem( pItemObj ) )
 	{
 		m_pNewInventoryCtrl->SetSquareColorNormal(m_fInvenClrWarning[0], m_fInvenClrWarning[1], m_fInvenClrWarning[2] );
 		return false;
@@ -511,6 +564,11 @@ bool CNewUILuckyItemWnd::Process_BTN_Action( void )
 		g_pChatListBox->AddText("", GlobalText[1817], SEASON3B::TYPE_ERROR_MESSAGE);
 		return false;
 	}
+	if( m_eType == eLuckyItemType_Elevation && m_pNewInventoryCtrl->GetNumberOfItems() != 2 )
+	{
+		g_pChatListBox->AddText("", "Place a Jewel of Harmony and a Jewel of Guardian.", SEASON3B::TYPE_ERROR_MESSAGE);
+		return false;
+	}
 	if( !Check_LuckyItem( m_pNewInventoryCtrl->GetItem(0) ) )
 	{
 		g_pChatListBox->AddText("", GlobalText[1812], SEASON3B::TYPE_ERROR_MESSAGE);
@@ -549,6 +607,30 @@ bool CNewUILuckyItemWnd::UpdateMouseEvent( void )
 	{
 		if(SEASON3B::IsPress(VK_RBUTTON))
 		{
+			// Right click an item in the window (the ticket, or the item it was
+			// exchanged for) to move it to the first free inventory slot. Same
+			// hidden pick-up as unequipping, so a refused move puts it back.
+			ITEM* pItem = m_pNewInventoryCtrl ? m_pNewInventoryCtrl->FindItemAtPt(MouseX, MouseY) : NULL;
+			if (pItem && !EquipmentItem && CNewUIInventoryCtrl::GetPickedItem() == NULL)
+			{
+				const int nEmptySlot = g_pMyInventory->FindEmptySlot(pItem);
+				if (nEmptySlot == -1)
+				{
+					g_pChatListBox->AddText("", GlobalText[1815], SEASON3B::TYPE_ERROR_MESSAGE);
+				}
+				else if (CNewUIInventoryCtrl::CreatePickedItem(m_pNewInventoryCtrl, pItem))
+				{
+					CNewUIPickedItem* pPicked = CNewUIInventoryCtrl::GetPickedItem();
+					const int nSrcIndex = pPicked->GetSourceLinealPos();
+					m_pNewInventoryCtrl->RemoveItem(pItem);
+					pPicked->HidePickedItem();
+					if (SendRequestEquipmentItem(SetWndAction(eLuckyItem_Move), nSrcIndex, pPicked->GetItem(), REQUEST_EQUIPMENT_INVENTORY, nEmptySlot))
+						PlayBuffer(SOUND_GET_ITEM01);
+					else
+						CNewUIInventoryCtrl::BackupPickedItem();
+				}
+			}
+
 			MouseRButton = false;
 			MouseRButtonPop = false;
 			MouseRButtonPush = false;
@@ -579,6 +661,20 @@ bool CNewUILuckyItemWnd::Update( void )
 
 bool CNewUILuckyItemWnd::Render( void )
 {
+	// Sit beside the inventory like the Chaos Machine. Item models are clipped to
+	// the right-hand panel area, so at the old fixed x=260 they drew invisible.
+	const int nPosX = (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_ExpandInventory) ? 640 - 190 * 3 : 640 - 190 * 2) + DisplayWinCDepthBox;
+	if (m_ptPos.x != nPosX || m_ptPos.y != 0)
+	{
+		SetPos(nPosX, 0);
+		SetFrame();
+		if (m_pNewInventoryCtrl)
+			m_pNewInventoryCtrl->SetPos(nPosX + 15, 110);
+		const float fBtnW = m_sImgList[eImgList_MixBtn].s_fWid;
+		const float fBtnH = m_sImgList[eImgList_MixBtn].s_fHgt;
+		m_BtnMix.ChangeButtonInfo(nPosX + (m_fSizeX - fBtnW) * 0.5f, 380, fBtnW, fBtnH);
+	}
+
 	EnableAlphaTest();
 	glColor4f(1.f, 1.f, 1.f, 1.f);
 	

@@ -1328,6 +1328,11 @@ struct OBJECTSTRUCT
 
 	short m_OfflineCoordX;
 	short m_OfflineCoordY;
+	short m_OfflineMap; // map the off helper was started on, for the return-after-death switch
+	BYTE m_OfflineReturning; // 1 = respawned after a death, heading back to the start spot
+	BYTE m_OfflineReturnTries; // Move (M) attempts to reach m_OfflineMap
+	DWORD m_OfflineReturnTick;
+	DWORD m_OfflineReturnStart;
 	DWORD m_OfflineTimeResetMove;
 	DWORD ClickClientSend;
 #if (CUSTOM_BCHOTROI || CongHuongV2)

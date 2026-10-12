@@ -4477,6 +4477,70 @@ void CChaosBox::LuckyItemRefineMix(LPOBJ lpObj) // OK
 	#endif
 }
 
+void CChaosBox::ElevationJewelMix(LPOBJ lpObj) // OK
+{
+	// Lucky Item NPC: exactly one Jewel of Harmony + one Jewel of Guardian ->
+	// one Jewel of Elevation. Rate is ElevationJewelMixRate_ALn in ChaosMix.ini;
+	// failure consumes both jewels.
+	int HarmonyCount = 0;
+	int GuardianCount = 0;
+	int OtherCount = 0;
+
+	for(int n=0;n < CHAOS_BOX_SIZE;n++)
+	{
+		if(lpObj->ChaosBox[n].IsItem() == 0)
+		{
+			continue;
+		}
+
+		if(lpObj->ChaosBox[n].m_Index == GET_ITEM(14,42))
+		{
+			HarmonyCount++;
+		}
+		else if(lpObj->ChaosBox[n].m_Index == GET_ITEM(14,31))
+		{
+			GuardianCount++;
+		}
+		else
+		{
+			OtherCount++;
+		}
+	}
+
+	if (lpObj->ChaosLockShowRate != 100) //CB_GETMIXRATE
+	{
+		if(HarmonyCount != 1 || GuardianCount != 1 || OtherCount != 0)
+		{
+			this->GCChaosMixSend(lpObj->Index,7,0);
+			return;
+		}
+	}
+
+	lpObj->ChaosSuccessRate = gServerInfo.m_ElevationJewelMixRate[lpObj->AccountLevel];
+
+	lpObj->ChaosSuccessRate = ((lpObj->ChaosSuccessRate>100)?100:lpObj->ChaosSuccessRate);
+
+	//CB_GETMIXRATE
+	if (lpObj->ChaosLockShowRate == 100)  return;
+
+	if((GetLargeRand()%100) < lpObj->ChaosSuccessRate)
+	{
+		GDCreateItemSend(lpObj->Index,0xFF,0,0,GET_ITEM(14,161),0,1,0,0,0,-1,0,0,0,0,0,0xFF,0);
+
+		gLog.Output(LOG_CHAOS_MIX,"[ElevationJewelMix][Success][%s][%s] - (ChaosSuccessRate: %d)",lpObj->Account,lpObj->Name,lpObj->ChaosSuccessRate);
+	}
+	else
+	{
+		this->ChaosBoxInit(lpObj);
+
+		this->GCChaosBoxSend(lpObj,0);
+
+		this->GCChaosMixSend(lpObj->Index,0,0);
+
+		gLog.Output(LOG_CHAOS_MIX,"[ElevationJewelMix][Failure][%s][%s] - (ChaosSuccessRate: %d)",lpObj->Account,lpObj->Name,lpObj->ChaosSuccessRate);
+	}
+}
+
 void CChaosBox::MonsterWingMix(LPOBJ lpObj) // OK
 {
 
@@ -5692,6 +5756,9 @@ void CChaosBox::CGChaosMixRecv(PMSG_CHAOS_MIX_RECV* lpMsg, int aIndex) // OK
 		case CHAOS_MIX_LUCKY_ITEM_REFINE:
 			this->LuckyItemRefineMix(lpObj);
 			break;
+		case CHAOS_MIX_ELEVATION_JEWEL:
+			this->ElevationJewelMix(lpObj);
+			break;
 		case CHAOS_MIX_MONSTER_WING:
 			this->MonsterWingMix(lpObj);
 			break;
@@ -6019,6 +6086,9 @@ void CChaosBox::RecalcAndSendMixRate(LPOBJ lpObj, int ChaosMixId, int ChaosMixIn
 		break;
 	case CHAOS_MIX_LUCKY_ITEM_REFINE:
 		this->LuckyItemRefineMix(lpObj);
+		break;
+	case CHAOS_MIX_ELEVATION_JEWEL:
+		this->ElevationJewelMix(lpObj);
 		break;
 	case CHAOS_MIX_MONSTER_WING:
 		this->MonsterWingMix(lpObj);

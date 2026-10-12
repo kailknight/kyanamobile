@@ -145,9 +145,11 @@ public:
 	DWORD m_ConnectTick;
 	int m_MUOffHelperEnabled[MAX_ACCOUNT_LEVEL];
 	int m_MUOffHelperTimer[MAX_ACCOUNT_LEVEL];
+	int m_MUOffHelperReturn[MAX_ACCOUNT_LEVEL];
 	void ReadOffLine(char* section,char* path);
 	void Start(CG_OFFMODE_RESULT* aRecv, int UserIndex);
 	void Attack(int UserIndex);
+	void ReturnToStartSpot(LPOBJ lpObj);
 	void RenderAttack(int UserIndex);
 	void RenderAutoBuffParty(int aIndex);
 	void RenderAutoPote(int aIndex);

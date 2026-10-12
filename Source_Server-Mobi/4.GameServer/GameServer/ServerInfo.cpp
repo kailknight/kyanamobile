@@ -1575,6 +1575,13 @@ void CServerInfo::ReadChaosMixInfo(char* section,char* path) // OK
 
 	this->m_LuckyItemRefineMixRate2[3] = GetPrivateProfileInt(section,"LuckyItemRefineMixRate2_AL3",0,path);
 
+	for(int n=0;n < MAX_ACCOUNT_LEVEL;n++)
+	{
+		char key[64];
+		wsprintf(key,"ElevationJewelMixRate_AL%d",n);
+		this->m_ElevationJewelMixRate[n] = GetPrivateProfileInt(section,key,50,path);
+	}
+
 	#endif
 
 	#if(GAMESERVER_UPDATE>=701)

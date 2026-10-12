@@ -1079,6 +1079,11 @@ void gObjCharZeroSet(int aIndex) // OK
 #if USE_FAKE_ONLINE == TRUE
 	lpObj->IsFakeOnline = false;
 	lpObj->m_OfflineMoveDelay = 0;
+	lpObj->m_OfflineMap = -1;
+	lpObj->m_OfflineReturning = 0;
+	lpObj->m_OfflineReturnTries = 0;
+	lpObj->m_OfflineReturnTick = 0;
+	lpObj->m_OfflineReturnStart = 0;
 	lpObj->IsFakeRegen = false;
 	lpObj->IsFakePVPMode = 0;
 	lpObj->IsFakePartyMode = 0;

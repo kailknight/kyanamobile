@@ -133,6 +133,21 @@ bool CMove::GetInfoByName(char* name,MOVE_INFO* lpInfo) // OK
 	return 0;
 }
 
+// The Move (M) entry that lands on this map, or -1. Used by the off helper to
+// get back to its hunting map the way a player would.
+int CMove::GetMoveIndexByMap(int map) // OK
+{
+	for(std::map<int,MOVE_INFO>::iterator it=this->m_MoveInfo.begin();it != this->m_MoveInfo.end();it++)
+	{
+		if(gGate.GetGateMap(it->second.Gate) == map)
+		{
+			return it->second.Index;
+		}
+	}
+
+	return -1;
+}
+
 void CMove::Move(LPOBJ lpObj,int index) // OK
 {
 	MOVE_INFO MoveInfo;

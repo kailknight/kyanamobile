@@ -8,6 +8,7 @@
 #include "Path.h"
 #include "Notice.h"
 #include "Map.h"
+#include "Move.h"
 #include "Skill.h"
 #include "Party.h"
 #include "Attack.h"
@@ -47,6 +48,11 @@ void OfflineMode::ReadOffLine(char* section,char* path)
 	this->m_MUOffHelperTimer[1] = GetPrivateProfileInt(section, "MuOffHelperTime_AL1", -1, path);
 	this->m_MUOffHelperTimer[2] = GetPrivateProfileInt(section, "MuOffHelperTime_AL2", -1, path);
 	this->m_MUOffHelperTimer[3] = GetPrivateProfileInt(section, "MuOffHelperTime_AL3", -1, path);
+	// 1 = after dying, the off helper teleports back to where it was started.
+	this->m_MUOffHelperReturn[0] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL0", 0, path);
+	this->m_MUOffHelperReturn[1] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL1", 0, path);
+	this->m_MUOffHelperReturn[2] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL2", 0, path);
+	this->m_MUOffHelperReturn[3] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL3", 0, path);
 }
 
 void OfflineMode::OnHelperpAlreadyConnected(LPOBJ lpObj) // OK
@@ -160,6 +166,8 @@ void OfflineMode::Start(CG_OFFMODE_RESULT* aRecv, int aIndex)
 	//===========
 	lpObj->m_OfflineCoordX = lpObj->X;
 	lpObj->m_OfflineCoordY = lpObj->Y;
+	lpObj->m_OfflineMap = lpObj->Map;
+	lpObj->m_OfflineReturning = 0;
 	lpObj->m_OfflineTimeResetMove = GetTickCount();
 	lpObj->AttackCustomDelay = GetTickCount();
 	lpObj->MuOffHelperTime = this->m_MUOffHelperTimer[lpObj->AccountLevel] * 600;
@@ -273,6 +281,72 @@ void MuOffHelperRepair(int aIndex)
 	}
 }
 
+// After a death with MuOffHelperReturn on: get back to the start spot the way a
+// player would. On another map, use the Move (M) entry for that map - same
+// level, zen, wings and PK checks as the Move window, and it charges the zen.
+// On the right map, walk there in short path-found legs, then hunt again.
+void OfflineMode::ReturnToStartSpot(LPOBJ lpObj)
+{
+	const DWORD now = GetTickCount();
+
+	if ((int)(now - lpObj->m_OfflineReturnTick) < 500)
+	{
+		return;
+	}
+
+	lpObj->m_OfflineReturnTick = now;
+
+	if (lpObj->Map != lpObj->m_OfflineMap)
+	{
+		// Move refused (not enough zen, level, no wings for Icarus...) or no
+		// Move entry for that map: stay where we are, as before this switch.
+		const int MoveIndex = gMove.GetMoveIndexByMap(lpObj->m_OfflineMap);
+
+		if (MoveIndex == -1 || lpObj->m_OfflineReturnTries >= 3)
+		{
+			lpObj->m_OfflineReturning = 0;
+			return;
+		}
+
+		lpObj->m_OfflineReturnTries++;
+		lpObj->m_OfflineReturnTick = now + 2500; // let the gate move land before checking again
+		gMove.Move(lpObj, MoveIndex);
+		return;
+	}
+
+	const int dx = lpObj->m_OfflineCoordX - lpObj->X;
+	const int dy = lpObj->m_OfflineCoordY - lpObj->Y;
+
+	if (abs(dx) <= 1 && abs(dy) <= 1)
+	{
+		lpObj->m_OfflineReturning = 0;
+		lpObj->m_OfflineTimeResetMove = now;
+		return;
+	}
+
+	// Stuck for three minutes (walls the short path-finder can't get round):
+	// finish with a same-map teleport rather than standing there forever.
+	if ((now - lpObj->m_OfflineReturnStart) > 180000)
+	{
+		lpObj->m_OfflineReturning = 0;
+		gObjTeleport(lpObj->Index, lpObj->m_OfflineMap, lpObj->m_OfflineCoordX, lpObj->m_OfflineCoordY);
+		return;
+	}
+
+	// FindPath gives up after 15 steps, so aim at a point at most 8 tiles
+	// along the way and take 2 steps of that path (~4 tiles a second).
+	const int ix = lpObj->X + ((dx > 8) ? 8 : ((dx < -8) ? -8 : dx));
+	const int iy = lpObj->Y + ((dy > 8) ? 8 : ((dy < -8) ? -8 : dy));
+
+	PATH_INFO path;
+
+	if (gMap[lpObj->Map].PathFinding2(lpObj->X, lpObj->Y, ix, iy, &path) != 0 && path.PathNum > 1)
+	{
+		const int step = (path.PathNum > 2) ? 2 : 1;
+		AnimationMove(lpObj->Index, path.PathX[step], path.PathY[step]);
+	}
+}
+
 void OfflineMode::Attack(int aIndex)
 {
 	if (OBJMAX_RANGE(aIndex) == FALSE)
@@ -287,14 +361,48 @@ void OfflineMode::Attack(int aIndex)
 
 	LPOBJ lpObj = &gObj[aIndex];
 
+	// Died: with MuOffHelperReturn on, head back to the start spot once
+	// respawned - wherever the respawn point is, safe zone or not.
+	if (lpObj->DieRegen != 0 && lpObj->m_OfflineMode != 0 && lpObj->IsFakeOnline == 0
+		&& this->m_MUOffHelperReturn[lpObj->AccountLevel] != 0
+		&& MAP_RANGE(lpObj->m_OfflineMap) != 0
+		&& (gMap[lpObj->m_OfflineMap].GetAttr(lpObj->m_OfflineCoordX, lpObj->m_OfflineCoordY) & 1) == 0)
+	{
+		lpObj->m_OfflineReturning = 1;
+		lpObj->m_OfflineReturnTries = 0;
+		lpObj->m_OfflineReturnTick = GetTickCount() + 2000; // stand a moment after respawning
+		lpObj->m_OfflineReturnStart = GetTickCount();
+	}
+
 	if (lpObj->m_OfflineMode == 0 && lpObj->IsFakeOnline == 0 || lpObj->DieRegen != 0
 		|| lpObj->Teleport != 0)
 	{
 		return;
 	}
 
+	if (lpObj->m_OfflineReturning != 0 && lpObj->IsFakeOnline == 0)
+	{
+		this->ReturnToStartSpot(lpObj);
+		return;
+	}
+
 	if (gServerInfo.InSafeZone(aIndex) == true)
 	{
+		// Killed and respawned in town: head back to the hunting spot if this
+		// account level has MuOffHelperReturn on, and that spot isn't a safe
+		// zone itself (a helper started in town has nowhere to return to).
+		if (lpObj->m_OfflineMode != 0 && lpObj->IsFakeOnline == 0
+			&& this->m_MUOffHelperReturn[lpObj->AccountLevel] != 0
+			&& MAP_RANGE(lpObj->m_OfflineMap) != 0
+			&& (gMap[lpObj->m_OfflineMap].GetAttr(lpObj->m_OfflineCoordX, lpObj->m_OfflineCoordY) & 1) == 0)
+		{
+			lpObj->m_OfflineReturning = 1;
+			lpObj->m_OfflineReturnTries = 0;
+			lpObj->m_OfflineReturnTick = 0;
+			lpObj->m_OfflineReturnStart = GetTickCount();
+			return;
+		}
+
 		this->OnHelperpAlreadyConnected(lpObj);
 		return;
 	}
@@ -876,6 +984,13 @@ void OfflineMode::regresar(int aIndex)
 
 	if (lpObj->m_OfflineMode == 0 && lpObj->IsFakeOnline == 0 || lpObj->DieRegen != 0
 		|| lpObj->Teleport != 0)
+	{
+		return;
+	}
+
+	// Walking back after a death (ReturnToStartSpot): this snap-back would
+	// jump him the rest of the way.
+	if (lpObj->m_OfflineReturning != 0)
 	{
 		return;
 	}

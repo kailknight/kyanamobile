@@ -71,6 +71,7 @@ enum eChaosMixNumber
 	CHAOS_MIX_PLUS_ITEM_LEVEL6 = 50,
 	CHAOS_MIX_LUCKY_ITEM_CREATE = 51,
 	CHAOS_MIX_LUCKY_ITEM_REFINE = 52,
+	CHAOS_MIX_ELEVATION_JEWEL = 53,
 	CHAOS_MIX_MONSTER_WING = 56,
 	CHAOS_MIX_SOCKET_WEAPON = 57,
 	CHAOS_MIX_FENRIR_GOLD = 58,
@@ -177,6 +178,7 @@ public:
 	void SummonScrollMix(LPOBJ lpObj,int type);
 	void LuckyItemCreateMix(LPOBJ lpObj);
 	void LuckyItemRefineMix(LPOBJ lpObj);
+	void ElevationJewelMix(LPOBJ lpObj);
 	void MonsterWingMix(LPOBJ lpObj);
 	void SocketWeaponMix(LPOBJ lpObj);
 	void PentagramMithrilMix(LPOBJ lpObj);
