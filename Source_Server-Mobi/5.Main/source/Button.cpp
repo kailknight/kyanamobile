@@ -19,7 +19,7 @@ extern float g_fScreenRate_y;
 
 CButton*	CButton::m_pBtnHeld;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 namespace
 {
 	// Tap debounce shared by EVERY legacy CButton.

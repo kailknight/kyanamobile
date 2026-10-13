@@ -72,7 +72,7 @@ namespace
 {
 	bool IsMobileUiTap()
 	{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		return SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnDn();
 #else
 		return ((GetKeyState(VK_LBUTTON) & 0x8000) != 0);
@@ -372,7 +372,7 @@ void VoiceChatProcInput()
 	bool bHeld = false;
 	bool bBlockedByChat = false;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// The touch handler owns both modes on this platform - it knows whether a
 	// tap toggled or a finger is still down - so this just follows its flag.
 	bHeld = g_VoiceTouchTalking;
@@ -632,7 +632,7 @@ bool Interface::ActionSendItemGS(ITEM* ItemSell, int Slot)
 }
 void Interface::Init()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 #define ANDROID_IF_STAGE(msg) do { OutputDebugStringA("UI_IFACE: " msg); g_ErrorReport.Write("[UI_IFACE] " msg "\r\n"); } while(0)
 #else
 #define ANDROID_IF_STAGE(msg) ((void)0)
@@ -956,7 +956,7 @@ void Interface::RenderCaptchaNumber(float PosX, float PosY, CUITextInputBox* a6,
 //=== Draw Menu Custom
 void Interface::DrawInfoMini()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// The social shortcuts and the Auto Reset / Auto HP / Auto PK toggles are
 	// desktop controls sized for a mouse, and they sit across the bottom of the
 	// screen where the touch overlay now lives. Drawing and hit testing are

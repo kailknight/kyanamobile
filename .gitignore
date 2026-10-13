@@ -28,6 +28,10 @@
 /Source_Server-Mobi/ios/third_party/
 /Source_Server-Mobi/ios/build/
 
+# The native Mac build: same idea, it shares ios/src and ios/third_party.
+!/Source_Server-Mobi/macos/
+/Source_Server-Mobi/macos/build/
+
 # Compiled artifacts if any get generated in-place.
 *.o
 *.obj

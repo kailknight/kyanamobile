@@ -40,7 +40,7 @@ namespace
 {
 	bool IsPrimaryUiTap()
 	{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		return SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnDn();
 #else
 		return ((GetKeyState(VK_LBUTTON) & 0x8000) != 0);
@@ -51,7 +51,7 @@ namespace
 
 CNewUIBCustomMenuInfo::CNewUIBCustomMenuInfo()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM_CTOR: begin");
 	g_ErrorReport.Write("[UI_BCUSTOM_CTOR] begin\r\n");
 #endif
@@ -62,7 +62,7 @@ CNewUIBCustomMenuInfo::CNewUIBCustomMenuInfo()
 	BLockMessageBox = false;
 	AutoCtrlPK = false;
 	AutoHP = false;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM_CTOR: end");
 	g_ErrorReport.Write("[UI_BCUSTOM_CTOR] end\r\n");
 #endif
@@ -906,36 +906,36 @@ bool CNewUIBCustomMenuInfo::Create(CNewUIManager* pNewUIMng, int x, int y)
 	if( NULL == pNewUIMng )
 		return false;
 	
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM: create begin");
 	g_ErrorReport.Write("[UI_BCUSTOM] create begin\r\n");
 #endif
 	m_pNewUIMng = pNewUIMng;
 	m_pNewUIMng->AddUIObj( SEASON3B::INTERFACE_BCUSTOMMENU, this );
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM: add ui obj ok");
 	g_ErrorReport.Write("[UI_BCUSTOM] add ui obj ok\r\n");
 #endif
 
 	SetPos(x, y);
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM: set pos ok");
 	g_ErrorReport.Write("[UI_BCUSTOM] set pos ok\r\n");
 #endif
 	LoadImages();
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM: load images ok");
 	g_ErrorReport.Write("[UI_BCUSTOM] load images ok\r\n");
 #endif
 	Show( true );
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM: show ok");
 	g_ErrorReport.Write("[UI_BCUSTOM] show ok\r\n");
 #endif
 
 	//this->WindowMenuCustom = new GUIObj(-1, 50, 220, 295, true);
 	gInterface.Init();
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	OutputDebugStringA("UI_BCUSTOM: gInterface.Init ok");
 	g_ErrorReport.Write("[UI_BCUSTOM] gInterface.Init ok\r\n");
 #endif

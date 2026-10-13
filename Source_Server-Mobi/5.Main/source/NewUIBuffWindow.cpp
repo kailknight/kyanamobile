@@ -70,7 +70,7 @@ void SEASON3B::CNewUIBuffWindow::SetPos(int x, int y)
 
 void SEASON3B::CNewUIBuffWindow::SetPos(int iScreenWidth)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Buffs sit under the status panel on mobile rather than across the top
 	// centre, where they collided with the boss/event banners. X/Y are literal
 	// (this file has no access to android_main.cpp's kPortraitBarLeft/

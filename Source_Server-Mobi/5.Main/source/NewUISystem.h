@@ -67,7 +67,7 @@
 #include "NewUIDuelWatchWindow.h"
 #include "NewUIDuelWatchMainFrameWindow.h"
 #include "NewUIDuelWatchUserListWindow.h"
-#if defined(PBG_ADD_INGAMESHOP_UI_MAINFRAME) || (defined(__ANDROID__) || defined(MU_IOS))
+#if defined(PBG_ADD_INGAMESHOP_UI_MAINFRAME) || (defined(MU_TOUCH_UI))
 #include "GameShop/NewUIInGameShop.h"
 #endif //PBG_ADD_INGAMESHOP_UI_MAINFRAME || __ANDROID__
 #include "NewUIDoppelGangerWindow.h"

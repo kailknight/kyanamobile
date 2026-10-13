@@ -37,7 +37,7 @@ extern int g_iChatInputType;
 
 namespace
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 float GetLoginUiScale()
 {
 	float scale = 1.0f;
@@ -135,7 +135,7 @@ void CLoginWin::Create()
 	m_pPassInputBox->SetState(UISTATE_NORMAL);
 	 m_pPassInputBox->SetOption(UIOPTION_NOLOCALIZEDCHARACTERS);
 	m_pIDInputBox->SetTabTarget(m_pPassInputBox);
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	m_pPassInputBox->SetTabTarget(NULL);
 #else
 	m_pPassInputBox->SetTabTarget(m_pIDInputBox);
@@ -227,7 +227,7 @@ bool CLoginWin::FocusInputAt(float uiX, float uiY)
 		float spriteY = static_cast<float>(sprite.GetYPos());
 		float spriteW = static_cast<float>(sprite.GetWidth());
 		float spriteH = static_cast<float>(sprite.GetHeight());
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		if (g_fScreenRate_x > 0.0f)
 		{
 			spriteX /= g_fScreenRate_x;
@@ -347,7 +347,7 @@ void CLoginWin::UpdateWhileShow(double dDeltaTick)
 	}
 #endif
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// CUITextInputBox::DoMouseAction() (UIControls.cpp) grabs focus off the
 	// bare global MouseX/MouseY the moment it sees the button down inside its
 	// own (padded +4/+8px) rect - it knows nothing about CB_AutoLogin's arrow,
@@ -381,7 +381,7 @@ void CLoginWin::RenderControls()
 
 	if (this->FirstLoad == 1)
 	{
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 		if (strlen(m_ID) > 0)
 			CUIMng::Instance().m_LoginWin.GetPassInputBox()->GiveFocus();
 		else

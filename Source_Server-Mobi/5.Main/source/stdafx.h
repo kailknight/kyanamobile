@@ -31,6 +31,14 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 
+// MU_TOUCH_UI: the phone layout (touch HUD, virtual joystick, mobile windows)
+// rather than the PC one. Separate from the platform macros because the Mac
+// build shares the Apple platform code (MU_IOS) but is played with mouse and
+// keyboard, so it takes the PC interface wherever a file chooses on this.
+#if defined(__ANDROID__) || (defined(MU_IOS) && !defined(MU_MACOS))
+#define MU_TOUCH_UI 1
+#endif
+
 #if defined(_MSC_VER) && !defined(_WIN64)
 #ifndef _USE_32BIT_TIME_T
 	#define _USE_32BIT_TIME_T

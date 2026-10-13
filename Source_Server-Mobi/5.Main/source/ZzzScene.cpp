@@ -1056,7 +1056,7 @@ void CreateCharacterScene()
     g_ErrorReport.Write( "> Character scene init success.\r\n");
 }
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 // Character-select tap, deferred by one frame.
 //
 // SelectedCharacter is produced by SelectObjects() inside
@@ -1163,7 +1163,7 @@ void NewMoveCharacterScene()
 		}
 	}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Drain the PREVIOUS frame's tap before latching this one - see the comment on
 	// s_CharSelTapPending. Done ahead of the IsCursorOnUI() bail below so a latched
 	// tap always resolves, even if the finger has since drifted into the button bar.
@@ -1195,7 +1195,7 @@ void NewMoveCharacterScene()
 		return;
 	}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Latch only; the pick this tap needs does not exist yet this frame.
 	if (rInput.IsLBtnDbl() || rInput.IsLBtnDn())
 	{
@@ -2079,7 +2079,7 @@ bool MoveMainCamera()
             }
 			
         }
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
         if (g_androidZoomOverride > 0.0f && SceneFlag == MAIN_SCENE)
         {
             const float defaultDist = 1000.0f;
@@ -2245,7 +2245,7 @@ bool MoveMainCamera()
         }
         else
         {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
             if (g_androidZoomOverride > 0.0f)
             {
                 CameraDistanceTarget = g_androidZoomOverride;
@@ -2445,7 +2445,7 @@ void MoveMainScene()
 	MoveChat();
 	UpdatePersonalShopTitleImp();
 	MoveHero();
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	{
 		// Casting a ground-targeted skill from the touch overlay needs the same
 		// terrain pick MoveHero does, so it runs here rather than from the
@@ -2857,7 +2857,7 @@ bool RenderMainScene()
 
     RenderCursor();
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Drawn here rather than from RenderVirtualPad: text drawn in that phase
 	// never appeared on screen, while this UI phase is the one the cursor and
 	// the FPS overlay use, and those do render.
@@ -3113,7 +3113,7 @@ void MainScene(HDC hDC)
 		EndBitmap();
 #endif // defined(_DEBUG) || defined(LDS_FOR_DEVELOPMENT_TESTMODE) || defined(LDS_UNFIXED_FIXEDFRAME_FORDEBUG)
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		// The overlay is scaffolding and is not free: ~8 long strings a frame,
 		// all of which change every frame and so can never be cached. On Mali
 		// that measured ~4-5ms/frame. Set false to run clean - metrics still

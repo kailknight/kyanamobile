@@ -63,7 +63,7 @@ namespace
 
 	// The menu's combo part drives whichever combo this platform has: the PC
 	// hotkey 1-2-3 chain, or the mobile attack wheel's combo (android_main.cpp).
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	bool MenuComboEnabled() { return MU_MobileComboIsEnabled(); }
 	void MenuComboSetEnabled(bool on) { MU_MobileComboSetEnabled(on); }
 	int MenuComboDelay(int step) { return MU_MobileComboGetDelayMs(step); }
@@ -91,7 +91,7 @@ namespace
 	}
 }
 
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 namespace
 {
 	// Typing a ms value in the auto menu: one box, moved onto whichever row was
@@ -181,7 +181,7 @@ void CAutoPotion::SetServerRules(int accountLevel, int canConfigure, int thresho
 	this->m_CanConfigure = (canConfigure >= 0) ? (canConfigure != 0) : (accountLevel > 0);
 	this->m_ServerThreshold = (threshold >= 10 && threshold <= 90) ? threshold : kDefaultThreshold;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Lost the right (VIP ran out, or the config changed) with the settings
 	// open: close them. On PC the menu stays - only its settings lock.
 	if (!this->m_CanConfigure && gInterface.Data[eAutoPotionConfig].OnShow)
@@ -352,7 +352,7 @@ void CAutoPotion::Render()
 {
 	if (!gInterface.Data[eAutoPotionConfig].OnShow || g_pBCustomMenuInfo == NULL)
 	{
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 		// Closed while a value was being typed: keep what was typed and hand the
 		// keyboard back to the game.
 		EndComboDelayEdit(true);
@@ -360,7 +360,7 @@ void CAutoPotion::Render()
 		return;
 	}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Mobile combo works for every class (the attack wheel's chain).
 	const bool comboClass = true;
 #else
@@ -455,7 +455,7 @@ void CAutoPotion::Render()
 			const float rowY = posY + 24.0f + (float)step * 21.0f;
 			const int delayMs = MenuComboDelay(step);
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			TextDraw(g_hFont, left + 10, rowY + 5, 0xFFFFFFFF, 0x0, 0, 0, 1, "Skill %d", step + 1);
 #else
 			TextDraw(g_hFont, left + 10, rowY + 5, 0xFFFFFFFF, 0x0, 0, 0, 1, "Skill %d (key %d)", step + 1, step + 1);
@@ -469,13 +469,13 @@ void CAutoPotion::Render()
 
 				if (g_pBCustomMenuInfo->DrawButton(minusX, rowY, 70, 12, "-", btnW))
 				{
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 					EndComboDelayEdit(false);
 #endif
 					MenuComboAddDelay(step, -1);
 				}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 				TextDraw(g_hFontBold, minusX + btnW, rowY + 5, 0xFFFFFFFF, 0x0, plusX - (minusX + btnW), 0, 3, "%d", delayMs);
 #else
 				// The number itself: click it to type a value, Enter or a click
@@ -524,7 +524,7 @@ void CAutoPotion::Render()
 
 				if (g_pBCustomMenuInfo->DrawButton(plusX, rowY, 70, 12, "+", btnW))
 				{
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 					EndComboDelayEdit(false);
 #endif
 					MenuComboAddDelay(step, 1);
@@ -542,21 +542,21 @@ void CAutoPotion::Render()
 		}
 		else
 		{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			TextDraw(g_hFont, left, posY + 94, 0xFF909090, 0x0, rowW, 0, 3, "tap - / + to change (%d-%d)", CAutoCombo::kMinDelayMs, CAutoCombo::kMaxDelayMs);
 #else
 			TextDraw(g_hFont, left, posY + 94, 0xFF909090, 0x0, rowW, 0, 3, "click a number to type it (%d-%d)", CAutoCombo::kMinDelayMs, CAutoCombo::kMaxDelayMs);
 #endif
 		}
 	}
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	else
 	{
 		EndComboDelayEdit(true);
 	}
 #endif
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	const char* footer = showPotion ? "AutoPots: tap on/off, hold for this menu" : "Combo: tap on/off, hold for this menu";
 #else
 	const char* footer = "~ x3: potion on/off   Hold ~: this menu";
@@ -706,7 +706,7 @@ void CAutoCombo::SaveSettings()
 
 bool CAutoCombo::TryCast(CHARACTER* c, int selectedSkill, float selectedDistance)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Mobile has its own combo on the attack wheel.
 	return false;
 #else

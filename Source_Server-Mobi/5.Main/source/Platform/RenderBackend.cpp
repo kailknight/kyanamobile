@@ -233,6 +233,16 @@ private:
             0, 0, s_nativePresentWidth, s_nativePresentHeight,
             GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
+#if defined(MU_MACOS)
+        // macOS presents the window's framebuffer (NSOpenGLContext flushBuffer
+        // on a layer-backed view) only while it is bound: leaving the
+        // offscreen target bound here showed a black window with the game
+        // running behind it. BeginFrame binds the offscreen target again.
+        glBindFramebuffer(GL_FRAMEBUFFER, s_defaultFramebuffer);
+        GL_InvalidateCachedGLState();
+        return;
+#endif
+
         // Re-bind the offscreen target so the next frame's clear/draws land in
         // it rather than on the backbuffer.
         glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);

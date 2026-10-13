@@ -15,7 +15,7 @@
 #include "DuelMgr.h"
 #include "MapManager.h"
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 extern bool AndroidShowCommandTradePicker();
 extern bool AndroidShowCommandPartyPicker();
 extern bool AndroidShowCommandGuildPicker();
@@ -144,7 +144,7 @@ bool SEASON3B::CNewUICommandWindow::BtnProcess()
 	{
 		if( m_BtnCommand[i].UpdateMouseEvent() == true )
 		{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			if (i == COMMAND_TRADE && ::AndroidShowCommandTradePicker())
 			{
 				if (m_iCurSelectCommand != COMMAND_NONE)

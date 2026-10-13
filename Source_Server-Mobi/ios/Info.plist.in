@@ -50,6 +50,13 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Voice chat lets nearby players hear you while you hold the talk button.</string>
 
+	<!-- Export compliance, answered once here so App Store Connect stops asking
+	     on every upload. The owner declared "none of the algorithms" on
+	     2026-10-06: the game's own packet scrambling only obscures traffic and
+	     the app has no standard encryption. Change this if that stops being true. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
 	<!-- data.zip is served over plain HTTP (Android sets usesCleartextTraffic
 	     for the same reason). Dev-build setting; narrow before App Store. -->
 	<key>NSAppTransportSecurity</key>

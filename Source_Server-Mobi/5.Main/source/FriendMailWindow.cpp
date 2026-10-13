@@ -57,7 +57,7 @@ namespace
 
 	bool PrimaryDown()
 	{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		return SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnDn();
 #else
 		return ((GetKeyState(VK_LBUTTON) & 0x8000) != 0);

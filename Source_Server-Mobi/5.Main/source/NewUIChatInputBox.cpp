@@ -125,6 +125,9 @@ bool SEASON3B::CNewUIChatInputBox::Create(CNewUIManager* pNewUIMng, CNewUIChatLo
 	// Android and iOS - setting it there would stop Enter sending chat
 	// messages. There is no Tab key on a touch keyboard anyway.
 #if !defined(__ANDROID__) && !defined(MU_IOS)
+	// Not on the Apple/Android text layer (UIControls.cpp): there Enter-as-Tab
+	// moves the caret to the whisper box instead of sending, where on Windows
+	// Enter sends.
 	m_pChatInputBox->SetOption(UIOPTION_ENTERASTAB);
 	m_pWhsprIDInputBox->SetOption(UIOPTION_ENTERASTAB);
 #endif

@@ -6,7 +6,12 @@
 // laid over the game view while the game's init waits (android_main.cpp's
 // g_IosPreloadPending).
 
+#import <TargetConditionals.h>
+#if TARGET_OS_OSX
+#import <AppKit/AppKit.h>
+#else
 #import <UIKit/UIKit.h>
+#endif
 #import <QuartzCore/QuartzCore.h>
 
 #include "Platform/IosPlatform.h"
@@ -27,6 +32,12 @@
 #include <vector>
 
 using namespace mu_preload;
+
+#if TARGET_OS_OSX
+#define MU_FOREGROUND_NOTIFICATION NSApplicationDidBecomeActiveNotification
+#else
+#define MU_FOREGROUND_NOTIFICATION UIApplicationWillEnterForegroundNotification
+#endif
 
 namespace
 {
@@ -49,7 +60,9 @@ std::atomic<bool> g_complete { false };
 std::atomic<bool> g_running { false };
 std::atomic<bool> g_cancel { false };
 std::atomic<bool> g_awaitingRetry { false };
+#if !TARGET_OS_OSX
 UIBackgroundTaskIdentifier g_backgroundTask = UIBackgroundTaskInvalid;
+#endif
 
 void Log(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void Log(const char* fmt, ...)
@@ -107,12 +120,118 @@ void ExcludeFromBackup(const std::string& path)
     NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
     [url setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
 }
+
+// A network failure as text, tagged with the code ErrorCode() shows for it.
+// The tag is taken from the NSError code because its description is localised.
+std::string NetworkErrorText(NSError* error)
+{
+    const char* tag = "";
+    if ([error.domain isEqualToString:NSURLErrorDomain])
+    {
+        switch (error.code)
+        {
+        case NSURLErrorCannotFindHost:
+        case NSURLErrorDNSLookupFailed:
+            tag = "[E101] ";
+            break;
+        case NSURLErrorCannotConnectToHost:
+        case NSURLErrorNotConnectedToInternet:
+            tag = "[E102] ";
+            break;
+        case NSURLErrorTimedOut:
+            tag = "[E103] ";
+            break;
+        case NSURLErrorSecureConnectionFailed:
+        case NSURLErrorServerCertificateHasBadDate:
+        case NSURLErrorServerCertificateUntrusted:
+        case NSURLErrorServerCertificateHasUnknownRoot:
+        case NSURLErrorServerCertificateNotYetValid:
+        case NSURLErrorClientCertificateRejected:
+        case NSURLErrorClientCertificateRequired:
+        case NSURLErrorAppTransportSecurityRequiresSecureConnection:
+            tag = "[E104] ";
+            break;
+        default:
+            break;
+        }
+    }
+    return std::string(tag) + (error.localizedDescription.UTF8String ?: "network error");
+}
+
+bool Contains(const std::string& text, const char* part)
+{
+    return text.find(part) != std::string::npos;
+}
+
+// What the player sees when the sync fails: a short code instead of the error
+// text, which can carry the server's address. The full text still goes to the
+// log. Same codes as Android's PreloadActivity.errorCode:
+//   E101 host name not resolved       E102 cannot connect (down / port closed)
+//   E103 timed out                    E104 secure connection failed
+//   E4xx / E5xx the server's HTTP status
+//   E301 data empty or incomplete     E302 archive damaged
+//   E303 cannot write to storage      E199 anything else
+std::string ErrorCode(const std::string& message)
+{
+    if (message.size() >= 6 && message[0] == '[' && message[1] == 'E' && message[5] == ']')
+    {
+        return message.substr(1, 4);
+    }
+    const size_t http = message.find("HTTP ");
+    if (http != std::string::npos)
+    {
+        const int status = atoi(message.c_str() + http + 5);
+        if (status >= 100 && status <= 599)
+        {
+            return "E" + std::to_string(status);
+        }
+    }
+    std::string lower = message;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(tolower(c)); });
+    if (Contains(lower, "cannot write") || Contains(lower, "cannot create") || Contains(lower, "cannot save")
+        || Contains(lower, "cannot install") || Contains(lower, "cannot read downloaded") || Contains(lower, "storage")
+        || Contains(lower, "finalise") || Contains(lower, "write callback"))
+    {
+        return "E303";
+    }
+    if (Contains(lower, "cannot open data.zip") || Contains(lower, "failed to extract") || Contains(lower, "invalid zip"))
+    {
+        return "E302";
+    }
+    if (Contains(lower, "empty") || Contains(lower, "incomplete") || Contains(lower, "not found in downloaded")
+        || Contains(lower, "short chunk"))
+    {
+        return "E301";
+    }
+    return "E199";
+}
+
+// Safety net for every status line: no address or port reaches the screen,
+// whatever a message happens to contain.
+NSString* HideAddress(NSString* text)
+{
+    if (text.length == 0)
+    {
+        return text;
+    }
+    static NSRegularExpression* s_url = [NSRegularExpression
+        regularExpressionWithPattern:@"https?://\\S+" options:NSRegularExpressionCaseInsensitive error:nil];
+    static NSRegularExpression* s_ip = [NSRegularExpression
+        regularExpressionWithPattern:@"\\b\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?\\b" options:0 error:nil];
+    NSString* out = [s_url stringByReplacingMatchesInString:text options:0
+                                                      range:NSMakeRange(0, text.length) withTemplate:@"server"];
+    return [s_ip stringByReplacingMatchesInString:out options:0
+                                            range:NSMakeRange(0, out.length) withTemplate:@"server"];
+}
 }
 
 // ---------------------------------------------------------------------------
 // Download screen (Android: PreloadActivity.buildUi)
 // ---------------------------------------------------------------------------
 
+#if TARGET_OS_OSX
+#include "MacPreloadOverlay.inc"
+#else
 static UIColor* ColorFromArgb(uint32_t argb)
 {
     return [UIColor colorWithRed:((argb >> 16) & 0xFF) / 255.0
@@ -212,7 +331,7 @@ static UIColor* ColorFromArgb(uint32_t argb)
     NSMutableArray<UIImage*>* banners = [NSMutableArray array];
     for (NSString* name in @[ @"banner_preload_1", @"banner_preload_2" ])
     {
-        NSString* path = [[NSBundle mainBundle] pathForResource:name ofType:@"png"];
+        NSString* path = [[NSBundle mainBundle] pathForResource:name ofType:@"jpg"];
         UIImage* image = path ? [UIImage imageWithContentsOfFile:path] : nil;
         if (image)
         {
@@ -258,6 +377,7 @@ static UIColor* ColorFromArgb(uint32_t argb)
     [_panel addSubview:_retry];
 
     _stage.text = @"Preparing data sync...";
+    _detail.text = @"Contacting server...";
 
     if (_banners.count > 1)
     {
@@ -271,14 +391,14 @@ static UIColor* ColorFromArgb(uint32_t argb)
 
 - (void)switchBanner
 {
+    // No UIView animateWithDuration crossfade here: animating _banner.alpha
+    // triggers UIKit's focus-engine environment walk on iPad
+    // (-[UIView _focusBehavior] -> ... -> -[UIWindow parentFocusEnvironment]),
+    // which hangs indefinitely on this sokol_app.h-managed window and gets the
+    // app killed by the watchdog (XPC_EXIT_REASON_SIGTERM_TIMEOUT). A direct
+    // image swap is cosmetically slightly less smooth but doesn't hit that path.
     _bannerIndex = (_bannerIndex + 1) % _banners.count;
-    UIImage* next = _banners[_bannerIndex];
-    [UIView animateWithDuration:0.22
-        animations:^{ self->_banner.alpha = 0.08; }
-        completion:^(BOOL) {
-            self->_banner.image = next;
-            [UIView animateWithDuration:0.26 animations:^{ self->_banner.alpha = 1.0; }];
-        }];
+    _banner.image = _banners[_bannerIndex];
 }
 
 - (void)layoutSubviews
@@ -318,9 +438,9 @@ static UIColor* ColorFromArgb(uint32_t argb)
 
 - (void)setStage:(NSString*)stage detail:(NSString*)detail timer:(NSString*)timer percent:(double)percent
 {
-    if (stage) _stage.text = stage;
-    if (detail) _detail.text = detail;
-    if (timer) _timer.text = timer;
+    if (stage) _stage.text = HideAddress(stage);
+    if (detail) _detail.text = HideAddress(detail);
+    if (timer) _timer.text = HideAddress(timer);
     if (percent >= 0.0) _progress.progress = percent / 100.0;
 }
 
@@ -345,11 +465,13 @@ static UIColor* ColorFromArgb(uint32_t argb)
         completion:^(BOOL) { [self removeFromSuperview]; }];
 }
 @end
+#endif
 
 namespace
 {
 MuPreloadOverlay* g_overlay = nil;
 
+#if !TARGET_OS_OSX
 UIWindow* FindHostWindow()
 {
     for (UIScene* scene in [UIApplication sharedApplication].connectedScenes)
@@ -376,6 +498,7 @@ UIWindow* FindHostWindow()
 #pragma clang diagnostic pop
     return window;
 }
+#endif
 
 void PostUi(NSString* stage, NSString* detail, NSString* timer, double percent)
 {
@@ -449,6 +572,7 @@ struct HttpResult
 {
     NSInteger status = 0;
     NSHTTPURLResponse* response = nil;
+    NSData* body = nil;
     std::string error;
 };
 
@@ -457,15 +581,16 @@ HttpResult RunDataTask(NSURLRequest* request)
     dispatch_semaphore_t done = dispatch_semaphore_create(0);
     __block HttpResult result;
     NSURLSessionDataTask* task = [Session() dataTaskWithRequest:request
-        completionHandler:^(NSData*, NSURLResponse* response, NSError* error) {
+        completionHandler:^(NSData* data, NSURLResponse* response, NSError* error) {
             if (error)
             {
-                result.error = error.localizedDescription.UTF8String ?: "network error";
+                result.error = NetworkErrorText(error);
             }
             else if ([response isKindOfClass:[NSHTTPURLResponse class]])
             {
                 result.response = (NSHTTPURLResponse*)response;
                 result.status = result.response.statusCode;
+                result.body = data;
             }
             dispatch_semaphore_signal(done);
         }];
@@ -604,7 +729,7 @@ bool RunDownloadTask(NSURLRequest* request, int slot, NSInteger expectedStatus,
         completionHandler:^(NSURL* location, NSURLResponse* response, NSError* taskError) {
             if (taskError)
             {
-                failure = taskError.localizedDescription.UTF8String ?: "network error";
+                failure = NetworkErrorText(taskError);
             }
             else
             {
@@ -882,8 +1007,9 @@ bool DownloadZipParallel(bool withAuth, const std::string& zipPath, const Remote
 // downloadZipFromUrl: one plain GET, for a host that will not do ranges.
 bool DownloadZipSingle(bool withAuth, const std::string& zipPath, NSInteger* status, std::string* error)
 {
+    // Never the address or the download login - players see neither.
     PostUi(withAuth ? @"Connecting with Basic Auth..." : @"Connecting to download host...",
-           kDataZipUrl, withAuth ? @"Auth mode: basic" : @"Auth mode: none", -1);
+           @"Please wait...", @"", -1);
 
     const long long startMs = NowMs();
     std::atomic<bool> finished { false };
@@ -965,6 +1091,7 @@ bool DownloadZip(const std::string& zipPath, std::string* error)
 
 void EndBackgroundTask()
 {
+#if !TARGET_OS_OSX
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_backgroundTask != UIBackgroundTaskInvalid)
         {
@@ -972,6 +1099,7 @@ void EndBackgroundTask()
             g_backgroundTask = UIBackgroundTaskInvalid;
         }
     });
+#endif
 }
 
 void Finish(NSString* stage, NSString* detail, NSString* timer, double delaySeconds)
@@ -993,8 +1121,8 @@ void Fail(const std::string& message)
     EndBackgroundTask();
     // Worked out here, not in the block: a block captures a C++ reference as a
     // reference, and by the time it runs the caller's string is gone (TestFlight
-    // 1.0.28 (29) crashed reading the dead stack).
-    NSString* detail = NS(message);
+    // 1.0.28 (29) crashed in ErrorCode reading the dead stack).
+    NSString* detail = NS("Error code: " + ErrorCode(message));
     dispatch_async(dispatch_get_main_queue(), ^{
         [g_overlay setStage:@"Preload failed"
                      detail:detail
@@ -1004,6 +1132,408 @@ void Fail(const std::string& message)
         g_running = false;
         g_awaitingRetry = true;
     });
+}
+
+// ---------------------------------------------------------------------------
+// Incremental update (Android: tryIncrementalUpdate / runIncrementalUpdate).
+// Anything unexpected - no range support, a zip feature this does not read, a
+// CRC mismatch, most of the archive changed - returns false, and the caller
+// does the full download it always did.
+// ---------------------------------------------------------------------------
+
+// Past this share of the archive changed, one full parallel download is the
+// quicker way.
+constexpr double kIncrementalMaxChangedShare = 0.5;
+// Changed files next to each other in the archive go in one range, up to this.
+constexpr uint64_t kIncrementalGroupBytes = 8ULL * 1024 * 1024;
+
+NSMutableURLRequest* MakeRangeRequest(bool withAuth, uint64_t start, uint64_t endInclusive, NSTimeInterval timeout)
+{
+    NSMutableURLRequest* request = MakeRequest(withAuth, timeout);
+    [request setValue:[NSString stringWithFormat:@"bytes=%llu-%llu", start, endInclusive] forHTTPHeaderField:@"Range"];
+    return request;
+}
+
+bool FetchRangeBytes(bool withAuth, uint64_t start, uint64_t endInclusive, std::vector<uint8_t>* out, std::string* error)
+{
+    const uint64_t length = endInclusive - start + 1;
+    if (endInclusive < start || length > 64ULL * 1024 * 1024)
+    {
+        *error = "bad range " + std::to_string(start) + "-" + std::to_string(endInclusive);
+        return false;
+    }
+    const HttpResult result = RunDataTask(MakeRangeRequest(withAuth, start, endInclusive, 30));
+    if (!result.error.empty())
+    {
+        *error = result.error;
+        return false;
+    }
+    if (result.status != 206)
+    {
+        *error = "HTTP " + std::to_string(result.status) + " for range " + std::to_string(start) + "-"
+            + std::to_string(endInclusive);
+        return false;
+    }
+    if (result.body.length != length)
+    {
+        *error = "range cut short: " + std::to_string(result.body.length) + " of " + std::to_string(length);
+        return false;
+    }
+    const uint8_t* bytes = static_cast<const uint8_t*>(result.body.bytes);
+    out->assign(bytes, bytes + length);
+    return true;
+}
+
+bool ReadRemoteCentralDirectory(bool withAuth, uint64_t total, std::vector<RemoteZipEntry>* entries, std::string* error)
+{
+    // The end record sits in the last 22 bytes plus a comment of up to 64 KB;
+    // the zip64 locator, when there is one, is the 20 bytes before it.
+    const uint64_t tailLength = std::min<uint64_t>(total, 65536 + 22 + 20);
+    std::vector<uint8_t> tail;
+    ZipEndInfo end;
+    if (!FetchRangeBytes(withAuth, total - tailLength, total - 1, &tail, error) || !ParseZipEnd(tail, &end, error))
+    {
+        return false;
+    }
+    if (end.needsZip64)
+    {
+        std::vector<uint8_t> record;
+        if (!FetchRangeBytes(withAuth, end.zip64EndOffset, end.zip64EndOffset + 55, &record, error)
+            || !ParseZip64End(record, &end, error))
+        {
+            return false;
+        }
+    }
+    if (end.centralSize == 0 || end.centralSize > 64ULL * 1024 * 1024 || end.centralOffset + end.centralSize > total)
+    {
+        *error = "zip central directory out of range";
+        return false;
+    }
+
+    std::vector<uint8_t> central;
+    return FetchRangeBytes(withAuth, end.centralOffset, end.centralOffset + end.centralSize - 1, &central, error)
+        && ParseCentralDirectory(central, end.centralOffset, end.entryCount, entries, error);
+}
+
+// One worker's download of a group's range into partPath, counted in `slot`
+// of g_inflight while it runs.
+bool FetchRangeToFile(bool withAuth, uint64_t start, uint64_t endInclusive, const std::string& partPath, int slot,
+                      std::string* error)
+{
+    const long long expected = static_cast<long long>(endInclusive - start + 1);
+    NSString* target = [NSString stringWithUTF8String:partPath.c_str()];
+    return RunDownloadTask(MakeRangeRequest(withAuth, start, endInclusive, 30), slot, 206,
+        ^bool(NSURL* location, std::string* moveError) {
+            NSError* nsError = nil;
+            [[NSFileManager defaultManager] removeItemAtPath:target error:nil];
+            if (![[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:target] error:&nsError])
+            {
+                *moveError = "cannot save downloaded chunk";
+                return false;
+            }
+            struct stat st {};
+            if (stat(partPath.c_str(), &st) != 0 || st.st_size != expected)
+            {
+                *moveError = "range cut short: " + std::to_string(static_cast<long long>(st.st_size)) + " of "
+                    + std::to_string(expected);
+                return false;
+            }
+            return true;
+        },
+        nullptr, error);
+}
+
+bool DownloadChangedEntries(bool withAuth, const std::vector<const RemoteZipEntry*>& changed, const std::string& dataDir,
+                            const std::string& root, std::string* error)
+{
+    const long long startMs = NowMs();
+
+    // Entries back to back in the archive go in one ranged request.
+    std::vector<const RemoteZipEntry*> sorted = changed;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const RemoteZipEntry* a, const RemoteZipEntry* b) { return a->localOffset < b->localOffset; });
+    std::vector<std::vector<RemoteZipEntry>> groups;
+    uint64_t groupStart = 0;
+    uint64_t groupEnd = 0;
+    long long totalBytes = 0;
+    for (const RemoteZipEntry* entry : sorted)
+    {
+        if (!groups.empty() && entry->localOffset == groupEnd && entry->spanEnd - groupStart <= kIncrementalGroupBytes)
+        {
+            groups.back().push_back(*entry);
+            groupEnd = entry->spanEnd;
+        }
+        else
+        {
+            groups.push_back({ *entry });
+            groupStart = entry->localOffset;
+            groupEnd = entry->spanEnd;
+        }
+        totalBytes += static_cast<long long>(entry->spanEnd - entry->localOffset);
+    }
+
+    const std::string workDir = JoinPath(root, "preload_data_patch");
+    DeleteRecursively(workDir);
+    if (!EnsureDirectory(workDir))
+    {
+        *error = "cannot create patch folder";
+        return false;
+    }
+
+    std::atomic<long long> doneBytes { 0 };
+    std::atomic<int> filesDone { 0 };
+    std::atomic<size_t> nextGroup { 0 };
+    std::mutex failureMutex;
+    std::string failure;
+    auto failed = [&]() {
+        std::lock_guard<std::mutex> lock(failureMutex);
+        return !failure.empty();
+    };
+
+    std::vector<std::thread> workers;
+    const int workerCount = static_cast<int>(std::min<size_t>(kChunkThreads, groups.size()));
+    std::atomic<int> running { workerCount };
+    auto work = [&](int w) {
+            while (!failed() && !g_cancel.load())
+            {
+                const size_t index = nextGroup.fetch_add(1);
+                if (index >= groups.size())
+                {
+                    return;
+                }
+                const std::vector<RemoteZipEntry>& group = groups[index];
+                const uint64_t start = group.front().localOffset;
+                const uint64_t endInclusive = group.back().spanEnd - 1;
+                const std::string part = JoinPath(workDir, "g" + std::to_string(index) + ".bin");
+
+                std::string groupError;
+                bool fetched = false;
+                for (int attempt = 0; attempt < kChunkAttempts && !g_cancel.load(); ++attempt)
+                {
+                    groupError.clear();
+                    if (FetchRangeToFile(withAuth, start, endInclusive, part, w, &groupError))
+                    {
+                        fetched = true;
+                        break;
+                    }
+                    Log("update group %zu attempt %d failed: %s", index, attempt + 1, groupError.c_str());
+                    std::this_thread::sleep_for(std::chrono::milliseconds(400 * (attempt + 1)));
+                }
+                if (fetched)
+                {
+                    doneBytes.fetch_add(static_cast<long long>(endInclusive - start + 1));
+                    if (ApplyEntriesFromPart(part, start, group, dataDir, g_cancel, &groupError))
+                    {
+                        filesDone.fetch_add(static_cast<int>(group.size()));
+                    }
+                    else
+                    {
+                        fetched = false;
+                    }
+                }
+                unlink(part.c_str());
+                if (!fetched)
+                {
+                    std::lock_guard<std::mutex> lock(failureMutex);
+                    if (failure.empty())
+                    {
+                        failure = groupError.empty() ? std::string("Download cancelled") : groupError;
+                    }
+                    return;
+                }
+            }
+    };
+    for (int w = 0; w < workerCount; ++w)
+    {
+        workers.emplace_back([&, w]() {
+            work(w);
+            running.fetch_sub(1);
+        });
+    }
+
+    const int fileTotal = static_cast<int>(changed.size());
+    long long windowStartMs = startMs;
+    long long windowStartBytes = 0;
+    double recentSpeed = 0.0;
+    for (;;)
+    {
+        const bool alive = running.load() > 0;
+        const long long soFar = std::min(totalBytes, doneBytes.load() + InflightBytes());
+        const long long now = NowMs();
+        if (now - windowStartMs >= 1000)
+        {
+            recentSpeed = (soFar - windowStartBytes) / ((now - windowStartMs) / 1000.0);
+            windowStartMs = now;
+            windowStartBytes = soFar;
+        }
+        const double share = std::min(1.0, soFar / static_cast<double>(std::max(1LL, totalBytes)));
+        const long long etaMs = recentSpeed > 0.0 ? static_cast<long long>((totalBytes - soFar) / recentSpeed * 1000.0) : 0;
+        char stage[64];
+        snprintf(stage, sizeof(stage), "Updating changed files %.1f%%", share * 100.0);
+        PostUi(NS(stage),
+               NS(std::to_string(filesDone.load()) + " / " + std::to_string(fileTotal) + " files | "
+                  + FormatBytes(soFar) + " / " + FormatBytes(totalBytes)),
+               NS("Speed " + FormatBytes(static_cast<long long>(std::max(0.0, recentSpeed))) + "/s | ETA "
+                  + FormatDuration(std::max(0LL, etaMs))),
+               20.0 + share * 78.0);
+        if (!alive)
+        {
+            break;
+        }
+        std::this_thread::sleep_for(kUiInterval);
+    }
+    for (std::thread& worker : workers)
+    {
+        worker.join();
+    }
+    DeleteRecursively(workDir);
+
+    if (g_cancel.load())
+    {
+        *error = "Download cancelled";
+        return false;
+    }
+    if (!failure.empty())
+    {
+        *error = failure;
+        return false;
+    }
+    return true;
+}
+
+bool RunIncrementalUpdate(const std::string& root, const std::string& dataDir, std::string* error)
+{
+    const long long startMs = NowMs();
+    PostUi(@"Checking for updated files...", @"Reading the file list", @"", 1.0);
+
+    bool withAuth = false;
+    RemoteFileInfo info;
+    bool probed = false;
+    for (bool auth : { false, true })
+    {
+        RemoteFileInfo candidate = ProbeRemoteFile(auth);
+        if (candidate.unauthorized || !candidate.error.empty())
+        {
+            if (!candidate.error.empty())
+            {
+                Log("incremental probe failed: %s", candidate.error.c_str());
+            }
+            continue;
+        }
+        info = candidate;
+        withAuth = auth;
+        probed = true;
+        break;
+    }
+    if (!probed || !info.valid || !info.supportsRanges)
+    {
+        *error = "incremental update needs range support";
+        return false;
+    }
+    const uint64_t total = static_cast<uint64_t>(info.totalBytes);
+
+    std::vector<RemoteZipEntry> entries;
+    if (!ReadRemoteCentralDirectory(withAuth, total, &entries, error))
+    {
+        return false;
+    }
+
+    const std::unordered_map<std::string, std::string> localFiles = ListLocalFiles(dataDir);
+    const std::unordered_map<std::string, IndexEntry> index = ReadDataIndex(root);
+    const bool verifyByCrc = index.empty();
+
+    int fileCount = 0;
+    for (const RemoteZipEntry& entry : entries)
+    {
+        if (!entry.key.empty() && !entry.isDirectory)
+        {
+            ++fileCount;
+        }
+    }
+
+    std::vector<const RemoteZipEntry*> changed;
+    uint64_t changedBytes = 0;
+    int checked = 0;
+    long long lastUiMs = 0;
+    for (const RemoteZipEntry& entry : entries)
+    {
+        if (entry.key.empty() || entry.isDirectory)
+        {
+            continue;
+        }
+        if (g_cancel.load())
+        {
+            *error = "Download cancelled";
+            return false;
+        }
+
+        bool same = false;
+        const auto local = localFiles.find(entry.key);
+        struct stat st {};
+        if (local != localFiles.end() && stat(local->second.c_str(), &st) == 0
+            && static_cast<uint64_t>(st.st_size) == entry.size)
+        {
+            if (!verifyByCrc)
+            {
+                const auto known = index.find(entry.key);
+                same = known != index.end() && known->second.crc == entry.crc && known->second.size == entry.size;
+            }
+            else
+            {
+                uint32_t crc = 0;
+                same = CrcOfFile(local->second, &crc) && crc == entry.crc;
+            }
+        }
+        if (!same)
+        {
+            changed.push_back(&entry);
+            changedBytes += entry.spanEnd - entry.localOffset;
+        }
+
+        ++checked;
+        const long long now = NowMs();
+        if (verifyByCrc && now - lastUiMs >= kUiInterval.count())
+        {
+            lastUiMs = now;
+            PostUi(@"Checking local files...",
+                   NS("Checked " + std::to_string(checked) + " / " + std::to_string(fileCount) + " files"),
+                   NS(std::to_string(changed.size()) + " to update so far"),
+                   std::min(1.0, checked / static_cast<double>(std::max(1, fileCount))) * 20.0);
+        }
+    }
+
+    Log("incremental: %zu of %d files changed, %llu of %llu bytes (verifyByCrc=%d)", changed.size(), fileCount,
+        static_cast<unsigned long long>(changedBytes), static_cast<unsigned long long>(total), verifyByCrc ? 1 : 0);
+
+    if (changedBytes > total * kIncrementalMaxChangedShare)
+    {
+        *error = "most of data.zip changed";
+        return false;
+    }
+    if (!changed.empty() && !DownloadChangedEntries(withAuth, changed, dataDir, root, error))
+    {
+        return false;
+    }
+
+    WriteDataIndex(root, entries);
+    WriteReadyMarker(root, dataDir, FetchRemoteDataSignature());
+
+    const size_t count = changed.size();
+    Finish(count > 0 ? @"Data updated. Launching game..." : @"Data up to date. Launching game...",
+           NS(std::to_string(count) + (count == 1 ? " file" : " files") + " updated (" + FormatBytes(static_cast<long long>(changedBytes)) + ")"),
+           NS("Update time: " + FormatDuration(NowMs() - startMs)), 0.65);
+    return true;
+}
+
+bool TryIncrementalUpdate(const std::string& root, const std::string& dataDir)
+{
+    std::string error;
+    if (RunIncrementalUpdate(root, dataDir, &error))
+    {
+        return true;
+    }
+    Log("incremental update not used, doing the full download: %s", error.c_str());
+    return false;
 }
 
 bool ExtractAndInstall(const std::string& root, const std::string& cacheRoot, const std::string& zipPath, std::string* error)
@@ -1090,7 +1620,14 @@ void RunPreloadFlow()
             Finish(@"Data already present. Skip download.", NS(dataDir), @"Fast start mode", 0.35);
             return;
         }
-        Log("remote data.zip changed, re-downloading. stored=%s remote=%s", stored.c_str(), remote.c_str());
+        Log("remote data.zip changed. stored=%s remote=%s", stored.c_str(), remote.c_str());
+
+        // Fetch only the files that differ; falls through to the full
+        // download when that cannot be done.
+        if (TryIncrementalUpdate(root, dataDir))
+        {
+            return;
+        }
     }
 
     const std::string cacheRoot = JoinPath(root, "preload_data_sync");
@@ -1104,7 +1641,9 @@ void RunPreloadFlow()
     {
         if (usable)
         {
-            Finish(@"Sync failed, using existing data...", NS(error), @"Launching with local data", 0.45);
+            Log("sync failed, using existing data: %s", error.c_str());
+            Finish(@"Sync failed, using existing data...", NS("Error code: " + ErrorCode(error)),
+                   @"Launching with local data", 0.45);
             return;
         }
         Fail(error);
@@ -1118,7 +1657,9 @@ void RunPreloadFlow()
         // The finished archive stays in the cache; only a broken one is removed.
         if (usable)
         {
-            Finish(@"Sync failed, using existing data...", NS(error), @"Launching with local data", 0.45);
+            Log("sync failed, using existing data: %s", error.c_str());
+            Finish(@"Sync failed, using existing data...", NS("Error code: " + ErrorCode(error)),
+                   @"Launching with local data", 0.45);
             return;
         }
         Fail(error);
@@ -1128,6 +1669,9 @@ void RunPreloadFlow()
 
     dataDir = FindChildIgnoreCase(root, kDataFolderName, true);
     WriteReadyMarker(root, dataDir, FetchRemoteDataSignature());
+    // What was just installed, so the next data.zip change can be fetched
+    // file by file instead of whole.
+    WriteDataIndexFromZip(zipPath, root);
     DeleteRecursively(cacheRoot);
     ExcludeFromBackup(dataDir);
 
@@ -1152,15 +1696,19 @@ bool MU_IosPreloadBegin()
 
     if (g_overlay == nil)
     {
+#if TARGET_OS_OSX
+        g_overlay = MuShowPreloadOverlay();
+#else
         UIWindow* window = FindHostWindow();
         g_overlay = [[MuPreloadOverlay alloc] initWithFrame:window ? window.bounds : [UIScreen mainScreen].bounds];
         [window addSubview:g_overlay];
+#endif
 
         // A failed download is retried by itself when the player comes back to
         // the app, which is the usual way a transfer dies on a phone.
         static dispatch_once_t once;
         dispatch_once(&once, ^{
-            [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification
+            [[NSNotificationCenter defaultCenter] addObserverForName:MU_FOREGROUND_NOTIFICATION
                                                               object:nil
                                                                queue:[NSOperationQueue mainQueue]
                                                           usingBlock:^(NSNotification*) {
@@ -1173,11 +1721,13 @@ bool MU_IosPreloadBegin()
         });
     }
 
+#if !TARGET_OS_OSX
     // Asks for the few extra seconds iOS allows after the app is backgrounded.
     g_backgroundTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"MuDataSync" expirationHandler:^{
         [[UIApplication sharedApplication] endBackgroundTask:g_backgroundTask];
         g_backgroundTask = UIBackgroundTaskInvalid;
     }];
+#endif
 
     std::thread(RunPreloadFlow).detach();
     return false;

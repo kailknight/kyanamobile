@@ -545,7 +545,7 @@ int SEASON3B::CNewUIMasterSkillTree::SetDivideString(char* text, int isItemTollT
 
 bool SEASON3B::CNewUIMasterSkillTree::Render()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Render only runs while the window is open: a gap means it was closed in
 	// between (X, Esc, another window), so start again with nothing selected.
 	static DWORD s_LastRenderTick = 0;
@@ -590,7 +590,7 @@ bool SEASON3B::CNewUIMasterSkillTree::UpdateMouseEvent()
 	const POINT& closePos = this->m_CloseBT.GetPos();
 	const POINT& closeSize = this->m_CloseBT.GetSize();
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	const int closePadX = 12;
 	const int closePadY = 10;
 
@@ -992,7 +992,7 @@ void SEASON3B::CNewUIMasterSkillTree::RenderToolTip()
 
 		int CalcY = (int)(this->categoryPos[group].y + (p->SkillRank - 1) * 41.0f);
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		// Touch: the details of the tapped (selected) skill stay up - there is
 		// no hover to keep them open.
 		if (Skill != this->m_TouchSkill)
@@ -1223,7 +1223,7 @@ bool SEASON3B::CNewUIMasterSkillTree::CheckBtn()
 		}
 	}
 	
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// This runs every frame, not only on a tap - only a frame with a tap may
 	// clear the selection below.
 	const bool tappedThisFrame = SEASON3B::IsPress(VK_LBUTTON);
@@ -1248,7 +1248,7 @@ bool SEASON3B::CNewUIMasterSkillTree::CheckBtn()
 		}
 	}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// A tap that landed on no skill puts the pinned details away.
 	if (tappedThisFrame && this->m_TouchHit == false)
 	{
@@ -1282,7 +1282,7 @@ bool SEASON3B::CNewUIMasterSkillTree::CheckAttributeArea(int group, int index, i
 
 	if (SEASON3B::IsPress(1) && SEASON3B::CheckMouseIn(posX + 8, posY + 5, 20, 28))
 	{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		// No hover on a touch screen, so a tap used to add a point straight
 		// away with no way to read the skill first. First tap: select it and
 		// show its details (RenderToolTip). A second tap on it within

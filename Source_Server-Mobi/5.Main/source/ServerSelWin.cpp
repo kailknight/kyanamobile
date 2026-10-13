@@ -253,7 +253,7 @@ void CServerSelWin::UpdateDisplay()
 	ShowServerGBtns();
 	ShowDecoSprite();
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (m_iSelectServerBtnIndex == -1)
 	{
 		if (m_bTestServerBtn == true)

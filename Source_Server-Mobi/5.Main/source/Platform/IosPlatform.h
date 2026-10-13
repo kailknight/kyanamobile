@@ -23,6 +23,13 @@ void MU_IosGetSafeAreaFractions(float* left, float* top, float* right, float* bo
 // is about half as tall, so the same layout shows everything half the size.
 bool MU_IosIsPhone();
 
+// Asks iOS for the extra run time it allows after the app leaves the
+// foreground (about 30 s), so android_main.cpp's background keepalive thread
+// gets to send before the process is suspended. Without it iOS suspends the
+// whole app within seconds and the thread never runs. Main thread only.
+void MU_IosBeginBackgroundKeepAlive();
+void MU_IosEndBackgroundKeepAlive();
+
 // Battery 0-100, or -1 when unknown (simulator, or monitoring not ready yet).
 int MU_IosGetBatteryPercent();
 

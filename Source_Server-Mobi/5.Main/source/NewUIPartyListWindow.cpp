@@ -85,7 +85,7 @@ void CNewUIPartyListWindow::SetPos(int x, int y)
 
 void CNewUIPartyListWindow::SetPos(int x)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Anchored down the left edge on mobile, clear of the status panel above it
 	// and the buffs beside it. The desktop form is right-aligned off the screen
 	// width, which put it under the new top bar.
@@ -150,7 +150,7 @@ bool CNewUIPartyListWindow::BtnProcess()
 				}
 			}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			// Mobile: tapping a member opens the party window (user request,
 			// 1 Oct). There is no keyboard shortcut for it on a phone. The
 			// buff-target selection below still runs, so a heal/buff skill

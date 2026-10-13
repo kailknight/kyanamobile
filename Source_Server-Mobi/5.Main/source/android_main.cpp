@@ -2896,6 +2896,12 @@ bool IsWithinVirtualAutoAcquireRange(int characterIndex)
 
 bool IsVirtualPadAvailable()
 {
+#if !defined(MU_TOUCH_UI)
+    // The Mac plays with the PC interface: no joystick, touch skill buttons,
+    // top-bar icons or corner minimap. Everything that draws or hit-tests
+    // the touch overlay asks this first.
+    return false;
+#endif
     return SceneFlag == MAIN_SCENE
         && Hero != nullptr
         && CharacterAttribute != nullptr
@@ -2913,6 +2919,10 @@ bool IsVirtualPadAvailable()
 // worked, and neither did tapping a name in the log to whisper it.
 bool IsAndroidChatUiAvailable()
 {
+#if !defined(MU_TOUCH_UI)
+    // PC interface (Mac): the PC chat window and input box are used as built.
+    return false;
+#endif
     return SceneFlag == MAIN_SCENE
         && Hero != nullptr
         && CharacterAttribute != nullptr
@@ -2931,6 +2941,10 @@ bool IsAndroidChatUiAvailable()
 // bar) that a future session may want to wire up behind a settings toggle.
 void SyncVirtualHudChatBox()
 {
+#if !defined(MU_TOUCH_UI)
+    // PC interface (Mac): the PC chat window and input box are used as built.
+    return;
+#endif
     if (g_pNewUISystem == nullptr || g_pChatInputBox == nullptr)
     {
         return;
@@ -13613,6 +13627,10 @@ ITEM GetAndroidTutorialExampleItem(int page)
 // RenderVirtualPad() itself gates on every frame.
 void MaybeStartAndroidTutorial()
 {
+#if defined(MU_MACOS)
+    // A tour of the touch controls; the Mac is played with mouse and keyboard.
+    return;
+#endif
     static bool s_checked = false;
     if (s_checked || !IsVirtualPadAvailable())
     {
@@ -17985,6 +18003,10 @@ SEASON3B::MESSAGE_TYPE GetChatTabMessageType(int tab)
 
 SEASON3B::CNewUIChatLogWindow* GetAndroidChatLog()
 {
+#if !defined(MU_TOUCH_UI)
+    // PC interface (Mac): the PC chat window and input box are used as built.
+    return nullptr;
+#endif
     return (g_pNewUISystem != nullptr) ? g_pNewUISystem->GetUI_NewChatLogWindow() : nullptr;
 }
 
@@ -18074,6 +18096,10 @@ bool IsChatTabActive(int tab)
 
 void RenderAndroidChatTabs()
 {
+#if !defined(MU_TOUCH_UI)
+    // PC interface (Mac): the PC chat window and input box are used as built.
+    return;
+#endif
     // The IsAndroidGameWindowOpen() half matches the tap handler's own gate
     // exactly (see HandleVirtualFingerDown) - the strip was drawing over NPC
     // panels and the inventory while being untappable there, which is both
@@ -23705,6 +23731,11 @@ static SDL_FingerID ToSdlFingerId(uintptr_t identifier)
 // edges: every send happens under g_bgKeepAliveMutex with g_bgKeepAliveActive
 // still set, and RESUMED clears the flag under the same mutex on the sokol
 // thread before the next frame - after that the thread cannot send again.
+//
+// iOS suspends the whole process, this thread included, a few seconds after
+// the app leaves the foreground. A background task buys about 30 s, enough for
+// one or two sends, so a break of up to about 75-90 s survives there; longer
+// breaks still end at the reconnect screen.
 static std::mutex g_bgKeepAliveMutex;
 static std::condition_variable g_bgKeepAliveCv;
 static bool g_bgKeepAliveActive = false;
@@ -23731,6 +23762,16 @@ static void BackgroundKeepAliveThread()
 
 static void SetBackgroundKeepAlive(bool active)
 {
+#if defined(MU_IOS)
+    if (active)
+    {
+        MU_IosBeginBackgroundKeepAlive();
+    }
+    else
+    {
+        MU_IosEndBackgroundKeepAlive();
+    }
+#endif
     {
         std::lock_guard<std::mutex> lock(g_bgKeepAliveMutex);
         g_bgKeepAliveActive = active;
@@ -25420,7 +25461,9 @@ static void IosVoiceHeartbeat(uint32_t frameMs)
 }
 #endif
 
-#if defined(MU_IOS)
+#if defined(MU_MACOS)
+void MU_MacScreenshotPoll(int width, int height);   // macos/src/MacScreenshot.cpp
+#elif defined(MU_IOS)
 void MU_IosScreenshotPoll(int width, int height);   // ios/src/IosScreenshot.cpp
 #endif
 
@@ -25430,15 +25473,29 @@ static void OnAndroidSappFrame()
     const uint32_t frameStart = MU_MobileGetTicks();
     RunAndroidGameFrame();
     IosVoiceHeartbeat(MU_MobileGetTicks() - frameStart);
-    MU_IosScreenshotPoll(static_cast<int>(WindowWidth), static_cast<int>(WindowHeight));
 #else
     RunAndroidGameFrame();
+#endif
+#if defined(MU_MACOS)
+    MU_MacScreenshotPoll(sapp_width(), sapp_height());
+#elif defined(MU_IOS)
+    MU_IosScreenshotPoll(static_cast<int>(WindowWidth), static_cast<int>(WindowHeight));
 #endif
 }
 
 static void OnAndroidSappCleanup()
 {
     ShutdownAndroidGame();
+#if defined(MU_MACOS)
+    // AppKit quits through exit(), which then runs the game's static
+    // destructors in an order they were never written for (CNewUISystem's
+    // tears down text boxes after their edit-control table is gone) and
+    // crashed every quit with "quit unexpectedly". Everything that needs
+    // saving is written above; leave without the destructors, as the mobile
+    // builds effectively do when the OS ends the process.
+    fflush(nullptr);
+    _exit(0);
+#endif
 }
 
 static void OnAndroidSappEvent(const sapp_event* event)
@@ -26585,8 +26642,19 @@ sapp_desc sokol_main(int argc, char* argv[])
 #endif
     desc.window_title = "MU Online";
     desc.swap_interval = 0;
+#if defined(MU_MACOS)
+    // sokol's Cocoa backend only takes 3.2 or 4.1 core; 4.1 is the most macOS
+    // has, and gl_compat.cpp's shaders are translated for it.
+    desc.window_title = "World of Kira";
+    desc.fullscreen = false;
+    desc.gl.major_version = 4;
+    desc.gl.minor_version = 1;
+#else
     desc.gl.major_version = 3;
-#if defined(MU_IOS)
+#endif
+#if defined(MU_MACOS)
+    // (version set above)
+#elif defined(MU_IOS)
     desc.gl.minor_version = 0; // iOS OpenGL ES stops at 3.0
 #else
     desc.gl.minor_version = 1;

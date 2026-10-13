@@ -201,7 +201,7 @@ bool SEASON3B::CNewUIPurchaseShopInventory::PurchaseShopInventoryProcess()
 		int iCurSquareIndex = m_pNewInventoryCtrl->FindItemptIndex(MouseX, MouseY);
 		if( iCurSquareIndex != -1 )
 		{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			// Touch: the first tap on a slot only points at it, which is what
 			// makes the tooltip and price appear. Only a second tap on that
 			// same slot opens the buy dialog.
@@ -227,7 +227,7 @@ bool SEASON3B::CNewUIPurchaseShopInventory::PurchaseShopInventoryProcess()
 			ChangeSourceIndex(iCurSquareIndex);
 			CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CPersonalShopItemBuyMsgBoxLayout));
 		}
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		else
 		{
 			// Tapped a gap or outside the grid - drops the selection, so the

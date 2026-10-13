@@ -92,7 +92,7 @@ extern float g_fScreenRate_y;
 extern char *g_lpszMp3[NUM_MUSIC];
 
 extern vec3_t MousePosition, MouseTarget;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 extern bool IsAndroidVirtualJoystickHoldingMovement();
 extern bool AndroidIsVirtualPadAvailable();
 extern void AndroidNoteTappedCharacter(int characterIndex);
@@ -8384,7 +8384,7 @@ void MoveHero()
 						Success = true;
 					}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 					// The movement stick owns the hero's path while it is held, so
 					// nothing below may hand out a competing one. It would path to
 					// wherever the touch cursor was last left - the last tap on the
@@ -8510,7 +8510,7 @@ void MoveHero()
 						}
 					}
 					else if ( SelectedOperate != -1
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 						&& !IsAndroidVirtualJoystickHoldingMovement()
 #endif
 						&& ( c->SafeZone || ( c->Helper.Type<MODEL_HELPER+2 || c->Helper.Type>MODEL_HELPER+4 || c->Helper.Type != MODEL_HELPER+37 || gCustomPet2.GetInfoPetType(c->Helper.Type - 1171) == 5 || gCustomPet2.GetInfoPetType(c->Helper.Type - 1171) == 6)))
@@ -8532,7 +8532,7 @@ void MoveHero()
 							}
 					}
 					else if(SelectedNpc!=-1
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 						&& !IsAndroidVirtualJoystickHoldingMovement()
 #endif
 						&& !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
@@ -8579,7 +8579,7 @@ void MoveHero()
 						}
 					}
 					else if(SelectedItem!=-1
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 						&& !IsAndroidVirtualJoystickHoldingMovement()
 #endif
 						)
@@ -8597,7 +8597,7 @@ void MoveHero()
 						}
 					}
 					else if(HIBYTE(GetAsyncKeyState(VK_SHIFT)) != 128
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 						// Movement is the virtual stick's job alone on mobile - unlike
 						// the SelectedOperate/SelectedNpc/SelectedItem branches above,
 						// which only skip while the stick is actively held (so a tap
@@ -8928,7 +8928,7 @@ void SelectObjects()
 		// key on a touch device, so this branch never ran on Android and items
 		// could not be selected or picked up at all. Treat the modifier as
 		// always held there.
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		if(true)
 #else
 		if(HIBYTE(GetAsyncKeyState(VK_MENU))==128)
@@ -8950,7 +8950,7 @@ void SelectObjects()
 						{
 							SelectedOperate = SelectOperate();
 						}
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 						// The pointer stays parked at the last touch, so only the
 						// frame the finger went down counts as tapping this player.
 						else if(MouseLButtonPush)
@@ -10001,7 +10001,7 @@ extern int g_iKeyPadEnable;
 
 void RenderCursor()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// On touch devices the pointer is the finger, so a floating arrow/hand
 	// following the synthetic mouse position is just noise - and the joystick
 	// parks that position away from the character while moving, which made it

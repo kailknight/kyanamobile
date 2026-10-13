@@ -18,7 +18,7 @@
 #include <functional>
 #include <queue>
 #include <vector>
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 #include "Platform/MobileTime.h"
 #endif
 
@@ -88,7 +88,7 @@ void RequestPartyPositions(DWORD intervalMs) {
 }
 extern Interface gInterface;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 #define ANDROID_HERO_STAGE(msg) do { OutputDebugStringA("UI_HERO: " msg); g_ErrorReport.Write("[UI_HERO] " msg "\r\n"); } while(0)
 #else
 #define ANDROID_HERO_STAGE(msg) ((void)0)
@@ -833,7 +833,7 @@ void CNewUIHeroPositionInfo::DrawMiniMap() {
   EnableAlphaTest(0);
 }
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 extern bool AndroidGetMiniMapPanelRect(float* outX, float* outY, float* outW, float* outH);
 // Not declared in any header this file already includes (ZzzOpenglUtil.cpp
 // keeps them file-local in practice), but they are plain global functions.
@@ -1576,13 +1576,13 @@ void ShowInfoTitleWindow() {
 bool CNewUIHeroPositionInfo::Render() {
   // gInterface.DrawMessage(1, "CNewUIHeroPositionInfo::Render() %d/%d",
   // m_Pos.x, m_Pos.y);
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   const uint64_t dbgInitStart = MU_MobilePerfNow();
 #endif
   ShowInfoTitleWindow();
   MiniMapLoad();
   AutoMove();
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   // Everything below is the desktop info panel: the coordinate plate and the
   // Menu / Show Name / Show HP Bar / Camera 3D / Config Auto / Active Auto
   // buttons. The touch overlay has its own location chip and reaches those
@@ -1595,7 +1595,7 @@ bool CNewUIHeroPositionInfo::Render() {
   DrawAndroidMiniMap();
   return true;
 #endif
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   const uint64_t dbgInitTicks = MU_MobilePerfNow() - dbgInitStart;
   const uint64_t dbgImgStart = MU_MobilePerfNow();
 #endif
@@ -1634,13 +1634,13 @@ bool CNewUIHeroPositionInfo::Render() {
   } else {
     m_BtnStop.Render();
   }
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   const uint64_t dbgImgTicks = MU_MobilePerfNow() - dbgImgStart;
   const uint64_t dbgTextStart = MU_MobilePerfNow();
 #endif
 
   //--
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   // RenderText() does an expensive re-layout whenever its string content
   // changes, and this string includes the live coordinates which change on
   // almost every frame while walking - refresh it a few times a second
@@ -1665,7 +1665,7 @@ bool CNewUIHeroPositionInfo::Render() {
   g_pRenderText->RenderText(m_Pos.x + 10, m_Pos.y + 2, szText, WidenX + 20,
                             13 - 4, RT3_SORT_CENTER);
 #endif
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   const uint64_t dbgTextTicks = MU_MobilePerfNow() - dbgTextStart;
   const uint64_t dbgMenuStart = MU_MobilePerfNow();
 #endif
@@ -1695,13 +1695,13 @@ bool CNewUIHeroPositionInfo::Render() {
   }
   DisableAlphaBlend();
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   const uint64_t dbgMenuTicks = MU_MobilePerfNow() - dbgMenuStart;
   const uint64_t dbgMapStart = MU_MobilePerfNow();
 #endif
   //===DrawMapo
   DrawMiniMap();
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
   {
     const double freq = static_cast<double>(MU_MobilePerfFrequency());
     const double initMs = (static_cast<double>(dbgInitTicks) * 1000.0) / freq;

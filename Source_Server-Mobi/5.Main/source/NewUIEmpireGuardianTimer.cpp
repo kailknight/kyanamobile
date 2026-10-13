@@ -53,7 +53,7 @@ void CNewUIEmpireGuardianTimer::Release()
 
 void CNewUIEmpireGuardianTimer::SetPos(int x, int y)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// The desktop spot (screen right, vertical middle) sits under the mobile
 	// attack wheel. Anchor under the minimap instead - same spot used by
 	// NewUIChaosCastleTime/NewUIBattleSoccerScore/NewUIKanturuEvent's

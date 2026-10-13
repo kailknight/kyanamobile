@@ -38,7 +38,7 @@
 #include "CustomEventTime.h"
 #include "CustomRanking.h"
 #include "QuickToggles.h"
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 #include "Platform/UIAtlas.h"
 #endif
 
@@ -56,7 +56,7 @@ extern int DisplayHeightExt;
 extern int DisplayWinExt;
 extern int DisplayWinReal;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 // Touch layout for the skill picker: a fixed 6x2 grid sitting above the chat
 // tabs, paged when the character knows more than twelve castable skills.
 //
@@ -188,7 +188,7 @@ void GetAndroidSkillPickerPageButtonRects(float& prevX, float& nextX, float& y, 
 
 static void GetLegacySkillPickerCellRect(int order, float& x, float& y, float& width, float& height)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	width = kAndroidPickerCellW;
 	height = kAndroidPickerCellH;
 
@@ -265,7 +265,7 @@ static WORD GetCurrentSkillTypeForPrior()
 	return 0;
 }
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 bool AndroidTriggerHotKeySkillTap(int hotKeySkillIndex);
 constexpr int kAndroidHiddenLegacyButtonX = -10000;
 constexpr int kAndroidHiddenLegacyButtonY = -10000;
@@ -341,7 +341,7 @@ void SEASON3B::CNewUIMainFrameWindow::LoadImages()
 	LoadBitmap("Interface\\partCharge1\\newui_menu_Bt04.jpg", IMAGE_MENU_BTN_WINDOW, GL_LINEAR, GL_CLAMP_TO_EDGE);
 	LoadBitmap("Interface\\partCharge1\\Decor.tga", IMAGE_DECOR_WIDE, GL_LINEAR, GL_CLAMP_TO_EDGE);
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// The gauge textures are now freshly loaded regardless of which skin
 	// branch above ran - pack them into their own shared atlas (see
 	// Platform/UIAtlas.h).
@@ -440,7 +440,7 @@ void SEASON3B::CNewUIMainFrameWindow::SetButtonInfo()
 	m_BtnWindow.ChangeImgColor(BUTTON_STATE_DOWN, RGBA(255, 255, 255, 255));
 	m_BtnWindow.ChangeToolTipText(GlobalText[1744], true);
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	m_BtnFriend.ChangeButtonInfo(kAndroidHiddenLegacyButtonX, kAndroidHiddenLegacyButtonY, x_Add, y_Add);
 	m_BtnWindow.ChangeButtonInfo(kAndroidHiddenLegacyButtonX, kAndroidHiddenLegacyButtonY, x_Add, y_Add);
 	m_BtnMyInven.ChangeButtonInfo(kAndroidHiddenLegacyButtonX, kAndroidHiddenLegacyButtonY, x_Add, y_Add);
@@ -897,13 +897,13 @@ bool SEASON3B::CNewUIMainFrameWindow::RenderSS2()
 	EnableAlphaTest();
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	RenderFrame();
 #endif
 
 	m_pNewUI3DRenderMng->RenderUI2DEffect(ITEMHOTKEYNUMBER_CAMERA_Z_ORDER, UI2DEffectCallback, this, 0, 0);
 
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	// The five hotkey boxes and the current-skill box along the bottom. Its
 	// input half was already disabled on mobile - the pad arc both fires and
 	// assigns these slots - so this only stopped drawing them.
@@ -911,7 +911,7 @@ bool SEASON3B::CNewUIMainFrameWindow::RenderSS2()
 #endif
 	//
 	EnableAlphaTest();
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	RenderLifeManaSS2();
 	RenderGuageSDSS2();
 	RenderGuageAGSS2();
@@ -930,13 +930,13 @@ bool SEASON3B::CNewUIMainFrameWindow::Render()
 	EnableAlphaTest();
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	RenderFrame();
 #endif
 
 	m_pNewUI3DRenderMng->RenderUI2DEffect(ITEMHOTKEYNUMBER_CAMERA_Z_ORDER, UI2DEffectCallback, this, 0, 0);
 
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	// The five hotkey boxes and the current-skill box along the bottom. Its
 	// input half was already disabled on mobile - the pad arc both fires and
 	// assigns these slots - so this only stopped drawing them.
@@ -944,7 +944,7 @@ bool SEASON3B::CNewUIMainFrameWindow::Render()
 #endif
 
 	EnableAlphaTest();
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	RenderLifeMana();
 	RenderGuageSD();
 	RenderGuageAG();
@@ -960,7 +960,7 @@ bool SEASON3B::CNewUIMainFrameWindow::Render()
 
 void SEASON3B::CNewUIMainFrameWindow::Render3D()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// These draw the hotkey potion models at y=443, which is underneath the
 	// virtual joystick now that the frame is gone. The overlay draws its own.
 	return;
@@ -1015,7 +1015,7 @@ void SEASON3B::CNewUIMainFrameWindow::RenderFrame()
 		x = 256.f + 128.f + DisplayWinExt;
 
 		float renderWidth = width;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		const float cutX = kAndroidLegacyMainFrameButtonCutX + DisplayWinExt;
 		renderWidth = (cutX > x) ? (cutX - x) : 0.0f;
 		if (renderWidth > width)
@@ -1473,7 +1473,7 @@ void SEASON3B::CNewUIMainFrameWindow::RenderButtons()
 	m_BtnCShop.Render();
 #endif //defined PBG_ADD_INGAMESHOP_UI_MAINFRAME
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	return;
 #endif
 
@@ -2329,7 +2329,7 @@ void SEASON3B::CNewUIItemHotKey::RenderItems()
 
 void SEASON3B::CNewUIItemHotKey::RenderItemCount()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Would leave quantity numbers floating at y=457 with no potion icons under
 	// them. The overlay prints its own count on each hotkey button instead.
 	return;
@@ -2361,7 +2361,7 @@ void SEASON3B::CNewUIItemHotKey::RenderItemCount()
 
 void SEASON3B::CNewUIItemHotKey::UseItemRButton()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// These slots sit at y=445, underneath the virtual joystick, and touch has no
 	// real right button - the only way to reach this is the long-press emulation,
 	// so holding a finger down to walk would quietly drink a potion. Mobile uses
@@ -2476,7 +2476,7 @@ void SEASON3B::CNewUISkillList::LoadImages()
 	LoadBitmap("Interface\\newui_non_skill3.jpg", IMAGE_NON_SKILL3, GL_LINEAR);
 #endif //PBG_ADD_NEWCHAR_MONK_SKILL
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// IMAGE_SKILLBOX/IMAGE_SKILLBOX_USE are now freshly loaded - pack them
 	// into their own shared atlas (see Platform/UIAtlas.h).
 	MU_BuildSkillBoxAtlas();
@@ -2539,7 +2539,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 	// it fires hotkey skills from its own arc, and completes a skill assignment
 	// with the same SetHotKey call. The picker popup further down is still live
 	// on mobile and must keep running, so this guard stops short of it.
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	x = 385.f - FixX + DisplayWinExt;
 	y = 431.f + DisplayHeightExt;
 	width = 32.f; height = 38.f;
@@ -2633,7 +2633,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 
 			if (m_EventState == EVENT_BTN_DOWN_SKILLHOTKEY && MouseLButtonPush == false)
 			{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 				if (m_iAndroidTouchAssignSkillIndex >= 0)
 				{
 					SetHotKey(iIndex, m_iAndroidTouchAssignSkillIndex);
@@ -2688,7 +2688,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 			{
 				if (MouseLButtonPush == false)
 				{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 					m_EventState = EVENT_NONE;
 					if (m_iAndroidTouchAssignSkillIndex < 0)
 					{
@@ -2786,7 +2786,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 			&& m_iRenderSkillInfoType == i && SEASON3B::CheckMouseIn(x, y, width, height) == true)
 		{
 			m_EventState = EVENT_NONE;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			m_wHeroPriorSkill = GetCurrentSkillTypeForPrior();
 			Hero->CurrentSkill = i;
 			m_iAndroidTouchAssignSkillIndex = i;
@@ -2812,7 +2812,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 	{
 		for (int i = AT_PET_COMMAND_DEFAULT; i < AT_PET_COMMAND_END; ++i)
 		{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			GetLegacySkillPickerCellRect(iSkillCount, x, y, width, height);
 			iSkillCount++;
 #else
@@ -2851,7 +2851,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 					&& m_iRenderSkillInfoType == i)
 				{
 					m_EventState = EVENT_NONE;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 					m_wHeroPriorSkill = GetCurrentSkillTypeForPrior();
 					Hero->CurrentSkill = i;
 					m_iAndroidTouchAssignSkillIndex = i;
@@ -2894,7 +2894,7 @@ bool SEASON3B::CNewUISkillList::UpdateMouseEvent()
 
 bool SEASON3B::CNewUISkillList::UpdateKeyEvent()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (m_bSkillList == true && m_iAndroidTouchAssignSkillIndex >= 0)
 	{
 		for (int i = 0; i < 9; ++i)
@@ -3083,7 +3083,7 @@ void SEASON3B::CNewUISkillList::SetSkillPickerOpen(bool open)
 	if (open == true)
 	{
 		m_iAndroidTouchAssignSkillIndex = -1;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		// Always open on the first page. Reopening on whatever page was last
 		// viewed hides the skills the player uses most behind an arrow.
 		SetAndroidSkillPickerPage(0);
@@ -3113,7 +3113,7 @@ void SEASON3B::CNewUISkillList::SetAndroidTouchAssignSkillIndex(int skillIndex)
 
 int SEASON3B::CNewUISkillList::HitTestAndroidSkillPickerPageButton(float uiX, float uiY) const
 {
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	return -1;
 #else
 	if (m_bSkillList == false || GetAndroidSkillPickerPageCount() <= 1)
@@ -3142,7 +3142,7 @@ int SEASON3B::CNewUISkillList::HitTestAndroidSkillPickerPageButton(float uiX, fl
 
 void SEASON3B::CNewUISkillList::StepAndroidSkillPickerPage(int delta)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	const int pageCount = GetAndroidSkillPickerPageCount();
 	int page = GetAndroidSkillPickerPage() + delta;
 	// Wrap, so a single arrow reaches every page on a two page set.
@@ -3162,7 +3162,7 @@ void SEASON3B::CNewUISkillList::StepAndroidSkillPickerPage(int delta)
 
 void SEASON3B::CNewUISkillList::RenderAndroidSkillPickerPageControls()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	const int pageCount = GetAndroidSkillPickerPageCount();
 	if (pageCount <= 1)
 	{
@@ -3188,7 +3188,7 @@ void SEASON3B::CNewUISkillList::RenderAndroidSkillPickerPageControls()
 
 int SEASON3B::CNewUISkillList::HitTestAndroidTouchSkillPicker(float uiX, float uiY) const
 {
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	return -1;
 #else
 	if (m_bSkillList == false || CharacterAttribute == NULL)
@@ -3493,7 +3493,7 @@ bool SEASON3B::CNewUISkillList::Render()
 	{
 		if (m_bSkillList == true)
 		{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			// The touch build's picker is a scrollable list now
 			// (RenderAndroidSkillPickerList in android_main.cpp) instead of
 			// this fixed 6x2 paged grid, so each row has room to show what a

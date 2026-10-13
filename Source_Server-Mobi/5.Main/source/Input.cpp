@@ -11,7 +11,7 @@
 extern bool g_bWndActive;
 #endif
 extern CTimer*	g_pTimer;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 extern bool MouseLButtonDBClick;
 #endif
 
@@ -138,7 +138,7 @@ void CInput::Update()
 		}
 	}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// The time+cursor-movement heuristic above assumes a real mouse and is
 	// unreliable for touch: a steady finger reports near-zero cursor delta
 	// between polls, which can suppress or falsely trigger m_bLBtnDbl

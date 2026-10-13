@@ -56,7 +56,7 @@ void CNewUIBloodCastle::Release()
 
 void CNewUIBloodCastle::SetPos(int x, int y)
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// See NewUIEmpireGuardianTimer::SetPos: shared mobile anchor under the
 	// minimap for every instanced-event status widget, none of which are ever
 	// visible together. The desktop spot this replaces is the bottom-right

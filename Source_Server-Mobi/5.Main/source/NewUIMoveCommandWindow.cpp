@@ -21,7 +21,7 @@ extern int DisplayWinMid;
 extern int DisplayHeightExt;
 extern int DisplayWinExt;
 extern int DisplayWinReal;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 extern bool AndroidGetMoveMapWindowPosition(int panelWidth, int panelHeight, int* outX, int* outY);
 #endif
 using namespace SEASON3B;
@@ -53,7 +53,7 @@ namespace
 		return false;
 	}
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	const int kAndroidMoveMapColumns = 4;
 	const int kAndroidMoveMapRows = 4;
 	const int kAndroidMoveMapTileWidth = 114;
@@ -260,7 +260,7 @@ void SEASON3B::CNewUIMoveCommandWindow::SetPos(int x, int y)
 	m_iRealFontHeight = FontHeight * 640 / WindowWidth + 2;
 	//m_iRealFontHeight = FontHeight * DisplayHeight / WindowWidth + 2; //Fix Test Wide
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (IsAndroidMoveMapGridMode())
 	{
 		const int itemCount = static_cast<int>(m_listMoveInfoData.size());
@@ -623,7 +623,7 @@ bool SEASON3B::CNewUIMoveCommandWindow::BtnProcess()
 {
 	int iX, iY;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (IsAndroidMoveMapGridMode())
 	{
 		if (CheckMouseIn(m_Pos.x, m_Pos.y, m_MapNameUISize.x, m_MapNameUISize.y) && IsPress(VK_LBUTTON))
@@ -857,7 +857,7 @@ bool SEASON3B::CNewUIMoveCommandWindow::UpdateMouseEvent()
 	if( true == BtnProcess() )
 		return false;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (IsAndroidMoveMapGridMode())
 	{
 		if (CheckMouseIn(m_Pos.x, m_Pos.y, m_MapNameUISize.x, m_MapNameUISize.y))
@@ -1028,7 +1028,7 @@ void SEASON3B::CNewUIMoveCommandWindow::RecursiveCalcScroll(IN int piScrollValue
 
 void SEASON3B::CNewUIMoveCommandWindow::UpdateScrolling()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (IsAndroidMoveMapGridMode())
 	{
 		const int itemCount = static_cast<int>(m_listMoveInfoData.size());
@@ -1059,7 +1059,7 @@ void SEASON3B::CNewUIMoveCommandWindow::UpdateScrolling()
 
 void SEASON3B::CNewUIMoveCommandWindow::RenderFrame()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (IsAndroidMoveMapGridMode())
 	{
 		EnableAlphaBlend3();
@@ -1217,7 +1217,7 @@ void SEASON3B::CNewUIMoveCommandWindow::RenderFrame()
 
 bool SEASON3B::CNewUIMoveCommandWindow::Render()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (IsAndroidMoveMapGridMode())
 	{
 		EnableAlphaBlend3();
@@ -1406,7 +1406,7 @@ void SEASON3B::CNewUIMoveCommandWindow::OpenningProcess()
 	SetStrifeMap();
 	SettingCanMoveMap();
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if (IsAndroidMoveMapGridMode())
 	{
 		m_iCurPage = 1;

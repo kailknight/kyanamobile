@@ -156,7 +156,7 @@ void cCustomMenu::Draw()
 
 	float MainWidth = 230;
 	float MainHeight = 290;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Nudged down from dead-center - the top edge (and its close button) used to
 	// sit right under the Android top bar's icon row.
 	float StartY = ((DisplayHeight - 51) / 2) - (MainHeight / 2) + 50.0f;

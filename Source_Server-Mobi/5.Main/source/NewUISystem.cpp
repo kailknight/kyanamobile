@@ -17,7 +17,7 @@ extern int DisplayHeightExt;
 extern int DisplayWinExt;
 extern int DisplayWinReal;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 extern bool AndroidGetMoveMapWindowPosition(int panelWidth, int panelHeight, int* outX, int* outY);
 #endif
 
@@ -126,7 +126,7 @@ bool SEASON3B::CNewUISystem::Create()
 	m_pNewChatLogWindow = new CNewUIChatLogWindow;
 	// Bottom centre on mobile, under the tab strip the touch overlay draws, so
 	// the messages land inside that panel instead of along the left edge.
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	if(false == m_pNewChatLogWindow->Create(m_pNewUIMng, 215, 470, 6))
 #else
 	if(false == m_pNewChatLogWindow->Create(m_pNewUIMng, 0, 480-50-47, 6))
@@ -167,7 +167,7 @@ void SEASON3B::CNewUISystem::Release()
 
 bool SEASON3B::CNewUISystem::LoadMainSceneInterface()
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 #define ANDROID_UI_STAGE(msg) do { OutputDebugStringA("UI_LOAD: " msg); g_ErrorReport.Write("[UI_LOAD] " msg "\r\n"); } while(0)
 #else
 #define ANDROID_UI_STAGE(msg) ((void)0)
@@ -417,7 +417,7 @@ bool SEASON3B::CNewUISystem::LoadMainSceneInterface()
 	}
 
 	m_pNewSiegeWarfare = new CNewUISiegeWarfare;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Top right, over the spot the mobile minimap panel normally takes (which
 	// stands down in Loren Deep). The PC position lands on the attack buttons.
 	if(m_pNewSiegeWarfare->Create(m_pNewUIMng, 640 - CNewUISiegeWarBase::MINIMAP_FRAME_WIDTH - 4, 36) == false)
@@ -963,7 +963,7 @@ void SEASON3B::CNewUISystem::Show(DWORD dwKey)
 			Hide(SEASON3B::INTERFACE_HELP);
 			Hide(SEASON3B::INTERFACE_ITEM_EXPLANATION);
 			Hide(SEASON3B::INTERFACE_SETITEM_EXPLANATION);
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 			int moveMapX = 0;
 			int moveMapY = 0;
 			if (AndroidGetMoveMapWindowPosition(

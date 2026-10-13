@@ -104,7 +104,7 @@ bool SEASON3B::CNewUISiegeWarBase::Render()
 	g_pRenderText->SetTextColor( 255, 255, 255, 255 );
 	g_pRenderText->SetBgColor( 0, 0, 0, 0 );
 	
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	/*
 		The map texture comes out vertically flipped on mobile, the same split the
 		cash shop banner has (NewUIInGameShop.cpp RenderBanner). Confirmed on the
@@ -503,7 +503,7 @@ void SEASON3B::CNewUISiegeWarBase::SetPos( int x, int y )
 	m_MiniMapPos.y = m_MiniMapFramePos.y + 28; 
 	m_TimeUIPos.x = m_MiniMapFramePos.x + 20; 
 	m_TimeUIPos.y = m_MiniMapFramePos.y + MINIMAP_FRAME_HEIGHT - 4;
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	/*
 		Mobile docks this top right (NewUISystem::Create) - the PC spot is on top
 		of the attack buttons. The battle skill frame sits above the map on PC,

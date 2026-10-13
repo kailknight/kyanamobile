@@ -422,7 +422,7 @@ void SEASON3B::CNewUIChatLogWindow::ProcessAddText(const type_string& strID, con
 	// ProcessAddText deliberately keeps system messages out of m_vecAllMsgs.
 	auto mirrorToSystem = [&](const type_string& id, const type_string& text)
 	{
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 		if (MsgType != TYPE_GM_MESSAGE && MsgType != TYPE_ERROR_MESSAGE)
 		{
 			return;

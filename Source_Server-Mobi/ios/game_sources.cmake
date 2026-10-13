@@ -1,0 +1,32 @@
+# The client's source list, shared by the iOS (ios/CMakeLists.txt) and macOS
+# (macos/CMakeLists.txt) builds. Expects GAME_SRC_DIR; sets GAME_SOURCES.
+
+# --- Game sources: same glob and exclusions as Android ----------------------
+file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS "${GAME_SRC_DIR}/*.cpp")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*[Ww]inmain\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*MuEditor.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*imgui.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*GameShop/FileDownloader.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*ProtectSysKey.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Scenes.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*[/\\\\]Camera[/\\\\].*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*StackWalker.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Stack\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*TrayMode\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*UIWindows - Copy\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Dump.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Log/WindowsConsole\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Log/ErrorReport\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/cryptopp.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*CSResourceManager\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Math\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*ExternalObject/Leaf.*\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*DSplaysound\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*DSwaveIO\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*GCCertification\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*ExternalObject/detours\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/mapm/.*DEMO.*\\.[Cc][Pp][Pp]$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*WSctlc\\.cpp$")
+# Editor backups that sit beside real sources.
+list(FILTER GAME_SOURCES EXCLUDE REGEX ".*\\.bak.*$")
+list(REMOVE_DUPLICATES GAME_SOURCES)

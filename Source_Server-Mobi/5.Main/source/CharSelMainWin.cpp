@@ -49,7 +49,7 @@ void CCharSelMainWin::Create()
 	m_aBtn[CSMW_BTN_CONNECT].Create(54, 30, BITMAP_LOG_IN+5, 4, 2, 1, 3);
 	m_aBtn[CSMW_BTN_DELETE].Create(54, 30, BITMAP_LOG_IN+6, 4, 2, 1, 3);
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Create() above builds each button's sprite frames off the native 54x30
 	// art, so the SetSize calls below only inflate the render/click box (same
 	// two-step pattern LoginWin.cpp uses for its own buttons) - a real 54x30
@@ -103,7 +103,7 @@ void CCharSelMainWin::SetPosition(int nXCoord, int nYCoord)
 	int nWinRPosX = nXCoord + CWin::GetWidth();
 	int nConnectGap = 1;
 
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Anchor the right-hand pair to the real screen edge, and put a finger-sized
 	// gap between Connect and Delete.
 	//

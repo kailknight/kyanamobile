@@ -2,7 +2,15 @@
 // Android does the same jobs in MuMainNativeActivity.java.
 
 #import <CoreText/CoreText.h>
+#import <TargetConditionals.h>
+#if TARGET_OS_OSX
+#import <AppKit/AppKit.h>
+#import <IOKit/pwr_mgt/IOPMLib.h>
+#import <IOKit/ps/IOPowerSources.h>
+#import <IOKit/ps/IOPSKeys.h>
+#else
 #import <UIKit/UIKit.h>
+#endif
 
 #include "Platform/IosPlatform.h"
 
@@ -29,7 +37,13 @@ const char* MU_IosDataRoot()
     if (s_root[0] == '\0')
     {
         const char* home = getenv("HOME");
+#if TARGET_OS_OSX
+        // ~/Documents is TCC-protected on a Mac, and a game is not a document.
+        snprintf(s_root, sizeof(s_root), "%s/Library/Application Support/World of Kira",
+                 (home && home[0]) ? home : ".");
+#else
         snprintf(s_root, sizeof(s_root), "%s/Documents", (home && home[0]) ? home : ".");
+#endif
     }
     return s_root;
 }
@@ -46,6 +60,29 @@ void MU_IosChdirToDataRoot()
     fprintf(stderr, "I/MuMain: working dir set to %s\n", root);
 }
 
+#if TARGET_OS_OSX
+// A Mac has no idle timer to switch off; hold a power assertion instead so the
+// display does not sleep mid-game (Android: FLAG_KEEP_SCREEN_ON).
+void MU_IosSetIdleTimerDisabled(bool disabled)
+{
+    static IOPMAssertionID s_assertion = kIOPMNullAssertionID;
+    if (disabled && s_assertion == kIOPMNullAssertionID)
+    {
+        IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep, kIOPMAssertionLevelOn,
+                                    CFSTR("World of Kira is running"), &s_assertion);
+    }
+    else if (!disabled && s_assertion != kIOPMNullAssertionID)
+    {
+        IOPMAssertionRelease(s_assertion);
+        s_assertion = kIOPMNullAssertionID;
+    }
+}
+
+// macOS does not suspend a windowed app that loses focus, so the keepalive
+// thread has nothing to bridge.
+void MU_IosBeginBackgroundKeepAlive() {}
+void MU_IosEndBackgroundKeepAlive() {}
+#else
 void MU_IosSetIdleTimerDisabled(bool disabled)
 {
     void (^apply)(void) = ^{
@@ -61,6 +98,72 @@ void MU_IosSetIdleTimerDisabled(bool disabled)
     }
 }
 
+static UIBackgroundTaskIdentifier s_keepAliveTask = UIBackgroundTaskInvalid;
+
+void MU_IosBeginBackgroundKeepAlive()
+{
+    if (s_keepAliveTask != UIBackgroundTaskInvalid)
+    {
+        return;
+    }
+    // iOS ends the grant itself when the time is up; the handler must hand the
+    // task back or the app is killed instead of suspended.
+    s_keepAliveTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"MuKeepAlive"
+                                                                  expirationHandler:^{
+        MU_IosEndBackgroundKeepAlive();
+    }];
+}
+
+void MU_IosEndBackgroundKeepAlive()
+{
+    if (s_keepAliveTask == UIBackgroundTaskInvalid)
+    {
+        return;
+    }
+    [[UIApplication sharedApplication] endBackgroundTask:s_keepAliveTask];
+    s_keepAliveTask = UIBackgroundTaskInvalid;
+}
+#endif
+
+#if TARGET_OS_OSX
+// The window has no notch or home indicator.
+void MU_IosGetSafeAreaFractions(float* left, float* top, float* right, float* bottom)
+{
+    *left = *top = *right = *bottom = 0.0f;
+}
+
+bool MU_IosIsPhone()
+{
+    return false;
+}
+
+int MU_IosGetBatteryPercent()
+{
+    CFTypeRef info = IOPSCopyPowerSourcesInfo();
+    if (info == nullptr)
+    {
+        return -1;
+    }
+    int percent = -1;
+    CFArrayRef sources = IOPSCopyPowerSourcesList(info);
+    if (sources != nullptr)
+    {
+        for (CFIndex i = 0; i < CFArrayGetCount(sources) && percent < 0; ++i)
+        {
+            NSDictionary* source = (__bridge NSDictionary*)IOPSGetPowerSourceDescription(info, CFArrayGetValueAtIndex(sources, i));
+            NSNumber* current = source[@kIOPSCurrentCapacityKey];
+            NSNumber* max = source[@kIOPSMaxCapacityKey];
+            if (current != nil && max != nil && max.intValue > 0)
+            {
+                percent = current.intValue * 100 / max.intValue;
+            }
+        }
+        CFRelease(sources);
+    }
+    CFRelease(info);
+    return percent;   // -1 on a desktop Mac with no battery
+}
+#else
 static UIWindow* MainWindow()
 {
     for (UIScene* scene in [UIApplication sharedApplication].connectedScenes)
@@ -113,6 +216,7 @@ int MU_IosGetBatteryPercent()
     const float level = device.batteryLevel;
     return (level < 0.0f) ? -1 : static_cast<int>(level * 100.0f + 0.5f);
 }
+#endif
 
 const char* MU_IosSystemFontPath(bool bold)
 {
@@ -220,6 +324,13 @@ void MergeLowercaseDataFolder(const fs::path& root)
     {
         return;
     }
+    // macOS volumes ignore case: "data" and "Data" are then one folder, and
+    // merging it into itself and removing "data" deletes the game data.
+    if (fs::exists(canonical, ec) && fs::equivalent(lower, canonical, ec))
+    {
+        return;
+    }
+    ec.clear();
     if (!fs::exists(canonical, ec))
     {
         fs::rename(lower, canonical, ec);

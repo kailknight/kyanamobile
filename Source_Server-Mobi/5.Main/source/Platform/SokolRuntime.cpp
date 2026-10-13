@@ -1,6 +1,11 @@
 #if defined(__ANDROID__) || defined(MU_IOS)
 
+#if defined(MU_MACOS)
+// A Mac has desktop OpenGL only; gl_compat.cpp translates the ES shaders.
+#define SOKOL_GLCORE
+#else
 #define SOKOL_GLES3
+#endif
 #define SOKOL_APP_IMPL
 
 #if defined(__ANDROID__)
@@ -99,7 +104,11 @@ void MU_MobileKeepRenderingWhileUnfocused()
 #endif
 }
 
-#if defined(MU_IOS)
+#if defined(MU_MACOS)
+// A Mac has a hardware keyboard and no on-screen one.
+void MU_IosShowKeyboard(bool) {}
+bool MU_IosKeyboardHasFocus() { return false; }
+#elif defined(MU_IOS)
 #include <cstdio>
 
 // sokol brings the iOS keyboard up by making a hidden UITextField first

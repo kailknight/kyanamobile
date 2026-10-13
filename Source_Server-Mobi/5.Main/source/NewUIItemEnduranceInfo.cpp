@@ -62,7 +62,7 @@ void SEASON3B::CNewUIItemEnduranceInfo::Release()
 // Pet HP goes just under the status panel on mobile. Both desktop forms anchor
 // it off the right edge at y=370, which is now the consumable row and the
 // skill arc. Item durability keeps its own right-hand spot.
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 namespace
 {
 	// RenderHPUI draws its frame at (iX, iY - 368), so the value stored here is
@@ -81,7 +81,7 @@ namespace
 
 void SEASON3B::CNewUIItemEnduranceInfo::SetPos( int x, int y )
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	m_UIStartPos.x = kAndroidPetHpX;
 	m_UIStartPos.y = kAndroidPetHpY;
 #else
@@ -96,7 +96,7 @@ void SEASON3B::CNewUIItemEnduranceInfo::SetPos( int x, int y )
 
 void SEASON3B::CNewUIItemEnduranceInfo::SetPos( int x )
 {
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	m_UIStartPos.x = kAndroidPetHpX;
 	m_UIStartPos.y = kAndroidPetHpY;
 #else
@@ -404,7 +404,7 @@ void SEASON3B::CNewUIItemEnduranceInfo::RenderHPUI( int iX, int iY, unicode::t_c
 	// Shifts left to make room for the party list, which on the desktop sits to
 	// the right of this gauge. On mobile both were moved to the left edge, so
 	// the shift would push the gauge off-screen instead of clear of anything.
-#if !defined(__ANDROID__) && !defined(MU_IOS)
+#if !defined(MU_TOUCH_UI)
 	if (PartyNumber > 0)
 	{
 		iX = iX - 70.f;

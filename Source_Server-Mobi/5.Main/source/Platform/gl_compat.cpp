@@ -794,8 +794,10 @@ int g_ProfStencilBits = -1;
 void GL_SampleDepthStencilFormat()
 {
     GLint d = 0, s = 0;
+#if !defined(MU_MACOS)   // removed from the core profile; profiling readout only
     glGetIntegerv(GL_DEPTH_BITS, &d);
     glGetIntegerv(GL_STENCIL_BITS, &s);
+#endif
     g_ProfDepthBits = static_cast<int>(d);
     g_ProfStencilBits = static_cast<int>(s);
 }
@@ -1039,6 +1041,13 @@ static std::string AdaptShaderSource(const char* src) {
     };
     replaceAll("#version 310 es", "#version 300 es");
     replaceAll("layout(std140, binding = 0) uniform", "layout(std140) uniform");
+#if defined(MU_MACOS)
+    // macOS stops at desktop GLSL 4.10 (core profile). The 3.00 ES sources
+    // above are valid 4.10 once the version line says so: precision
+    // qualifiers are accepted and ignored there, and vertex input locations
+    // and fragment outputs need nothing more.
+    replaceAll("#version 300 es", "#version 410 core");
+#endif
 
     // "layout(location = N) uniform ..." -> "uniform ...". Vertex inputs keep
     // their layout(location = N): that is legal in 3.00.
@@ -1234,6 +1243,19 @@ void GL_Compat_Init() {
     s_imAttribValid = false;
     s_quadIndices.clear();
     s_quadIndexCapacityQuads = 0;
+
+#if defined(MU_MACOS)
+    // A core-profile context draws nothing without a vertex array object
+    // bound; ES lets the default one (0) do. One for the whole game: every
+    // draw sets its attribute pointers itself.
+    {
+        static GLuint s_coreVao = 0;
+        if (s_coreVao == 0) {
+            glGenVertexArrays(1, &s_coreVao);
+        }
+        glBindVertexArray(s_coreVao);
+    }
+#endif
 
     // Compile shaders. Both programs share one vertex shader object and use
     // matching explicit layout(location=...) on every attribute/uniform (see

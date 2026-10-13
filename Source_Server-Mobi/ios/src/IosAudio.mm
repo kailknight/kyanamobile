@@ -10,7 +10,16 @@
 // same sample and drones.
 
 #import <AVFoundation/AVFoundation.h>
+#import <TargetConditionals.h>
+#if TARGET_OS_OSX
+#import <AppKit/AppKit.h>
+#define MU_RESIGN_ACTIVE NSApplicationDidResignActiveNotification
+#define MU_BECAME_ACTIVE NSApplicationDidBecomeActiveNotification
+#else
 #import <UIKit/UIKit.h>
+#define MU_RESIGN_ACTIVE UIApplicationWillResignActiveNotification
+#define MU_BECAME_ACTIVE UIApplicationDidBecomeActiveNotification
+#endif
 
 #include "IosAudio.h"
 #include "IosVoice.h"
@@ -659,10 +668,13 @@ void OnDidBecomeActive()
 void InstallObservers()
 {
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-    [center addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil
+#if !TARGET_OS_OSX   // a desktop game keeps playing when another window has focus
+    [center addObserverForName:MU_RESIGN_ACTIVE object:nil queue:nil
                     usingBlock:^(NSNotification*) { OnWillResignActive(); }];
-    [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil
+    [center addObserverForName:MU_BECAME_ACTIVE object:nil queue:nil
                     usingBlock:^(NSNotification*) { OnDidBecomeActive(); }];
+#endif
+#if !TARGET_OS_OSX   // AVAudioSession does not exist on macOS
     // A call or Siri stops the engine and pauses the player.
     [center addObserverForName:AVAudioSessionInterruptionNotification object:nil queue:nil
                     usingBlock:^(NSNotification* note) {
@@ -701,6 +713,7 @@ void InstallObservers()
         g_musicWasPlaying = false;
         RequestRebuild();
     }];
+#endif
     // Route changes (headphones in/out) stop the engine. So does starting one
     // with voice processing: it moves the hardware onto several microphones
     // (the input goes from 1 to 4 channels) and posts a configuration change

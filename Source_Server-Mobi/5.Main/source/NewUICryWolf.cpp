@@ -153,7 +153,7 @@ bool SEASON3B::CNewUICryWolf::Render()
 	// widescreen (never following the box to the right corner) and sitting under
 	// the mobile attack wheel on Android. offX/offY carry the same delta into
 	// every literal below so the cluster keeps moving as one piece.
-#if defined(__ANDROID__) || defined(MU_IOS)
+#if defined(MU_TOUCH_UI)
 	// Same anchor as the other instanced-event widgets (NewUIEmpireGuardianTimer
 	// and friends) - under the minimap. Main's desktop top-left (518,278) lands
 	// there; everything else keeps its offset from Main.
