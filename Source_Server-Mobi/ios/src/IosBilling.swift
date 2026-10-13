@@ -137,7 +137,11 @@ private final class MuStore {
     // MARK: - Purchases
 
     private func buy(_ productId: String) async {
-        await loadProducts()
+        // Only ask the App Store again when this pack is missing: reloading
+        // on every Pay held the payment sheet back by a network round trip.
+        if locked({ products[productId] }) == nil {
+            await loadProducts()
+        }
         guard let product = locked({ products[productId] }) else {
             push("error:This pack is not available on the App Store", productId)
             return

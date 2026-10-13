@@ -28,7 +28,7 @@ set(SOKOL_ROOT       "${THIRDPARTY_DIR}/sokol" CACHE PATH "Shared sokol checkout
 
 set(MU_IOS_TEAM_ID      "" CACHE STRING "Apple development team ID (Xcode > Settings > Accounts)")
 set(MU_IOS_BUNDLE_ID    "com.worldofkira" CACHE STRING "App bundle identifier")
-set(MU_IOS_BUILD_NUMBER "31" CACHE STRING "CFBundleVersion; also satisfies ClientBuild.h's MU_ANDROID_VERSION_CODE")
+set(MU_IOS_BUILD_NUMBER "32" CACHE STRING "CFBundleVersion; also satisfies ClientBuild.h's MU_ANDROID_VERSION_CODE")
 set(MU_IOS_VERSION      "1.0.${MU_IOS_BUILD_NUMBER}" CACHE STRING "CFBundleShortVersionString")
 # Both off by default, as on Android (MU_ANDROID_DISABLE_LOG). For diagnosis:
 #   ./generate.sh then cmake -S . -B build -DMU_IOS_LOGS=ON -DMU_IOS_PERF_LOG=ON

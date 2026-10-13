@@ -587,33 +587,39 @@ namespace
 		if(!AppleJwt(&jwt))
 			return;	// RETRY
 
-		// Production first; Apple's guidance is to fall back to the sandbox on
-		// "not found", which is where TestFlight and Xcode purchases live.
-		const char* hosts[2] = { "api.storekit.itunes.apple.com","api.storekit-sandbox.itunes.apple.com" };
+		// Production first, then the sandbox, which is where TestFlight and
+		// Xcode purchases live. Production answers 404 for a sandbox purchase,
+		// and 401 for every lookup while the app is not on the App Store yet,
+		// so both fall through to the sandbox.
 		std::string path = std::string("/inApps/v1/transactions/") + transactionId;
 		std::string response;
+		DWORD prodStatus = 0;
 		DWORD status = 0;
-		int hostIndex = 0;
 
-		for(; hostIndex < 2; hostIndex++)
+		if(!HttpsRequest("api.storekit.itunes.apple.com","GET",path,"Authorization: Bearer " + jwt + "\r\n","",&prodStatus,&response))
+			return;	// RETRY
+
+		status = prodStatus;
+
+		if(prodStatus == 404 || prodStatus == 401)
 		{
-			if(!HttpsRequest(hosts[hostIndex],"GET",path,"Authorization: Bearer " + jwt + "\r\n","",&status,&response))
+			if(!HttpsRequest("api.storekit-sandbox.itunes.apple.com","GET",path,"Authorization: Bearer " + jwt + "\r\n","",&status,&response))
 				return;	// RETRY
-
-			if(status != 404)
-				break;
 		}
 
-		if(status == 404)
+		if(status == 404 && prodStatus == 404)
 		{
+			// Neither store knows it: not a real purchase of this app.
 			msg->Result = PLAY_RESULT_INVALID;
 			return;
 		}
 
 		if(status != 200)
 		{
-			// 401: wrong key, key id, issuer id or bundle id in PlayBilling.ini.
-			LogAdd(LOG_RED,"[AppStore] Transaction lookup failed (HTTP %d) for %s",status,req.AccountID);
+			// 401 from both: wrong key, Key ID, Issuer ID or BundleId in
+			// PlayBilling.ini (Working Project\Tools\appstore_key_test.py checks
+			// them). 404 from the sandbox after a production 401: not found yet.
+			LogAdd(LOG_RED,"[AppStore] Transaction lookup failed (production HTTP %d, sandbox HTTP %d) for %s",prodStatus,status,req.AccountID);
 			return;	// RETRY
 		}
 
