@@ -11,6 +11,9 @@ enum eLogType
 	LOG_GENERAL = 0,
 };
 
+// One file per log (<Directory>\DataServer.txt) that is emptied when the day
+// changes, rather than a new dated file every day: the log never holds more
+// than today, plus a size cap for a runaway day.
 struct LOG_INFO
 {
 	BOOL Active;
@@ -20,6 +23,7 @@ struct LOG_INFO
 	int Year;
 	char Filename[256];
 	HANDLE File;
+	DWORD Size;
 };
 
 class CLog
