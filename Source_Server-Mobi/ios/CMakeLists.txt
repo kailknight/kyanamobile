@@ -12,7 +12,7 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     message(FATAL_ERROR "Configure with -DCMAKE_SYSTEM_NAME=iOS (use ./generate.sh).")
 endif()
 
-project(WorldOfKiraIOS C CXX OBJC OBJCXX)
+project(WorldOfKiraIOS C CXX OBJC OBJCXX Swift)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,7 +28,7 @@ set(SOKOL_ROOT       "${THIRDPARTY_DIR}/sokol" CACHE PATH "Shared sokol checkout
 
 set(MU_IOS_TEAM_ID      "" CACHE STRING "Apple development team ID (Xcode > Settings > Accounts)")
 set(MU_IOS_BUNDLE_ID    "com.worldofkira" CACHE STRING "App bundle identifier")
-set(MU_IOS_BUILD_NUMBER "1" CACHE STRING "CFBundleVersion; also satisfies ClientBuild.h's MU_ANDROID_VERSION_CODE")
+set(MU_IOS_BUILD_NUMBER "31" CACHE STRING "CFBundleVersion; also satisfies ClientBuild.h's MU_ANDROID_VERSION_CODE")
 set(MU_IOS_VERSION      "1.0.${MU_IOS_BUILD_NUMBER}" CACHE STRING "CFBundleShortVersionString")
 # Both off by default, as on Android (MU_ANDROID_DISABLE_LOG). For diagnosis:
 #   ./generate.sh then cmake -S . -B build -DMU_IOS_LOGS=ON -DMU_IOS_PERF_LOG=ON
@@ -66,34 +66,7 @@ set(SDL2TTF_INSTALL  OFF CACHE BOOL "" FORCE)
 add_subdirectory("${DEPS_DIR}/SDL2_ttf" "${CMAKE_BINARY_DIR}/SDL2_ttf" EXCLUDE_FROM_ALL)
 
 # --- Game sources: same glob and exclusions as Android ----------------------
-file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS "${GAME_SRC_DIR}/*.cpp")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*[Ww]inmain\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*MuEditor.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*imgui.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*GameShop/FileDownloader.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*ProtectSysKey.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Scenes.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*[/\\\\]Camera[/\\\\].*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*StackWalker.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Stack\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*TrayMode\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*UIWindows - Copy\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Dump.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Log/WindowsConsole\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Log/ErrorReport\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/cryptopp.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*CSResourceManager\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/Math\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*ExternalObject/Leaf.*\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*DSplaysound\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*DSwaveIO\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*GCCertification\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*ExternalObject/detours\\.cpp$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*Utilities/mapm/.*DEMO.*\\.[Cc][Pp][Pp]$")
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*WSctlc\\.cpp$")
-# Editor backups that sit beside real sources.
-list(FILTER GAME_SOURCES EXCLUDE REGEX ".*\\.bak.*$")
-list(REMOVE_DUPLICATES GAME_SOURCES)
+include("${CMAKE_CURRENT_SOURCE_DIR}/game_sources.cmake")
 
 set(IOS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosAudio.mm"
@@ -101,6 +74,8 @@ set(IOS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPlatform.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreload.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreloadCore.cpp"
+    # StoreKit 2 (WCoin recharge) is a Swift-only API; one C entry point.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/IosBilling.swift"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosScreenshot.cpp"
     "${THIRDPARTY_DIR}/miniz/miniz.c"
 )
@@ -122,8 +97,8 @@ foreach(ASSET IN LISTS BUNDLED_ASSETS)
 endforeach()
 
 set(PRELOAD_BANNERS
-    "${ANDROID_MAIN_DIR}/res/mipmap-hdpi/banner_preload_1.png"
-    "${ANDROID_MAIN_DIR}/res/mipmap-hdpi/banner_preload_2.png"
+    "${ANDROID_MAIN_DIR}/res/mipmap-hdpi/banner_preload_1.jpg"
+    "${ANDROID_MAIN_DIR}/res/mipmap-hdpi/banner_preload_2.jpg"
 )
 set_source_files_properties(${PRELOAD_BANNERS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 
@@ -182,7 +157,8 @@ foreach(GAME_INCLUDE_DIR IN ITEMS
         "${GAME_SRC_DIR}/Time"
         "${GAME_SRC_DIR}/Translation"
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
-    target_compile_options(WorldOfKira PRIVATE "-iquote${GAME_INCLUDE_DIR}")
+    # C-family only: the Swift driver rejects -iquote.
+    target_compile_options(WorldOfKira PRIVATE "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-iquote${GAME_INCLUDE_DIR}>")
 endforeach()
 
 target_compile_definitions(WorldOfKira PRIVATE
@@ -206,7 +182,7 @@ target_compile_options(WorldOfKira PRIVATE
     $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-Wno-c++11-narrowing>
     $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-Wno-invalid-source-encoding>
     $<$<COMPILE_LANGUAGE:CXX,OBJCXX>:-fno-strict-aliasing>
-    $<$<CONFIG:Release>:-O3>
+    $<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>>:-O3>
 )
 
 target_link_libraries(WorldOfKira PRIVATE
@@ -215,6 +191,7 @@ target_link_libraries(WorldOfKira PRIVATE
     z
     "-framework UIKit"
     "-framework AVFoundation"
+    "-framework StoreKit"
     "-framework GLKit"
     "-framework OpenGLES"
     "-framework QuartzCore"
@@ -240,6 +217,11 @@ set_target_properties(WorldOfKira PROPERTIES
     XCODE_ATTRIBUTE_GCC_ENABLE_CPP_EXCEPTIONS "YES"
     XCODE_ATTRIBUTE_GCC_ENABLE_CPP_RTTI "YES"
     XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC "YES"
+    XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
+    # Archive (App Store / TestFlight): CMake leaves INSTALL_PATH empty, so
+    # `xcodebuild archive` installed nothing and produced an empty archive.
+    XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+    XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
     XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH[variant=Debug] "YES"
     XCODE_GENERATE_SCHEME ON
     # Run from Xcode with the optimised build: the client is CPU-bound, and an

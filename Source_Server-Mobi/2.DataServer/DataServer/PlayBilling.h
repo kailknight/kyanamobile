@@ -1,4 +1,9 @@
-// PlayBilling.h: Google Play WCoin (C) recharge, DataServer side.
+// PlayBilling.h: Google Play and App Store WCoin (C) recharge, DataServer side.
+//
+// App Store purchases use the same flow with the token "apple-<transaction
+// id>": the worker asks Apple's App Store Server API instead of Google
+// (RunVerifyApple in PlayBilling.cpp) and the phone, not this side, finishes
+// the purchase afterwards.
 //
 // The phone pays Google, the game hands the purchase token to GameServer,
 // GameServer forwards it here (0xD9/0x37). This side asks Google whether the
@@ -99,6 +104,14 @@ private:
 	bool m_Enabled;
 	char m_KeyFile[MAX_PATH];
 	char m_PackageName[128];
+
+	// App Store ([AppStore] in PlayBilling.ini): purchase tokens "apple-<id>".
+	bool m_AppleEnabled;
+	bool m_AppleAllowSandbox;
+	char m_AppleKeyFile[MAX_PATH];
+	char m_AppleKeyId[32];
+	char m_AppleIssuer[64];
+	char m_AppleBundle[128];
 };
 
 extern CPlayBilling gPlayBilling;

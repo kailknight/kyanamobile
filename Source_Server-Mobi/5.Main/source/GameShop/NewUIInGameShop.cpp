@@ -14,8 +14,16 @@
 #include "MsgBoxIGSGiftStorageItemInfo.h"
 #include "MsgBoxIGSDeleteItemConfirm.h"
 #include "MapManager.h"
-#if defined(__ANDROID__)
+// A phone with an in-app store for the WCoin recharge: Google Play on Android,
+// the App Store on iPhone/iPad. The Mac and PC buy on the website.
+#if defined(__ANDROID__) || (defined(MU_IOS) && !defined(MU_MACOS))
+#define MU_STORE_BILLING 1
 #include "Platform/MobilePlatform.h"
+#endif
+#if defined(__ANDROID__)
+#define MU_STORE_NAME "Google Play"
+#else
+#define MU_STORE_NAME "the App Store"
 #endif
 extern int DisplayWinCDepthBox;
 extern int DisplayWin;
@@ -921,7 +929,7 @@ bool CNewUIInGameShop::BtnProcess()
 
 	if( m_CashChargeButton.UpdateMouseEvent() == true )
 	{
-#if defined(__ANDROID__)
+#if defined(MU_STORE_BILLING)
 		OpenRecharge();
 		return true;
 #endif
@@ -1624,10 +1632,11 @@ void CNewUIInGameShop::OpeningProcess()
 	g_InGameShopSystem->SelectCategory(0);
 	InitCategoryBtn();
 	g_InGameShopSystem->SetRequestEventPackge();
-#if defined(__ANDROID__)
-	// Connects Play Billing and re-reports any paid purchase the server has
-	// not finished yet (lost answer, server down), so it gets credited without
+#if defined(MU_STORE_BILLING)
+	// Connects the store and re-reports any paid purchase the server has not
+	// finished yet (lost answer, server down), so it gets credited without
 	// the player having to open the recharge panel.
+	MU_MobileBilling("account", LogInID, NULL, 0);
 	MU_MobileBilling("init", "", NULL, 0);
 #endif
 }
@@ -2033,16 +2042,13 @@ void CNewUIInGameShop::UnloadImages()
 // WCoin (C) recharge
 // ---------------------------------------------------------------------------
 
-#if defined(__ANDROID__)
-#include "Platform/MobilePlatform.h"
-#endif
-
 namespace
 {
 	/*
 		The website's recharge packs. The product ids are the ones created in
-		Play Console (MuBilling.PRODUCT_IDS); the peso price is only shown until
-		Google's own price, in the player's currency, has loaded.
+		Play Console (MuBilling.PRODUCT_IDS) and App Store Connect
+		(IosBilling.swift); the peso price is only shown until the store's own
+		price, in the player's currency, has loaded.
 	*/
 	struct RechargePack
 	{
@@ -2130,31 +2136,48 @@ void CNewUIInGameShop::OnPlayPurchaseResult(const BYTE* lpMsg, int size)
 		sprintf(text, "+%u WCoin (C) added to your account. Thank you!", (unsigned)msg.WCoinC);
 		RechargeMessage("Recharge", text);
 		break;
-	case 1: // already credited earlier - Play re-reported a finished purchase
+	case 1: // already credited earlier - the store re-reported a finished purchase
 		break;
 	case 2:
 	case 6:
-		RechargeMessage("Recharge", "Google Play did not confirm this purchase, so no WCoin was added.");
+		RechargeMessage("Recharge", "The store did not confirm this purchase, so no WCoin was added.");
 		break;
 	case 3:
 		RechargeMessage("Recharge", "Your payment is still pending. The WCoin will be added once it clears.");
 		break;
 	case 5:
+#if defined(__ANDROID__)
 		RechargeMessage("Recharge", "Recharge is not switched on for this server yet. If the WCoin is not added within 3 days, Google refunds the payment automatically.");
+#else
+		RechargeMessage("Recharge", "Recharge is not switched on for this server yet. Your payment is kept and the WCoin will be added once it is.");
+#endif
 		break;
-	default: // 4: Google or the server busy
+	default: // 4: the store or the server busy
 		RechargeMessage("Recharge", "Your payment is safe, but it could not be confirmed right now. It will be added the next time you open the shop.");
 		break;
 	}
+
+#if defined(MU_IOS) && !defined(MU_MACOS)
+	// Apple has no server-side consume: the purchase is finished here, once the
+	// server has credited it (now or before). Anything else stays unfinished
+	// and is reported again on the next shop open. Invalid/unknown purchases
+	// are released too - finishing them would hide a store-side mistake.
+	char productId[sizeof(msg.ProductId) + 1] = { 0 };
+	memcpy(productId, msg.ProductId, sizeof(msg.ProductId));
+	MU_MobileBilling((msg.Result == 0 || msg.Result == 1) ? "finish" : "release", productId, NULL, 0);
+#endif
 }
 
 void CNewUIInGameShop::OpenRecharge()
 {
 	m_bRechargeOpen = !m_bRechargeOpen;
 	PlayBuffer(SOUND_CLICK01);
-#if defined(__ANDROID__)
+#if defined(MU_STORE_BILLING)
 	if (m_bRechargeOpen)
+	{
+		MU_MobileBilling("account", LogInID, NULL, 0);
 		MU_MobileBilling("init", "", NULL, 0);
+	}
 #endif
 }
 
@@ -2190,9 +2213,10 @@ bool CNewUIInGameShop::UpdateRechargePanel()
 		if (SEASON3B::CheckMouseIn(X + RC_PAY_X, Y + RC_PAY_Y, RC_PAY_W, RC_PAY_H))
 		{
 			PlayBuffer(SOUND_CLICK01);
-#if defined(__ANDROID__)
+#if defined(MU_STORE_BILLING)
+			MU_MobileBilling("account", LogInID, NULL, 0);
 			if (!MU_MobileBilling("buy", kRechargePacks[m_iRechargeSelected].ProductId, NULL, 0))
-				RechargeMessage("Recharge", "Google Play is not available on this device.");
+				RechargeMessage("Recharge", MU_STORE_NAME " is not available on this device.");
 #else
 			RechargeMessage("Recharge", "Recharge from the website on PC.");
 #endif
@@ -2206,7 +2230,7 @@ bool CNewUIInGameShop::UpdateRechargePanel()
 
 void CNewUIInGameShop::PollRechargeResults()
 {
-#if defined(__ANDROID__)
+#if defined(MU_STORE_BILLING)
 	char result[1024];
 	for (int guard = 0; guard < 4; ++guard)
 	{
@@ -2228,8 +2252,9 @@ void CNewUIInGameShop::PollRechargeResults()
 		if (strcmp(status, "ok") == 0)
 		{
 			/*
-				Paid. Hand the token to the server, which checks it with Google,
-				adds the WCoin and finishes (consumes) the purchase - the answer
+				Paid. Hand the token to the server, which checks it with the store
+				(Google, or Apple for "apple-" tokens), adds the WCoin and finishes
+				(consumes) the purchase - the answer
 				comes back as 0xD3/0xF1 (OnPlayPurchaseResult). If that never
 				happens the purchase stays unfinished and Play reports it again
 				on the next shop open, so this simply runs again.
@@ -2346,9 +2371,9 @@ void CNewUIInGameShop::RenderRechargePanel()
 			g_pRenderText->RenderText(tx, ty + 82, szText, RC_TILE_W, 0, RT3_SORT_CENTER);
 		}
 
-		// Price: Google's, in the player's currency, once loaded.
+		// Price: the store's, in the player's currency, once loaded.
 		char szPrice[64] = { 0 };
-#if defined(__ANDROID__)
+#if defined(MU_STORE_BILLING)
 		MU_MobileBilling("price", pack.ProductId, szPrice, sizeof(szPrice));
 #endif
 		if (szPrice[0] == '\0')
@@ -2364,7 +2389,11 @@ void CNewUIInGameShop::RenderRechargePanel()
 	RenderFillRect(X + RC_PAY_X, Y + RC_PAY_Y, RC_PAY_W, RC_PAY_H, 0.86f, 0.66f, 0.20f, overPay ? 1.0f : 0.88f);
 	char szSelCoins[16];
 	FormatThousands(sel.Coins, szSelCoins, sizeof(szSelCoins));
+#if defined(__ANDROID__)
 	sprintf(szText, "Pay with Google Play  -  %s WCoin (C)", szSelCoins);
+#else
+	sprintf(szText, "Pay with the App Store  -  %s WCoin (C)", szSelCoins);
+#endif
 	g_pRenderText->SetFont(g_hFontBold);
 	g_pRenderText->SetTextColor(30, 20, 5, 255);
 	g_pRenderText->RenderText(X + RC_PAY_X, Y + RC_PAY_Y + 6, szText, RC_PAY_W, 0, RT3_SORT_CENTER);

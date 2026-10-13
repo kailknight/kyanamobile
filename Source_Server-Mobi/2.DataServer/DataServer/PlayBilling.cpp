@@ -318,6 +318,361 @@ namespace
 		return ok;
 	}
 
+	// ---- App Store ----------------------------------------------------------
+	//
+	// iPhone/iPad purchases arrive with the token "apple-<transaction id>". The
+	// App Store Server API is asked for that transaction with a JWT signed by
+	// the In-App Purchase key (ES256); the answer, over TLS from Apple, carries
+	// the transaction as a JWS whose payload is read here. Apple has no
+	// server-side consume: the phone finishes the purchase once this has
+	// credited it (IosBilling.swift).
+
+	const char* kApplePrefix = "apple-";
+
+	bool IsAppleToken(const char* token)
+	{
+		return token != NULL && strncmp(token,kApplePrefix,6) == 0;
+	}
+
+	// CNG (Vista+) is loaded at run time: StdAfx.h targets XP, which hides the
+	// NCrypt declarations, and ES256 needs CNG.
+	typedef LONG (WINAPI* PFN_NCryptOpenStorageProvider)(ULONG_PTR*,LPCWSTR,DWORD);
+	typedef LONG (WINAPI* PFN_NCryptImportKey)(ULONG_PTR,ULONG_PTR,LPCWSTR,void*,ULONG_PTR*,PBYTE,DWORD,DWORD);
+	typedef LONG (WINAPI* PFN_NCryptSignHash)(ULONG_PTR,void*,PBYTE,DWORD,PBYTE,DWORD,DWORD*,DWORD);
+	typedef LONG (WINAPI* PFN_NCryptFreeObject)(ULONG_PTR);
+
+	// wincrypt.h's Vista-only ECC structures, for the same reason.
+	struct MU_CRYPT_ECC_PRIVATE_KEY_INFO
+	{
+		DWORD dwVersion;
+		CRYPT_DER_BLOB PrivateKey;
+		LPSTR szCurveOid;
+		CRYPT_BIT_BLOB PublicKey;
+	};
+	#define MU_X509_ECC_PRIVATE_KEY ((LPCSTR)82)
+	#define MU_ECDSA_PRIVATE_P256_MAGIC 0x32534345	// "ECS2"
+
+	bool Sha256(const std::string& input,BYTE out[32])
+	{
+		bool ok = false;
+		HCRYPTPROV prov = 0;
+		HCRYPTHASH hash = 0;
+		DWORD len = 32;
+
+		if(CryptAcquireContextA(&prov,NULL,NULL,PROV_RSA_AES,CRYPT_VERIFYCONTEXT)
+			&& CryptCreateHash(prov,CALG_SHA_256,0,0,&hash)
+			&& CryptHashData(hash,(const BYTE*)input.data(),(DWORD)input.size(),0)
+			&& CryptGetHashParam(hash,HP_HASHVAL,out,&len,0) && len == 32)
+		{
+			ok = true;
+		}
+
+		if(hash) CryptDestroyHash(hash);
+		if(prov) CryptReleaseContext(prov,0);
+		return ok;
+	}
+
+	// ES256 over input with the .p8 key: the JWS signature is the raw 64-byte
+	// r||s that NCryptSignHash returns for ECDSA.
+	bool SignEs256(const std::string& pemKey,const std::string& input,std::string* signatureB64)
+	{
+		static HMODULE ncrypt = LoadLibraryA("ncrypt.dll");
+
+		if(ncrypt == NULL)
+			return false;
+
+		PFN_NCryptOpenStorageProvider openProvider = (PFN_NCryptOpenStorageProvider)GetProcAddress(ncrypt,"NCryptOpenStorageProvider");
+		PFN_NCryptImportKey importKey = (PFN_NCryptImportKey)GetProcAddress(ncrypt,"NCryptImportKey");
+		PFN_NCryptSignHash signHash = (PFN_NCryptSignHash)GetProcAddress(ncrypt,"NCryptSignHash");
+		PFN_NCryptFreeObject freeObject = (PFN_NCryptFreeObject)GetProcAddress(ncrypt,"NCryptFreeObject");
+
+		if(openProvider == NULL || importKey == NULL || signHash == NULL || freeObject == NULL)
+			return false;
+
+		BYTE digest[32];
+
+		if(!Sha256(input,digest))
+			return false;
+
+		bool ok = false;
+		BYTE* der = NULL;
+		DWORD derLen = 0;
+		ULONG_PTR prov = 0;
+		ULONG_PTR key = 0;
+
+		if(!CryptStringToBinaryA(pemKey.c_str(),0,CRYPT_STRING_BASE64HEADER,NULL,&derLen,NULL,NULL))
+			return false;
+
+		der = new BYTE[derLen];
+
+		if(CryptStringToBinaryA(pemKey.c_str(),0,CRYPT_STRING_BASE64HEADER,der,&derLen,NULL,NULL)
+			&& openProvider(&prov,L"Microsoft Software Key Storage Provider",0) == 0)
+		{
+			// The .p8 is PKCS#8; the key storage provider takes that directly.
+			if(importKey(prov,0,L"PKCS8_PRIVATEKEY",NULL,&key,der,derLen,0) != 0)
+			{
+				key = 0;
+
+				// Fallback: unwrap PKCS#8 -> ECPrivateKey -> BCRYPT_ECCPRIVATE_BLOB
+				// (X, Y, d). Needs the public key inside the ECPrivateKey, which
+				// App Store Connect keys carry.
+				CRYPT_PRIVATE_KEY_INFO* pki = NULL;
+				DWORD pkiLen = 0;
+				MU_CRYPT_ECC_PRIVATE_KEY_INFO* ecc = NULL;
+				DWORD eccLen = 0;
+
+				if(CryptDecodeObjectEx(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,PKCS_PRIVATE_KEY_INFO,der,derLen,CRYPT_DECODE_ALLOC_FLAG,NULL,&pki,&pkiLen)
+					&& CryptDecodeObjectEx(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,MU_X509_ECC_PRIVATE_KEY,pki->PrivateKey.pbData,pki->PrivateKey.cbData,CRYPT_DECODE_ALLOC_FLAG,NULL,&ecc,&eccLen)
+					&& ecc->PrivateKey.cbData == 32 && ecc->PublicKey.cbData == 65 && ecc->PublicKey.pbData[0] == 0x04)
+				{
+					BYTE blob[8 + 96];
+					DWORD magic = MU_ECDSA_PRIVATE_P256_MAGIC;
+					DWORD cbKey = 32;
+					memcpy(blob,&magic,4);
+					memcpy(blob + 4,&cbKey,4);
+					memcpy(blob + 8,ecc->PublicKey.pbData + 1,64);
+					memcpy(blob + 72,ecc->PrivateKey.pbData,32);
+
+					if(importKey(prov,0,L"ECCPRIVATEBLOB",NULL,&key,blob,sizeof(blob),0) != 0)
+						key = 0;
+
+					SecureZeroMemory(blob,sizeof(blob));
+				}
+
+				if(ecc) LocalFree(ecc);
+				if(pki) LocalFree(pki);
+			}
+
+			if(key != 0)
+			{
+				BYTE sig[64];
+				DWORD sigLen = 0;
+
+				if(signHash(key,NULL,digest,sizeof(digest),sig,sizeof(sig),&sigLen,0) == 0 && sigLen == 64)
+				{
+					*signatureB64 = Base64Url(sig,sigLen);
+					ok = true;
+				}
+			}
+		}
+
+		if(key) freeObject(key);
+		if(prov) freeObject(prov);
+		SecureZeroMemory(der,derLen);
+		delete[] der;
+		return ok;
+	}
+
+	std::string Base64UrlDecode(const std::string& in)
+	{
+		std::string out;
+		DWORD acc = 0;
+		int bits = 0;
+
+		for(size_t i = 0; i < in.size(); i++)
+		{
+			char c = in[i];
+			int v;
+
+			if(c >= 'A' && c <= 'Z') v = c - 'A';
+			else if(c >= 'a' && c <= 'z') v = c - 'a' + 26;
+			else if(c >= '0' && c <= '9') v = c - '0' + 52;
+			else if(c == '-' || c == '+') v = 62;
+			else if(c == '_' || c == '/') v = 63;
+			else continue;
+
+			acc = (acc << 6) | (DWORD)v;
+			bits += 6;
+
+			if(bits >= 8)
+			{
+				bits -= 8;
+				out.push_back((char)((acc >> bits) & 0xFF));
+			}
+		}
+
+		return out;
+	}
+
+	// The UUID IosBilling.swift attaches to every purchase (appAccountToken):
+	// SHA-256("worldofkira:" + lowercased account), first 16 bytes, version-4
+	// and variant bits set.
+	std::string AccountToken(const char* account)
+	{
+		std::string lower = "worldofkira:";
+
+		for(const char* p = account; *p; p++)
+			lower.push_back((char)tolower((unsigned char)*p));
+
+		BYTE h[32];
+
+		if(!Sha256(lower,h))
+			return "";
+
+		h[6] = (BYTE)((h[6] & 0x0F) | 0x40);
+		h[8] = (BYTE)((h[8] & 0x3F) | 0x80);
+
+		char uuid[40];
+		sprintf_s(uuid,sizeof(uuid),"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+			h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],h[8],h[9],h[10],h[11],h[12],h[13],h[14],h[15]);
+		return uuid;
+	}
+
+	// Worker-thread only (copied in StartWorker).
+	bool g_AppleAllowSandbox = false;
+	char g_AppleKeyFile[MAX_PATH];
+	char g_AppleKeyId[32];
+	char g_AppleIssuer[64];
+	char g_AppleBundle[128];
+	std::string g_ApplePem;
+
+	bool AppleJwt(std::string* jwt)
+	{
+		if(g_ApplePem.empty())
+		{
+			FILE* f = NULL;
+
+			if(fopen_s(&f,g_AppleKeyFile,"rb") != 0 || f == NULL)
+			{
+				LogAdd(LOG_RED,"[AppStore] Cannot open key file %s",g_AppleKeyFile);
+				return false;
+			}
+
+			char buf[1024];
+			size_t n;
+
+			while((n = fread(buf,1,sizeof(buf),f)) > 0)
+				g_ApplePem.append(buf,n);
+
+			fclose(f);
+		}
+
+		// A fresh token per lookup: they are cheap, and Apple caps them at an hour.
+		__time64_t now = _time64(NULL);
+		char header[128];
+		char claims[512];
+		sprintf_s(header,sizeof(header),"{\"alg\":\"ES256\",\"kid\":\"%s\",\"typ\":\"JWT\"}",g_AppleKeyId);
+		sprintf_s(claims,sizeof(claims),"{\"iss\":\"%s\",\"iat\":%lld,\"exp\":%lld,\"aud\":\"appstoreconnect-v1\",\"bid\":\"%s\"}",
+			g_AppleIssuer,(long long)now,(long long)(now + 1200),g_AppleBundle);
+
+		std::string unsignedJwt = Base64Url(std::string(header)) + "." + Base64Url(std::string(claims));
+		std::string signature;
+
+		if(!SignEs256(g_ApplePem,unsignedJwt,&signature))
+		{
+			LogAdd(LOG_RED,"[AppStore] Signing with %s failed (error %d) - is it the In-App Purchase .p8 key?",g_AppleKeyFile,GetLastError());
+			g_ApplePem.clear();
+			return false;
+		}
+
+		*jwt = unsignedJwt + "." + signature;
+		return true;
+	}
+
+	void RunVerifyApple(const SDHP_PLAY_PURCHASE_RECV& req,SDHP_PLAY_PURCHASE_VERIFIED* msg)
+	{
+		const char* transactionId = req.Token + 6;
+
+		for(const char* p = transactionId; *p; p++)
+		{
+			if(*p < '0' || *p > '9')
+			{
+				msg->Result = PLAY_RESULT_INVALID;
+				return;
+			}
+		}
+
+		std::string jwt;
+
+		if(!AppleJwt(&jwt))
+			return;	// RETRY
+
+		// Production first; Apple's guidance is to fall back to the sandbox on
+		// "not found", which is where TestFlight and Xcode purchases live.
+		const char* hosts[2] = { "api.storekit.itunes.apple.com","api.storekit-sandbox.itunes.apple.com" };
+		std::string path = std::string("/inApps/v1/transactions/") + transactionId;
+		std::string response;
+		DWORD status = 0;
+		int hostIndex = 0;
+
+		for(; hostIndex < 2; hostIndex++)
+		{
+			if(!HttpsRequest(hosts[hostIndex],"GET",path,"Authorization: Bearer " + jwt + "\r\n","",&status,&response))
+				return;	// RETRY
+
+			if(status != 404)
+				break;
+		}
+
+		if(status == 404)
+		{
+			msg->Result = PLAY_RESULT_INVALID;
+			return;
+		}
+
+		if(status != 200)
+		{
+			// 401: wrong key, key id, issuer id or bundle id in PlayBilling.ini.
+			LogAdd(LOG_RED,"[AppStore] Transaction lookup failed (HTTP %d) for %s",status,req.AccountID);
+			return;	// RETRY
+		}
+
+		std::string jws;
+
+		if(!JsonFind(response,"signedTransactionInfo",&jws))
+			return;
+
+		size_t dot1 = jws.find('.');
+		size_t dot2 = (dot1 == std::string::npos) ? std::string::npos : jws.find('.',dot1 + 1);
+
+		if(dot2 == std::string::npos)
+			return;
+
+		std::string payload = Base64UrlDecode(jws.substr(dot1 + 1,dot2 - dot1 - 1));
+		std::string bundleId, productId, type, accountToken, environment, revocation, txId;
+		JsonFind(payload,"bundleId",&bundleId);
+		JsonFind(payload,"productId",&productId);
+		JsonFind(payload,"type",&type);
+		JsonFind(payload,"appAccountToken",&accountToken);
+		JsonFind(payload,"environment",&environment);
+		JsonFind(payload,"transactionId",&txId);
+		bool revoked = JsonFind(payload,"revocationDate",&revocation);
+
+		if(bundleId != g_AppleBundle || productId != req.ProductId || type != "Consumable" || txId != transactionId)
+		{
+			LogAdd(LOG_RED,"[AppStore] %s reported transaction %s that does not match (bundle %s, product %s, type %s)",
+				req.AccountID,transactionId,bundleId.c_str(),productId.c_str(),type.c_str());
+			msg->Result = PLAY_RESULT_INVALID;
+			return;
+		}
+
+		if(_stricmp(accountToken.c_str(),AccountToken(req.AccountID).c_str()) != 0)
+		{
+			LogAdd(LOG_RED,"[AppStore] %s reported transaction %s bought by another account - refused",req.AccountID,transactionId);
+			msg->Result = PLAY_RESULT_INVALID;
+			return;
+		}
+
+		if(revoked)
+		{
+			msg->Result = PLAY_RESULT_INVALID;
+			return;
+		}
+
+		if(environment != "Production" && !g_AppleAllowSandbox)
+		{
+			// TestFlight and Xcode purchases cost nothing; crediting them on a
+			// live server would hand out free WCoin.
+			LogAdd(LOG_RED,"[AppStore] %s: sandbox purchase %s not credited (AllowSandbox = 0)",req.AccountID,transactionId);
+			msg->Result = PLAY_RESULT_INVALID;
+			return;
+		}
+
+		CopyField(msg->OrderId,sizeof(msg->OrderId),transactionId);
+		msg->Consumed = 0;
+		msg->Result = PLAY_RESULT_CREDITED;
+	}
+
 	// ---- worker -------------------------------------------------------------
 
 	enum { JOB_VERIFY = 0, JOB_CONSUME = 1 };
@@ -439,6 +794,13 @@ namespace
 		memcpy(msg.ProductId,job.Req.ProductId,sizeof(msg.ProductId));
 		memcpy(msg.Token,job.Req.Token,sizeof(msg.Token));
 		msg.Result = PLAY_RESULT_RETRY;
+
+		if(IsAppleToken(job.Req.Token))
+		{
+			RunVerifyApple(job.Req,&msg);
+			gSocketManager.PostInternal(job.Index,0xD9,(BYTE*)&msg,sizeof(msg));
+			return;
+		}
 
 		std::string access;
 
@@ -564,6 +926,12 @@ CPlayBilling::CPlayBilling()
 	this->m_Enabled = false;
 	this->m_KeyFile[0] = 0;
 	this->m_PackageName[0] = 0;
+	this->m_AppleEnabled = false;
+	this->m_AppleAllowSandbox = false;
+	this->m_AppleKeyFile[0] = 0;
+	this->m_AppleKeyId[0] = 0;
+	this->m_AppleIssuer[0] = 0;
+	this->m_AppleBundle[0] = 0;
 }
 
 void CPlayBilling::LoadConfig()
@@ -579,6 +947,24 @@ void CPlayBilling::LoadConfig()
 	}
 
 	LogAdd(LOG_BLACK,"[PlayBilling] %s (package %s)",this->m_Enabled ? "Enabled" : "Disabled",this->m_PackageName);
+
+	this->m_AppleEnabled = GetPrivateProfileIntA("AppStore","Enabled",0,kConfigFile) != 0;
+	this->m_AppleAllowSandbox = GetPrivateProfileIntA("AppStore","AllowSandbox",0,kConfigFile) != 0;
+	GetPrivateProfileStringA("AppStore","KeyFile",".\\AppStoreKey.p8",this->m_AppleKeyFile,sizeof(this->m_AppleKeyFile),kConfigFile);
+	GetPrivateProfileStringA("AppStore","KeyId","",this->m_AppleKeyId,sizeof(this->m_AppleKeyId),kConfigFile);
+	GetPrivateProfileStringA("AppStore","IssuerId","",this->m_AppleIssuer,sizeof(this->m_AppleIssuer),kConfigFile);
+	GetPrivateProfileStringA("AppStore","BundleId","com.worldofkira",this->m_AppleBundle,sizeof(this->m_AppleBundle),kConfigFile);
+
+	if(this->m_AppleEnabled && (!IsSafeToken(this->m_AppleKeyId,sizeof(this->m_AppleKeyId) - 1,false)
+		|| !IsSafeToken(this->m_AppleIssuer,sizeof(this->m_AppleIssuer) - 1,false)
+		|| !IsSafeToken(this->m_AppleBundle,sizeof(this->m_AppleBundle) - 1,false)))
+	{
+		LogAdd(LOG_RED,"[AppStore] KeyId/IssuerId/BundleId missing or not valid - disabled");
+		this->m_AppleEnabled = false;
+	}
+
+	LogAdd(LOG_BLACK,"[AppStore] %s (bundle %s%s)",this->m_AppleEnabled ? "Enabled" : "Disabled",this->m_AppleBundle,
+		this->m_AppleAllowSandbox ? ", sandbox purchases credited" : "");
 }
 
 void CPlayBilling::StartWorker()
@@ -590,6 +976,11 @@ void CPlayBilling::StartWorker()
 	// before it starts. A changed key file or package needs a restart.
 	strcpy_s(g_WorkerKeyFile,sizeof(g_WorkerKeyFile),this->m_KeyFile);
 	strcpy_s(g_WorkerPackage,sizeof(g_WorkerPackage),this->m_PackageName);
+	strcpy_s(g_AppleKeyFile,sizeof(g_AppleKeyFile),this->m_AppleKeyFile);
+	strcpy_s(g_AppleKeyId,sizeof(g_AppleKeyId),this->m_AppleKeyId);
+	strcpy_s(g_AppleIssuer,sizeof(g_AppleIssuer),this->m_AppleIssuer);
+	strcpy_s(g_AppleBundle,sizeof(g_AppleBundle),this->m_AppleBundle);
+	g_AppleAllowSandbox = this->m_AppleAllowSandbox;
 
 	InitializeCriticalSection(&g_JobLock);
 	g_JobSemaphore = CreateSemaphore(NULL,0,0x7FFFFFFF,NULL);
@@ -615,7 +1006,7 @@ void CPlayBilling::OnPurchaseRequest(SDHP_PLAY_PURCHASE_RECV* lpMsg,int index)
 	lpMsg->ProductId[sizeof(lpMsg->ProductId) - 1] = 0;
 	lpMsg->Token[sizeof(lpMsg->Token) - 1] = 0;
 
-	if(!this->m_Enabled)
+	if(!(IsAppleToken(lpMsg->Token) ? this->m_AppleEnabled : this->m_Enabled))
 	{
 		this->SendResult(index,lpMsg->aIndex,lpMsg->AccountID,lpMsg->ProductId,PLAY_RESULT_DISABLED,0);
 		return;
@@ -679,14 +1070,15 @@ void CPlayBilling::OnPurchaseVerified(SDHP_PLAY_PURCHASE_VERIFIED* lpMsg,int ind
 
 	if(result == PLAY_RESULT_CREDITED)
 	{
-		LogAdd(LOG_GREEN,"[PlayBilling] %s bought %s: +%d WCoin (C) (order %s)",lpMsg->AccountID,lpMsg->ProductId,coins,lpMsg->OrderId);
+		LogAdd(LOG_GREEN,"[%s] %s bought %s: +%d WCoin (C) (order %s)",IsAppleToken(lpMsg->Token) ? "AppStore" : "PlayBilling",lpMsg->AccountID,lpMsg->ProductId,coins,lpMsg->OrderId);
 	}
 
 	this->SendResult(index,lpMsg->aIndex,lpMsg->AccountID,lpMsg->ProductId,result,(result == PLAY_RESULT_CREDITED) ? (DWORD)coins : 0);
 
 	// Credited now or before: finish it with Google so the pack can be bought
-	// again and the purchase is not auto-refunded.
-	if((result == PLAY_RESULT_CREDITED || result == PLAY_RESULT_ALREADY) && !lpMsg->Consumed)
+	// again and the purchase is not auto-refunded. App Store purchases are
+	// finished by the phone instead, once it sees this answer.
+	if((result == PLAY_RESULT_CREDITED || result == PLAY_RESULT_ALREADY) && !lpMsg->Consumed && !IsAppleToken(lpMsg->Token))
 	{
 		PlayJob job;
 		memset(&job,0,sizeof(job));

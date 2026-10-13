@@ -255,6 +255,10 @@ int MU_MobilePollBannerDownload()
 #endif
 }
 
+#if defined(MU_IOS) && !defined(MU_MACOS)
+extern "C" bool MU_IosBilling(const char* cmd, const char* arg, char* out, int outSize);
+#endif
+
 bool MU_MobileBilling(const char* cmd, const char* arg, char* out, int outSize)
 {
     if (out != nullptr && outSize > 0)
@@ -315,6 +319,9 @@ bool MU_MobileBilling(const char* cmd, const char* arg, char* out, int outSize)
     if (jCmd != nullptr) env->DeleteLocalRef(jCmd);
     if (jArg != nullptr) env->DeleteLocalRef(jArg);
     return ok;
+#elif defined(MU_IOS) && !defined(MU_MACOS)
+    // StoreKit 2, in ios/src/IosBilling.swift - same commands and results.
+    return MU_IosBilling(cmd, arg != nullptr ? arg : "", out, outSize);
 #else
     (void)arg;
     return false;
