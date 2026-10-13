@@ -1,4 +1,4 @@
-ï»¿// NewUIInGameShop.cpp: implementation of the NewUIInGameShop class.
+﻿// NewUIInGameShop.cpp: implementation of the NewUIInGameShop class.
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
@@ -92,7 +92,7 @@ bool CNewUIInGameShop::Create(CNewUIManager* pNewUIMng, int x, int y)
 	SetPos(x, y);
 	LoadImages();
 	SetBtnInfo();
-	Show(false);	//visible()ÃÂ» flaseÂ·Ã
+	Show(false);	//visible()À» flase·Î
 
 	return true;
 }
@@ -800,7 +800,7 @@ void CNewUIInGameShop::RenderDisplayItems()
 	glViewport2(0,0,WindowWidth,WindowHeight);
 	//DAT Fix Size Item Wide XSHOP
 	float SizeItem = 1.6f;
-	//if (m_Resolution >= 3) { SizeItem += 0.70f; } //Gá»c
+	//if (m_Resolution >= 3) { SizeItem += 0.70f; } //Gốc
 	switch ((int)m_Resolution)
 	{
 	case 3: SizeItem += 0.30f; break;	//1280x1024
@@ -961,14 +961,14 @@ bool CNewUIInGameShop::BtnProcess()
 
 		IGS_StorageItem* pSelectItem = m_StorageItemListBox.GetSelectedText();
 		
-		if( iStorageIndex == IGS_SAFEKEEPING_LISTBOX )					// ÂºÂ¸Â°Ã¼ÃÃ
+		if( iStorageIndex == IGS_SAFEKEEPING_LISTBOX )					// º¸°üÇÔ
 		{
 			CMsgBoxIGSStorageItemInfo* pMsgBox = NULL;
 			CreateMessageBox(MSGBOX_LAYOUT_CLASS(CMsgBoxIGSStorageItemInfoLayout), &pMsgBox);
 			pMsgBox->Initialize(pSelectItem->m_iStorageSeq, pSelectItem->m_iStorageItemSeq, pSelectItem->m_wItemCode, pSelectItem->m_szType, 
 				pSelectItem->m_szName, pSelectItem->m_szNum, pSelectItem->m_szPeriod);
 		}
-		else if( iStorageIndex == IGS_PRESENTBOX_LISTBOX )				// Â¼Â±Â¹Â° ÂºÂ¸Â°Ã¼ÃÃ
+		else if( iStorageIndex == IGS_PRESENTBOX_LISTBOX )				// ¼±¹° º¸°üÇÔ
 		{
 			CMsgBoxIGSGiftStorageItemInfo* pMsgBox = NULL;
 			CreateMessageBox(MSGBOX_LAYOUT_CLASS(CMsgBoxIGSGiftStorageItemInfoLayout), &pMsgBox);
@@ -1011,7 +1011,7 @@ bool CNewUIInGameShop::BtnProcess()
 	{	
 		if(g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP) == true)
 		{	
-			SendRequestIGS_CashShopOpen(1);		// Â¼Â¥ CloseÂ¿Ã¤ÃÂ»
+			SendRequestIGS_CashShopOpen(1);		// ¼¥ Close¿äÃ»
 			g_pNewUISystem->Hide(SEASON3B::INTERFACE_INGAMESHOP);
 
 			return true;
