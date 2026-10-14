@@ -28,7 +28,7 @@ set(SOKOL_ROOT       "${THIRDPARTY_DIR}/sokol" CACHE PATH "Shared sokol checkout
 
 set(MU_IOS_TEAM_ID      "" CACHE STRING "Apple development team ID (Xcode > Settings > Accounts)")
 set(MU_IOS_BUNDLE_ID    "com.worldofkira" CACHE STRING "App bundle identifier")
-set(MU_IOS_BUILD_NUMBER "32" CACHE STRING "CFBundleVersion; also satisfies ClientBuild.h's MU_ANDROID_VERSION_CODE")
+set(MU_IOS_BUILD_NUMBER "35" CACHE STRING "CFBundleVersion; also satisfies ClientBuild.h's MU_ANDROID_VERSION_CODE")
 set(MU_IOS_VERSION      "1.0.${MU_IOS_BUILD_NUMBER}" CACHE STRING "CFBundleShortVersionString")
 # Both off by default, as on Android (MU_ANDROID_DISABLE_LOG). For diagnosis:
 #   ./generate.sh then cmake -S . -B build -DMU_IOS_LOGS=ON -DMU_IOS_PERF_LOG=ON
@@ -72,6 +72,7 @@ set(IOS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosAudio.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosVoice.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPlatform.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/IosDeviceId.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreload.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IosPreloadCore.cpp"
     # StoreKit 2 (WCoin recharge) is a Swift-only API; one C entry point.
@@ -192,6 +193,7 @@ target_link_libraries(WorldOfKira PRIVATE
     "-framework UIKit"
     "-framework AVFoundation"
     "-framework StoreKit"
+    "-framework Security"
     "-framework GLKit"
     "-framework OpenGLES"
     "-framework QuartzCore"

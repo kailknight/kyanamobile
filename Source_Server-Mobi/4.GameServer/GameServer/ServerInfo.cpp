@@ -156,6 +156,7 @@
 #include "SlotMachine.h"
 #include "FakeOnline.h"
 #include "FriendMail.h"
+#include "DeviceBan.h"
 
 CServerInfo gServerInfo;
 
@@ -458,6 +459,8 @@ void CServerInfo::ReadCustomInfo() // OK
 	gCustomMix.Load(gPath.GetFullPath("Custom\\CustomMix.txt"));
 
 	gCustomMarlon.Load(gPath.GetFullPath("Custom\\CustomMarlonTeleport.txt"));
+
+	gDeviceBan.Load(gPath.GetFullPath("Custom\\DeviceBan.txt"));
 
 	gPKFree.Load(gPath.GetFullPath("Custom\\CustomZonaPK.txt"));
 

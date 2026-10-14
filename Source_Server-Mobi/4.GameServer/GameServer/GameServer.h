@@ -15,6 +15,7 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam);
 LRESULT CALLBACK About(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam);
 LRESULT CALLBACK UserOnline(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam);
 LRESULT CALLBACK MapMonsterInfo(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam);
+LRESULT CALLBACK BannedList(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam);
 LRESULT CALLBACK IPBanned(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam);
 void RefreshInvasionMenu(HWND hwnd);
 extern HWND hWndComboBox;

@@ -835,9 +835,10 @@ void gObjCharZeroSet(int aIndex) // OK
 
 	lpObj->m_VoiceToken = 0;
 
-	lpObj->m_ClientBuildReported = false;
-	lpObj->m_ClientPlatform = 0;
-	lpObj->m_ClientBuild = 0;
+	// m_ClientBuildReported / m_ClientPlatform / m_ClientBuild / m_DeviceId are
+	// NOT reset here: this also runs when a character is loaded, after login,
+	// and would wipe what the client reported for this connection (the hardware
+	// id then read as "none" in the Online Users window). gObjAdd resets them.
 
 	for(int n=0;n < MAX_PVP_RAMP_SLOTS;n++)
 	{
@@ -1583,6 +1584,12 @@ short gObjAdd(SOCKET socket,char* IpAddress,int aIndex) // OK
 	LPOBJ lpObj = &gObj[aIndex];
 
 	gObjCharZeroSet(aIndex);
+
+	// Per connection, not per character (see gObjCharZeroSet).
+	lpObj->m_ClientBuildReported = false;
+	lpObj->m_ClientPlatform = 0;
+	lpObj->m_ClientBuild = 0;
+	lpObj->m_DeviceId[0] = 0;
 
 	lpObj->Index = aIndex;
 	lpObj->Connected = OBJECT_CONNECTED;

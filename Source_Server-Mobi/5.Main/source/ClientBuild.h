@@ -68,3 +68,9 @@ const char* MU_GetClientBuildStamp();
 // MinClientBuildAndroid / MinClientBuildPC, and the same instant the stamp above
 // shows. DWORD rather than int because 2609191943 is past the signed maximum.
 DWORD MU_GetClientBuildNumber();
+
+// This phone's id for device bans, appended to packet 0xD3:0x7D (GameServer
+// DeviceBan.h). 32 hex chars from MuMainNativeActivity.deviceId(), or "" on PC
+// and wherever Android gave us no ANDROID_ID - the server then sees the short,
+// old-format packet and simply has no id to check.
+const char* MU_GetDeviceId();

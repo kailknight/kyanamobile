@@ -36,6 +36,7 @@
 #include "CustomAttack.h"
 #include "CustomStore.h"
 #include "OfflineMode.h"
+#include "DeviceBan.h"
 #include "BossGuild.h"
 #include "CTCMini.h"
 #include "BattleSurvivor.h"
@@ -387,6 +388,9 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam) // 
 					break;
 				case IDM_MAPMONSTERINFO:
 					DialogBox(hInst,(LPCTSTR)IDD_MAPMONSTERINFO,hWnd,(DLGPROC)MapMonsterInfo);
+					break;
+				case IDM_BANNEDLIST:
+					DialogBox(hInst,(LPCTSTR)IDD_BANNEDLIST,hWnd,(DLGPROC)BannedList);
 					break;
 				case IDM_ABOUT:
 					DialogBox(hInst,(LPCTSTR)IDD_ABOUTBOX,hWnd,(DLGPROC)About);
@@ -954,6 +958,75 @@ LRESULT CALLBACK UserOnline(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam) 
 
 			switch(LOWORD(wParam))
 			{
+			// Selecting a player shows what a ban would act on.
+			case IDC_LIST1:
+				if(HIWORD(wParam) == LBN_SELCHANGE)
+				{
+					int sel = (int)SendMessage(hWndComboBox,LB_GETCURSEL,0,0);
+					char* account = (sel == LB_ERR) ? 0 : (char*)SendMessage(hWndComboBox,LB_GETITEMDATA,sel,0);
+					char info[200] = "Player is no longer online.";
+
+					for(int n=OBJECT_START_USER;account != 0 && n < MAX_OBJECT;n++)
+					{
+						if(gObj[n].Connected >= OBJECT_LOGGED && strcmp(gObj[n].Account,account) == 0)
+						{
+							wsprintf(info,"IP: %s\nPlatform: %s\nHardware ID:\n%s%s",
+								gObj[n].IpAddr,
+								(gObj[n].m_ClientPlatform == 1) ? "Phone" : "PC",
+								DeviceIdValid(gObj[n].m_DeviceId) ? gObj[n].m_DeviceId : "(none - old client)",
+								((DeviceIdValid(gObj[n].m_DeviceId) && gDeviceBan.IsBanned(gObj[n].m_DeviceId)) || gDeviceBan.IsIpBanned(gObj[n].IpAddr)) ? "\nBANNED" : "");
+							break;
+						}
+					}
+
+					SetDlgItemText(hDlg,IDC_STATIC_HWINFO,info);
+				}
+				return 1;
+			case IDC_BUTTONBANHW:
+				{
+					int sel = (int)SendMessage(hWndComboBox,LB_GETCURSEL,0,0);
+
+					if(sel == LB_ERR)
+					{
+						MessageBox(hDlg,"Select a player first.","Ban hardware ID",MB_OK | MB_ICONINFORMATION);
+						return 1;
+					}
+
+					char* account = (char*)SendMessage(hWndComboBox,LB_GETITEMDATA,sel,0);
+
+					for(int n=OBJECT_START_USER;n < MAX_OBJECT;n++)
+					{
+						if(gObj[n].Connected < OBJECT_LOGGED || strcmp(gObj[n].Account,account) != 0)
+						{
+							continue;
+						}
+
+						char question[400];
+						wsprintf(question,"Ban %s (%s)?\n\nThis bans:\n - the account\n - the IP %s\n - the hardware ID of this %s%s\n\nThe account and every other account on that device are kicked now.\nAnyone else on that IP is refused at their next login.",
+							gObj[n].Account,gObj[n].Name,gObj[n].IpAddr,(gObj[n].m_ClientPlatform == 1) ? "phone" : "PC",
+							DeviceIdValid(gObj[n].m_DeviceId) ? "" : " (none - old client)");
+
+						if(MessageBox(hDlg,question,"Ban account / IP / hardware ID",MB_YESNO | MB_ICONWARNING) != IDYES)
+						{
+							return 1;
+						}
+
+						char error[128];
+
+						if(gDeviceBan.BanPlayer(n,"Server",error,sizeof(error)) == 0)
+						{
+							MessageBox(hDlg,error,"Ban hardware ID",MB_OK | MB_ICONERROR);
+						}
+						else
+						{
+							MessageBox(hDlg,"Account, IP and hardware ID banned; player kicked.","Ban",MB_OK);
+						}
+						return 1;
+					}
+
+					MessageBox(hDlg,"Player is no longer online.","Ban hardware ID",MB_OK);
+				}
+				return 1;
 			case IDC_BUTTONDC:
 
 					int itemIndex = (int) SendMessage(hWndComboBox, LB_GETCURSEL, (WPARAM)0, (LPARAM) 0);
@@ -1300,6 +1373,143 @@ LRESULT CALLBACK MapMonsterInfo(HWND hDlg,UINT message,WPARAM wParam,LPARAM lPar
 				return 1;
 			}
 
+			break;
+	}
+
+	return 0;
+}
+
+// ----------------------------------------------------------------------
+// Banned List - Tools menu. Every ban in the device ban file (shared by
+// both GameServers when DeviceBanFile is set), one row each, and an Unban
+// button that lifts the hardware id, the IP banned with it and the
+// account block (DeviceBan.h).
+// ----------------------------------------------------------------------
+
+static std::vector<DEVICE_BAN_ENTRY> g_BannedListEntries;
+
+static void BannedListFill(HWND hDlg)
+{
+	HWND list = GetDlgItem(hDlg,IDC_LIST_BANNED);
+
+	SendMessage(list,LB_RESETCONTENT,0,0);
+
+	gDeviceBan.GetBans(g_BannedListEntries);
+
+	int widest = 0;
+	HDC dc = GetDC(list);
+	HFONT font = (HFONT)SendMessage(list,WM_GETFONT,0,0);
+	HFONT old = (HFONT)SelectObject(dc,font);
+
+	for(size_t n=0;n < g_BannedListEntries.size();n++)
+	{
+		const DEVICE_BAN_ENTRY& e = g_BannedListEntries[n];
+
+		char row[300];
+		sprintf_s(row,"%s   |   IP: %s   |   %s",
+			e.Note.empty() ? "(no note)" : e.Note.c_str(),
+			e.Ip.empty() ? "-" : e.Ip.c_str(),
+			(e.Key.compare(0,3,"ip:") == 0) ? "IP only" : e.Key.c_str());
+
+		int pos = (int)SendMessage(list,LB_ADDSTRING,0,(LPARAM)row);
+		SendMessage(list,LB_SETITEMDATA,pos,(LPARAM)n);
+
+		SIZE size;
+		if(GetTextExtentPoint32A(dc,row,(int)strlen(row),&size) != 0 && size.cx > widest){ widest = size.cx; }
+	}
+
+	SelectObject(dc,old);
+	ReleaseDC(list,dc);
+
+	SendMessage(list,LB_SETHORIZONTALEXTENT,widest + 10,0);
+
+	char info[64];
+	sprintf_s(info,"%d ban(s). Select one to see what it covers.",(int)g_BannedListEntries.size());
+	SetDlgItemText(hDlg,IDC_STATIC_BANINFO,info);
+}
+
+static int BannedListSelected(HWND hDlg)
+{
+	HWND list = GetDlgItem(hDlg,IDC_LIST_BANNED);
+
+	int sel = (int)SendMessage(list,LB_GETCURSEL,0,0);
+
+	if(sel == LB_ERR)
+	{
+		return -1;
+	}
+
+	int n = (int)SendMessage(list,LB_GETITEMDATA,sel,0);
+
+	return (n >= 0 && n < (int)g_BannedListEntries.size()) ? n : -1;
+}
+
+LRESULT CALLBACK BannedList(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam) // OK
+{
+	switch(message)
+	{
+		case WM_INITDIALOG:
+			BannedListFill(hDlg);
+			return 1;
+		case WM_COMMAND:
+			switch(LOWORD(wParam))
+			{
+				case IDOK:
+				case IDCANCEL:
+					EndDialog(hDlg,LOWORD(wParam));
+					return 1;
+				case IDC_LIST_BANNED:
+					if(HIWORD(wParam) == LBN_SELCHANGE)
+					{
+						int n = BannedListSelected(hDlg);
+
+						if(n >= 0)
+						{
+							const DEVICE_BAN_ENTRY& e = g_BannedListEntries[n];
+							const bool ipOnly = (e.Key.compare(0,3,"ip:") == 0);
+
+							char info[300];
+							sprintf_s(info,"%s\nIP: %s\nHardware ID: %s\nUnban lifts the %s and unblocks the account.",
+								e.Note.c_str(),e.Ip.empty() ? "-" : e.Ip.c_str(),ipOnly ? "(none - old client)" : e.Key.c_str(),
+								ipOnly ? "IP" : (e.Ip.empty() ? "hardware ID" : "hardware ID and IP"));
+							SetDlgItemText(hDlg,IDC_STATIC_BANINFO,info);
+						}
+					}
+					return 1;
+				case IDC_BUTTON_UNBAN:
+					{
+						int n = BannedListSelected(hDlg);
+
+						if(n < 0)
+						{
+							MessageBox(hDlg,"Select a ban first.","Unban",MB_OK | MB_ICONINFORMATION);
+							return 1;
+						}
+
+						DEVICE_BAN_ENTRY e = g_BannedListEntries[n];
+						const bool ipOnly = (e.Key.compare(0,3,"ip:") == 0);
+
+						char question[300];
+						sprintf_s(question,"Unban %s?\n\nThis lifts the %s and unblocks the account.",
+							e.Note.empty() ? e.Key.c_str() : e.Note.c_str(),
+							ipOnly ? "IP" : (e.Ip.empty() ? "hardware ID" : "hardware ID and IP"));
+
+						if(MessageBox(hDlg,question,"Unban",MB_YESNO | MB_ICONQUESTION) != IDYES)
+						{
+							return 1;
+						}
+
+						const std::string target = ipOnly ? e.Key.substr(3) : e.Key;
+
+						if(gDeviceBan.UnbanId(target.c_str(),"Server") == 0)
+						{
+							MessageBox(hDlg,"Could not unban - it may already have been lifted. The list is refreshed.","Unban",MB_OK | MB_ICONWARNING);
+						}
+
+						BannedListFill(hDlg);
+					}
+					return 1;
+			}
 			break;
 	}
 

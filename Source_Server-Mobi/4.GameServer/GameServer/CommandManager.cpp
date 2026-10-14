@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "CommandManager.h"
+#include "DeviceBan.h"
 #include "BloodCastle.h"
 #include "BonusManager.h"
 #include "CashShop.h"
@@ -208,6 +209,20 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 	memset(command,0,sizeof(command));
 
 	this->GetString(message,command,sizeof(command),0);
+
+	// Device bans are GM-only and not in Command.txt, whose 0-based rows against
+	// the 1-based enum make a new entry easy to bind to the wrong handler.
+	if(_stricmp(command,"/bandevice") == 0 || _stricmp(command,"/unbandevice") == 0)
+	{
+		char* argument = &message[strlen(command)];
+
+		if(argument[0] == 0x20)
+		{
+			argument++;
+		}
+
+		return this->CommandDeviceBan(lpObj,command,argument);
+	}
 
 	COMMAND_LIST CommandData;
 
@@ -3803,6 +3818,70 @@ bool CCommandManager::CommandBlocCharRecv(SDHP_COMMAND_BLOC_RECV* lpMsg) // OK
 	}
 
 #endif
+	return 1;
+}
+
+// /bandevice <character>          ban the phone that character is on, and kick it
+// /unbandevice <character|id>     lift it (by an online character, or by the id
+//                                 from the [Device] connect log line)
+bool CCommandManager::CommandDeviceBan(LPOBJ lpObj,char* command,char* arg) // OK
+{
+	if(gGameMaster.CheckGameMasterLevel(lpObj,1) == 0)
+	{
+		return 0;
+	}
+
+	bool ban = (_stricmp(command,"/bandevice") == 0);
+
+	char target[40] = {0};
+
+	this->GetString(arg,target,sizeof(target),0);
+
+	if(target[0] == 0)
+	{
+		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,ban ? "Usage: /bandevice <character>" : "Usage: /unbandevice <character|hardware id|IP>");
+		return 0;
+	}
+
+	char name[11] = {0};
+	strncpy_s(name,target,_TRUNCATE);
+
+	LPOBJ lpTarget = gObjFind(name);
+
+	if(ban != 0)
+	{
+		if(lpTarget == 0)
+		{
+			gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"%s is not online",target);
+			return 0;
+		}
+
+		char targetName[11];
+		strcpy_s(targetName,lpTarget->Name);
+
+		char error[128];
+
+		if(gDeviceBan.BanPlayer(lpTarget->Index,lpObj->Name,error,sizeof(error)) == 0)
+		{
+			gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"%s",error);
+			return 0;
+		}
+
+		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"Account, IP and hardware of %s banned",targetName);
+	}
+	else
+	{
+		const char* id = (lpTarget != 0) ? lpTarget->m_DeviceId : target;
+
+		if(gDeviceBan.UnbanId(id,lpObj->Name) == 0)
+		{
+			gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"That hardware ID or IP is not banned");
+			return 0;
+		}
+
+		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"Unbanned (account, IP and hardware ID)");
+	}
+
 	return 1;
 }
 

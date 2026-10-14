@@ -860,6 +860,7 @@ struct OBJECTSTRUCT
 	bool  m_ClientBuildReported;
 	BYTE  m_ClientPlatform;
 	DWORD m_ClientBuild;
+	char  m_DeviceId[33];   // DeviceBan.h; "" when the client sent none
 
 	// Throttle for the "This item does not belong to you" notice. A Muun
 	// collector re-asks for the same reserved drop about once a second for as

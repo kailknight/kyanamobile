@@ -219,3 +219,137 @@ const char* MU_GetClientBuildStamp()
 
 	return s_szStamp;
 }
+
+// Written once from the UI thread in onCreate, before the first login can be
+// sent, and only read afterwards.
+static char g_DeviceId[33] = {};
+
+#if defined(MU_IOS)
+// IosPlatform.mm - a Keychain-stored UUID, hashed the same way as on Android.
+extern "C" void MU_IosFillDeviceId(char* out33);
+#endif
+
+#if defined(_WIN32) && !defined(__ANDROID__) && !defined(__APPLE__)
+#include <wincrypt.h>
+#pragma comment(lib, "advapi32.lib")
+
+// PC hardware id: Windows' MachineGuid (set at install) plus the system drive's
+// volume serial. Both survive reinstalling the game and change only with a
+// Windows reinstall / reformat. Hashed like the phone ids, so the server sees
+// the same 32-hex shape from every platform.
+static void FillPcDeviceId(char* out33)
+{
+	out33[0] = 0;
+
+	char guid[64] = {};
+	DWORD guidSize = sizeof(guid);
+	HKEY key = nullptr;
+
+	// 64-bit view: Main.exe is 32-bit, and the WOW64 view of this key has no
+	// MachineGuid on 64-bit Windows.
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &key) == ERROR_SUCCESS)
+	{
+		DWORD type = 0;
+		if (RegQueryValueExA(key, "MachineGuid", nullptr, &type, (BYTE*)guid, &guidSize) != ERROR_SUCCESS || type != REG_SZ)
+		{
+			guid[0] = 0;
+		}
+		guid[sizeof(guid) - 1] = 0;
+		RegCloseKey(key);
+	}
+
+	char windowsDir[MAX_PATH] = {};
+	char root[4] = "C:\\";
+	if (GetWindowsDirectoryA(windowsDir, MAX_PATH) >= 2)
+	{
+		root[0] = windowsDir[0];
+	}
+
+	DWORD serial = 0;
+	GetVolumeInformationA(root, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0);
+
+	if (guid[0] == 0 && serial == 0)
+	{
+		return;	// nothing stable to identify this PC by
+	}
+
+	char source[128];
+	wsprintfA(source, "kira-device:%s:%08X", guid, serial);
+
+	HCRYPTPROV prov = 0;
+	HCRYPTHASH hash = 0;
+	BYTE digest[32] = {};
+	DWORD digestSize = sizeof(digest);
+
+	if (CryptAcquireContextA(&prov, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+	{
+		if (CryptCreateHash(prov, CALG_SHA_256, 0, 0, &hash)
+			&& CryptHashData(hash, (const BYTE*)source, (DWORD)strlen(source), 0)
+			&& CryptGetHashParam(hash, HP_HASHVAL, digest, &digestSize, 0))
+		{
+			for (int i = 0; i < 16; i++)
+			{
+				wsprintfA(out33 + i * 2, "%02x", digest[i]);
+			}
+			out33[32] = 0;
+		}
+
+		if (hash)
+		{
+			CryptDestroyHash(hash);
+		}
+		CryptReleaseContext(prov, 0);
+	}
+}
+#endif
+
+const char* MU_GetDeviceId()
+{
+#if defined(_WIN32) && !defined(__ANDROID__) && !defined(__APPLE__)
+	static bool pcFilled = false;
+	if (!pcFilled)
+	{
+		pcFilled = true;
+		FillPcDeviceId(g_DeviceId);
+	}
+#endif
+#if defined(MU_IOS)
+	// Filled on first use: iOS has no onCreate hook that runs before the login
+	// screen, and the first login packet is the first reader.
+	static bool filled = false;
+	if (!filled)
+	{
+		filled = true;
+		MU_IosFillDeviceId(g_DeviceId);
+	}
+#endif
+	return g_DeviceId;
+}
+
+#if defined(__ANDROID__)
+#include <jni.h>
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_muonline_client_MuMainNativeActivity_nativeSetDeviceId(JNIEnv* env, jclass, jstring id)
+{
+	g_DeviceId[0] = 0;
+	if (env == nullptr || id == nullptr)
+	{
+		return;
+	}
+
+	const char* chars = env->GetStringUTFChars(id, nullptr);
+	if (chars == nullptr)
+	{
+		return;
+	}
+
+	if (strlen(chars) == 32)
+	{
+		memcpy(g_DeviceId, chars, 32);
+		g_DeviceId[32] = 0;
+	}
+
+	env->ReleaseStringUTFChars(id, chars);
+}
+#endif

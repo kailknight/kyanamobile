@@ -155,6 +155,7 @@
     <ClInclude Include="CB_AutoNapGame.h" />
     <ClInclude Include="RedeemCode.h" />
     <ClInclude Include="PlayBilling.h" />
+    <ClInclude Include="DeviceLog.h" />
     <ClInclude Include="FriendMail.h" />
     <ClInclude Include="FriendMailProtocol.h" />
     <ClInclude Include="SlotClaim.h" />
@@ -210,6 +211,7 @@
     <ClCompile Include="CB_AutoNapGame.cpp" />
     <ClCompile Include="RedeemCode.cpp" />
     <ClCompile Include="PlayBilling.cpp" />
+    <ClCompile Include="DeviceLog.cpp" />
     <ClCompile Include="FriendMail.cpp" />
     <ClCompile Include="SlotClaim.cpp" />
     <ClCompile Include="SpinClaim.cpp" />

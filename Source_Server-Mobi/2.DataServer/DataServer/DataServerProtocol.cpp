@@ -41,6 +41,7 @@
 #include "NewUIMyInventory.h"
 #include "RedeemCode.h"
 #include "PlayBilling.h"
+#include "DeviceLog.h"
 #include "FriendMail.h"
 #include "SpinClaim.h"
 #include "SlotClaim.h"
@@ -949,6 +950,12 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x36: //==Master skill tree recommendations - request
 				gMasterSkillTree.GDMasterRecommendRecv((SDHP_MASTER_RECOMMEND_RECV*)lpMsg, index);
+				break;
+			case 0x47: //==Login record: account, IP, hardware id (DeviceLog.h)
+				gDeviceLog.OnLogin((SDHP_DEVICE_LOGIN_RECV*)lpMsg);
+				break;
+			case 0x48: //==Hardware ban / unban record
+				gDeviceLog.OnBan((SDHP_DEVICE_BAN_RECV*)lpMsg);
 				break;
 			case 0x40: //==Friend mail - friend details
 				gFriendMail.OnDetailRequest((SDHP_FRIENDMAIL_NAME_REQ*)lpMsg, index);

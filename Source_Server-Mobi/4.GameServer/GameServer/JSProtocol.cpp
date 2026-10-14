@@ -15,6 +15,7 @@
 #include "IpManager.h"
 #include "OfflineMode.h"
 #include "FakeOnline.h"
+#include "DeviceBan.h"
 
 void JoinServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 {
@@ -126,6 +127,17 @@ void JGConnectAccountRecv(SDHP_CONNECT_ACCOUNT_RECV* lpMsg) // OK
 //========================================================================================================
 
 	LogAddConnect(LOG_BLUE,"AddAccount [%s] Login!",gObj[lpMsg->index].Account);
+
+	// Which phone each account logs in from, for finding a device to ban
+	// (DeviceBan.h) after the character has gone offline.
+	if(gObj[lpMsg->index].m_DeviceId[0] != 0)
+	{
+		gLog.Output(LOG_CONNECT,"[Device] Account: %s, Ip: %s, Device: %s",gObj[lpMsg->index].Account,gObj[lpMsg->index].IpAddr,gObj[lpMsg->index].m_DeviceId);
+	}
+
+	// And to the database (HardwareLog), every login - PC and phone - with the
+	// IP even when the client sent no hardware id.
+	gDeviceBan.SendLoginLog(lpMsg->index);
 }
 
 void JGDisconnectAccountRecv(SDHP_DISCONNECT_ACCOUNT_RECV* lpMsg) // OK
@@ -253,6 +265,10 @@ void JGMapServerMoveAuthRecv(SDHP_MAP_SERVER_MOVE_AUTH_RECV* lpMsg) // OK
 	memcpy(gObj[lpMsg->index].AccountExpireDate,lpMsg->AccountExpireDate,sizeof(gObj[lpMsg->index].AccountExpireDate));
 
 	GCMapServerMoveAuthSend(lpMsg->index,1);
+
+	// A server switch is a new connection to this GameServer: record it like a
+	// login, so the hardware id and IP are known here too (DeviceBan.h).
+	gDeviceBan.SendLoginLog(lpMsg->index);
 
 	gObj[lpMsg->index].EnableDelCharacter = 0;
 

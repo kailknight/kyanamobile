@@ -23,6 +23,7 @@
 #include "DevilSquare.h"
 #include "DoubleGoer.h"
 #include "DSProtocol.h"
+#include "DeviceBan.h"
 #include "Duel.h"
 #include "EffectManager.h"
 #include "ESProtocol.h"
@@ -2689,6 +2690,15 @@ void CGMapServerMoveAuthRecv(PMSG_MAP_SERVER_MOVE_AUTH_RECV* lpMsg,int aIndex) /
 		return;
 	}
 
+	// Same device ban as at login: a server switch is a fresh connection, and the
+	// client sends its hardware id (0xD3:0x7D) right before this packet too.
+	if((DeviceIdValid(lpObj->m_DeviceId) != 0 && gDeviceBan.IsBanned(lpObj->m_DeviceId) != 0) || gDeviceBan.IsIpBanned(lpObj->IpAddr) != 0)
+	{
+		gLog.Output(LOG_HACK,"[SECURITY][GameServer] Banned device or IP refused on server move (Index: %d, Ip: %s, Device: %s)",aIndex,lpObj->IpAddr,lpObj->m_DeviceId);
+		CloseClient(aIndex);
+		return;
+	}
+
 	if(lpObj->LoginMessageSend == 0)
 	{
 		lpObj->LoginMessageSend++;
@@ -2895,6 +2905,14 @@ void CGClientBuildRecv(PMSG_CLIENT_BUILD_RECV* lpMsg,int size,int aIndex) // OK
 	lpObj->m_ClientBuildReported = true;
 	lpObj->m_ClientPlatform = lpMsg->Platform;
 	lpObj->m_ClientBuild = lpMsg->Build;
+
+	if(size >= (int)sizeof(PMSG_CLIENT_BUILD_DEVICE_RECV))
+	{
+		memcpy(lpObj->m_DeviceId,((PMSG_CLIENT_BUILD_DEVICE_RECV*)lpMsg)->DeviceId,32);
+		lpObj->m_DeviceId[32] = 0;
+	}
+
+	gLog.Output(LOG_CONNECT,"[ClientBuild] Ip: %s, Platform: %d, Build: %u, Size: %d, Device: %s",lpObj->IpAddr,(int)lpObj->m_ClientPlatform,lpObj->m_ClientBuild,size,lpObj->m_DeviceId);
 }
 
 void CGConnectAccountRecv(PMSG_CONNECT_ACCOUNT_RECV* lpMsg,int aIndex) // OK
@@ -2919,6 +2937,16 @@ void CGConnectAccountRecv(PMSG_CONNECT_ACCOUNT_RECV* lpMsg,int aIndex) // OK
 	{
 		gLog.Output(LOG_HACK,"[SECURITY][GameServer] Client serial mismatch (Index: %d, Ip: %s, Account: %s)",aIndex,lpObj->IpAddr,lpObj->Account);
 		GCConnectAccountSend(aIndex,6);
+		return;
+	}
+
+	// Banned phone. Checked before the account is even looked up, so every
+	// account on that device is refused - which is the point of a device ban.
+	// Result 5 is the existing "account blocked" answer the client already shows.
+	if((DeviceIdValid(lpObj->m_DeviceId) != 0 && gDeviceBan.IsBanned(lpObj->m_DeviceId) != 0) || gDeviceBan.IsIpBanned(lpObj->IpAddr) != 0)
+	{
+		gLog.Output(LOG_HACK,"[SECURITY][GameServer] Banned device or IP refused (Index: %d, Ip: %s, Device: %s)",aIndex,lpObj->IpAddr,lpObj->m_DeviceId);
+		GCConnectAccountSend(aIndex,5);
 		return;
 	}
 

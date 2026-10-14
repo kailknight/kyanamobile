@@ -52,6 +52,7 @@ public class MuMainNativeActivity extends NativeActivity {
         int metaState,
         int repeatCount);
     private native void nativeSetKeyboardBridge();
+    private static native void nativeSetDeviceId(String id);
     private native void nativeClearKeyboardBridge();
     private static native void nativeOnWindowFocusChanged(boolean hasFocus);
 
@@ -748,6 +749,31 @@ public class MuMainNativeActivity extends NativeActivity {
                 | View.SYSTEM_UI_FLAG_FULLSCREEN);
     }
 
+    /**
+     * This phone's id for device bans (GameServer DeviceBan.h): SHA-256 of
+     * ANDROID_ID, first 32 hex chars. ANDROID_ID is per app-signing key, so other
+     * apps never see the same value, and it survives reinstalling the game; it
+     * changes on a factory reset. Hashed so the raw id never leaves the phone.
+     */
+    private String deviceId() {
+        try {
+            String raw = android.provider.Settings.Secure.getString(
+                    getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
+            if (raw == null || raw.isEmpty()) {
+                return "";
+            }
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(("kira-device:" + raw).getBytes("UTF-8"));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 16; i++) {
+                hex.append(String.format("%02x", hash[i] & 0xff));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         extractGameAssets();
@@ -755,6 +781,7 @@ public class MuMainNativeActivity extends NativeActivity {
         super.onCreate(savedInstanceState);
         instance = this;
         nativeSetKeyboardBridge();
+        nativeSetDeviceId(deviceId());
         installImeBridge();
     }
 

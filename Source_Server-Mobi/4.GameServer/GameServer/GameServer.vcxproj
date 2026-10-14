@@ -578,6 +578,7 @@
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="SummonScroll.h" />
     <ClInclude Include="TeleportMarlon.h" />
+    <ClInclude Include="DeviceBan.h" />
     <ClInclude Include="ThemidaSDK.h" />
     <ClInclude Include="ThuMuaDoExc.h" />
     <ClInclude Include="Trade.h" />
@@ -870,6 +871,7 @@
     </ClCompile>
     <ClCompile Include="SummonScroll.cpp" />
     <ClCompile Include="TeleportMarlon.cpp" />
+    <ClCompile Include="DeviceBan.cpp" />
     <ClCompile Include="ThuMuaDoExc.cpp" />
     <ClCompile Include="Trade.cpp" />
     <ClCompile Include="Union.cpp" />

@@ -377,6 +377,14 @@ struct PMSG_CLIENT_BUILD_RECV
 	DWORD Build;
 };
 
+// Newer phones append their device id (see DeviceBan.h). Its own struct, so the
+// size check above still accepts clients that send only the two fields.
+struct PMSG_CLIENT_BUILD_DEVICE_RECV
+{
+	PMSG_CLIENT_BUILD_RECV base;
+	char  DeviceId[32]; // hex, not NUL-terminated
+};
+
 #pragma pack(pop)
 
 struct PMSG_CHARACTER_CREATE_RECV

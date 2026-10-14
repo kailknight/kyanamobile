@@ -248,6 +248,14 @@ __forceinline void SendClientBuild()
 	spe << ( BYTE)MU_CLIENT_PLATFORM;
 	spe << ( DWORD)MU_GetClientBuildNumber();
 
+	// Device id for phone bans (ClientBuild.h). Left off entirely when there is
+	// none, so the server reads the packet exactly as it did before this field.
+	const char* deviceId = MU_GetDeviceId();
+	if (deviceId[0] != 0)
+	{
+		spe.AddData((void*)deviceId, 32);
+	}
+
 	// UNENCRYPTED, and it has to be. The GameServer's packet whitelist
 	// (Data\Hack\HackPacketCheck.txt) lists head 211 (0xD3) with Encrypt = 0,
 	// and CHackPacketCheck::CheckPacketHack calls CloseClient on any mismatch -
@@ -1997,6 +2005,7 @@ __forceinline bool SendRequestMixExit()
 
 #define SendChangeMServer(lpID, lpChr, iAuth1, iAuth2, iAuth3, iAuth4 )\
 {\
+	SendClientBuild();\
 	CStreamPacketEngine spe;\
 	spe.Init( 0xC1, 0xB1);\
 	spe << ( BYTE)0x01;\
