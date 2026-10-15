@@ -184,6 +184,13 @@ private final class MuStore {
             Task { await transaction.finish() }
             return
         }
+        // Bought by another game account on this phone: leave it unfinished
+        // for that account's next login. Reporting it now would be refused
+        // ("bought by another account") and, worse, hold this product's one
+        // slot with the server so this account's own purchase waits behind it.
+        if let owner = transaction.appAccountToken, let current = accountToken(), owner != current {
+            return
+        }
 
         let productId = transaction.productID
         let report: Bool = locked {
