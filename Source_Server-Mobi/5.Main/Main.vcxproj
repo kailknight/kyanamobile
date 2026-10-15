@@ -582,6 +582,7 @@
     <ClCompile Include="source\VoiceAudioOpenSL.cpp" />
     <ClCompile Include="source\VoiceAudioWin.cpp" />
     <ClCompile Include="source\VoiceClient.cpp" />
+    <ClCompile Include="source\PlayerBlock.cpp" />
     <ClCompile Include="source\QuickToggles.cpp" />
     <ClCompile Include="source\VoiceSettings.cpp" />
     <ClCompile Include="source\VoiceCodec.cpp">
@@ -1078,6 +1079,7 @@
     <ClInclude Include="source\ClientBuild.h" />
     <ClInclude Include="source\VoiceAudio.h" />
     <ClInclude Include="source\VoiceClient.h" />
+    <ClInclude Include="source\PlayerBlock.h" />
     <ClInclude Include="source\QuickToggles.h" />
     <ClInclude Include="source\VoiceCodec.h" />
     <ClInclude Include="source\VoiceProtocol.h" />

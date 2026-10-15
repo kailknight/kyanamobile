@@ -3,6 +3,7 @@
 #include "NewUIChatLogWindow.h"
 #include "NewUIManager.h"
 #include "NewUISystem.h"
+#include "PlayerBlock.h"
 #include "DSPlaySound.h"
 #include "UIControls.h"
 #include "ZzzInterface.h"
@@ -369,6 +370,13 @@ void SEASON3B::CNewUIChatLogWindow::SetPosition(int x, int y)
 void SEASON3B::CNewUIChatLogWindow::AddText(const type_string& strID, const type_string& strText, MESSAGE_TYPE MsgType, MESSAGE_TYPE ErrMsgType /*= TYPE_ALL_MESSAGE*/, void* MemoryData)
 {
 	if (strID.empty() && strText.empty())
+	{
+		return;
+	}
+
+	// Players this device has blocked (PlayerBlock.h): nothing they say shows.
+	if (!strID.empty() && MsgType != TYPE_SYSTEM_MESSAGE && MsgType != TYPE_ERROR_MESSAGE
+		&& (Hero == NULL || strcmp(strID.c_str(), Hero->ID) != 0) && gPlayerBlock.IsBlocked(strID.c_str()))
 	{
 		return;
 	}

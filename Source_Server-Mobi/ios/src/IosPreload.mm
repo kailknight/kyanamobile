@@ -358,7 +358,7 @@ static UIColor* ColorFromArgb(uint32_t argb)
     [self addSubview:_panel];
 
     _title = [self addLabelWithSize:18 color:0xFFF3F8FF bold:YES];
-    _title.attributedText = [[NSAttributedString alloc] initWithString:@"MU DATA SYNC"
+    _title.attributedText = [[NSAttributedString alloc] initWithString:@"DATA SYNC"
                                                             attributes:@{ NSKernAttributeName : @1.1 }];
     _stage = [self addLabelWithSize:14 color:0xFFDCE8FF bold:NO];
     _progress = [[MuPreloadProgressBar alloc] init];

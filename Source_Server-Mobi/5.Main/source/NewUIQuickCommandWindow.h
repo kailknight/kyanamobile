@@ -29,6 +29,8 @@ namespace SEASON3B
 			QCE_FOLLOW,
 			QCE_DUEL,
 			QCE_VIEWITEM,
+			QCE_BLOCK,		// always shown: App Store guideline 1.2 (PlayerBlock.h)
+			QCE_REPORT,
 			QCE_COUNT
 		};
 

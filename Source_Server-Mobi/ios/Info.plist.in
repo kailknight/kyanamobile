@@ -65,10 +65,8 @@
 		<true/>
 	</dict>
 
-	<!-- Lets Finder / the Files app see Documents (Data/, logs) while testing. -->
-	<key>UIFileSharingEnabled</key>
-	<true/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<true/>
+	<!-- Documents (game data, logs) is no longer shown in Finder / the Files
+	     app: that was a testing aid, and in a release it lets anyone browse and
+	     edit the game's files. The debug helpers use devicectl instead. -->
 </dict>
 </plist>

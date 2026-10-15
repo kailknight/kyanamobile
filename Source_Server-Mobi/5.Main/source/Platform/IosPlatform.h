@@ -30,6 +30,14 @@ bool MU_IosIsPhone();
 void MU_IosBeginBackgroundKeepAlive();
 void MU_IosEndBackgroundKeepAlive();
 
+// Opens a web page in Safari (account deletion, terms). Any thread.
+void MU_IosOpenURL(const char* url);
+
+// Shows the community rules once per install and records that the player
+// agreed (App Store guideline 1.2: zero tolerance for objectionable content,
+// how to block and report). Main thread; safe to call every launch.
+void MU_IosShowCommunityRulesOnce();
+
 // Battery 0-100, or -1 when unknown (simulator, or monitoring not ready yet).
 int MU_IosGetBatteryPercent();
 

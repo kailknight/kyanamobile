@@ -1,5 +1,24 @@
 #include "stdafx.h"
 #include "MenuCustom.h"
+#if defined(MU_IOS) && !defined(MU_MACOS)
+#include "Platform/IosPlatform.h"
+#endif
+
+#if defined(MU_IOS) && !defined(MU_MACOS)
+namespace
+{
+	// App Store build: an extra menu slot (after the server's 15) that opens the
+	// website's account deletion (guideline 5.1.1(v)), and the top-up entries
+	// that pay outside the App Store are never shown (guideline 3.1.1).
+	const int kIosDeleteAccountSlot = 15;
+	const char* kIosDeleteAccountUrl = "https://worldofkira.com/account/?view=settings#delete";
+
+	bool IsIosHiddenMenuSlot(int slot)
+	{
+		return slot == eButtonNapGame || slot == eButtonMocNap;
+	}
+}
+#endif
 #include "Util.h"
 #include "Protect.h"
 #include "CBInterface.h"
@@ -183,15 +202,24 @@ void cCustomMenu::Draw()
 	// Collect enabled slots first, then paginate that filtered list - some
 	// slots are off (Menu[i]==0) on any given server, so pagination has to
 	// be based on how many buttons actually show, not raw slot index range.
-	int enabledSlots[15];
+	int enabledSlots[16];
 	int enabledCount = 0;
 	for (int i = 0; i < 15; i++)
 	{
+#if defined(MU_IOS) && !defined(MU_MACOS)
+		if (IsIosHiddenMenuSlot(i))
+		{
+			continue;
+		}
+#endif
 		if (gProtect.m_MainInfo.Menu[i])
 		{
 			enabledSlots[enabledCount++] = i;
 		}
 	}
+#if defined(MU_IOS) && !defined(MU_MACOS)
+	enabledSlots[enabledCount++] = kIosDeleteAccountSlot;
+#endif
 
 	const int pageCount = (enabledCount == 0) ? 1 : ((enabledCount - 1) / kCustomMenuButtonsPerPage) + 1;
 	if (this->m_CurrentPage >= pageCount)
@@ -226,6 +254,19 @@ void cCustomMenu::Draw()
 		// to it (GetMainInfo.cpp/MenuName.h) - an empty slot there (not
 		// migrated yet) falls back to the old Text_Button/Text_<lang>.ini
 		// label, so nothing changes for a server that hasn't set this up.
+#if defined(MU_IOS) && !defined(MU_MACOS)
+		if (i == kIosDeleteAccountSlot)
+		{
+			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Delete Account", BtnW))
+			{
+				// The website asks for the password and confirms before
+				// anything is deleted.
+				MU_IosOpenURL(kIosDeleteAccountUrl);
+			}
+		}
+		else
+#endif
+		{
 		char* label = (gProtect.m_MainInfo.MenuName[i][0] != '\0')
 			? gProtect.m_MainInfo.MenuName[i]
 			: gOther.Text_Button[i];
@@ -233,6 +274,7 @@ void cCustomMenu::Draw()
 		if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, label, BtnW))
 		{
 			this->ActionButton(i);
+		}
 		}
 		cX++;
 		if (cX > 1)

@@ -108,6 +108,11 @@ set_source_files_properties(${PRELOAD_BANNERS} PROPERTIES MACOSX_PACKAGE_LOCATIO
 set(IOS_ASSET_CATALOG "${CMAKE_CURRENT_SOURCE_DIR}/assets/Assets.xcassets")
 set_source_files_properties(${IOS_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 
+# App Store build: the World of Kira emblem drawn in place of the data's MU logo
+# (GlobalBitmap.cpp IosLogoOverride). Installed into Data/Logo with MuAssets.
+set(IOS_LOGO "${CMAKE_CURRENT_SOURCE_DIR}/assets/Logo/WoK-logo.OZT" "${CMAKE_CURRENT_SOURCE_DIR}/assets/Logo/WoK-logo_g.OZJ")
+set_source_files_properties(${IOS_LOGO} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/MuAssets/data/Logo")
+
 # AAC copies of the Ogg music tracks, which AVAudioPlayer cannot decode.
 file(GLOB IOS_MUSIC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/Music/*.m4a")
 set_source_files_properties(${IOS_MUSIC} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/Music")
@@ -118,6 +123,7 @@ add_executable(WorldOfKira MACOSX_BUNDLE
     ${BUNDLED_ASSETS}
     ${PRELOAD_BANNERS}
     ${IOS_MUSIC}
+    ${IOS_LOGO}
     ${IOS_ASSET_CATALOG}
 )
 

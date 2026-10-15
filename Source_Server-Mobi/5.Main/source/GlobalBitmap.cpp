@@ -12,6 +12,29 @@
 #include <vector>
 #include "turbojpeg.h"
 #include "Platform/gl_compat.h"
+
+#if defined(MU_IOS) && !defined(MU_MACOS)
+// App Store build: the World of Kira emblem bundled with the app (ios/assets/
+// Logo, installed into Data/Logo with the other bundled assets) is drawn in
+// place of the MU logo the game data carries. Empty when not a logo file or
+// when the bundled file is missing.
+static std::string IosLogoOverride(const std::string& filename, const char* ext)
+{
+	if (filename.find("MU-logo") == std::string::npos)
+	{
+		return std::string();
+	}
+	const bool glow = filename.find("MU-logo_g") != std::string::npos;
+	std::string path = std::string("Data/Logo/") + (glow ? "WoK-logo_g." : "WoK-logo.") + ext;
+	FILE* probe = fopen(path.c_str(), "rb");
+	if (probe == NULL)
+	{
+		return std::string();
+	}
+	fclose(probe);
+	return path;
+}
+#endif
 #endif
 
 // ZzzOpenglUtil.cpp's BindTexture() shadow. Declared at true file scope: an
@@ -819,6 +842,12 @@ bool CGlobalBitmap::OpenJpeg(GLuint uiBitmapIndex, const std::string& filename, 
 #endif
 	std::string filename_ozj;
 	ExchangeExt(filename, "OZJ", filename_ozj);
+#if defined(MU_IOS) && !defined(MU_MACOS)
+	if (!IosLogoOverride(filename, "OZJ").empty())
+	{
+		filename_ozj = IosLogoOverride(filename, "OZJ");
+	}
+#endif
 
 	FILE* infile = fopen(filename_ozj.c_str(), "rb");
 	if(infile == NULL)
@@ -1045,6 +1074,12 @@ bool CGlobalBitmap::OpenTga(GLuint uiBitmapIndex, const std::string& filename, G
 #endif
 	std::string filename_ozt;
 	ExchangeExt(filename, "OZT", filename_ozt);
+#if defined(MU_IOS) && !defined(MU_MACOS)
+	if (!IosLogoOverride(filename, "OZT").empty())
+	{
+		filename_ozt = IosLogoOverride(filename, "OZT");
+	}
+#endif
 
     FILE *fp = fopen(filename_ozt.c_str(), "rb");
 	if(fp == NULL)

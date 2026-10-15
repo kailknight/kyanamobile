@@ -152,7 +152,7 @@ static CGColorRef CGColorFromArgb(uint32_t argb)
 
     _title = [self addLabelWithSize:18 color:0xFFF3F8FF bold:YES];
     _title.attributedStringValue =
-        [[NSAttributedString alloc] initWithString:@"MU DATA SYNC"
+        [[NSAttributedString alloc] initWithString:@"DATA SYNC"
                                         attributes:@{ NSKernAttributeName : @1.1,
                                                       NSFontAttributeName : [NSFont boldSystemFontOfSize:18],
                                                       NSForegroundColorAttributeName : ColorFromArgb(0xFFF3F8FF) }];

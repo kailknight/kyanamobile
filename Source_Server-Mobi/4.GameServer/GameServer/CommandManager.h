@@ -333,6 +333,7 @@ public:
 	bool CommandInfo(LPOBJ lpObj,char* arg);
     bool CommandBlocAcc(LPOBJ lpObj,char* arg);
 	bool CommandDeviceBan(LPOBJ lpObj,char* command,char* arg);
+	bool CommandReport(LPOBJ lpObj,char* arg);
 	bool CommandBlocAccRecv(SDHP_COMMAND_BLOC_RECV* lpMsg);
     bool CommandBlocChar(LPOBJ lpObj,char* arg);
 	bool CommandBlocCharRecv(SDHP_COMMAND_BLOC_RECV* lpMsg);

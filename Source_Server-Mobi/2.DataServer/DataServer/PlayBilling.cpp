@@ -520,6 +520,31 @@ namespace
 
 	// Worker-thread only (copied in StartWorker).
 	bool g_AppleAllowSandbox = false;
+	char g_AppleSandboxAccounts[256];
+
+	// "test2, reviewer" style list, case-insensitive.
+	bool IsSandboxAccount(const char* account)
+	{
+		const char* p = g_AppleSandboxAccounts;
+
+		while(*p)
+		{
+			while(*p == ' ' || *p == ',' || *p == ';')
+				p++;
+
+			const char* start = p;
+
+			while(*p && *p != ',' && *p != ';' && *p != ' ')
+				p++;
+
+			const size_t len = (size_t)(p - start);
+
+			if(len > 0 && len == strlen(account) && _strnicmp(start,account,len) == 0)
+				return true;
+		}
+
+		return false;
+	}
 	char g_AppleKeyFile[MAX_PATH];
 	char g_AppleKeyId[32];
 	char g_AppleIssuer[64];
@@ -665,7 +690,7 @@ namespace
 			return;
 		}
 
-		if(environment != "Production" && !g_AppleAllowSandbox)
+		if(environment != "Production" && !g_AppleAllowSandbox && !IsSandboxAccount(req.AccountID))
 		{
 			// TestFlight and Xcode purchases cost nothing; crediting them on a
 			// live server would hand out free WCoin.
@@ -934,6 +959,7 @@ CPlayBilling::CPlayBilling()
 	this->m_PackageName[0] = 0;
 	this->m_AppleEnabled = false;
 	this->m_AppleAllowSandbox = false;
+	this->m_AppleSandboxAccounts[0] = 0;
 	this->m_AppleKeyFile[0] = 0;
 	this->m_AppleKeyId[0] = 0;
 	this->m_AppleIssuer[0] = 0;
@@ -956,6 +982,7 @@ void CPlayBilling::LoadConfig()
 
 	this->m_AppleEnabled = GetPrivateProfileIntA("AppStore","Enabled",0,kConfigFile) != 0;
 	this->m_AppleAllowSandbox = GetPrivateProfileIntA("AppStore","AllowSandbox",0,kConfigFile) != 0;
+	GetPrivateProfileStringA("AppStore","SandboxAccounts","",this->m_AppleSandboxAccounts,sizeof(this->m_AppleSandboxAccounts),kConfigFile);
 	GetPrivateProfileStringA("AppStore","KeyFile",".\\AppStoreKey.p8",this->m_AppleKeyFile,sizeof(this->m_AppleKeyFile),kConfigFile);
 	GetPrivateProfileStringA("AppStore","KeyId","",this->m_AppleKeyId,sizeof(this->m_AppleKeyId),kConfigFile);
 	GetPrivateProfileStringA("AppStore","IssuerId","",this->m_AppleIssuer,sizeof(this->m_AppleIssuer),kConfigFile);
@@ -987,6 +1014,7 @@ void CPlayBilling::StartWorker()
 	strcpy_s(g_AppleIssuer,sizeof(g_AppleIssuer),this->m_AppleIssuer);
 	strcpy_s(g_AppleBundle,sizeof(g_AppleBundle),this->m_AppleBundle);
 	g_AppleAllowSandbox = this->m_AppleAllowSandbox;
+	strcpy_s(g_AppleSandboxAccounts,sizeof(g_AppleSandboxAccounts),this->m_AppleSandboxAccounts);
 
 	InitializeCriticalSection(&g_JobLock);
 	g_JobSemaphore = CreateSemaphore(NULL,0,0x7FFFFFFF,NULL);

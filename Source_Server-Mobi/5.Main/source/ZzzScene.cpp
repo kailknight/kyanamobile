@@ -1687,6 +1687,19 @@ bool NewRenderLogInScene(HDC hDC)
 	g_pRenderText->SetTextColor(255, 255, 255, 255);
 	g_pRenderText->SetBgColor(0, 0, 0, 128);
 	
+#if defined(MU_IOS) && !defined(MU_MACOS)
+	// Community rules, once per install, before anyone can chat (guideline 1.2).
+	{
+		extern void MU_IosShowCommunityRulesOnce();
+		MU_IosShowCommunityRulesOnce();
+	}
+
+	// App Store build: only the game's own name. The data's footer (454/455)
+	// names the server emulator and 456 is the original client's version tag.
+	strcpy(Text,"Copyright (c) World of Kira. All Rights Reserved.");
+	g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), Text,lstrlen(Text),&Size);
+	g_pRenderText->RenderText(DisplayWinMid -Size.cx* DisplayWin /WindowWidth/2, DisplayHeight -Size.cy* DisplayWin /WindowWidth-1,Text);
+#else
 	strcpy(Text,GlobalText[454]);
 	g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), Text,lstrlen(Text),&Size);
 	g_pRenderText->RenderText((335+ DisplayWinExt) -Size.cx* DisplayWin /WindowWidth, DisplayHeight -Size.cy* DisplayWin /WindowWidth-1,Text);
@@ -1700,6 +1713,7 @@ bool NewRenderLogInScene(HDC hDC)
 	
 	g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), Text,lstrlen(Text),&Size);
 	g_pRenderText->RenderText(0, DisplayHeight -Size.cy* DisplayWin /WindowWidth-1,Text);
+#endif
 
     RenderInfomation();
 

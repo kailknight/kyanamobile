@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "PlayerBlock.h"
 #include "NewUIQuickCommandWindow.h"
 #include "NewUISystem.h"
 // For gProtect.m_MainInfo.HidePlayerMenu and the PLAYER_MENU_HIDE_* bits - not
@@ -138,6 +139,25 @@ bool SEASON3B::CNewUIQuickCommandWindow::UpdateMouseEvent()
 				g_pCommandWindow->CommandDual(pCha);
 				CloseQuickCommand();
 
+				return false;
+			}
+			break;
+		case QCE_BLOCK:
+			{
+				const bool now = gPlayerBlock.Toggle(m_strID);
+				char text[96];
+				sprintf_s(text, sizeof(text), now ? "Blocked %s: you will no longer see their chat or hear their voice." : "Unblocked %s.", m_strID);
+				if (g_pChatListBox != NULL)
+					g_pChatListBox->AddText("", text, SEASON3B::TYPE_SYSTEM_MESSAGE);
+				CloseQuickCommand();
+				return false;
+			}
+			break;
+		case QCE_REPORT:
+			{
+				// The server logs it for the GMs and answers with a notice.
+				gPlayerBlock.Report(m_strID, NULL);
+				CloseQuickCommand();
 				return false;
 			}
 			break;
@@ -328,7 +348,7 @@ void SEASON3B::CNewUIQuickCommandWindow::RenderContents()
 	// Indexed by QUICK_COMMAND_ENTRY, so it stays aligned with the enum even as
 	// rows are hidden. QCE_VIEWITEM has no GlobalText id, hence the -1 sentinel
 	// and the literal below.
-	static const int iGlobalText[QCE_COUNT] = { 943, 1124, 944, 948, 949, -1 };
+	static const int iGlobalText[QCE_COUNT] = { 943, 1124, 944, 948, 949, -1, -1, -1 };
 
 	const int nRows = GetVisibleRowCount();
 
@@ -348,6 +368,14 @@ void SEASON3B::CNewUIQuickCommandWindow::RenderContents()
 		if(iEntry >= 0 && iEntry < QCE_COUNT && iGlobalText[iEntry] >= 0)
 		{
 			g_pRenderText->RenderText(m_Pos.x, y, GlobalText[iGlobalText[iEntry]], 112, 0, RT3_SORT_CENTER);
+		}
+		else if (iEntry == QCE_BLOCK)
+		{
+			g_pRenderText->RenderText(m_Pos.x, y, gPlayerBlock.IsBlocked(m_strID) ? "Unblock" : "Block", 112, 0, RT3_SORT_CENTER);
+		}
+		else if (iEntry == QCE_REPORT)
+		{
+			g_pRenderText->RenderText(m_Pos.x, y, "Report", 112, 0, RT3_SORT_CENTER);
 		}
 		else
 		{
@@ -431,9 +459,12 @@ int SEASON3B::CNewUIQuickCommandWindow::BuildVisibleEntries()
 
 	m_nVisibleCount = 0;
 
+	// Block and Report are always offered, whatever the operator hides.
 	if ((dwHide & PLAYER_MENU_HIDE_ALL) != 0)
 	{
-		return 0;
+		m_aVisibleEntry[m_nVisibleCount++] = QCE_BLOCK;
+		m_aVisibleEntry[m_nVisibleCount++] = QCE_REPORT;
+		return m_nVisibleCount;
 	}
 
 	static const struct { int iEntry; DWORD dwFlag; } aEntryFlag[] =
@@ -461,6 +492,9 @@ int SEASON3B::CNewUIQuickCommandWindow::BuildVisibleEntries()
 
 		m_aVisibleEntry[m_nVisibleCount++] = aEntryFlag[i].iEntry;
 	}
+
+	m_aVisibleEntry[m_nVisibleCount++] = QCE_BLOCK;
+	m_aVisibleEntry[m_nVisibleCount++] = QCE_REPORT;
 
 	return m_nVisibleCount;
 }

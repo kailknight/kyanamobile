@@ -3,6 +3,7 @@
 #include "stdafx.h"
 #include <math.h>
 #include "VoiceClient.h"
+#include "PlayerBlock.h"
 #include "UIControls.h"
 #include "VoiceAudio.h"
 #include "ZzzOpenglUtil.h"
@@ -693,6 +694,13 @@ void CVoiceClient::HandlePacket(const VBYTE* pBuffer, int iLength) // OK
 void CVoiceClient::HandleFrameIn(const VOICE_V2C_FRAME_MSG* lpMsg) // OK
 {
 	if (lpMsg->Length > VOICE_FRAME_BYTES)
+	{
+		return;
+	}
+
+	// A player this device has blocked is never played (PlayerBlock.h). This
+	// runs on the game thread, inside Proc.
+	if (gPlayerBlock.IsSpeakerBlocked((int)lpMsg->SpeakerIndex))
 	{
 		return;
 	}

@@ -381,3 +381,70 @@ void MU_IosCopyBundledAssets()
     }
     fprintf(stderr, "I/MuMain: bundled assets: %d files, %d updated\n", total, copied);
 }
+
+void MU_IosOpenURL(const char* url)
+{
+    if (url == nullptr || url[0] == '\0')
+    {
+        return;
+    }
+    NSURL* target = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
+    if (target == nil)
+    {
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+#if TARGET_OS_OSX
+        [[NSWorkspace sharedWorkspace] openURL:target];
+#else
+        [[UIApplication sharedApplication] openURL:target options:@{} completionHandler:nil];
+#endif
+    });
+}
+
+#if TARGET_OS_OSX
+void MU_IosShowCommunityRulesOnce() {}
+#else
+void MU_IosShowCommunityRulesOnce()
+{
+    static NSString* const kAgreedKey = @"CommunityRulesAgreed.v1";
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:kAgreedKey])
+    {
+        return;
+    }
+
+    static bool s_showing = false;
+    if (s_showing)
+    {
+        return;
+    }
+
+    UIViewController* host = MainWindow().rootViewController;
+    while (host.presentedViewController != nil)
+    {
+        host = host.presentedViewController;
+    }
+    if (host == nil)
+    {
+        return; // no window yet; the next call shows it
+    }
+    s_showing = true;
+
+    NSString* message =
+        @"World of Kira has zero tolerance for objectionable content and abusive players.\n\n"
+        @"Harassment, threats, hate speech, sexual or illegal content in chat or voice "
+        @"leads to a ban.\n\n"
+        @"To block or report a player, tap them and choose Block or Report "
+        @"(or type /block <name> or /report <name>). Our GMs review reports within 24 hours.";
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Community Rules"
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"I Agree"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction*) {
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kAgreedKey];
+        s_showing = false;
+    }]];
+    [host presentViewController:alert animated:YES completion:nil];
+}
+#endif

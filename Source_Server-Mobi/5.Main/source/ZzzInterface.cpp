@@ -2,6 +2,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "PlayerBlock.h"
 #include <imm.h>
 #include "UIManager.h"
 #include "ZzzOpenglUtil.h"
@@ -4556,6 +4557,12 @@ bool CheckMacroLimit ( char* Text )
 bool CheckCommand(char *Text, bool bMacroText )
 {
 	if(g_ConsoleDebug->CheckCommand(Text) == true)  
+	{
+		return true;
+	}
+
+	// /block, /unblock, /blocklist stay on this device (PlayerBlock.h).
+	if(bMacroText == false && gPlayerBlock.HandleCommand(Text))
 	{
 		return true;
 	}

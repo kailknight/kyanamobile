@@ -210,6 +210,20 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 
 	this->GetString(message,command,sizeof(command),0);
 
+	// /report <name> [reason]: any player, from the chat or the player menu
+	// (client PlayerBlock.cpp). Not in Command.txt, for the reason below.
+	if(_stricmp(command,"/report") == 0)
+	{
+		char* argument = &message[strlen(command)];
+
+		if(argument[0] == 0x20)
+		{
+			argument++;
+		}
+
+		return this->CommandReport(lpObj,argument);
+	}
+
 	// Device bans are GM-only and not in Command.txt, whose 0-based rows against
 	// the 1-based enum make a new entry easy to bind to the wrong handler.
 	if(_stricmp(command,"/bandevice") == 0 || _stricmp(command,"/unbandevice") == 0)
@@ -3818,6 +3832,79 @@ bool CCommandManager::CommandBlocCharRecv(SDHP_COMMAND_BLOC_RECV* lpMsg) // OK
 	}
 
 #endif
+	return 1;
+}
+
+// /report <name> [reason]   a player reports another for abuse. Written to
+// Report.log next to GameServer.exe with both accounts and the place, shown in
+// the server window, and told to any GM online. One report a minute per player.
+bool CCommandManager::CommandReport(LPOBJ lpObj,char* arg) // OK
+{
+	static DWORD s_LastReport[MAX_OBJECT] = {0};
+
+	char name[11] = {0};
+	this->GetString(arg,name,sizeof(name),0);
+
+	if(name[0] == 0)
+	{
+		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"Usage: /report <name> [reason]");
+		return 0;
+	}
+
+	const DWORD now = GetTickCount();
+
+	if(s_LastReport[lpObj->Index] != 0 && (now - s_LastReport[lpObj->Index]) < 60000)
+	{
+		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"You can send one report a minute.");
+		return 0;
+	}
+
+	s_LastReport[lpObj->Index] = (now == 0) ? 1 : now;
+
+	char reason[100] = {0};
+	const char* rest = strchr(arg,' ');
+
+	if(rest != NULL)
+	{
+		strncpy_s(reason,rest + 1,_TRUNCATE);
+	}
+
+	for(char* p = reason; *p; p++)
+	{
+		if(*p == '\r' || *p == '\n')
+		{
+			*p = ' ';
+		}
+	}
+
+	LPOBJ lpTarget = gObjFind(name);
+
+	SYSTEMTIME time;
+	GetLocalTime(&time);
+
+	FILE* file = NULL;
+
+	if(fopen_s(&file,".\\Report.log","a") == 0 && file != NULL)
+	{
+		fprintf(file,"%04d-%02d-%02d %02d:%02d:%02d reporter %s (%s) map %d %d,%d -> %s (%s)%s : %s\n",
+			time.wYear,time.wMonth,time.wDay,time.wHour,time.wMinute,time.wSecond,
+			lpObj->Name,lpObj->Account,lpObj->Map,lpObj->X,lpObj->Y,
+			name,(lpTarget != NULL) ? lpTarget->Account : "?",(lpTarget != NULL) ? "" : " offline",
+			(reason[0] != 0) ? reason : "-");
+		fclose(file);
+	}
+
+	LogAdd(LOG_RED,"[Report] %s reported %s: %s",lpObj->Name,name,(reason[0] != 0) ? reason : "-");
+
+	for(int n = OBJECT_START_USER; n < MAX_OBJECT; n++)
+	{
+		if(gObjIsConnectedGP(n) != 0 && gGameMaster.CheckGameMasterLevel(&gObj[n],1) != 0)
+		{
+			gNotice.GCNoticeSend(n,1,0,0,0,0,0,"[Report] %s reported %s: %s",lpObj->Name,name,(reason[0] != 0) ? reason : "-");
+		}
+	}
+
+	gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"Thank you. Your report about %s was sent to the GMs.",name);
 	return 1;
 }
 

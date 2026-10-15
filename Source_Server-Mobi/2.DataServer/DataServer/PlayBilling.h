@@ -108,6 +108,7 @@ private:
 	// App Store ([AppStore] in PlayBilling.ini): purchase tokens "apple-<id>".
 	bool m_AppleEnabled;
 	bool m_AppleAllowSandbox;
+	char m_AppleSandboxAccounts[256];	// sandbox purchases credited for these only
 	char m_AppleKeyFile[MAX_PATH];
 	char m_AppleKeyId[32];
 	char m_AppleIssuer[64];
