@@ -226,6 +226,10 @@ struct SDHP_REDEEM_CODE_PEEK_RECV
 	DWORD RewardWCoinP;
 	DWORD RewardGoblinPoint;
 	DWORD RewardRuud;
+	DWORD RewardVipLevel; // appended after RewardRuud, mirrored in DataServerProtocol.h
+	DWORD RewardVipDays;
+	DWORD RewardBuffIndex; // Effect.txt index, 0 = none (mirrored in DataServerProtocol.h)
+	DWORD RewardBuffMinutes;
 };
 
 // GameServer -> DataServer (0xD9 / 0x31) - commit request. Only sent after
@@ -256,6 +260,10 @@ struct SDHP_REDEEM_CODE_COMMIT_RECV
 	DWORD RewardWCoinP;
 	DWORD RewardGoblinPoint;
 	DWORD RewardRuud;
+	DWORD RewardVipLevel; // appended after RewardRuud, mirrored in DataServerProtocol.h
+	DWORD RewardVipDays;
+	DWORD RewardBuffIndex; // Effect.txt index, 0 = none (mirrored in DataServerProtocol.h)
+	DWORD RewardBuffMinutes;
 };
 
 // Hand-duplicated in DataServer's own DataServerProtocol.h. Items[] is an

@@ -165,7 +165,7 @@ bool MainLoad::Load()
 				"Data\\Custom\\Configs\\kyana.ah is missing or unreadable.\n\n"
 				"This file is required to run the game. Restore it with the patcher "
 				"or reinstall the client.",
-				"Kira MU", MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);
+				"World of Kira", MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST);
 
 			::ExitProcess(0);
 		}

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "resource.h"
 #include "DSProtocol.h"
+#include "MonthlyCard.h"
 #include "BloodCastle.h"
 #include "CashShop.h"
 #include "CastleSiege.h"
@@ -145,6 +146,9 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x46: //Friend mail - attachment counts
 				gFriendMail.DGCountsRecv((SDHP_FRIENDMAIL_COUNTS_RECV*)lpMsg);
+				break;
+			case 0x50: //Kira Pass (monthly WCoin) - paid / status
+				gMonthlyCard.DGResultRecv((SDHP_MONTHLYCARD_RESULT*)lpMsg);
 				break;
 			}
 			break;
@@ -1295,6 +1299,15 @@ void DGCharacterInfoRecv(SDHP_CHARACTER_INFO_RECV* lpMsg) // OK
 	{
 		LogAdd(LOG_RED,"[DGCharacterInfoRecv] Invalid Account [%d](%s)",lpMsg->index,lpMsg->account);
 		CloseClient(lpMsg->index);
+		return;
+	}
+
+	// A second answer for a character already in game (the client asked again
+	// during a server switch) would reload it from the database - where the map
+	// is still the one it left - and send it straight back. Keep the first load.
+	if(gObj[lpMsg->index].Connected == OBJECT_ONLINE)
+	{
+		LogAdd(LOG_RED,"[DGCharacterInfoRecv] Duplicate character load ignored [%d](%s)",lpMsg->index,lpMsg->account);
 		return;
 	}
 

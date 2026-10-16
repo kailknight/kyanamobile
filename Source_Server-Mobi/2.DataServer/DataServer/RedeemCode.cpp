@@ -88,6 +88,25 @@ BYTE CRedeemCode::RunRedeemQuery(const char* query,REDEEM_BUNDLE_ITEM* outItems,
 					outCurrency->WCoinP      = (wcoinP > 0) ? (DWORD)wcoinP : 0;
 					outCurrency->GoblinPoint = (goblin > 0) ? (DWORD)goblin : 0;
 					outCurrency->Ruud        = (ruud   > 0) ? (DWORD)ruud   : 0;
+
+					int vipLevel = gQueryManager.GetAsInteger("RewardVipLevel");
+					int vipDays  = gQueryManager.GetAsInteger("RewardVipDays");
+
+					// -1 = column missing (schema not updated yet): no VIP reward.
+					if(vipLevel >= 1 && vipLevel <= 3 && vipDays > 0)
+					{
+						outCurrency->VipLevel = (DWORD)vipLevel;
+						outCurrency->VipDays  = (DWORD)vipDays;
+					}
+
+					int buffIndex   = gQueryManager.GetAsInteger("RewardBuffIndex");
+					int buffMinutes = gQueryManager.GetAsInteger("RewardBuffMinutes");
+
+					if(buffIndex > 0 && buffMinutes > 0)
+					{
+						outCurrency->BuffIndex   = (DWORD)buffIndex;
+						outCurrency->BuffMinutes = (DWORD)buffMinutes;
+					}
 				}
 			}
 
@@ -164,6 +183,10 @@ void CRedeemCode::OnPeekRequest(GSSENDDS_REDEEM_CODE_PEEK* lpMsg,int aIndex)
 		pMsg.RewardWCoinP = currency.WCoinP;
 		pMsg.RewardGoblinPoint = currency.GoblinPoint;
 		pMsg.RewardRuud = currency.Ruud;
+		pMsg.RewardVipLevel = currency.VipLevel;
+		pMsg.RewardVipDays = currency.VipDays;
+		pMsg.RewardBuffIndex = currency.BuffIndex;
+		pMsg.RewardBuffMinutes = currency.BuffMinutes;
 	}
 
 	gSocketManager.DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
@@ -177,16 +200,33 @@ void CRedeemCode::OnCommitRequest(GSSENDDS_REDEEM_CODE_COMMIT* lpMsg,int aIndex)
 	pMsg.aIndex = lpMsg->aIndex;
 	memcpy(pMsg.AccountID,lpMsg->AccountID,sizeof(pMsg.AccountID));
 
+	// The character name only goes into the redemption record (who received
+	// it), so a name with other characters - [ADM]KYANa, accents - must not
+	// block the redeem. It used to be checked like the code and failed as
+	// "That code doesn't exist" on the Redeem step only (the preview never
+	// sends a name). Anything outside the safe set becomes '_' instead, so it
+	// still can't break out of the quoted SQL string below.
+	char charName[11] = {0};
+	for(size_t n = 0; n < sizeof(charName) - 1 && lpMsg->CharacterName[n] != 0; n++)
+	{
+		char c = lpMsg->CharacterName[n];
+		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+		charName[n] = ok ? c : '_';
+	}
+	if(charName[0] == 0)
+	{
+		charName[0] = '_';
+	}
+
 	if(!IsSafeIdentifierString(lpMsg->Code,32)
-		|| !IsSafeIdentifierString(lpMsg->AccountID,10)
-		|| !IsSafeIdentifierString(lpMsg->CharacterName,10))
+		|| !IsSafeIdentifierString(lpMsg->AccountID,10))
 	{
 		pMsg.Result = REDEEM_NOT_FOUND;
 	}
 	else
 	{
 		char query[256];
-		sprintf_s(query,sizeof(query),"EXEC WZ_CommitRedeemCode '%s','%s','%s'",lpMsg->Code,lpMsg->AccountID,lpMsg->CharacterName);
+		sprintf_s(query,sizeof(query),"EXEC WZ_CommitRedeemCode '%s','%s','%s'",lpMsg->Code,lpMsg->AccountID,charName);
 
 		BYTE itemCount = 0;
 		REDEEM_CURRENCY_REWARD currency;
@@ -196,6 +236,10 @@ void CRedeemCode::OnCommitRequest(GSSENDDS_REDEEM_CODE_COMMIT* lpMsg,int aIndex)
 		pMsg.RewardWCoinP = currency.WCoinP;
 		pMsg.RewardGoblinPoint = currency.GoblinPoint;
 		pMsg.RewardRuud = currency.Ruud;
+		pMsg.RewardVipLevel = currency.VipLevel;
+		pMsg.RewardVipDays = currency.VipDays;
+		pMsg.RewardBuffIndex = currency.BuffIndex;
+		pMsg.RewardBuffMinutes = currency.BuffMinutes;
 	}
 
 	gSocketManager.DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);

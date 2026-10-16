@@ -2130,11 +2130,19 @@ void CNewUIInGameShop::OnPlayPurchaseResult(const BYTE* lpMsg, int size)
 
 	char text[256];
 
+	// Kira Pass (CB_KiraPass.h): no WCoin is added directly - it arrives by mail.
+	const bool kiraPass = (strncmp(msg.ProductId, "kira_pass", 9) == 0);
+
 	switch (msg.Result)
 	{
 	case 0: // credited
-		sprintf(text, "+%u WCoin (C) added to your account. Thank you!", (unsigned)msg.WCoinC);
-		RechargeMessage("Recharge", text);
+		if (kiraPass)
+			RechargeMessage("Kira Pass", "Kira Pass activated! Your first WCoin (C) is in your mailbox (Friends), and more arrives every day you log in. Thank you!");
+		else
+		{
+			sprintf(text, "+%u WCoin (C) added to your account. Thank you!", (unsigned)msg.WCoinC);
+			RechargeMessage("Recharge", text);
+		}
 		break;
 	case 1: // already credited earlier - the store re-reported a finished purchase
 		break;

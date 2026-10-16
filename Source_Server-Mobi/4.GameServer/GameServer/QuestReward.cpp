@@ -220,6 +220,12 @@ void CQuestReward::InsertQuestReward(LPOBJ lpObj,int QuestIndex) // OK
 			Class += (lpObj->Class*32);
 
 			gQuest.GCQuestRewardSend(lpObj->Index,lpInfo->Index,Class);
+
+			// High Elf learns Infinity Arrow (moved here from Marlon's quest).
+			if(lpObj->Class == CLASS_FE && gSkillManager.GetSkill(lpObj,SKILL_INFINITY_ARROW) == 0)
+			{
+				gSkillManager.GCSkillAddSend(lpObj->Index,gSkillManager.AddSkill(lpObj,SKILL_INFINITY_ARROW,0),SKILL_INFINITY_ARROW,0,0);
+			}
 			continue;
 		}
 	}

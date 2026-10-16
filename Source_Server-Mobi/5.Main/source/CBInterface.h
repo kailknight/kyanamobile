@@ -261,6 +261,7 @@ enum ObjectID
 		eWindowDoiItem,
 #endif
 	eAutoPotionConfig, // QuickToggles.cpp - hold ~ (auto potion + auto combo)
+	eWindowKiraPass, // CB_KiraPass.cpp - monthly WCoin pass (Menu)
 	eEndWindowCustom, //ket thuc
 
 

@@ -32,6 +32,11 @@ public:
 	// half-done (shown offline, "already registered" on re-adding). This clears it.
 	void CompleteFriendship(const char* acceptor,const char* requester);
 
+	// A system letter with a coin attachment (Kira Pass, MonthlyCard.cpp): from
+	// any label, into toName's mailbox, expiring after expireDays (0 = never).
+	// False when it could not be written (full mailbox) - nothing was stored.
+	bool MailCoins(const char* toName,const char* fromLabel,const char* subject,const char* memoText,int coinType,int amount,int expireDays);
+
 private:
 	DWORD GetGuid(const char* name);
 	void ReturnExpiredItems();

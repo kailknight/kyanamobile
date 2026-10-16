@@ -19,6 +19,7 @@
 #include "CustomRankUser.h"
 #include "CustomTop.h"
 #include "CustomStore.h"
+#include "OfflineMode.h"
 #include "DevilSquare.h"
 #include "DSProtocol.h"
 #include "EventHideAndSeek.h"
@@ -209,20 +210,6 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 	memset(command,0,sizeof(command));
 
 	this->GetString(message,command,sizeof(command),0);
-
-	// /report <name> [reason]: any player, from the chat or the player menu
-	// (client PlayerBlock.cpp). Not in Command.txt, for the reason below.
-	if(_stricmp(command,"/report") == 0)
-	{
-		char* argument = &message[strlen(command)];
-
-		if(argument[0] == 0x20)
-		{
-			argument++;
-		}
-
-		return this->CommandReport(lpObj,argument);
-	}
 
 	// Device bans are GM-only and not in Command.txt, whose 0-based rows against
 	// the 1-based enum make a new entry easy to bind to the wrong handler.
@@ -673,6 +660,11 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 			break;
 		case COMMAND_JOINPARTY:
 			Result = CommandJoinParty(lpObj, argument);
+			break;
+		case COMMAND_REPORT:
+			// /report <name> [reason], INDEX 88 in Command.txt. Also sent by the
+			// player menu's Report button (client PlayerBlock.cpp).
+			Result = this->CommandReport(lpObj, argument);
 			break;
 		case COMMAND_SETLEVEL:			
 			Result = CommandSetLevel(lpObj, argument);								
@@ -1433,6 +1425,15 @@ bool CCommandManager::CommandDisconnect(LPOBJ lpObj,char* arg) // OK
 	}
 
 	gObjUserKill(lpTarget->Index);
+
+	// Off helper / off attack / off store characters have no connection for
+	// gObjUserKill to close - end those sessions directly, as the GameServer
+	// window's Disconnect does.
+	gCustomAttack.OnAttackAlreadyConnected(lpTarget);
+
+	gCustomStore.OnPShopAlreadyConnected(lpTarget);
+
+	g_OfflineMode.OnHelperpAlreadyConnected(lpTarget);
 
 	gLog.Output(LOG_COMMAND,"[CommandDisconnect][%s][%s] - (Name: %s)",lpObj->Account,lpObj->Name,name);
 

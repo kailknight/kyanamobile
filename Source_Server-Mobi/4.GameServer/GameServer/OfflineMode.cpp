@@ -24,6 +24,9 @@
 #include "MapManager.h"
 #include "Log.h"
 #include "ItemLevel.h"
+#include <map>
+#include <vector>
+#include <algorithm>
 
 OfflineMode g_OfflineMode;
 
@@ -55,7 +58,24 @@ void OfflineMode::ReadOffLine(char* section,char* path)
 	this->m_MUOffHelperReturn[3] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL3", 0, path);
 }
 
+// Ends a character's off helper and removes it from the game. Called when the
+// account logs in again, from the GameServer window's Disconnect, /disconnect,
+// a device ban and server shutdown. It used to require IsFakeOnline too, so it
+// only ever removed fake-online bots and a real player's off helper could not
+// be disconnected at all (it has no socket for CloseClient to close).
 void OfflineMode::OnHelperpAlreadyConnected(LPOBJ lpObj) // OK
+{
+	if(lpObj->m_OfflineMode != 0)
+	{
+		gObjDel(lpObj->Index);
+		lpObj->m_OfflineMode = 0;
+		lpObj->MuOffHelperTime = 0;
+	}
+}
+
+// A helper character standing in a safe zone: fake-online bots are removed,
+// a real player's off helper is left alone (exactly the old behaviour).
+void OfflineMode::OnHelperInSafeZone(LPOBJ lpObj) // OK
 {
 	if(lpObj->m_OfflineMode != 0 && lpObj->IsFakeOnline !=0)
 	{
@@ -136,7 +156,24 @@ void OfflineMode::Start(CG_OFFMODE_RESULT* aRecv, int aIndex)
 	lpObj->DistanceReturnOn = aRecv->DistanceReturnOn;
 	lpObj->DistanceMin = aRecv->DistanceMin;
 	lpObj->SkillBasicID = aRecv->SkillBasicID;
-	lpObj->ComboOn = (lpObj->Class == CLASS_DK) ? aRecv->ComboOn : 0;				//-> CLASS_KNIGHT
+	lpObj->ComboOn = (lpObj->Class == CLASS_DK) ? aRecv->ComboOn : 0;				//-> CLASS_KNIGHT only
+	//-- Activation skills 1/2 (an older client sends a shorter packet: basic skill only)
+	for(int i = 0; i < 2; i++)
+	{
+		bool has = (aRecv->h.size >= sizeof(CG_OFFMODE_RESULT));
+		lpObj->OffActiveSkill[i] = has ? aRecv->ActiveSkill[i] : 0xFFFF;
+		lpObj->OffActiveDelayOn[i] = has ? aRecv->ActiveSkillDelayOn[i] : 0;
+		lpObj->OffActiveConditionOn[i] = has ? aRecv->ActiveSkillConditionOn[i] : 0;
+		lpObj->OffActiveSubCon[i] = has ? aRecv->ActiveSkillSubCon[i] : 0;
+		lpObj->OffActiveDelay[i] = has ? aRecv->ActiveSkillDelay[i] : 0;
+		lpObj->OffActiveTick[i] = 0;
+	}
+	if(aRecv->h.size < sizeof(CG_OFFMODE_RESULT))
+	{
+		lpObj->ComboOn = 0;
+	}
+	lpObj->OffComboStep = 0;
+	lpObj->OffComboTick = 0;
 	//--
 	lpObj->PartyModeOn = aRecv->PartyModeOn;
 	lpObj->PartyModeHealOn = (lpObj->Class == CLASS_FE) ? aRecv->PartyModeHealOn : 0;		//-> CLASS_ELF
@@ -285,6 +322,107 @@ void MuOffHelperRepair(int aIndex)
 // player would. On another map, use the Move (M) entry for that map - same
 // level, zen, wings and PK checks as the Move window, and it charges the zen.
 // On the right map, walk there in short path-found legs, then hunt again.
+// Walk-back route for each off-helper: the whole way from the respawn point to
+// the start spot, found once with a breadth-first search over the map's tile
+// attributes. The old walker only planned 8 tiles ahead in a straight line, so
+// in a maze (Atlans 3) it walked into walls and stood there.
+struct OFFHELPER_ROUTE
+{
+	int map;
+	int tx;
+	int ty;
+	std::vector<WORD> points; // x | (y << 8), start excluded
+	size_t next;
+};
+
+static std::map<int,OFFHELPER_ROUTE> gOffHelperRoute;
+
+static bool OffHelperTileWalkable(CMap* lpMap,int x,int y)
+{
+	// 4 = wall, 8 = no-walk. 1 (safe zone) and 2 (someone standing) are fine.
+	return (lpMap->GetAttr(x,y) & 0x0C) == 0;
+}
+
+static bool OffHelperFindRoute(int map,int sx,int sy,int tx,int ty,std::vector<WORD>& out)
+{
+	out.clear();
+
+	CMap* lpMap = &gMap[map];
+	const int w = lpMap->m_width;
+	const int h = lpMap->m_height;
+
+	if(w <= 0 || h <= 0 || w > 256 || h > 256 || sx < 0 || sy < 0 || tx < 0 || ty < 0 || sx >= w || sy >= h || tx >= w || ty >= h)
+	{
+		return false;
+	}
+
+	static int prev[256*256];
+	static WORD queue[256*256];
+
+	for(int n = 0; n < w*h; n++)
+	{
+		prev[n] = -1;
+	}
+
+	const int start = sy*w+sx;
+	const int goal = ty*w+tx;
+	int head = 0;
+	int tail = 0;
+
+	prev[start] = start;
+	queue[tail++] = (WORD)start;
+
+	static const int dx[8] = { 1,-1,0,0,1,1,-1,-1 };
+	static const int dy[8] = { 0,0,1,-1,1,-1,1,-1 };
+
+	while(head < tail && prev[goal] == -1)
+	{
+		const int cur = queue[head++];
+		const int cx = cur%w;
+		const int cy = cur/w;
+
+		for(int d = 0; d < 8; d++)
+		{
+			const int nx = cx+dx[d];
+			const int ny = cy+dy[d];
+
+			if(nx < 0 || ny < 0 || nx >= w || ny >= h)
+			{
+				continue;
+			}
+
+			const int ni = ny*w+nx;
+
+			if(prev[ni] != -1 || (ni != goal && OffHelperTileWalkable(lpMap,nx,ny) == 0))
+			{
+				continue;
+			}
+
+			// No cutting a wall corner on a diagonal step.
+			if(d >= 4 && (OffHelperTileWalkable(lpMap,cx+dx[d],cy) == 0 || OffHelperTileWalkable(lpMap,cx,cy+dy[d]) == 0))
+			{
+				continue;
+			}
+
+			prev[ni] = cur;
+			queue[tail++] = (WORD)ni;
+		}
+	}
+
+	if(prev[goal] == -1)
+	{
+		return false;
+	}
+
+	for(int cur = goal; cur != start; cur = prev[cur])
+	{
+		out.push_back((WORD)((cur%w) | ((cur/w) << 8)));
+	}
+
+	std::reverse(out.begin(),out.end());
+	return true;
+}
+
 void OfflineMode::ReturnToStartSpot(LPOBJ lpObj)
 {
 	const DWORD now = GetTickCount();
@@ -321,6 +459,7 @@ void OfflineMode::ReturnToStartSpot(LPOBJ lpObj)
 	{
 		lpObj->m_OfflineReturning = 0;
 		lpObj->m_OfflineTimeResetMove = now;
+		gOffHelperRoute.erase(lpObj->Index);
 		return;
 	}
 
@@ -333,17 +472,62 @@ void OfflineMode::ReturnToStartSpot(LPOBJ lpObj)
 		return;
 	}
 
-	// FindPath gives up after 15 steps, so aim at a point at most 8 tiles
-	// along the way and take 2 steps of that path (~4 tiles a second).
-	const int ix = lpObj->X + ((dx > 8) ? 8 : ((dx < -8) ? -8 : dx));
-	const int iy = lpObj->Y + ((dy > 8) ? 8 : ((dy < -8) ? -8 : dy));
+	// Follow a full route (found once, again if knocked off it), 2 tiles per
+	// step (~4 tiles a second).
+	OFFHELPER_ROUTE& route = gOffHelperRoute[lpObj->Index];
 
-	PATH_INFO path;
+	bool onRoute = (route.map == lpObj->Map && route.tx == lpObj->m_OfflineCoordX && route.ty == lpObj->m_OfflineCoordY && route.next <= route.points.size());
 
-	if (gMap[lpObj->Map].PathFinding2(lpObj->X, lpObj->Y, ix, iy, &path) != 0 && path.PathNum > 1)
+	if (onRoute)
 	{
-		const int step = (path.PathNum > 2) ? 2 : 1;
-		AnimationMove(lpObj->Index, path.PathX[step], path.PathY[step]);
+		// Where are we along it? (pushed, or the last step was refused)
+		const WORD here = (WORD)(lpObj->X | (lpObj->Y << 8));
+		const size_t from = (route.next >= 3) ? route.next - 3 : 0;
+		const size_t to = (route.next + 3 < route.points.size()) ? route.next + 3 : route.points.size();
+		bool found = (route.next == 0);
+
+		for (size_t n = from; n < to; n++)
+		{
+			if (route.points[n] == here)
+			{
+				route.next = n + 1;
+				found = true;
+				break;
+			}
+		}
+
+		onRoute = found;
+	}
+
+	if (onRoute == false)
+	{
+		route.map = lpObj->Map;
+		route.tx = lpObj->m_OfflineCoordX;
+		route.ty = lpObj->m_OfflineCoordY;
+		route.next = 0;
+
+		if (OffHelperFindRoute(lpObj->Map, lpObj->X, lpObj->Y, route.tx, route.ty, route.points) == false)
+		{
+			// No way there on foot: teleport rather than stand still.
+			gOffHelperRoute.erase(lpObj->Index);
+			lpObj->m_OfflineReturning = 0;
+			gObjTeleport(lpObj->Index, lpObj->m_OfflineMap, lpObj->m_OfflineCoordX, lpObj->m_OfflineCoordY);
+			return;
+		}
+	}
+
+	if (route.next >= route.points.size())
+	{
+		return;
+	}
+
+	const size_t step = (route.next + 1 < route.points.size()) ? route.next + 1 : route.next;
+	const WORD target = route.points[step];
+	AnimationMove(lpObj->Index, target & 0xFF, target >> 8);
+
+	if (lpObj->X == (target & 0xFF) && lpObj->Y == (target >> 8))
+	{
+		route.next = step + 1;
 	}
 }
 
@@ -372,6 +556,7 @@ void OfflineMode::Attack(int aIndex)
 		lpObj->m_OfflineReturnTries = 0;
 		lpObj->m_OfflineReturnTick = GetTickCount() + 2000; // stand a moment after respawning
 		lpObj->m_OfflineReturnStart = GetTickCount();
+		gOffHelperRoute.erase(lpObj->Index);
 	}
 
 	if (lpObj->m_OfflineMode == 0 && lpObj->IsFakeOnline == 0 || lpObj->DieRegen != 0
@@ -403,7 +588,7 @@ void OfflineMode::Attack(int aIndex)
 			return;
 		}
 
-		this->OnHelperpAlreadyConnected(lpObj);
+		this->OnHelperInSafeZone(lpObj);
 		return;
 	}
 
@@ -464,7 +649,7 @@ void OfflineMode::RenderAutoPote(int aIndex)	//-- OK
 	}
 
 	//-- RECOVERY HEALING ELF
-	if(lpObj->RecoveryHealOn != 0 && lpObj->IsFakeOnline != 0)
+	if(lpObj->RecoveryHealOn != 0 && (lpObj->m_OfflineMode != 0 || lpObj->IsFakeOnline != 0)) // off helper too, not only bots
 	{
 		CSkill* RenderSkillHealing;
 
@@ -483,6 +668,10 @@ void OfflineMode::RenderAutoPote(int aIndex)	//-- OK
 	}
 }
 
+// Self buffs, party buffs and the elf's party heal - what the Helper does in
+// game. It used to run only for fake-online bots (IsFakeOnline), so a real
+// player's off helper never buffed itself or its party. Party members must be
+// on the same map and within MAX_PARTY_DISTANCE, like a normal party buff.
 void OfflineMode::RenderAutoBuffParty(int aIndex)	//-- OK
 {
 	if (!gObjIsConnectedGP(aIndex))
@@ -492,8 +681,13 @@ void OfflineMode::RenderAutoBuffParty(int aIndex)	//-- OK
 	LPOBJ lpObj = &gObj[aIndex];
 	LPOBJ lpTarget;
 
-	//-- AUTOBUFF ONLY
-	if ( lpObj->BuffOn != 0 && lpObj->IsFakeOnline != 0)
+	if (lpObj->m_OfflineMode == 0 && lpObj->IsFakeOnline == 0)
+	{
+		return;
+	}
+
+	//-- AUTOBUFF (self)
+	if ( lpObj->BuffOn != 0 )
 	{
 		CSkill* RenderBuff;
 		for(int n = 0; n < 3 ; n++)
@@ -513,70 +707,167 @@ void OfflineMode::RenderAutoBuffParty(int aIndex)	//-- OK
 		}
 	}
 
-	//-- PARTY MODE ON
-	if ( lpObj->PartyModeOn != 0 && lpObj->IsFakeOnline != 0)
+	//-- PARTY MODE ON (only with a real party)
+	if ( lpObj->PartyModeOn == 0 || OBJECT_RANGE(lpObj->PartyNumber) == 0 || gParty.IsParty(lpObj->PartyNumber) == 0 )
 	{
+		return;
+	}
+
+	for(int i = 0; i < MAX_PARTY_USER ; i++)
+	{
+		int member = gParty.m_PartyInfo[lpObj->PartyNumber].Index[i];
+
+		if(OBJECT_RANGE(member) == 0 || member == lpObj->Index)
+		{
+			continue;
+		}
+
+		lpTarget = &gObj[member];
+
+		if(gObjIsConnectedGP(member) == 0 || lpTarget->Live == 0 || lpTarget->Map != lpObj->Map
+			|| gObjCalcDistance(lpObj,lpTarget) > MAX_PARTY_DISTANCE)
+		{
+			continue;
+		}
+
 		//-- PARTY HEAL ELF
 		if( lpObj->PartyModeHealOn != 0 && lpObj->Class == CLASS_FE)
 		{
-			CSkill* RenderPartyHealing;
+			CSkill* RenderPartyHealing = gSkillManager.GetSkill(lpObj, SKILL_HEAL);
 
-			for(int i = 0; i < MAX_PARTY_USER ; i++)
+			if (RenderPartyHealing != 0 && lpTarget->Life < (( lpTarget->MaxLife * lpObj->PartyModeHealPercent) / 100))
 			{
-
-				if(OBJECT_RANGE(gParty.m_PartyInfo[lpObj->PartyNumber].Index[i]) != 0)
-				{
-					RenderPartyHealing = gSkillManager.GetSkill(lpObj, SKILL_HEAL);
-
-					if (RenderPartyHealing != 0)
-					{
-						lpTarget = &gObj[gParty.m_PartyInfo[lpObj->PartyNumber].Index[i]];
-
-						if(lpTarget->Index == lpObj->Index)
-						{
-							continue;
-						}
-						if( lpTarget->Life < (( lpTarget->MaxLife * lpObj->PartyModeHealPercent) / 100))
-						{
-							if( gEffectManager.CheckEffect(lpTarget, gSkillManager.GetSkillEffect(RenderPartyHealing->m_index)) == 0 )
-							{
-								gSkillManager.UseAttackSkill(lpObj->Index, lpTarget->Index, RenderPartyHealing);
-							}
-						}
-					}
-				}
+				gSkillManager.UseAttackSkill(lpObj->Index, lpTarget->Index, RenderPartyHealing);
 			}
 		}
+
 		//-- PARTY BUFF
-		if( lpObj->PartyModeBuffOn != 0 && lpObj->IsFakeOnline != 0)
+		if( lpObj->PartyModeBuffOn != 0 )
 		{
-			CSkill* RenderPartyBuff;
-
-			for(int i = 0; i < MAX_PARTY_USER ; i++)
+			for(int n = 0; n < 3 ; n++)
 			{
-				if(OBJECT_RANGE(gParty.m_PartyInfo[lpObj->PartyNumber].Index[i]) != 0)
+				if(lpObj->BuffSkill[n] <= 0)
 				{
-					for(int n = 0; n < 3 ; n++)
-					{
-						if(lpObj->BuffSkill[n] > 0)
-						{
-							RenderPartyBuff = gSkillManager.GetSkill(lpObj, lpObj->BuffSkill[n]);
+					continue;
+				}
 
-							if (RenderPartyBuff != 0)
-							{
-								lpTarget = &gObj[gParty.m_PartyInfo[lpObj->PartyNumber].Index[i]];
+				CSkill* RenderPartyBuff = gSkillManager.GetSkill(lpObj, lpObj->BuffSkill[n]);
 
-								if(gEffectManager.CheckEffect(lpTarget, gSkillManager.GetSkillEffect(RenderPartyBuff->m_index)) == 0 )
-								{
-									gSkillManager.UseAttackSkill(lpObj->Index, gParty.m_PartyInfo[lpObj->PartyNumber].Index[i], RenderPartyBuff);
-								}
-							}
-						}
-					}
+				if (RenderPartyBuff != 0 && gEffectManager.CheckEffect(lpTarget, gSkillManager.GetSkillEffect(RenderPartyBuff->m_index)) == 0 )
+				{
+					gSkillManager.UseAttackSkill(lpObj->Index, lpTarget->Index, RenderPartyBuff);
 				}
 			}
 		}
 	}
+}
+
+CSkill* OfflineMode::GetSlotSkill(LPOBJ lpObj, int slot)
+{
+	int id = (slot == 0) ? (int)lpObj->SkillBasicID : (int)lpObj->OffActiveSkill[slot - 1];
+
+	if(id <= 0 || id >= 0xFFFF)
+	{
+		return 0;
+	}
+
+	return gSkillManager.GetSkill(lpObj, id);
+}
+
+// Mirrors the client's ActiveCheckMonterCount: -1 = not now, else a priority.
+int OfflineMode::CheckActiveSkill(LPOBJ lpObj, int n)
+{
+	CSkill* lpSkill = this->GetSlotSkill(lpObj, n + 1);
+
+	if(lpSkill == 0)
+	{
+		return -1;
+	}
+
+	if(lpObj->OffActiveDelayOn[n] != 0)
+	{
+		DWORD delay = ((lpObj->OffActiveDelay[n] > 1) ? lpObj->OffActiveDelay[n] : 1) * 1000;
+		return ((GetTickCount() - lpObj->OffActiveTick[n]) >= delay) ? 1 : -1;
+	}
+
+	if(lpObj->OffActiveConditionOn[n] != 0)
+	{
+		int count = 0;
+
+		for(int v = 0; v < MAX_VIEWPORT; v++)
+		{
+			if(lpObj->VpPlayer2[v].state == VIEWPORT_NONE || OBJECT_RANGE(lpObj->VpPlayer2[v].index) == 0 || lpObj->VpPlayer2[v].type != OBJECT_MONSTER)
+			{
+				continue;
+			}
+
+			LPOBJ lpTarget = &gObj[lpObj->VpPlayer2[v].index];
+
+			if(lpTarget->Live == 0 || lpTarget->State == OBJECT_EMPTY)
+			{
+				continue;
+			}
+
+			if(lpObj->DistanceLongOn != 0)
+			{
+				if(gObjCalcDistance(lpObj, lpTarget) <= (int)lpObj->HuntingRange)
+				{
+					count++;
+				}
+			}
+			else if(gSkillManager.CheckSkillRange(lpSkill->m_index, lpObj->X, lpObj->Y, lpTarget->X, lpTarget->Y) != 0)
+			{
+				count++;
+			}
+		}
+
+		static const int need[4] = { 2, 4, 6, 8 };
+		int sub = lpObj->OffActiveSubCon[n];
+
+		if(sub < 0 || sub > 3)
+		{
+			return -1;
+		}
+
+		return (count >= need[sub]) ? sub : -1;
+	}
+
+	return -1;
+}
+
+int OfflineMode::SelectSkillSlot(LPOBJ lpObj)
+{
+	if(lpObj->ComboOn != 0)
+	{
+		// Combo: basic -> skill 1 -> skill 2. A half-built chain older than
+		// 2.5 s can't finish any more (ComboSkill 3 s window), so restart it.
+		if(lpObj->OffComboStep < 0 || lpObj->OffComboStep > 2 || (lpObj->OffComboStep != 0 && (GetTickCount() - lpObj->OffComboTick) > 2500))
+		{
+			lpObj->OffComboStep = 0;
+		}
+
+		for(int tries = 0; tries < 3; tries++)
+		{
+			if(this->GetSlotSkill(lpObj, lpObj->OffComboStep) != 0)
+			{
+				return lpObj->OffComboStep;
+			}
+
+			lpObj->OffComboStep = (lpObj->OffComboStep >= 2) ? 0 : lpObj->OffComboStep + 1;
+		}
+
+		return 0;
+	}
+
+	int c1 = this->CheckActiveSkill(lpObj, 0);
+	int c2 = this->CheckActiveSkill(lpObj, 1);
+
+	if(c1 != -1 || c2 != -1)
+	{
+		return (c2 > c1) ? 2 : 1;
+	}
+
+	return 0;
 }
 
 void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
@@ -591,17 +882,30 @@ void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
 	int distance = (lpObj->HuntingRange > 6) ? 6 : lpObj->HuntingRange;
 
 	//-- SKILL ATTACK
-	CSkill * SkillRender;
+	CSkill * SkillRender = 0;
 
-	/*if( lpObj->ComboOn != 0 )
+	// Same choice as the online helper (CB_MUHelper::MuHelperActiveAttack):
+	// slot 0 = basic skill, 1/2 = activation skills.
+	int slot = this->SelectSkillSlot(lpObj);
+
+	if(lpObj->RecoveryDrainOn != 0 && lpObj->Life < (( lpObj->MaxLife * lpObj->RecoveryDrainPercent) / 100))
 	{
-
-		SkillRender = ( lpObj->orderskill == 0 ) ? gSkillManager.GetSkill(lpObj, lpObj->SkillBasicID) : ( lpObj->orderskill == 1 ) ? gSkillManager.GetSkill(lpObj, lpObj->Skill) : gSkillManager.GetSkill(lpObj, lpObj->SkillBasicID);
+		SkillRender = gSkillManager.GetSkill(lpObj, SKILL_DRAIN_LIFE);
+		slot = -1;
 	}
-	else
-	{*/
-		SkillRender = ( lpObj->Life < (( lpObj->MaxLife * lpObj->RecoveryDrainPercent) / 100) && lpObj->RecoveryDrainOn != 0) ? gSkillManager.GetSkill(lpObj, SKILL_DRAIN_LIFE) : gSkillManager.GetSkill(lpObj, lpObj->SkillBasicID);
-	/*}*/
+
+	if(SkillRender == 0)
+	{
+		if(slot < 0) slot = 0;
+
+		SkillRender = this->GetSlotSkill(lpObj, slot);
+
+		if(SkillRender == 0 && slot != 0)
+		{
+			slot = 0;
+			SkillRender = this->GetSlotSkill(lpObj, 0);
+		}
+	}
 
 
 	if (SkillRender == 0)
@@ -709,6 +1013,18 @@ void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
 			if((GetTickCount()-((DWORD) lpObj->AttackCustomDelay )) >= (((((DWORD) lpObj->PhysiSpeed) * MultiPlicador) > 1500 ) ? 0 : ( 1500 - (((DWORD) lpObj->PhysiSpeed) * MultiPlicador ))))
 			{
 				lpObj->AttackCustomDelay = GetTickCount();
+
+				if(slot >= 1)
+				{
+					lpObj->OffActiveTick[slot - 1] = GetTickCount();
+				}
+
+				if(lpObj->ComboOn != 0 && slot >= 0)
+				{
+					// Next combo step only after a cast really went out.
+					lpObj->OffComboStep = (slot >= 2) ? 0 : slot + 1;
+					lpObj->OffComboTick = GetTickCount();
+				}
 
 				if(SkillRender->m_skill != SKILL_FLAME 
 					&& SkillRender->m_skill != SKILL_TWISTER 
@@ -838,7 +1154,7 @@ int OfflineMode::PickUP(int aIndex)
 
 	if (gServerInfo.InSafeZone(aIndex) == true)
 	{
-		this->OnHelperpAlreadyConnected(lpObj);
+		this->OnHelperInSafeZone(lpObj);
 		return 0;
 	}
 
@@ -997,7 +1313,7 @@ void OfflineMode::regresar(int aIndex)
 
 	if (gServerInfo.InSafeZone(aIndex) == true)
 	{
-		this->OnHelperpAlreadyConnected(lpObj);
+		this->OnHelperInSafeZone(lpObj);
 		return;
 	}
 

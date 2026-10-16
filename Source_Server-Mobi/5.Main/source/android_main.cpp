@@ -1532,7 +1532,7 @@ constexpr float kSkillPageButtonRadius = 13.0f;
 // message store.
 constexpr float kChatTabsX = 215.0f;
 constexpr float kChatTabsY = 352.0f;
-constexpr float kChatTabW = 30.0f;
+constexpr float kChatTabW = 23.0f;
 constexpr float kChatTabH = 16.0f;
 constexpr float kChatTabGap = 1.0f;
 
@@ -1540,13 +1540,13 @@ constexpr float kChatTabGap = 1.0f;
 constexpr float kChatLogX = 215.0f;
 constexpr float kChatLogBottomY = 470.0f;
 
-constexpr int kChatTabCount = 7;
+constexpr int kChatTabCount = 8;
 
 
 // Last entry is the overflow tab, which cycles the channels that have no tab of
 // their own rather than opening a menu.
 constexpr std::array<const char*, kChatTabCount> kChatTabLabels = {
-    "All", "Chat", "Party", "Guild", "Alliance", "System", "+"
+    "All", "Post", "PM", "Party", "Guild", "Ally", "System", "+"
 };
 
 // Auto-combo toggle. Only drawn and only hit-tested for the Knight line, so it
@@ -10874,6 +10874,7 @@ bool IsAndroidRawPopupWindowOpen()
                              // menu, so it needs this entry either way.
 #endif
         eWindowFriendMail,   // Friends (modern) - opens from the friend button.
+        eWindowKiraPass,     // Kira Pass (monthly WCoin) - opens from the Menu.
     };
 
     for (const ObjectID window : kAndroidMenuSubWindows)
@@ -16535,7 +16536,9 @@ void UpdateAndroidBagHold()
     // out of it. Binding is still available the moment the window is closed.
     const bool transferWindowOpen = (g_pNewUISystem != nullptr)
         && (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY)
-            || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE));
+            || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_STORAGE)
+            // A shop: a hold sells (after a confirmation), potions included.
+            || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP));
 
     const int itemLevel = (item->Level >> 3) & 15;
     if (!transferWindowOpen && SEASON3B::CNewUIMyInventory::CanRegisterItemHotKey(item->Type))
@@ -17992,11 +17995,12 @@ SEASON3B::MESSAGE_TYPE GetChatTabMessageType(int tab)
     switch (tab)
     {
     case 0:  return SEASON3B::TYPE_ALL_MESSAGE;
-    case 1:  return SEASON3B::TYPE_CHAT_MESSAGE;
-    case 2:  return SEASON3B::TYPE_PARTY_MESSAGE;
-    case 3:  return SEASON3B::TYPE_GUILD_MESSAGE;
-    case 4:  return SEASON3B::TYPE_UNION_MESSAGE;   // alliance
-    case 5:  return SEASON3B::TYPE_SYSTEM_MESSAGE;
+    case 1:  return SEASON3B::TYPE_POST_ITEM;        // /post lines
+    case 2:  return SEASON3B::TYPE_WHISPER_MESSAGE;  // private messages
+    case 3:  return SEASON3B::TYPE_PARTY_MESSAGE;
+    case 4:  return SEASON3B::TYPE_GUILD_MESSAGE;
+    case 5:  return SEASON3B::TYPE_UNION_MESSAGE;    // alliance
+    case 6:  return SEASON3B::TYPE_SYSTEM_MESSAGE;
     default: return SEASON3B::TYPE_ALL_MESSAGE;
     }
 }
@@ -18181,13 +18185,12 @@ int GetChatTabInputMsgType(int tab)
     switch (tab)
     {
     case 0:  // All
-    case 1:  // Chat
         return SEASON3B::CNewUIChatInputBox::INPUT_CHAT_MESSAGE;
-    case 2:  // Party
+    case 3:  // Party
         return SEASON3B::CNewUIChatInputBox::INPUT_PARTY_MESSAGE;
-    case 3:  // Guild
+    case 4:  // Guild
         return SEASON3B::CNewUIChatInputBox::INPUT_GUILD_MESSAGE;
-    case 4:  // Alliance
+    case 5:  // Alliance
         return SEASON3B::CNewUIChatInputBox::INPUT_GENS_MESSAGE;
     default:
         return SEASON3B::CNewUIChatInputBox::INPUT_NOTHING;
@@ -18213,7 +18216,7 @@ bool HandleAndroidChatTabTap(float uiX, float uiY)
         {
             // Overflow: step through the channels with no tab of their own.
             static const SEASON3B::MESSAGE_TYPE kExtra[] = {
-                SEASON3B::TYPE_WHISPER_MESSAGE,
+                SEASON3B::TYPE_CHAT_MESSAGE,
                 SEASON3B::TYPE_GM_MESSAGE,
                 SEASON3B::TYPE_GENS_MESSAGE,
                 SEASON3B::TYPE_ERROR_MESSAGE,
@@ -25551,7 +25554,7 @@ int SDL_main(int argc, char* argv[])
 
     // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Create fullscreen window 鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾鑺掗垾婵冨亾
     g_SDLWindow = SDL_CreateWindow(
-        "MU Online",
+        "World of Kira",
         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
         0, 0,
         SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_SHOWN
@@ -26640,7 +26643,7 @@ sapp_desc sokol_main(int argc, char* argv[])
 #if defined(__ANDROID__)
     desc.android_fb_scale = 0.8f;
 #endif
-    desc.window_title = "MU Online";
+    desc.window_title = "World of Kira";
     desc.swap_interval = 0;
 #if defined(MU_MACOS)
     // sokol's Cocoa backend only takes 3.2 or 4.1 core; 4.1 is the most macOS

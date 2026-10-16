@@ -108,6 +108,10 @@ void CB_RedeemCodeWindow::Reset()
 	this->m_RewardWCoinP = 0;
 	this->m_RewardGoblinPoint = 0;
 	this->m_RewardRuud = 0;
+	this->m_RewardVipLevel = 0;
+	this->m_RewardVipDays = 0;
+	this->m_RewardBuffMinutes = 0;
+	memset(this->m_RewardBuffName, 0, sizeof(this->m_RewardBuffName));
 	this->m_HoveredRow = -1;
 	this->m_HoveredTipX = 0.0f;
 	this->m_HoveredTipLeftX = 0.0f;
@@ -169,6 +173,11 @@ void CB_RedeemCodeWindow::RecvPreviewResult(PMSG_REDEEM_CODE_RECV* lpMsg)
 	this->m_RewardWCoinP = lpMsg->RewardWCoinP;
 	this->m_RewardGoblinPoint = lpMsg->RewardGoblinPoint;
 	this->m_RewardRuud = lpMsg->RewardRuud;
+	this->m_RewardVipLevel = lpMsg->RewardVipLevel;
+	this->m_RewardVipDays = lpMsg->RewardVipDays;
+	this->m_RewardBuffMinutes = lpMsg->RewardBuffMinutes;
+	memcpy(this->m_RewardBuffName, lpMsg->RewardBuffName, sizeof(this->m_RewardBuffName));
+	this->m_RewardBuffName[sizeof(this->m_RewardBuffName) - 1] = 0;
 	this->m_HoveredRow = -1;
 
 	// Only REDEEM_OK_TO_REDEEM gets to see the bundle and a Redeem button -
@@ -192,6 +201,11 @@ void CB_RedeemCodeWindow::RecvRedeemResult(PMSG_REDEEM_CODE_RECV* lpMsg)
 	this->m_RewardWCoinP = lpMsg->RewardWCoinP;
 	this->m_RewardGoblinPoint = lpMsg->RewardGoblinPoint;
 	this->m_RewardRuud = lpMsg->RewardRuud;
+	this->m_RewardVipLevel = lpMsg->RewardVipLevel;
+	this->m_RewardVipDays = lpMsg->RewardVipDays;
+	this->m_RewardBuffMinutes = lpMsg->RewardBuffMinutes;
+	memcpy(this->m_RewardBuffName, lpMsg->RewardBuffName, sizeof(this->m_RewardBuffName));
+	this->m_RewardBuffName[sizeof(this->m_RewardBuffName) - 1] = 0;
 	this->m_HoveredRow = -1;
 	this->m_State = STATE_RESULT;
 }
@@ -209,6 +223,8 @@ const char* CB_RedeemCodeWindow::ResultMessage(BYTE result) const
 	case REDEEM_ALREADY_REDEEMED: return "You've already redeemed this code.";
 	case REDEEM_INVENTORY_FULL:   return "Your inventory doesn't have room for all the rewards.";
 	case REDEEM_BUSY:             return "Please wait for your last attempt to finish.";
+	case REDEEM_VIP_LOWER:        return "Your account already has a higher VIP than this code gives.";
+	case REDEEM_BUFF_ACTIVE:      return "This buff is already active on you. Use the code when it ends.";
 	default:                      return "Something went wrong - please try again.";
 	}
 }
@@ -381,6 +397,8 @@ int CB_RedeemCodeWindow::CurrencyRewardCount() const
 	if (this->m_RewardWCoinP > 0)      n++;
 	if (this->m_RewardGoblinPoint > 0) n++;
 	if (this->m_RewardRuud > 0)        n++;
+	if (this->m_RewardVipLevel > 0)    n++;
+	if (this->m_RewardBuffMinutes > 0)  n++;
 	return n;
 }
 
@@ -418,6 +436,44 @@ int CB_RedeemCodeWindow::RenderCurrencyRows(float x, float y, float w, float row
 		char amountText[32];
 		sprintf_s(amountText, sizeof(amountText), "%s", gInterface.NumberFormat(rows[i].amount));
 		TextDraw((HFONT)g_hFont, x + 10.0f, rowY + 22.0f, 0xFFFFFFFF, 0x0, w - 20.0f, 0, 0, amountText);
+
+		drawn++;
+	}
+
+	// VIP reward: "VIP 2" and the number of days, in the same row style.
+	if (this->m_RewardVipLevel > 0)
+	{
+		float rowY = y + (drawn * stride);
+		gInterface.DrawBarForm(x, rowY, w, rowH, 0.0f, 0.0f, 0.0f, 0.55f);
+
+		char label[32];
+		sprintf_s(label, sizeof(label), "VIP %d", (int)this->m_RewardVipLevel);
+		TextDraw((HFONT)g_hFont, x + 10.0f, rowY + 6.0f, 0xFFFFC04F, 0x0, w - 20.0f, 0, 0, label);
+
+		char daysText[32];
+		sprintf_s(daysText, sizeof(daysText), "%d day(s)", (int)this->m_RewardVipDays);
+		TextDraw((HFONT)g_hFont, x + 10.0f, rowY + 22.0f, 0xFFFFFFFF, 0x0, w - 20.0f, 0, 0, daysText);
+
+		drawn++;
+	}
+
+	// Buff reward: its name and how long it lasts once redeemed.
+	if (this->m_RewardBuffMinutes > 0)
+	{
+		float rowY = y + (drawn * stride);
+		gInterface.DrawBarForm(x, rowY, w, rowH, 0.0f, 0.0f, 0.0f, 0.55f);
+
+		TextDraw((HFONT)g_hFont, x + 10.0f, rowY + 6.0f, 0xFF8FE3FF, 0x0, w - 20.0f, 0, 0, this->m_RewardBuffName);
+
+		const int minutes = (int)this->m_RewardBuffMinutes;
+		char timeText[48];
+		if (minutes >= 1440)
+			sprintf_s(timeText, sizeof(timeText), "Buff - %d day(s) %d hour(s)", minutes / 1440, (minutes % 1440) / 60);
+		else if (minutes >= 60)
+			sprintf_s(timeText, sizeof(timeText), "Buff - %d hour(s) %d min", minutes / 60, minutes % 60);
+		else
+			sprintf_s(timeText, sizeof(timeText), "Buff - %d min", minutes);
+		TextDraw((HFONT)g_hFont, x + 10.0f, rowY + 22.0f, 0xFFFFFFFF, 0x0, w - 20.0f, 0, 0, timeText);
 
 		drawn++;
 	}

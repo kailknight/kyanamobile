@@ -350,7 +350,20 @@ inline int _wcsncpy_s_impl(wchar_t* dst, size_t dstsz, const wchar_t* src, size_
 #define _strcpy_s_3(d,n,s)                strcpy((d),(s))
 #define strcpy_s(...)                     _va_pick3(__VA_ARGS__, _strcpy_s_3, _strcpy_s_2, ~)(__VA_ARGS__)
 #define _strncpy_s_3(dst,src,cnt)         strncpy((dst),(src),(cnt))
-#define _strncpy_s_4(dst,dstsz,src,cnt)   strncpy((dst),(src),(cnt))
+// MSVC semantics: copy at most cnt (or dstsz-1 for _TRUNCATE) and always
+// terminate. A plain strncpy(dst,src,cnt) with cnt = _TRUNCATE ((size_t)-1)
+// zero-fills past the buffer and smashes the stack (Kira Pass price crash).
+inline int _strncpy_s_impl(char* dst, size_t dstsz, const char* src, size_t cnt)
+{
+    if (!dst || dstsz == 0) return EINVAL;
+    if (!src) { dst[0] = '\0'; return EINVAL; }
+    size_t n = (cnt == (size_t)-1) ? dstsz - 1 : (cnt < dstsz - 1 ? cnt : dstsz - 1);
+    size_t i = 0;
+    for (; i < n && src[i] != '\0'; ++i) dst[i] = src[i];
+    dst[i] = '\0';
+    return 0;
+}
+#define _strncpy_s_4(dst,dstsz,src,cnt)   _strncpy_s_impl((dst),(size_t)(dstsz),(src),(size_t)(cnt))
 #define strncpy_s(...)                    _PICK5(__VA_ARGS__, _strncpy_s_4, _strncpy_s_3, ~, ~)(__VA_ARGS__)
 inline int fopen_s(FILE** file, const char* path, const char* mode) { if (!file) return EINVAL; *file = fopen(path, mode); return *file ? 0 : errno; }
 #define _tcslen strlen

@@ -3229,8 +3229,15 @@ void CGCharacterInfoRecv(PMSG_CHARACTER_INFO_RECV* lpMsg,int aIndex) // OK
 		return;
 	}
 
+	// Server switch: the server already loads the character itself
+	// (JGMapServerMoveAuthRecv), so the client's own request is a duplicate.
+	if(lpObj->MapServerMoveRequest != 0)
+	{
+		return;
+	}
+
 	lpObj->EnableDelCharacter = 0;
-	
+
 	char name[11] = {0};
 
 	memcpy(name,lpMsg->name,sizeof(lpMsg->name));

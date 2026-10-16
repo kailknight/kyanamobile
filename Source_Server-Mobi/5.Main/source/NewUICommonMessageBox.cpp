@@ -2698,6 +2698,40 @@ CALLBACK_RESULT SEASON3B::CHighValueItemCheckMsgBoxLayout::CancelBtnDown(class C
 	return CALLBACK_BREAK;
 }
 
+bool SEASON3B::CSellItemConfirmMsgBoxLayout::SetLayout()
+{
+	CNewUI3DItemCommonMsgBox* pMsgBox = GetMsgBox();
+	if(0 == pMsgBox)
+		return false;
+	if(false == pMsgBox->Create(MSGBOX_COMMON_TYPE_OKCANCEL))
+		return false;
+
+	CNewUIPickedItem* pPickedItem = CNewUIInventoryCtrl::GetPickedItem();
+	ITEM* pItem = (pPickedItem != NULL) ? pPickedItem->GetItem() : NULL;
+
+	if(pItem)
+	{
+		pMsgBox->Set3DItem(pItem);
+	}
+
+	pMsgBox->AddMsg("Sell this item to the shop?", RGBA(255, 255, 255, 255), MSGBOX_FONT_BOLD);
+
+	if(pItem)
+	{
+		// ItemValue(item, 1) is the "Selling Price" the shop tooltip shows.
+		char gold[64];
+		ConvertGold(ItemValue(pItem, 1), gold);
+		char text[96];
+		sprintf(text, "You get %s Zen.", gold);
+		pMsgBox->AddMsg(text, RGBA(255, 178, 0, 255), MSGBOX_FONT_NORMAL);
+	}
+
+	pMsgBox->AddCallbackFunc(CHighValueItemCheckMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
+	pMsgBox->AddCallbackFunc(CHighValueItemCheckMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
+
+	return true;
+}
+
 bool SEASON3B::CUseFruitMsgBoxLayout::SetLayout()
 {
 	CNewUI3DItemCommonMsgBox* pMsgBox = GetMsgBox();

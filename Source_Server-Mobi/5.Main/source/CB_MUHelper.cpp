@@ -722,6 +722,17 @@ int CB_MUHelper::GetMonter()
 	return Target;
 }
 
+// Combo step bookkeeping (MuHelperActiveAttack).
+static DWORD s_LastComboStepTick = 0;
+// A combo step asked for but not on the wire yet. Some skills (Twisting Slash
+// and the other "continue" skills) are queued by ExecuteSkill and sent a frame
+// or more later, so the request counter only moves after the helper's call
+// returned. Without this the helper kept re-asking the same step - Twisting
+// over and over - and never reached Activation Skill 2.
+static int s_ComboPendingSlot = -1;
+static DWORD s_ComboPendingSeq = 0;
+static DWORD s_ComboPendingTick = 0;
+
 bool CB_MUHelper::MuHelperActiveAttack()
 {
 	int SelectSkillNum = 0;
@@ -731,7 +742,46 @@ bool CB_MUHelper::MuHelperActiveAttack()
 	//===Combo
 	if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Combo == 1)
 	{
-		SelectSkillNum = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillCache;
+		auto& pendData = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+		if (s_ComboPendingSlot >= 0)
+		{
+			if (g_SkillRequestSendSeq != s_ComboPendingSeq)
+			{
+				// The queued cast went out since the last call: that step is done.
+				pendData.TimerDelay[s_ComboPendingSlot] = GetTickCount();
+				pendData.SkillCache = (s_ComboPendingSlot >= 2 ? 0 : s_ComboPendingSlot + 1);
+				s_LastComboStepTick = GetTickCount();
+				s_ComboPendingSlot = -1;
+			}
+			else if ((GetTickCount() - s_ComboPendingTick) > 1500)
+			{
+				// Never went out (no mana, out of range...): ask again.
+				s_ComboPendingSlot = -1;
+			}
+			else
+			{
+				// Still waiting for it - don't queue the same step again.
+				return 1;
+			}
+		}
+		// Cycles Basic -> Skill 1 -> Skill 2, moving on only after a cast. A slot
+		// with no usable skill (left empty, or a skill the hero no longer has)
+		// never casts, so the cycle used to stop on it for good - the helper
+		// "stuck" with combo on. Step past such slots instead.
+		auto& data = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+		if (data.SkillCache < 0 || data.SkillCache > 2)
+		{
+			data.SkillCache = 0;
+		}
+		for (int tries = 0; tries < 3; ++tries)
+		{
+			if (gSkillManager.FindHeroSkill((ActionSkillType)data.Skill[data.SkillCache]) == 1)
+			{
+				break;
+			}
+			data.SkillCache = (data.SkillCache >= 2 ? 0 : data.SkillCache + 1);
+		}
+		SelectSkillNum = data.SkillCache;
 	}
 	else
 	{
@@ -754,13 +804,46 @@ SetAttackSkill:
 		//g_MovementSkill.m_bMagic = true;
 		if (SelectedCharacter != -1)
 		{
-			//Attacking = 2;
-			gCB_MUHelper->SimulateSkill(iSkillType, true, CharactersClient[SelectedCharacter].Key);
-			//MouseRButtonPush = 1;
-			g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Stage++;
+			auto& data = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
 
-			g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.TimerDelay[SelectSkillNum] = GetTickCount();
-			g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillCache = (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillCache >= 2 ? 0 : g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillCache + 1);
+			// The server's combo (ComboSkill.cpp) is starter -> finisher ->
+			// different finisher, each within 3 s of the last. Past ~2.5 s the
+			// half-built chain can't finish any more, so start again from the
+			// starter (Basic Skill) rather than casting a finisher that only
+			// resets it.
+			if (data.Combo == 1 && data.SkillCache != 0 && (GetTickCount() - s_LastComboStepTick) > 2500)
+			{
+				data.SkillCache = 0;
+			}
+
+			//Attacking = 2;
+			// ExecuteSkill's return value describes the previous cast; a request
+			// on the wire is the only honest "it went out" (g_SkillRequestSendSeq).
+			const DWORD sentBefore = g_SkillRequestSendSeq;
+			gCB_MUHelper->SimulateSkill(iSkillType, true, CharactersClient[SelectedCharacter].Key);
+			const bool sent = (g_SkillRequestSendSeq != sentBefore);
+			//MouseRButtonPush = 1;
+			data.Stage++;
+
+			if (sent)
+			{
+				data.TimerDelay[SelectSkillNum] = GetTickCount();
+
+				// Next slot only when this cast really went out. Moving on after a
+				// cast that never left (still in the last swing, no mana, walking
+				// into range) put the chain out of order, so the server kept
+				// resetting it and combo never fired.
+				data.SkillCache = (data.SkillCache >= 2 ? 0 : data.SkillCache + 1);
+				s_LastComboStepTick = GetTickCount();
+			}
+			else if (data.Combo == 1 && CheckKQ == 6)
+			{
+				// ExecuteSkill ran but nothing is on the wire yet: it may be a
+				// queued skill. Check on the next call before moving or retrying.
+				s_ComboPendingSlot = SelectSkillNum;
+				s_ComboPendingSeq = g_SkillRequestSendSeq;
+				s_ComboPendingTick = GetTickCount();
+			}
 			//DrawMessage(1, "Attack Skill %d -> Monter %d", g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SelectSkillNum], SelectedCharacter);
 		}
 

@@ -43,6 +43,7 @@ public:
 	void ReloadMonsterInfo();
 	void ReloadMapManagerInfo();
 	void ReadStartupInfo(char* section,char* path);
+	void ReadAllowedAccounts(char* section,char* path);
 	void ReadCashShopInfo(char* section,char* path);
 	void ReadChaosMixInfo(char* section,char* path);
 	void ReadCharacterInfo(char* section,char* path);
@@ -60,6 +61,10 @@ public:
 	char m_ServerName[32];
 	long m_ServerCode;
 	long m_ServerLock;
+	// AllowedAccountsOnly = 1: only accounts in AllowedAccounts (Common.ini) can log in.
+	int m_AllowedAccountsOnly;
+	std::vector<std::string> m_AllowedAccounts;
+	bool IsAccountAllowed(const char* account);
 	int  m_ServerMinLevel;
 	int  m_ServerMaxLevel;
 	int  m_ServerMinReset;

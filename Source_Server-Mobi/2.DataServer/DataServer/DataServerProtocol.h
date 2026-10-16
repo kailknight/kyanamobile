@@ -1153,6 +1153,10 @@ struct REDEEM_CURRENCY_REWARD
 	DWORD WCoinP;
 	DWORD GoblinPoint;
 	DWORD Ruud;
+	DWORD VipLevel; // 0 = no VIP reward, else account level 1-3
+	DWORD VipDays;
+	DWORD BuffIndex;   // Effect.txt index, 0 = no buff reward
+	DWORD BuffMinutes;
 };
 
 struct SDHP_REDEEM_CODE_PEEK_RECV
@@ -1170,6 +1174,10 @@ struct SDHP_REDEEM_CODE_PEEK_RECV
 	DWORD RewardWCoinP;
 	DWORD RewardGoblinPoint;
 	DWORD RewardRuud;
+	DWORD RewardVipLevel; // appended after RewardRuud, mirrored in GameServer DSProtocol.h
+	DWORD RewardVipDays;
+	DWORD RewardBuffIndex;
+	DWORD RewardBuffMinutes;
 };
 
 struct GSSENDDS_REDEEM_CODE_COMMIT
@@ -1196,6 +1204,10 @@ struct SDHP_REDEEM_CODE_COMMIT_RECV
 	DWORD RewardWCoinP;
 	DWORD RewardGoblinPoint;
 	DWORD RewardRuud;
+	DWORD RewardVipLevel; // appended after RewardRuud, mirrored in GameServer DSProtocol.h
+	DWORD RewardVipDays;
+	DWORD RewardBuffIndex;
+	DWORD RewardBuffMinutes;
 };
 
 // Must stay byte-identical to GameServer's hand-duplicated copy in its own

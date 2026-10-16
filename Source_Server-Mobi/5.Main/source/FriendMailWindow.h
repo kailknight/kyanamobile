@@ -134,6 +134,7 @@ public:
 	bool IsModern() const { return this->m_ConfigReceived && this->m_Modern; }
 	bool IsOpen() const;
 	void Toggle();
+	void OpenMailbox();
 	void Close();
 
 	void DrawWindow();

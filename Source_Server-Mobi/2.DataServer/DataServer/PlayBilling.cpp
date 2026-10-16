@@ -9,6 +9,7 @@
 #include "SocketManager.h"
 #include "ServerDisplayer.h"
 #include "Util.h"
+#include "MonthlyCard.h"
 
 #include <wincrypt.h>
 #include <winhttp.h>
@@ -31,6 +32,24 @@ CPlayBilling gPlayBilling;
 namespace
 {
 	const char* kConfigFile = ".\\PlayBilling.ini";
+
+	// Kira Pass products (PlayBilling.ini [MonthlyCard] Products, comma separated):
+	// they grant 30 days of the monthly card instead of crediting WCoin.
+	bool IsMonthlyCardProduct(const char* productId)
+	{
+		char list[512] = {0};
+		GetPrivateProfileStringA("MonthlyCard","Products","",list,sizeof(list),kConfigFile);
+
+		char* context = NULL;
+
+		for(char* token = strtok_s(list,", \t",&context); token != NULL; token = strtok_s(NULL,", \t",&context))
+		{
+			if(_stricmp(token,productId) == 0)
+				return true;
+		}
+
+		return false;
+	}
 
 	// Token, product id and order id go into URLs and SQL as-is, so only the
 	// characters Google actually uses get through.
@@ -1052,7 +1071,7 @@ void CPlayBilling::OnPurchaseRequest(SDHP_PLAY_PURCHASE_RECV* lpMsg,int index)
 		return;
 	}
 
-	if(GetPrivateProfileIntA("Products",lpMsg->ProductId,0,kConfigFile) <= 0)
+	if(!IsMonthlyCardProduct(lpMsg->ProductId) && GetPrivateProfileIntA("Products",lpMsg->ProductId,0,kConfigFile) <= 0)
 	{
 		this->SendResult(index,lpMsg->aIndex,lpMsg->AccountID,lpMsg->ProductId,PLAY_RESULT_UNKNOWN_PRODUCT,0);
 		return;
@@ -1080,9 +1099,12 @@ void CPlayBilling::OnPurchaseVerified(SDHP_PLAY_PURCHASE_VERIFIED* lpMsg,int ind
 		return;
 	}
 
-	const int coins = GetPrivateProfileIntA("Products",lpMsg->ProductId,0,kConfigFile);
+	// A Kira Pass purchase goes through the same token record (with 0 WCoin) so
+	// it keeps every protection below, then grants the month instead.
+	const bool monthly = IsMonthlyCardProduct(lpMsg->ProductId);
+	const int coins = monthly ? 0 : GetPrivateProfileIntA("Products",lpMsg->ProductId,0,kConfigFile);
 
-	if(coins <= 0)
+	if(!monthly && coins <= 0)
 	{
 		this->SendResult(index,lpMsg->aIndex,lpMsg->AccountID,lpMsg->ProductId,PLAY_RESULT_UNKNOWN_PRODUCT,0);
 		return;
@@ -1101,6 +1123,21 @@ void CPlayBilling::OnPurchaseVerified(SDHP_PLAY_PURCHASE_VERIFIED* lpMsg,int ind
 	}
 
 	gQueryManager.Close();
+
+	// Kira Pass: grant the month. Grant is keyed on the order, so running it
+	// again for an already-recorded token (a retry after a crash here) is safe.
+	// If it fails, answer RETRY and do not finish the purchase with Google, so
+	// it is delivered again rather than lost.
+	if(monthly && (result == PLAY_RESULT_CREDITED || result == PLAY_RESULT_ALREADY))
+	{
+		const char* ref = (lpMsg->OrderId[0] != 0) ? lpMsg->OrderId : lpMsg->Token;
+
+		if(gMonthlyCard.Grant(lpMsg->AccountID,IsAppleToken(lpMsg->Token) ? "apple" : "google",ref) < 0)
+		{
+			this->SendResult(index,lpMsg->aIndex,lpMsg->AccountID,lpMsg->ProductId,PLAY_RESULT_RETRY,0);
+			return;
+		}
+	}
 
 	if(result == PLAY_RESULT_CREDITED)
 	{

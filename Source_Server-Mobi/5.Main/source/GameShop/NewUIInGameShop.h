@@ -428,6 +428,10 @@ namespace SEASON3B
 		// handed over (GameServer/DataServer PlayBilling).
 		void OnPlayPurchaseResult(const BYTE* lpMsg, int size);
 
+		// Store purchase results normally arrive only while the shop is open;
+		// the Kira Pass panel (CB_KiraPass.cpp) runs this while it is open too.
+		void PollStoreResults() { this->PollRechargeResults(); }
+
 	private:
 		bool UpdateBanner();
 

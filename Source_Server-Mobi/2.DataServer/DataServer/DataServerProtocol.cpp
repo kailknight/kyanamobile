@@ -43,6 +43,7 @@
 #include "PlayBilling.h"
 #include "DeviceLog.h"
 #include "FriendMail.h"
+#include "MonthlyCard.h"
 #include "SpinClaim.h"
 #include "SlotClaim.h"
 void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
@@ -977,6 +978,9 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x46: //==Friend mail - attachment counts (+ expiry sweep)
 				gFriendMail.OnCountsRequest((SDHP_FRIENDMAIL_NAME_REQ*)lpMsg, index);
+				break;
+			case 0x50: //==Kira Pass (monthly WCoin) - pay on login / status
+				gMonthlyCard.OnRequest((SDHP_MONTHLYCARD_REQ*)lpMsg, index);
 				break;
 			}
 			break;

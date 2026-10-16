@@ -180,8 +180,10 @@ void CUIMng::RenderTitleSceneUI(HDC hDC, DWORD dwNow, DWORD dwTotal)
 		m_asprTitle[i].Render();
 	}
 
+	// The old MU logo (Interface/MU_TITLE) is a blank 1x1 placeholder that drew
+	// as a white box; the World of Kira loading art carries its own logo.
 #if !defined(__ANDROID__) && !defined(MU_IOS)
-	m_asprTitle[UIM_TS_MU].Render();
+//	m_asprTitle[UIM_TS_MU].Render();
 #endif
 	m_pgbLoding->SetValue(dwNow, dwTotal);
 	m_pgbLoding->Render();

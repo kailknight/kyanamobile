@@ -59,6 +59,10 @@ private:
 	DWORD m_RewardWCoinP;
 	DWORD m_RewardGoblinPoint;
 	DWORD m_RewardRuud;
+	DWORD m_RewardVipLevel;
+	DWORD m_RewardVipDays;
+	DWORD m_RewardBuffMinutes;
+	char m_RewardBuffName[32];
 	int m_HoveredRow;
 	float m_HoveredTipX;      // preferred anchor, just right of the window
 	float m_HoveredTipLeftX;  // window's left edge, for the flip-to-left case

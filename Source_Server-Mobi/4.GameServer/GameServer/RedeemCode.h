@@ -32,7 +32,7 @@ public:
 
 private:
 	bool IsCodeStringValid(const char* code);
-	void SendResultToClient(int aIndex,BYTE subcode,BYTE result,const REDEEM_BUNDLE_ITEM* items,int itemCount,DWORD wcoinC = 0,DWORD wcoinP = 0,DWORD goblinPoint = 0,DWORD ruud = 0);
+	void SendResultToClient(int aIndex,BYTE subcode,BYTE result,const REDEEM_BUNDLE_ITEM* items,int itemCount,DWORD wcoinC = 0,DWORD wcoinP = 0,DWORD goblinPoint = 0,DWORD ruud = 0,DWORD vipLevel = 0,DWORD vipDays = 0,DWORD buffIndex = 0,DWORD buffMinutes = 0);
 	void GrantBundle(int aIndex,const REDEEM_BUNDLE_ITEM* items,int itemCount);
 
 	// GameServer -> DataServer, this feature's own GD*Send equivalents.

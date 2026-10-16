@@ -98,6 +98,16 @@ void JGConnectAccountRecv(SDHP_CONNECT_ACCOUNT_RECV* lpMsg) // OK
 		GCConnectAccountSend(lpMsg->index,9);
 		return;
 	}
+
+	// Only the listed accounts may enter (AllowedAccountsOnly in Common.ini).
+	// Refused like ServerLock, so the client shows its usual message.
+	if(gServerInfo.IsAccountAllowed(lpMsg->account) == 0)
+	{
+		LogAdd(LOG_RED,"[AllowedAccounts] %s refused - not on this server's list",lpMsg->account);
+		GJDisconnectAccountSend(lpMsg->index,lpMsg->account,gObj[lpMsg->index].IpAddr);
+		GCConnectAccountSend(lpMsg->index,9);
+		return;
+	}
 	
 	gObj[lpMsg->index].Connected = OBJECT_LOGGED;
 
@@ -409,6 +419,10 @@ void GJDisconnectAccountSend(int aIndex,char* account,char* IpAddress) // OK
 void GJMapServerMoveSend(int aIndex,WORD NextServerCode,WORD map,BYTE x,BYTE y) // OK
 {
 	SDHP_MAP_SERVER_MOVE_SEND pMsg;
+
+	// Diagnostic: which map sends a player to which server, and from where.
+	LogAdd(LOG_RED,"[MapServerMove] %s: to map %d (%d,%d) on server %d - now map %d (%d,%d), last server %d, moveRequest %d",
+		gObj[aIndex].Name,map,x,y,NextServerCode,gObj[aIndex].Map,gObj[aIndex].X,gObj[aIndex].Y,gObj[aIndex].LastServerCode,gObj[aIndex].MapServerMoveRequest);
 
 	pMsg.header.set(0x03,sizeof(pMsg));
 

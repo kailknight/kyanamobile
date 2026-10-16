@@ -40,7 +40,8 @@ final class MuBilling {
     // Product ids, created in Play Console as one-time (consumable) products.
     static final String[] PRODUCT_IDS = {
         "wcoin_c_20", "wcoin_c_110", "wcoin_c_320",
-        "wcoin_c_540", "wcoin_c_1100", "wcoin_c_2750"
+        "wcoin_c_540", "wcoin_c_1100", "wcoin_c_2750",
+        "kira_pass_30" // Kira Pass: 30 days of monthly WCoin (CB_KiraPass.cpp)
     };
 
     private static BillingClient client;

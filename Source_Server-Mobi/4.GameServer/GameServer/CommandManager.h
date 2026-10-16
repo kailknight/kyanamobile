@@ -103,6 +103,8 @@ enum eCommandNumber
 	// in Command.txt. Get that off by one and the label binds to the neighbouring
 	// handler with no error at all.
 	COMMAND_JOINPARTY		= 88,
+	// /report: INDEX 88 in Command.txt (0-based, see above).
+	COMMAND_REPORT			= 89,
 };
 
 //**********************************************//

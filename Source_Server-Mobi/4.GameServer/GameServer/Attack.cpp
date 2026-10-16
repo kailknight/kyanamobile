@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "Attack.h"
+#include "MonsterScaling.h"
 #include "BattleSoccerManager.h"
 #include "CastleSiege.h"
 #include "ChaosCastle.h"
@@ -147,7 +148,7 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 			if((GetTickCount()-lpObj->HelperPvpNoticeTime) >= 5000)
 			{
 				lpObj->HelperPvpNoticeTime = GetTickCount();
-				gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"You cannot attack players while MU Helper is on.");
+				gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"You cannot attack players while the Helper is on.");
 			}
 			return 0;
 		}
@@ -286,6 +287,10 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 	{
 		return 0;
 	}
+
+	// The hit is allowed: a normal monster on a scaled map takes on this
+	// player's level the first time it is hit (MonsterScaling.ini).
+	gMonsterScaling.OnPlayerAttack(lpObj,lpTarget);
 
 	#pragma endregion
 

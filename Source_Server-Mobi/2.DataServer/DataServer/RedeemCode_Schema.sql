@@ -51,7 +51,15 @@ BEGIN
         RewardWCoinC      INT NOT NULL DEFAULT 0,  -- -> lpObj->Coin1
         RewardWCoinP      INT NOT NULL DEFAULT 0,  -- -> lpObj->Coin2
         RewardGoblinPoint INT NOT NULL DEFAULT 0,  -- -> lpObj->Coin3
-        RewardRuud        INT NOT NULL DEFAULT 0   -- -> lpObj->Ruud
+        RewardRuud        INT NOT NULL DEFAULT 0,  -- -> lpObj->Ruud
+        -- VIP reward: account level 1-3 for RewardVipDays days, applied through
+        -- the JoinServer exactly like Buy VIP (WZ_SetAccountLevel). 0 = none.
+        RewardVipLevel    TINYINT NOT NULL DEFAULT 0,
+        RewardVipDays     INT NOT NULL DEFAULT 0,
+        -- Buff reward: Effect.txt index (0 = none), active for RewardBuffMinutes
+        -- from the moment of redeeming - the same buffs the cash shop sells.
+        RewardBuffIndex   INT NOT NULL DEFAULT 0,
+        RewardBuffMinutes INT NOT NULL DEFAULT 0
     );
 END
 ELSE
@@ -64,6 +72,14 @@ BEGIN
         ALTER TABLE CustomRedemptionCodes ADD RewardGoblinPoint INT NOT NULL DEFAULT 0;
     IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('CustomRedemptionCodes') AND name = 'RewardRuud')
         ALTER TABLE CustomRedemptionCodes ADD RewardRuud INT NOT NULL DEFAULT 0;
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('CustomRedemptionCodes') AND name = 'RewardVipLevel')
+        ALTER TABLE CustomRedemptionCodes ADD RewardVipLevel TINYINT NOT NULL DEFAULT 0;
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('CustomRedemptionCodes') AND name = 'RewardVipDays')
+        ALTER TABLE CustomRedemptionCodes ADD RewardVipDays INT NOT NULL DEFAULT 0;
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('CustomRedemptionCodes') AND name = 'RewardBuffIndex')
+        ALTER TABLE CustomRedemptionCodes ADD RewardBuffIndex INT NOT NULL DEFAULT 0;
+    IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('CustomRedemptionCodes') AND name = 'RewardBuffMinutes')
+        ALTER TABLE CustomRedemptionCodes ADD RewardBuffMinutes INT NOT NULL DEFAULT 0;
 END
 
 IF OBJECT_ID('CustomRedemptionCodeItems', 'U') IS NULL
@@ -226,6 +242,7 @@ BEGIN
     SELECT
         1 AS Result,
         c.RewardWCoinC, c.RewardWCoinP, c.RewardGoblinPoint, c.RewardRuud,
+        c.RewardVipLevel, c.RewardVipDays, c.RewardBuffIndex, c.RewardBuffMinutes,
         -- LEFT JOIN, not a plain SELECT off the items table: a currency-only
         -- code has no item rows at all, and an empty result set makes the
         -- DataServer's reader (RedeemCode.cpp) fail closed with SERVER_ERROR
@@ -338,6 +355,7 @@ BEGIN
     SELECT
         0 AS Result,
         c.RewardWCoinC, c.RewardWCoinP, c.RewardGoblinPoint, c.RewardRuud,
+        c.RewardVipLevel, c.RewardVipDays, c.RewardBuffIndex, c.RewardBuffMinutes,
         -- LEFT JOIN, not a plain SELECT off the items table: a currency-only
         -- code has no item rows at all, and an empty result set makes the
         -- DataServer's reader (RedeemCode.cpp) fail closed with SERVER_ERROR

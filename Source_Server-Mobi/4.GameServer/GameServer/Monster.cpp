@@ -12,6 +12,7 @@
 #include "Crywolf.h"
 #include "CrywolfSync.h"
 #include "CustomMonster.h"
+#include "MonsterScaling.h"
 #include "DevilSquare.h"
 #include "DSProtocol.h"
 #include "EffectManager.h"
@@ -444,6 +445,7 @@ bool gObjSetMonster(int aIndex,int MonsterClass) // OK
 	gObjSetEquipInventory1Pointer(lpObj);
 #endif
 	gCustomMonster.SetCustomMonsterInfo(lpObj);
+	gMonsterScaling.Clear(lpObj->Index); // a new monster in this slot: drop any saved scaling
 
 	if(lpObj->AttackType != 0)
 	{
@@ -586,6 +588,8 @@ bool gObjSetMonster(int aIndex,int MonsterClass) // OK
 
 bool gObjMonsterRegen(LPOBJ lpObj) // OK
 {
+	gMonsterScaling.Reset(lpObj); // back to Monster.txt stats if it was scaled
+
 	gObjClearViewport(lpObj);
 
 	lpObj->TargetNumber = -1;
@@ -3322,6 +3326,7 @@ bool gObjSetBots(int aIndex,int MonsterClass) // OK SACAR LO QUE NO ES NESESARIO
 	gObjSetEquipInventory1Pointer(lpObj);
 #endif
 	gCustomMonster.SetCustomMonsterInfo(lpObj);
+	gMonsterScaling.Clear(lpObj->Index); // a new monster in this slot: drop any saved scaling
 
 	if(lpObj->AttackType != 0)
 	{

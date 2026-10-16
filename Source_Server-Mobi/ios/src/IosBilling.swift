@@ -34,7 +34,8 @@ private final class MuStore {
     // Product ids, created in App Store Connect as consumable in-app purchases.
     // The same ids as Google Play, so PlayBilling.ini serves both stores.
     let productIds = ["wcoin_c_20", "wcoin_c_110", "wcoin_c_320",
-                      "wcoin_c_540", "wcoin_c_1100", "wcoin_c_2750"]
+                      "wcoin_c_540", "wcoin_c_1100", "wcoin_c_2750",
+                      "kira_pass_30"]  // Kira Pass: 30 days of monthly WCoin (CB_KiraPass.cpp)
 
     private let lock = NSLock()
     private var products: [String: Product] = [:]

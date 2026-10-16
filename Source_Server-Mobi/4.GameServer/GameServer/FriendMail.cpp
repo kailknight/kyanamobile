@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 #include "FriendMail.h"
+#include "MonthlyCard.h"
 #include "DSProtocol.h"
 #include "GameMain.h"
 #include "ItemManager.h"
@@ -123,6 +124,9 @@ void CFriendMail::OnFriendListRequested(int aIndex)
 	DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
 
 	this->SendNameRequest(aIndex,0x46);
+
+	// Kira Pass: today's reward (and any instant reward) by mail.
+	gMonthlyCard.OnCharacterEnter(aIndex);
 }
 
 // -----------------------------------------------------------------------------

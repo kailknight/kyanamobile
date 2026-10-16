@@ -357,6 +357,8 @@ enum eRedeemCodeResult
 	REDEEM_INVENTORY_FULL,
 	REDEEM_BUSY,
 	REDEEM_SERVER_ERROR,
+	REDEEM_VIP_LOWER,        // the code gives a lower VIP than the account already has
+	REDEEM_BUFF_ACTIVE,      // the code's buff is already running on this character
 };
 
 struct REDEEM_ITEM_DETAIL
@@ -389,6 +391,14 @@ struct PMSG_REDEEM_CODE_RECV
 	DWORD RewardWCoinP;
 	DWORD RewardGoblinPoint;
 	DWORD RewardRuud;
+	// VIP reward (account level 1-3 for N days), 0 = none. Mirrored in
+	// GameServer's Protocol.h.
+	DWORD RewardVipLevel;
+	DWORD RewardVipDays;
+	// Buff reward: minutes it lasts and its name, 0 / "" = none. Mirrored in
+	// GameServer's Protocol.h.
+	DWORD RewardBuffMinutes;
+	char RewardBuffName[32];
 };
 
 // This struct is hand-duplicated in GameServer's own Protocol.h (this codebase

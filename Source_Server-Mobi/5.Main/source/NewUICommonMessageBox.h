@@ -567,6 +567,15 @@ namespace SEASON3B
 		static CALLBACK_RESULT CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
 	};
 
+	// Right-click (PC) / hold (phone) on a bag item while a shop is open: the
+	// item is picked up hidden, and this asks before selling it. OK and Cancel
+	// are CHighValueItemCheckMsgBoxLayout's own (sell the picked item / put it back).
+	class CSellItemConfirmMsgBoxLayout : public TMsgBoxLayout<CNewUI3DItemCommonMsgBox>
+	{
+	public:
+		bool SetLayout();
+	};
+
 	class CUseFruitMsgBoxLayout : public TMsgBoxLayout<CNewUI3DItemCommonMsgBox>
 	{
 	public:	

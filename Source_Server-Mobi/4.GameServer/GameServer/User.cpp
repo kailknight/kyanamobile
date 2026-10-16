@@ -1081,7 +1081,17 @@ void gObjCharZeroSet(int aIndex) // OK
 	lpObj->IsFakeOnline = false;
 	lpObj->m_OfflineMoveDelay = 0;
 	lpObj->m_OfflineMap = -1;
+	lpObj->MonthlyCardDaysLeft = 0;
+	lpObj->MonthlyCardPaidToday = 0;
 	lpObj->m_OfflineReturning = 0;
+	memset(lpObj->OffActiveSkill,0xFF,sizeof(lpObj->OffActiveSkill));
+	memset(lpObj->OffActiveDelayOn,0,sizeof(lpObj->OffActiveDelayOn));
+	memset(lpObj->OffActiveConditionOn,0,sizeof(lpObj->OffActiveConditionOn));
+	memset(lpObj->OffActiveSubCon,0,sizeof(lpObj->OffActiveSubCon));
+	memset(lpObj->OffActiveDelay,0,sizeof(lpObj->OffActiveDelay));
+	memset(lpObj->OffActiveTick,0,sizeof(lpObj->OffActiveTick));
+	lpObj->OffComboStep = 0;
+	lpObj->OffComboTick = 0;
 	lpObj->m_OfflineReturnTries = 0;
 	lpObj->m_OfflineReturnTick = 0;
 	lpObj->m_OfflineReturnStart = 0;

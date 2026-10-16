@@ -298,6 +298,19 @@ void CFriendMailWindow::Toggle()
 	PlayBuffer(25,0,0);
 }
 
+void CFriendMailWindow::OpenMailbox()
+{
+	if(this->IsModern() == false)
+	{
+		return;
+	}
+
+	gInterface.Data[eWindowFriendMail].EventTick = GetTickCount();
+	gInterface.Data[eWindowFriendMail].OnShow = true;
+	this->SetView(VIEW_MAIL);
+	this->RequestDetails();
+}
+
 void CFriendMailWindow::Close()
 {
 	gInterface.Data[eWindowFriendMail].OnShow = false;

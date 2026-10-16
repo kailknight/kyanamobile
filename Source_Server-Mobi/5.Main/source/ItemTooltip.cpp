@@ -226,7 +226,7 @@ int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 			}
 			//wsprintf(TextList[TextNum++], "\n");
 			wsprintf(TextList[TextNum++], "\n");
-			wsprintf(TextList[TextNum], "MuOnline");
+			wsprintf(TextList[TextNum], "World of Kira");
 			TextListColor[TextNum] = 4;
 			TextBold[TextNum++] = 0;
 		}
@@ -294,7 +294,7 @@ int nCInfo::nInformationOP(int TextNum, ITEM* ItemSearch)
 			}
 			//wsprintf(TextList[TextNum++], "\n");
 			wsprintf(TextList[TextNum++], "\n");
-			wsprintf(TextList[TextNum], "MuOnline");
+			wsprintf(TextList[TextNum], "World of Kira");
 			TextListColor[TextNum] = 4;
 			TextBold[TextNum++] = 0;
 		}

@@ -1326,10 +1326,21 @@ struct OBJECTSTRUCT
 /*+300*/	char	ObtainPickItemList[12][16];
 
 	int orderskill;
+	// Off-helper activation skills 1/2 + combo (mirrors the client helper)
+	WORD OffActiveSkill[2];
+	BYTE OffActiveDelayOn[2];
+	BYTE OffActiveConditionOn[2];
+	BYTE OffActiveSubCon[2];
+	WORD OffActiveDelay[2];
+	DWORD OffActiveTick[2];
+	int OffComboStep;
+	DWORD OffComboTick;
 
 	short m_OfflineCoordX;
 	short m_OfflineCoordY;
 	short m_OfflineMap; // map the off helper was started on, for the return-after-death switch
+	int MonthlyCardDaysLeft; // Kira Pass (MonthlyCard.cpp): days left, 0 = none
+	BYTE MonthlyCardPaidToday;
 	BYTE m_OfflineReturning; // 1 = respawned after a death, heading back to the start spot
 	BYTE m_OfflineReturnTries; // Move (M) attempts to reach m_OfflineMap
 	DWORD m_OfflineReturnTick;

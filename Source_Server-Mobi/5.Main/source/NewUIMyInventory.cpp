@@ -2725,6 +2725,49 @@ bool CNewUIMyInventory::HandleInventoryActions(CNewUIInventoryCtrl * targetContr
 			}
 		}
 
+		else if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP))
+		{
+			// Right click (PC) / hold (phone - the hold sends this same right
+			// click) sells a bag item, after a confirmation. Same checks as
+			// dragging it onto the shop (CNewUINPCShop::InventoryProcess); the
+			// item is picked up hidden so OK sells exactly that one and Cancel
+			// puts it back (CHighValueItemCheckMsgBoxLayout's own handlers).
+			ITEM* pItem = targetControl->FindItemAtPt(MouseX, MouseY);
+			if (pItem == nullptr || EquipmentItem || CNewUIInventoryCtrl::GetPickedItem() != nullptr
+				|| g_pNPCShop->IsSellingItem())
+			{
+				return true;
+			}
+
+			if (CharacterMachine->Gold + ItemValue(pItem) > 2000000000)
+			{
+				g_pChatListBox->AddText("", GlobalText[3148], SEASON3B::TYPE_SYSTEM_MESSAGE);
+				return true;
+			}
+			if (pItem->Jewel_Of_Harmony_Option != 0)
+			{
+				g_pChatListBox->AddText("", GlobalText[2211], SEASON3B::TYPE_ERROR_MESSAGE);
+				return true;
+			}
+			if (IsSellingBan(pItem))
+			{
+				g_pChatListBox->AddText("", GlobalText[668], SEASON3B::TYPE_ERROR_MESSAGE);
+				return true;
+			}
+
+			if (CNewUIInventoryCtrl::CreatePickedItem(targetControl, pItem))
+			{
+				const bool highValue = IsHighValueItem(pItem);
+				targetControl->RemoveItem(pItem);
+				CNewUIInventoryCtrl::GetPickedItem()->HidePickedItem();
+
+				if (highValue)
+					SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CHighValueItemCheckMsgBoxLayout));
+				else
+					SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CSellItemConfirmMsgBoxLayout));
+			}
+			return true;
+		}
 		else if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY))
 		{
 			g_pMyInventory->BMoveItemNew(MOVE_INV_TO_MIX);

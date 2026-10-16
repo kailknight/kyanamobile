@@ -4904,7 +4904,8 @@ bool CObjectManager::CharacterInfoSet(BYTE* aRecv,int aIndex) // OK
 	{
 		gSkillManager.AddSkill(lpObj,SKILL_STAR_FALL,0);
 
-		if(gQuest.CheckQuestListState(lpObj,2,QUEST_FINISH) != 0)
+		// Infinity Arrow comes with High Elf (3rd class), not Marlon's quest.
+		if(lpObj->ChangeUp >= 2)
 		{
 			gSkillManager.AddSkill(lpObj,SKILL_INFINITY_ARROW,0);
 		}

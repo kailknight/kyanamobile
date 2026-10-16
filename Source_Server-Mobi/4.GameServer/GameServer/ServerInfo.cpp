@@ -25,6 +25,7 @@
 #include "CustomEventDrop.h"
 #include "CustomJewel.h"
 #include "CustomMonster.h"
+#include "MonsterScaling.h"
 #include "CustomMove.h"
 #include "CustomNpcCollector.h"
 #include "CustomNpcCommand.h"
@@ -483,6 +484,8 @@ void CServerInfo::ReadCustomInfo() // OK
 	gCustomJewel.LoadXML(gPath.GetFullPath("Custom\\CustomJewel.xml"));
 
 	gCustomMonster.Load(gPath.GetFullPath("Custom\\CustomMonster.txt"));
+
+	gMonsterScaling.Load(gPath.GetFullPath("Custom\\MonsterScaling.ini"));
 
 	gCustomMonsterSkill.Load(gPath.GetFullPath("Custom\\CustomMonsterSkill.txt"));
 
@@ -995,6 +998,8 @@ void CServerInfo::ReadStartupInfo(char* section,char* path) // OK
 	this->m_ServerCode = GetPrivateProfileInt(section,"ServerCode",0,path);
 
 	this->m_ServerLock = GetPrivateProfileInt(section,"ServerLock",0,path);
+
+	this->ReadAllowedAccounts(section,path);
 
 	this->m_ServerPort = GetPrivateProfileInt(section,"ServerPort",0,path);
 
@@ -3266,6 +3271,8 @@ void CServerInfo::ReadCommonInfo(char* section,char* path) // OK
 
 	this->m_ServerLock = GetPrivateProfileInt(section,"ServerLock",0,path);
 
+	this->ReadAllowedAccounts(section,path);
+
 	this->m_ServerMaxUserNumber = GetPrivateProfileInt(section,"ServerMaxUserNumber",0,path);
 
 	this->m_MainChecksum = GetPrivateProfileInt(section,"MainChecksum",0,path);
@@ -5287,4 +5294,46 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 		wsprintf(key, "DevilSquareMiniBossClass%d", (n + 1));
 		this->m_DevilSquareMiniBossClass[n] = GetPrivateProfileInt(section, key, DevilSquareMiniBossDefault[n], path);
 	}
+}
+// AllowedAccountsOnly / AllowedAccounts (GameServerInfo - Common.ini): a server
+// only the listed accounts can enter - a test or staff server. Names are
+// comma separated and compared without case.
+void CServerInfo::ReadAllowedAccounts(char* section,char* path) // OK
+{
+	this->m_AllowedAccountsOnly = GetPrivateProfileInt(section,"AllowedAccountsOnly",0,path);
+
+	this->m_AllowedAccounts.clear();
+
+	char list[4096] = {0};
+
+	GetPrivateProfileString(section,"AllowedAccounts","",list,sizeof(list),path);
+
+	char* context = 0;
+
+	for(char* token = strtok_s(list,", \t",&context); token != 0; token = strtok_s(0,", \t",&context))
+	{
+		this->m_AllowedAccounts.push_back(token);
+	}
+}
+
+bool CServerInfo::IsAccountAllowed(const char* account) // OK
+{
+	if(this->m_AllowedAccountsOnly == 0)
+	{
+		return 1;
+	}
+
+	char name[11] = {0};
+
+	memcpy(name,account,sizeof(name)-1);
+
+	for(size_t n = 0; n < this->m_AllowedAccounts.size(); n++)
+	{
+		if(_stricmp(name,this->m_AllowedAccounts[n].c_str()) == 0)
+		{
+			return 1;
+		}
+	}
+
+	return 0;
 }

@@ -66,6 +66,7 @@
 #include "CB_BXHTopDmg.h"
 #include "VongQuay.h"
 #include "RedeemCodeWindow.h"
+#include "CB_KiraPass.h"
 #include "VoiceClient.h"
 #include "QuickToggles.h"
 #include "FriendMailWindow.h"
@@ -496,6 +497,9 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 					extern void SetDevilSquareTimer(int seconds);
 					SetDevilSquareTimer((int)(lpMsg[4] | (lpMsg[5] << 8)));
 				}
+				break;
+			case 0xF4: //Kira Pass status (CB_KiraPass.h), sent at login and after a purchase
+				if (gCB_KiraPass) gCB_KiraPass->RecvStatus(lpMsg, size);
 				break;
 			case 0xF1: //Google Play WCoin purchase - server's answer
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM

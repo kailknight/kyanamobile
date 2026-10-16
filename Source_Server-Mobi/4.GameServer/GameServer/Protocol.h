@@ -1985,6 +1985,8 @@ enum eRedeemCodeResult
 	REDEEM_INVENTORY_FULL,   // redeem-only: room check ran, the bundle didn't fit
 	REDEEM_BUSY,             // an earlier preview/redeem for this player is still in flight
 	REDEEM_SERVER_ERROR,
+	REDEEM_VIP_LOWER,        // the code gives a lower VIP than the account already has
+	REDEEM_BUFF_ACTIVE,      // the code's buff is already running on this character
 };
 
 // Full detail per bundle item - enough to rebuild an ITEM for a real tooltip
@@ -2025,6 +2027,13 @@ struct PMSG_REDEEM_CODE_RECV
 	DWORD RewardWCoinP;
 	DWORD RewardGoblinPoint;
 	DWORD RewardRuud;
+	// VIP reward (account level 1-3 for N days), 0 = none. Mirrored in the
+	// client's 5.Main/source/Protocol.h.
+	DWORD RewardVipLevel;
+	DWORD RewardVipDays;
+	// Buff reward: minutes it lasts and its Effect.txt name, 0 / "" = none.
+	DWORD RewardBuffMinutes;
+	char RewardBuffName[32];
 };
 
 // Must stay byte-identical to the client's hand-duplicated copy in

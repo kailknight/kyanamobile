@@ -66,8 +66,8 @@ void CB_OffMuHelper::RunningOffHelper()
 	//-- AutoBuffo
 	pRequest.BuffOn = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.AutoBuff;
 	pRequest.BuffSkill[0] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[0];
-	pRequest.BuffSkill[1] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[0];
-	pRequest.BuffSkill[2] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[0];
+	pRequest.BuffSkill[1] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[1];
+	pRequest.BuffSkill[2] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[2];
 	//-- PickObtain
 	pRequest.ObtainRange = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Range[1];
 	pRequest.ObtainRepairOn = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.RepairItem;
@@ -90,6 +90,16 @@ void CB_OffMuHelper::RunningOffHelper()
 		{
 			pRequest.ObtainPickExtraCount++;
 		}
+	}
+
+	//-- Activation skills 1/2 with their delay/condition, as the online helper uses them
+	for (int i = 0; i < 2; i++)
+	{
+		pRequest.ActiveSkill[i] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[i + 1];
+		pRequest.ActiveSkillDelayOn[i] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillDelay[i];
+		pRequest.ActiveSkillConditionOn[i] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillCondition[i];
+		pRequest.ActiveSkillSubCon[i] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillSubCon[i];
+		pRequest.ActiveSkillDelay[i] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Delay[i];
 	}
 
 	DataSend((LPBYTE)& pRequest, pRequest.h.size);

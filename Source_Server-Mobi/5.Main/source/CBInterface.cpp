@@ -39,6 +39,7 @@
 #if(DOIMK)
 #include "CB_DoiMK.h"
 #include "RedeemCodeWindow.h"
+#include "CB_KiraPass.h"
 #endif
 #include "APICB.h"
 
@@ -693,6 +694,7 @@ void Interface::Init()
 #endif
 	gFriendMailWindow = new CFriendMailWindow;
 	ANDROID_IF_STAGE("FriendMailWindow ok");
+	gCB_KiraPass = new CB_KiraPass;
 	gTradeCoinPanel = new CTradeCoinPanel;
 	ANDROID_IF_STAGE("TradeCoinPanel ok");
 #if(CB_CUSTOMMIXINFO)
@@ -814,6 +816,7 @@ void Interface::Work()
 	if (gCB_RedeemCodeWindow) gCB_RedeemCodeWindow->DrawWindow();
 #endif
 	if (gFriendMailWindow) gFriendMailWindow->DrawWindow();
+	if (gCB_KiraPass) gCB_KiraPass->DrawWindow();
 	if (gTradeCoinPanel) gTradeCoinPanel->Draw();
 #if(CUSTOM_WINDOWLOCKITEM)
 	if(gCB_LockItem) gCB_LockItem->DrawWindow();

@@ -133,7 +133,15 @@ struct CG_OFFMODE_RESULT
 	BYTE ObtainPickExtra;
 	int ObtainPickExtraCount;
 	char ObtainPickItemList[12][16];
+	//-- Activation skills 1/2 (newer clients only; check h.size)
+	WORD ActiveSkill[2];
+	BYTE ActiveSkillDelayOn[2];
+	BYTE ActiveSkillConditionOn[2];
+	BYTE ActiveSkillSubCon[2];
+	WORD ActiveSkillDelay[2];
 };
+
+#define CG_OFFMODE_RESULT_OLD_SIZE (offsetof(CG_OFFMODE_RESULT, ActiveSkill))
 
 class OfflineMode
 {
@@ -151,6 +159,9 @@ public:
 	void Attack(int UserIndex);
 	void ReturnToStartSpot(LPOBJ lpObj);
 	void RenderAttack(int UserIndex);
+	CSkill* GetSlotSkill(LPOBJ lpObj, int slot);
+	int CheckActiveSkill(LPOBJ lpObj, int n);
+	int SelectSkillSlot(LPOBJ lpObj);
 	void RenderAutoBuffParty(int aIndex);
 	void RenderAutoPote(int aIndex);
 	int PickUP(int aIndex);
@@ -159,6 +170,7 @@ public:
 	//-- [/]Protocolo
 	void OnAttackSecondProcHelper(LPOBJ lpObj); // OK
 	void OnHelperpAlreadyConnected(LPOBJ lpObj); // OK
+	void OnHelperInSafeZone(LPOBJ lpObj);
 	void regresar(int aIndex);
 };
 // ----------------------------------------------------------------------------------------------

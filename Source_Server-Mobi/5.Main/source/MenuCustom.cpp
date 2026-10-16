@@ -39,6 +39,14 @@ namespace
 #include "CB_LockItem.h"
 #include "VongQuay.h"
 #include "RedeemCodeWindow.h"
+#include "CB_KiraPass.h"
+
+namespace
+{
+	// Kira Pass (monthly WCoin): an extra menu slot after the server's 15, on
+	// every platform - opens CB_KiraPass.
+	const int kKiraPassSlot = 16;
+}
 
 cCustomMenu gCustomMenu;
 
@@ -202,7 +210,7 @@ void cCustomMenu::Draw()
 	// Collect enabled slots first, then paginate that filtered list - some
 	// slots are off (Menu[i]==0) on any given server, so pagination has to
 	// be based on how many buttons actually show, not raw slot index range.
-	int enabledSlots[16];
+	int enabledSlots[18];
 	int enabledCount = 0;
 	for (int i = 0; i < 15; i++)
 	{
@@ -217,6 +225,7 @@ void cCustomMenu::Draw()
 			enabledSlots[enabledCount++] = i;
 		}
 	}
+	enabledSlots[enabledCount++] = kKiraPassSlot;
 #if defined(MU_IOS) && !defined(MU_MACOS)
 	enabledSlots[enabledCount++] = kIosDeleteAccountSlot;
 #endif
@@ -254,6 +263,15 @@ void cCustomMenu::Draw()
 		// to it (GetMainInfo.cpp/MenuName.h) - an empty slot there (not
 		// migrated yet) falls back to the old Text_Button/Text_<lang>.ini
 		// label, so nothing changes for a server that hasn't set this up.
+		if (i == kKiraPassSlot)
+		{
+			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Kira Pass", BtnW))
+			{
+				gInterface.Data[eMenu_MAIN].OnShow = 0;
+				if (gCB_KiraPass) gCB_KiraPass->OpenWindow();
+			}
+		}
+		else
 #if defined(MU_IOS) && !defined(MU_MACOS)
 		if (i == kIosDeleteAccountSlot)
 		{

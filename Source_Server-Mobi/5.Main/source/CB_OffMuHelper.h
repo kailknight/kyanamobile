@@ -40,6 +40,12 @@ public:
 		BYTE ObtainPickExtra;
 		int ObtainPickExtraCount;
 		char ObtainPickItemList[12][16];
+		//-- Activation skills 1/2 (appended: an older server just ignores the tail)
+		WORD ActiveSkill[2];
+		BYTE ActiveSkillDelayOn[2];
+		BYTE ActiveSkillConditionOn[2];
+		BYTE ActiveSkillSubCon[2];
+		WORD ActiveSkillDelay[2];
 	};
 
 	CB_OffMuHelper();

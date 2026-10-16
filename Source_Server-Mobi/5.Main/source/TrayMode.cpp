@@ -85,7 +85,7 @@ void CTrayMode::ShowNotify(bool mode) // OK
 	}
 	else
 	{
-		wsprintf(nid.szTip, "MuOnline");
+		wsprintf(nid.szTip, "World of Kira");
 	}
 
 	Shell_NotifyIcon(((mode == 0) ? NIM_DELETE : NIM_ADD), &nid);

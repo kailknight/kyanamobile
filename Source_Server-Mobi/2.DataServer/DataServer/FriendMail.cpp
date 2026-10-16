@@ -551,6 +551,15 @@ void CFriendMail::ReturnExpiredItems()
 	EXPIRED rows[200];
 	int rowCount = 0;
 
+	// System mail (Kira Pass and the like) has no sender character to go back
+	// to: once it expires it is simply gone (Status 3). Without this the return
+	// below fails for it on every sweep, forever.
+	gQueryManager.ExecQuery(
+		"UPDATE i SET Status=3 FROM T_FriendMailItem i "
+		"WHERE i.Status=0 AND i.ExpireAt IS NOT NULL AND i.ExpireAt < GETDATE() "
+		"AND NOT EXISTS (SELECT 1 FROM T_FriendMain f WHERE f.Name = i.SenderName)");
+	gQueryManager.Close();
+
 	if(gQueryManager.ExecQuery(
 		"SELECT TOP 200 i.ItemID, i.GUID, i.SenderName, m.Name AS RecvName "
 		"FROM T_FriendMailItem i JOIN T_FriendMain m ON m.GUID = i.GUID "
@@ -717,4 +726,76 @@ void CFriendMail::LogLostItems(const char* reason,const char* name,const SDHP_FR
 	fclose(file);
 
 	LogAdd(LOG_RED,"[FriendMail] %s - %d item(s) from %s written to FriendMail_Lost.log",reason,count,name);
+}
+
+bool CFriendMail::MailCoins(const char* toName,const char* fromLabel,const char* subject,const char* memoText,int coinType,int amount,int expireDays)
+{
+	if(amount <= 0)
+	{
+		return 0;
+	}
+
+	char recipient[11];
+	char from[11];
+	char title[33];
+	CopyName(recipient,sizeof(recipient),toName,10);
+	CopyName(from,sizeof(from),fromLabel,10);
+	CopyName(title,sizeof(title),subject,32);
+
+	// The letter, into the recipient's mailbox. WZ_WriteMail returns the new
+	// MemoIndex and the mailbox owner's GUID, or an error code (<= 10).
+	gQueryManager.BindParameterAsString(1,from,sizeof(from));
+	gQueryManager.BindParameterAsString(2,recipient,sizeof(recipient));
+	gQueryManager.BindParameterAsString(3,title,sizeof(title));
+	gQueryManager.ExecQuery("EXEC WZ_WriteMail ?,?,?,0,0");
+	gQueryManager.Fetch();
+	DWORD memoIndex = gQueryManager.GetResult(0);
+	DWORD guid = gQueryManager.GetResult(1);
+	gQueryManager.Close();
+
+	if(memoIndex <= 10 || guid == 0)
+	{
+		return 0;
+	}
+
+	BYTE memo[FRIENDMAIL_MEMO_MAX];
+	memset(memo,0,sizeof(memo));
+	_snprintf_s((char*)memo,sizeof(memo),_TRUNCATE,"%s",memoText);
+
+	BYTE photo[18];
+	memset(photo,0,sizeof(photo));
+
+	gQueryManager.BindParameterAsBinary(1,memo,sizeof(memo));
+	gQueryManager.BindParameterAsBinary(2,photo,sizeof(photo));
+	gQueryManager.ExecQuery("UPDATE T_FriendMail SET Memo=?,Photo=? WHERE MemoIndex=%d AND GUID=%d",memoIndex,guid);
+	gQueryManager.Close();
+
+	// The coins: one attachment row with no item.
+	BYTE empty[FRIENDMAIL_ITEM_BYTES];
+	memset(empty,0xFF,sizeof(empty));
+
+	gQueryManager.BindParameterAsString(1,from,sizeof(from));
+	gQueryManager.BindParameterAsBinary(2,empty,sizeof(empty));
+
+	int stored = 0;
+
+	if(gQueryManager.ExecQuery("EXEC WZ_MailItem_Add %d,%d,?,?,%d,%d,%d",guid,memoIndex,expireDays,coinType,amount) != 0 && gQueryManager.Fetch() != SQL_NO_DATA)
+	{
+		stored = gQueryManager.GetAsInteger("Result");
+	}
+
+	gQueryManager.Close();
+
+	if(stored != 1)
+	{
+		// The letter is there but its coins aren't: remove the empty letter so
+		// the caller can hand the amount back and try again later.
+		gQueryManager.ExecQuery("DELETE FROM T_FriendMail WHERE MemoIndex=%d AND GUID=%d",memoIndex,guid);
+		gQueryManager.Close();
+		return 0;
+	}
+
+	this->NotifyRecipient(recipient,memoIndex,guid);
+
+	return 1;
 }

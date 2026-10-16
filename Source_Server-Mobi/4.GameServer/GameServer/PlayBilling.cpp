@@ -6,6 +6,7 @@
 #include "stdafx.h"
 #include "PlayBilling.h"
 #include "CashShop.h"
+#include "MonthlyCard.h"
 #include "GameMain.h"
 #include "Util.h"
 
@@ -87,6 +88,14 @@ void CPlayBilling::DGPurchaseRecv(SDHP_PLAY_PURCHASE_RECV* lpMsg)
 
 		// Re-read the balance the DataServer just changed, so the shop shows it.
 		gCashShop.CGCashShopPointRecv(aIndex);
+
+		// A Kira Pass purchase credits no WCoin directly (it is the only kind
+		// that doesn't): mail the instant reward now, while the player is here,
+		// instead of on the next login.
+		if(lpMsg->WCoinC == 0)
+		{
+			gMonthlyCard.OnCharacterEnter(aIndex);
+		}
 	}
 
 	this->SendClientResult(aIndex,lpMsg->Result,lpMsg->WCoinC,lpMsg->ProductId);

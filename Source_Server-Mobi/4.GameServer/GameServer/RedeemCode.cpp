@@ -11,6 +11,8 @@
 #include "Util.h"
 #include "GameMain.h"
 #include "CashShop.h"
+#include "JSProtocol.h"
+#include "EffectManager.h"
 #include <algorithm>
 
 CRedeemCode gRedeemCode;
@@ -142,12 +144,26 @@ void CRedeemCode::OnPeekReply(SDHP_REDEEM_CODE_PEEK_RECV* lpMsg)
 	LPOBJ lpObj = &gObj[aIndex];
 	PendingPeek& pending = this->m_PendingPeek[aIndex];
 
+	// Same rule as Buy VIP: a code can't lower the account's VIP. Checked here,
+	// before the commit, so the code isn't used up; the preview shows it too.
+	if(lpMsg->Result == REDEEM_OK_TO_REDEEM && lpMsg->RewardVipLevel != 0 && (int)lpMsg->RewardVipLevel < lpObj->AccountLevel)
+	{
+		lpMsg->Result = REDEEM_VIP_LOWER;
+	}
+
+	// The buff is already running: the cash shop refuses the same way. Checked
+	// before the commit, so the code isn't used up.
+	if(lpMsg->Result == REDEEM_OK_TO_REDEEM && lpMsg->RewardBuffIndex != 0 && gEffectManager.GetEffect(lpObj,(int)lpMsg->RewardBuffIndex) != 0)
+	{
+		lpMsg->Result = REDEEM_BUFF_ACTIVE;
+	}
+
 	if(!pending.ForRedeemFlow)
 	{
 		// User-visible "Check Code" - relay straight back. Nothing was
 		// mutated either way, so there is nothing more to do here.
 		lpObj->RedeemCodeBusy = false;
-		this->SendResultToClient(aIndex,0xA1,lpMsg->Result,lpMsg->Items,lpMsg->ItemCount,lpMsg->RewardWCoinC,lpMsg->RewardWCoinP,lpMsg->RewardGoblinPoint,lpMsg->RewardRuud);
+		this->SendResultToClient(aIndex,0xA1,lpMsg->Result,lpMsg->Items,lpMsg->ItemCount,lpMsg->RewardWCoinC,lpMsg->RewardWCoinP,lpMsg->RewardGoblinPoint,lpMsg->RewardRuud,lpMsg->RewardVipLevel,lpMsg->RewardVipDays,lpMsg->RewardBuffIndex,lpMsg->RewardBuffMinutes);
 		return;
 	}
 
@@ -164,7 +180,7 @@ void CRedeemCode::OnPeekReply(SDHP_REDEEM_CODE_PEEK_RECV* lpMsg)
 			lpObj->Name,lpMsg->Result);
 
 		lpObj->RedeemCodeBusy = false;
-		this->SendResultToClient(aIndex,0xA3,lpMsg->Result,lpMsg->Items,lpMsg->ItemCount,lpMsg->RewardWCoinC,lpMsg->RewardWCoinP,lpMsg->RewardGoblinPoint,lpMsg->RewardRuud);
+		this->SendResultToClient(aIndex,0xA3,lpMsg->Result,lpMsg->Items,lpMsg->ItemCount,lpMsg->RewardWCoinC,lpMsg->RewardWCoinP,lpMsg->RewardGoblinPoint,lpMsg->RewardRuud,lpMsg->RewardVipLevel,lpMsg->RewardVipDays,lpMsg->RewardBuffIndex,lpMsg->RewardBuffMinutes);
 		return;
 	}
 
@@ -233,9 +249,44 @@ void CRedeemCode::OnCommitReply(SDHP_REDEEM_CODE_COMMIT_RECV* lpMsg)
 				lpMsg->RewardRuud,
 				"RedeemCode");
 		}
+
+		// VIP reward: the same JoinServer call Buy VIP uses (WZ_SetAccountLevel),
+		// so it extends or sets the account level and expiry the same way.
+		if(lpMsg->RewardVipLevel >= 1 && lpMsg->RewardVipLevel <= 3 && lpMsg->RewardVipDays > 0)
+		{
+			LogAddCat(LOG_CAT_REDEEM,LOG_GREEN,"[RedeemCode] %s - VIP %d for %d day(s)",
+				lpObj->Name,lpMsg->RewardVipLevel,lpMsg->RewardVipDays);
+
+			GJAccountLevelSaveSend(aIndex,(int)lpMsg->RewardVipLevel,(int)(lpMsg->RewardVipDays*86400));
+			GJAccountLevelSend(aIndex);
+		}
+
+		// Buff reward: switched on now, for the given minutes - the same call the
+		// cash shop uses. Type-2 buffs (seals, scrolls) store an end time, the
+		// others a plain number of seconds.
+		if(lpMsg->RewardBuffIndex > 0 && lpMsg->RewardBuffMinutes > 0)
+		{
+			EFFECT_INFO* lpEffect = gEffectManager.GetInfo((int)lpMsg->RewardBuffIndex);
+
+			if(lpEffect != 0)
+			{
+				int seconds = (int)lpMsg->RewardBuffMinutes * 60;
+				int count = (lpEffect->Type == 2) ? ((int)time(0) + seconds) : seconds;
+
+				gEffectManager.AddEffect(lpObj,1,lpEffect->Index,count,0,0,0,0);
+
+				LogAddCat(LOG_CAT_REDEEM,LOG_GREEN,"[RedeemCode] %s - buff %s for %d minute(s)",
+					lpObj->Name,lpEffect->Name,lpMsg->RewardBuffMinutes);
+			}
+			else
+			{
+				LogAddCat(LOG_CAT_REDEEM,LOG_RED,"[RedeemCode] %s - buff index %d is not in Effect.txt, not given",
+					lpObj->Name,lpMsg->RewardBuffIndex);
+			}
+		}
 	}
 
-	this->SendResultToClient(aIndex,0xA3,lpMsg->Result,lpMsg->Items,lpMsg->ItemCount,lpMsg->RewardWCoinC,lpMsg->RewardWCoinP,lpMsg->RewardGoblinPoint,lpMsg->RewardRuud);
+	this->SendResultToClient(aIndex,0xA3,lpMsg->Result,lpMsg->Items,lpMsg->ItemCount,lpMsg->RewardWCoinC,lpMsg->RewardWCoinP,lpMsg->RewardGoblinPoint,lpMsg->RewardRuud,lpMsg->RewardVipLevel,lpMsg->RewardVipDays,lpMsg->RewardBuffIndex,lpMsg->RewardBuffMinutes);
 }
 
 // Only reached after WZ_CommitRedeemCode has already recorded the redemption
@@ -286,12 +337,15 @@ void CRedeemCode::GrantBundle(int aIndex,const REDEEM_BUNDLE_ITEM* items,int ite
 				itemOptionEx,
 				const_cast<BYTE*>(items[n].SocketOption),
 				items[n].SocketOptionBonus,
-				items[n].ItemDuration);
+				// ItemDuration is a length in seconds, but the item stores an
+				// absolute end time (CashShop.cpp compares it with time(0)), so
+				// add now - the same way the cash shop and quests do.
+				((items[n].ItemDuration > 0) ? ((DWORD)time(0) + items[n].ItemDuration) : 0));
 		}
 	}
 }
 
-void CRedeemCode::SendResultToClient(int aIndex,BYTE subcode,BYTE result,const REDEEM_BUNDLE_ITEM* items,int itemCount,DWORD wcoinC,DWORD wcoinP,DWORD goblinPoint,DWORD ruud)
+void CRedeemCode::SendResultToClient(int aIndex,BYTE subcode,BYTE result,const REDEEM_BUNDLE_ITEM* items,int itemCount,DWORD wcoinC,DWORD wcoinP,DWORD goblinPoint,DWORD ruud,DWORD vipLevel,DWORD vipDays,DWORD buffIndex,DWORD buffMinutes)
 {
 	PMSG_REDEEM_CODE_RECV pMsg;
 
@@ -303,6 +357,21 @@ void CRedeemCode::SendResultToClient(int aIndex,BYTE subcode,BYTE result,const R
 	pMsg.RewardWCoinP = wcoinP;
 	pMsg.RewardGoblinPoint = goblinPoint;
 	pMsg.RewardRuud = ruud;
+	pMsg.RewardVipLevel = vipLevel;
+	pMsg.RewardVipDays = vipDays;
+
+	// The buff's name from this server's Effect.txt - the client numbers buffs differently.
+	pMsg.RewardBuffMinutes = 0;
+	memset(pMsg.RewardBuffName,0,sizeof(pMsg.RewardBuffName));
+	if(buffIndex > 0 && buffMinutes > 0)
+	{
+		EFFECT_INFO* lpEffect = gEffectManager.GetInfo((int)buffIndex);
+		if(lpEffect != 0)
+		{
+			pMsg.RewardBuffMinutes = buffMinutes;
+			strncpy_s(pMsg.RewardBuffName,sizeof(pMsg.RewardBuffName),lpEffect->Name,sizeof(pMsg.RewardBuffName)-1);
+		}
+	}
 
 	if(items != NULL)
 	{
