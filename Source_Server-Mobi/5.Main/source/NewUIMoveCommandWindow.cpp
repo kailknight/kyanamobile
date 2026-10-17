@@ -1272,7 +1272,13 @@ bool SEASON3B::CNewUIMoveCommandWindow::Render()
 			EnableAlphaTest();
 			glColor4f(1.f, 1.f, 1.f, 1.f);
 
+#if defined(MU_IOS)
+			// iOS draws the double-size font squashed into the tile (tall, stretched
+			// letters); the bold font fits the tile as it does on PC.
+			g_pRenderText->SetFont(g_hFontBold ? g_hFontBold : g_hFont);
+#else
 			g_pRenderText->SetFont(g_hFontBig ? g_hFontBig : (g_hFontBold ? g_hFontBold : (g_hFixFont ? g_hFixFont : g_hFont)));
+#endif
 			if (canMove)
 			{
 				g_pRenderText->SetTextColor(255, 255, 255, 255);

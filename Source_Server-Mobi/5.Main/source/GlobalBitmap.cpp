@@ -1149,6 +1149,10 @@ bool CGlobalBitmap::OpenTga(GLuint uiBitmapIndex, const std::string& filename, G
 	
 	size_t BufferSize = Width*Height*pNewBitmap->Components;
 	pNewBitmap->Buffer     = (unsigned char*)new BYTE[BufferSize];
+	// The power-of-two padding past nx/ny is never written below. Windows hands
+	// back zeroed pages, iOS does not, so a button drawn wider than its art
+	// (the shop sidebar: 73px art, 90px button) sampled heap garbage.
+	memset(pNewBitmap->Buffer, 0, BufferSize);
 
 	m_dwUsedTextureMemory += BufferSize;
 

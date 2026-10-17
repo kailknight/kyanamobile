@@ -26,6 +26,7 @@
 
 import Foundation
 import StoreKit
+import UIKit
 import CryptoKit
 
 private final class MuStore {
@@ -46,8 +47,13 @@ private final class MuStore {
     // Per product: the transaction with the server now, and those waiting.
     private var inFlight: [String: UInt64] = [:]
     private var waiting: [String: [UInt64]] = [:]
+    // Per product: the transaction last handed to the server. Unlike inFlight
+    // it survives "init" (every shop or Kira Pass open clears inFlight), so a
+    // server answer that arrives after a re-open still finishes the right one.
+    private var lastReported: [String: UInt64] = [:]
     private var updates: Task<Void, Never>?
     private var loadingProducts = false
+    private var buying = false
 
     private func locked<T>(_ body: () -> T) -> T {
         lock.lock()
@@ -122,7 +128,14 @@ private final class MuStore {
             loadingProducts = true
             return false
         }
-        if alreadyLoading { return }
+        if alreadyLoading {
+            // Another load is running (the shop opened a moment ago): wait for
+            // it rather than reporting the pack missing.
+            for _ in 0..<50 where locked({ loadingProducts }) {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            return
+        }
         defer { locked { loadingProducts = false } }
         do {
             let loaded = try await Product.products(for: productIds)
@@ -151,8 +164,48 @@ private final class MuStore {
             push("error:Log in to your game account first", productId)
             return
         }
+        let alreadyBuying: Bool = locked {
+            if buying { return true }
+            buying = true
+            return false
+        }
+        if alreadyBuying {
+            push("info:The App Store payment is already open.", productId)
+            return
+        }
+        defer { locked { buying = false } }
+        // An earlier purchase of this product that the server has not credited
+        // yet stays unfinished, and while it does StoreKit never shows the
+        // payment sheet again for that product: Pay would sit on "Opening..."
+        // for good. Hand that purchase to the server again instead.
+        for await result in Transaction.unfinished {
+            if case .verified(let t) = result {
+                NSLog("MuStore: unfinished %@ id=%llu owner=%@ mine=%d", t.productID, t.id,
+                      t.appAccountToken?.uuidString ?? "-", t.appAccountToken == token ? 1 : 0)
+            }
+            guard case .verified(let old) = result, old.productID == productId,
+                  old.appAccountToken == nil || old.appAccountToken == token else { continue }
+            locked {
+                if inFlight[productId] == old.id { inFlight[productId] = nil }
+                waiting[productId]?.removeAll { $0 == old.id }
+            }
+            push("info:Your earlier \(product.displayName) purchase is still waiting - sending it to the server again...", productId)
+            accept(result)
+            return
+        }
+        NSLog("MuStore: calling purchase for %@", productId)
+        push("info:Opening the App Store payment for \(product.displayName)...", productId)
         do {
-            let result = try await product.purchase(options: [.appAccountToken(token)])
+            let options: Set<Product.PurchaseOption> = [.appAccountToken(token)]
+            let result: Product.PurchaseResult
+            // iOS 17+ wants the scene the payment sheet belongs to; without it
+            // the sheet could fail to appear on this sokol-managed window.
+            if #available(iOS 17.0, *), let scene = await MainActor.run(body: { MuStore.activeScene() }) {
+                result = try await product.purchase(confirmIn: scene, options: options)
+            } else {
+                result = try await product.purchase(options: options)
+            }
+            NSLog("MuStore: purchase %@ returned %@", productId, String(describing: result))
             switch result {
             case .success(let verification):
                 accept(verification)
@@ -166,6 +219,7 @@ private final class MuStore {
                 push("error:The App Store returned an unknown result", productId)
             }
         } catch {
+            NSLog("MuStore: purchase %@ threw %@", productId, String(describing: error))
             push("error:\(error.localizedDescription)", productId)
         }
     }
@@ -207,13 +261,16 @@ private final class MuStore {
             return false
         }
         if report {
+            locked { lastReported[productId] = transaction.id }
+            NSLog("MuStore: reporting %@ id=%llu", productId, transaction.id)
             push("ok", productId, "apple-\(transaction.id)", String(transaction.id))
         }
     }
 
     private func finish(_ productId: String) {
         let (done, next): (Transaction?, Transaction?) = locked {
-            guard let id = inFlight[productId] else { return (nil, nil) }
+            guard let id = inFlight[productId] ?? lastReported[productId] else { return (nil, nil) }
+            lastReported[productId] = nil
             let done = unfinished.removeValue(forKey: id)
             inFlight[productId] = nil
             var next: Transaction?
@@ -227,12 +284,20 @@ private final class MuStore {
             }
             return (done, next)
         }
+        NSLog("MuStore: finish %@ id=%llu", productId, done?.id ?? 0)
         if let done = done {
             Task { await done.finish() }
         }
         if let next = next {
+            locked { lastReported[productId] = next.id }
             push("ok", productId, "apple-\(next.id)", String(next.id))
         }
+    }
+
+    @MainActor
+    private static func activeScene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
     }
 
     // MARK: - Account binding

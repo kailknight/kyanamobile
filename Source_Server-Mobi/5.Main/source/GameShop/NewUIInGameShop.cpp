@@ -2092,6 +2092,16 @@ namespace
 		out[o] = '\0';
 	}
 
+	// Latest store status, drawn under the Pay button: the chat sits behind
+	// the shop window, so progress there was invisible.
+	char g_szRechargeStatus[160] = { 0 };
+
+	void SetRechargeStatus(const char* text)
+	{
+		strncpy(g_szRechargeStatus, text != NULL ? text : "", sizeof(g_szRechargeStatus) - 1);
+		g_szRechargeStatus[sizeof(g_szRechargeStatus) - 1] = '\0';
+	}
+
 	void RechargeMessage(const char* title, const char* text)
 	{
 		CMsgBoxIGSCommon* pMsgBox = NULL;
@@ -2137,10 +2147,14 @@ void CNewUIInGameShop::OnPlayPurchaseResult(const BYTE* lpMsg, int size)
 	{
 	case 0: // credited
 		if (kiraPass)
+		{
+			SetRechargeStatus("Kira Pass activated!");
 			RechargeMessage("Kira Pass", "Kira Pass activated! Your first WCoin (C) is in your mailbox (Friends), and more arrives every day you log in. Thank you!");
+		}
 		else
 		{
 			sprintf(text, "+%u WCoin (C) added to your account. Thank you!", (unsigned)msg.WCoinC);
+			SetRechargeStatus(text);
 			RechargeMessage("Recharge", text);
 		}
 		break;
@@ -2225,11 +2239,8 @@ bool CNewUIInGameShop::UpdateRechargePanel()
 			MU_MobileBilling("account", LogInID, NULL, 0);
 			if (!MU_MobileBilling("buy", kRechargePacks[m_iRechargeSelected].ProductId, NULL, 0))
 				RechargeMessage("Recharge", MU_STORE_NAME " is not available on this device.");
-#if defined(MU_IOS)
-			// The App Store's sheet takes a second or two to come up; say so.
-			else if (g_pChatListBox != NULL)
-				g_pChatListBox->AddText("", "Opening the App Store...", SEASON3B::TYPE_SYSTEM_MESSAGE);
-#endif
+			else
+				SetRechargeStatus("Contacting " MU_STORE_NAME "...");
 #else
 			RechargeMessage("Recharge", "Recharge from the website on PC.");
 #endif
@@ -2284,6 +2295,7 @@ void CNewUIInGameShop::PollRechargeResults()
 				pMsg.header.set(0xD3, 0xF0, sizeof(pMsg));
 				DataSend((LPBYTE)&pMsg, sizeof(pMsg));
 
+				SetRechargeStatus("Payment received - adding your WCoin (C)...");
 				if (g_pChatListBox != NULL)
 					g_pChatListBox->AddText("", "Payment received - adding your WCoin (C)...", SEASON3B::TYPE_SYSTEM_MESSAGE);
 			}
@@ -2294,9 +2306,22 @@ void CNewUIInGameShop::PollRechargeResults()
 		}
 		else if (strncmp(status, "error:", 6) == 0)
 		{
+			SetRechargeStatus(status + 6);
 			RechargeMessage("Recharge", status + 6);
 		}
-		// "cancelled": the player closed the sheet, nothing to say.
+		else if (strncmp(status, "info:", 5) == 0)
+		{
+			// Progress from the store (iOS): which step the payment is at.
+			SetRechargeStatus(status + 5);
+			if (g_pChatListBox != NULL)
+				g_pChatListBox->AddText("", status + 5, SEASON3B::TYPE_SYSTEM_MESSAGE);
+		}
+		else if (strcmp(status, "cancelled") == 0)
+		{
+			SetRechargeStatus("Payment cancelled.");
+			if (g_pChatListBox != NULL)
+				g_pChatListBox->AddText("", "Payment cancelled.", SEASON3B::TYPE_SYSTEM_MESSAGE);
+		}
 	}
 #endif
 }
@@ -2410,6 +2435,13 @@ void CNewUIInGameShop::RenderRechargePanel()
 	g_pRenderText->SetFont(g_hFontBold);
 	g_pRenderText->SetTextColor(30, 20, 5, 255);
 	g_pRenderText->RenderText(X + RC_PAY_X, Y + RC_PAY_Y + 6, szText, RC_PAY_W, 0, RT3_SORT_CENTER);
+
+	if (g_szRechargeStatus[0] != '\0')
+	{
+		g_pRenderText->SetFont(g_hFont);
+		g_pRenderText->SetTextColor(220, 220, 225, 255);
+		g_pRenderText->RenderText(X + RC_PAY_X, Y + RC_PAY_Y + RC_PAY_H + 6, g_szRechargeStatus, RC_PAY_W, 0, RT3_SORT_CENTER);
+	}
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 }
