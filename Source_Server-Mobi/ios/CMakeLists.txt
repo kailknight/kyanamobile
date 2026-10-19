@@ -108,6 +108,11 @@ set_source_files_properties(${PRELOAD_BANNERS} PROPERTIES MACOSX_PACKAGE_LOCATIO
 set(IOS_ASSET_CATALOG "${CMAKE_CURRENT_SOURCE_DIR}/assets/Assets.xcassets")
 set_source_files_properties(${IOS_ASSET_CATALOG} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 
+# Privacy manifest (App Store requirement): what the app collects and which
+# required-reason APIs it uses. Has to sit at the root of the .app bundle.
+set(IOS_PRIVACY_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/PrivacyInfo.xcprivacy")
+set_source_files_properties(${IOS_PRIVACY_MANIFEST} PROPERTIES MACOSX_PACKAGE_LOCATION "")
+
 # App Store build: the World of Kira emblem drawn in place of the data's MU logo
 # (GlobalBitmap.cpp IosLogoOverride). Installed into Data/Logo with MuAssets.
 set(IOS_LOGO "${CMAKE_CURRENT_SOURCE_DIR}/assets/Logo/WoK-logo.OZT" "${CMAKE_CURRENT_SOURCE_DIR}/assets/Logo/WoK-logo_g.OZJ")
@@ -125,6 +130,7 @@ add_executable(WorldOfKira MACOSX_BUNDLE
     ${IOS_MUSIC}
     ${IOS_LOGO}
     ${IOS_ASSET_CATALOG}
+    ${IOS_PRIVACY_MANIFEST}
 )
 
 list(LENGTH GAME_SOURCES GAME_SOURCE_COUNT)

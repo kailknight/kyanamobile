@@ -225,7 +225,11 @@ void cCustomMenu::Draw()
 			enabledSlots[enabledCount++] = i;
 		}
 	}
+#if !(defined(MU_IOS) && !defined(MU_MACOS))
+	// Hidden on iPhone until the Kira Pass in-app purchase is approved by Apple:
+	// its Buy button would answer "not available on the App Store" in review.
 	enabledSlots[enabledCount++] = kKiraPassSlot;
+#endif
 #if defined(MU_IOS) && !defined(MU_MACOS)
 	enabledSlots[enabledCount++] = kIosDeleteAccountSlot;
 #endif

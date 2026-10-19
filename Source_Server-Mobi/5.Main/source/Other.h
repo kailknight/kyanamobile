@@ -7,6 +7,8 @@ public:
 	Other();
 	virtual ~Other();
 	void Load();
+	// Forgets the cached ini files and loads again; see Other.cpp.
+	void Reload();
 	char Text_Chung[150][120];
 
 

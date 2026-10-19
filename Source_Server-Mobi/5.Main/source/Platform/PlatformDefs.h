@@ -2775,9 +2775,15 @@ namespace mu_ini
     // back - WritePrivateProfileString is a stub - so the cache cannot go
     // stale. Not thread safe, and does not need to be: the callers are static
     // init and the options window, both on the main thread.
-    inline const IniSections& CachedIniFile(const std::string& path)
+    inline std::unordered_map<std::string, IniSections>& IniFileCache()
     {
         static std::unordered_map<std::string, IniSections> cache;
+        return cache;
+    }
+
+    inline const IniSections& CachedIniFile(const std::string& path)
+    {
+        std::unordered_map<std::string, IniSections>& cache = IniFileCache();
 
         std::unordered_map<std::string, IniSections>::iterator it = cache.find(path);
         if (it == cache.end())
@@ -2785,6 +2791,17 @@ namespace mu_ini
             it = cache.emplace(path, ParseIniFile(path.c_str())).first;
         }
         return it->second;
+    }
+
+    // A file that was missing when first asked for is cached as empty, and every
+    // label read from it stays at the caller's default for the whole session.
+    // Other::Load runs as a global constructor, before the first-launch download
+    // or an update has put Text_Eng.ini in place, so it calls this and reads
+    // again once the game starts. Only safe when nothing holds a reference into
+    // the cache across the call.
+    inline void ForgetCachedIniFiles()
+    {
+        IniFileCache().clear();
     }
 }
 

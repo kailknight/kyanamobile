@@ -15,6 +15,14 @@ Other::~Other()
 {
 }
 
+void Other::Reload()
+{
+#if defined(__ANDROID__) || defined(MU_IOS)
+	mu_ini::ForgetCachedIniFiles();
+#endif
+	Load();
+}
+
 void Other::Load()
 {
 	//==Check Local
@@ -61,6 +69,18 @@ void Other::Load()
 		wsprintf(GetFotText2, "Text%d", st2);
 		GetPrivateProfileStringA("Text_Chung", GetFotText2, "Null", Text_Chung[st2], sizeof(Text_Chung[st2]), NameFileLocal);
 	}
+#if defined(__ANDROID__) || defined(MU_IOS)
+	{
+		// How many flea market labels actually loaded, for mu_exit_trace.txt: a
+		// window full of "Null" means this came out 0.
+		int loaded = 0;
+		for (int i = 0; i < 50; i++)
+		{
+			if (strcmp(TextVN_CHOTROI[i], "Null") != 0) loaded++;
+		}
+		MU_AppendExitTrace("text: %s loaded=%d market labels (of 46 defined)", NameFileLocal, loaded);
+	}
+#endif
 	//Set Text Change Class
 	//WindowClass.CreateText();
 }

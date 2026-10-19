@@ -167,6 +167,7 @@ int AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel);
 #include "GIPetManager.h"
 #include "MixMgr.h"
 #include "Util.h"
+#include "Other.h"
 
 // stb_image 鑺掗埀顑解偓?implementation is in android_turbojpeg_stubs.cpp; only declare here.
 #include "stb_image.h"
@@ -24316,6 +24317,13 @@ static bool InitializeAndroidGame()
     }
     g_strSelectedML = g_aszMLSelection;
     pMultiLanguage = new CMultiLanguage(g_strSelectedML);
+
+    // gOther fills every custom window's labels from Data/Custom/Text_<lang>.ini
+    // in a global constructor - before the data folder has been downloaded or
+    // updated on a fresh install, and before the language above is known. A
+    // missed file leaves every label as "Null" until the app is restarted, so
+    // read them again now that the data and the language are in place.
+    gOther.Reload();
 
     LOGI("INIT: srand");
     srand(static_cast<unsigned int>(time(nullptr)));
