@@ -48,6 +48,7 @@
 #include <android/log.h>
 #include "MobilePlatform.h"
 #include "MobileTime.h"
+#include "MobileTextEncoding.h"
 
 #if defined(MU_ANDROID_DISABLE_LOG)
 #ifdef __android_log_print
@@ -554,11 +555,8 @@ inline int WideCharToMultiByte(UINT cp, DWORD, LPCWSTR src, int srcLen, LPSTR ds
     if (n >= 0) dst[n] = '\0';
     return n >= 0 ? n : 0;
 }
-inline int MultiByteToWideChar(UINT, DWORD, LPCSTR src, int, LPWSTR dst, int dstLen) {
-    if (!dst || !dstLen) return (int)(strlen(src) + 1);
-    int n = mbstowcs(dst, src, dstLen - 1);
-    if (n >= 0) dst[n] = L'\0';
-    return n >= 0 ? n : 0;
+inline int MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR src, int srcLen, LPWSTR dst, int dstLen) {
+    return mu_text::MultiByteToWide(cp, flags, src, srcLen, dst, dstLen);
 }
 
 // ── Windows console color constants (no-op on Android) ────────────────────
@@ -1448,7 +1446,11 @@ inline BOOL GetTextExtentPoint32(HDC hdc, LPCWSTR text, int len, SIZE* sz) {
     if (sz) { sz->cx = w; sz->cy = h; }
     return TRUE;
 }
-inline BOOL GetTextExtentPoint32(HDC, LPCSTR, int, SIZE* sz) { if (sz) { sz->cx = 0; sz->cy = 0; } return FALSE; }
+inline BOOL GetTextExtentPoint32(HDC hdc, LPCSTR text, int len, SIZE* sz) {
+    if (!text || len < 0) return FALSE;
+    const std::wstring wide = mu_text::DecodeText(text, len);
+    return GetTextExtentPoint32W(hdc, wide.c_str(), static_cast<int>(wide.size()), sz);
+}
 
 // RECT intersection (Windows GDI)
 inline BOOL IntersectRect(RECT* dst, const RECT* a, const RECT* b) {
@@ -1889,10 +1891,9 @@ inline BOOL    TextOut(HDC hdc, int x, int y, LPCWSTR text, int len) {
     return AndroidTextOut(hdc, x, y, text, len) ? TRUE : FALSE;
 }
 inline BOOL    TextOut(HDC hdc, int x, int y, LPCSTR text, int len) {
-    if (!text) return FALSE;
-    wchar_t wide[2048] = {};
-    mbstowcs(wide, text, sizeof(wide) / sizeof(wide[0]) - 1);
-    return TextOut(hdc, x, y, wide, len);
+    if (!text || len < 0) return FALSE;
+    const std::wstring wide = mu_text::DecodeText(text, len);
+    return TextOut(hdc, x, y, wide.c_str(), static_cast<int>(wide.size()));
 }
 // GWLP_WNDPROC + SetWindowLongPtrW (edit box subclassing)
 #define GWLP_WNDPROC (-4)

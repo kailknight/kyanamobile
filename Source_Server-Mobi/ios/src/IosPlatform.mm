@@ -402,6 +402,57 @@ void MU_IosOpenURL(const char* url)
     });
 }
 
+void MU_IosAskRestartForLanguage(bool vietnamese)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // The tables and UI caches are loaded for the lifetime of the process.
+        // Background/foreground alone does not reload them. iOS must not be
+        // terminated or self-relaunched by the application.
+        NSString* title = vietnamese ? @"Ngôn ngữ: Tiếng Việt" : @"Language: English";
+        NSString* message = vietnamese
+            ? @"Đã lưu lựa chọn Tiếng Việt. Để áp dụng, mở trình chuyển đổi ứng dụng, "
+               "vuốt World of Kira lên để đóng, rồi mở lại từ màn hình chính. "
+               "Chỉ quay về màn hình chính sẽ không đổi ngôn ngữ."
+            : @"English has been saved. To apply it, open the App Switcher, swipe World of Kira "
+               "up to close it, then open it again from the Home Screen. "
+               "Returning to the Home Screen alone will not change the language.";
+#if TARGET_OS_OSX
+        NSAlert* alert = [[NSAlert alloc] init];
+        alert.messageText = title;
+        alert.informativeText = @"Your language choice has been saved. Quit World of Kira and open it again to apply it.";
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+#else
+        static bool s_showing = false;
+        if (s_showing)
+        {
+            return;
+        }
+        UIViewController* host = MainWindow().rootViewController;
+        while (host.presentedViewController != nil)
+        {
+            host = host.presentedViewController;
+        }
+        if (host == nil || host.isBeingDismissed || host.view.window == nil)
+        {
+            fprintf(stderr, "W/MuMain: language saved; no active controller for relaunch instructions\n");
+            return;
+        }
+        [host.view endEditing:YES];
+        UIAlertController* alert = [UIAlertController alertControllerWithTitle:title
+                                                                       message:message
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction*) {
+            s_showing = false;
+        }]];
+        s_showing = true;
+        [host presentViewController:alert animated:YES completion:nil];
+#endif
+    });
+}
+
 #if TARGET_OS_OSX
 void MU_IosShowCommunityRulesOnce() {}
 #else

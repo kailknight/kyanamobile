@@ -524,6 +524,9 @@ int CMultiLanguage::GetNumByteForOneCharUTF8()
 
 BOOL CMultiLanguage::IsCharUTF8(const char* pszText)
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+    return mu_text::IsUtf8(pszText, pszText ? strlen(pszText) : 0) ? TRUE : FALSE;
+#else
     if (pszText == NULL || strlen(pszText) <= 0)
         return TRUE;
     
@@ -560,6 +563,7 @@ BOOL CMultiLanguage::IsCharUTF8(const char* pszText)
         }
     }
     return bUTF8;
+#endif
 }
 
 int CMultiLanguage::ConvertCharToWideStr(std::wstring& wstrDest, LPCSTR lpString)
@@ -576,19 +580,15 @@ int CMultiLanguage::ConvertCharToWideStr(std::wstring& wstrDest, LPCSTR lpString
 
     // calculate the number of characters needed to hold the wide-character version of the string.
     nLenOfWideCharStr = MultiByteToWideChar(iConversionType, 0, lpString, -1, NULL, 0);
-    // memory allocation
-    wchar_t* pwszStr = new wchar_t[nLenOfWideCharStr];
-    
-    // convert the multi-byte string to a wide-character string.
-    MultiByteToWideChar(iConversionType, 0, lpString, -1, pwszStr, nLenOfWideCharStr);
-    
-    //assign
-    wstrDest += pwszStr;
-    
-    // release the allocated memory.
-    delete[] pwszStr;
-    
-    return nLenOfWideCharStr-1;     
+    if (nLenOfWideCharStr <= 0)
+        return 0;
+    std::vector<wchar_t> wide(nLenOfWideCharStr, L'\0');
+    const int converted = MultiByteToWideChar(iConversionType, 0, lpString, -1,
+        wide.data(), nLenOfWideCharStr);
+    if (converted <= 0)
+        return 0;
+    wstrDest.assign(wide.data(), converted - 1);
+    return converted - 1;
 }
 
 int CMultiLanguage::ConvertWideCharToStr(std::string& strDest, LPCWSTR lpwString, int iConversionType)

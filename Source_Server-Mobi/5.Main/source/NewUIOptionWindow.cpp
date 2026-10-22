@@ -18,7 +18,7 @@
 extern void SetSelectedLanguage(const char* pszLanguage);	// Winmain.cpp, GameConfig.cpp on mobile
 #if !defined(__ANDROID__) && !defined(MU_IOS)
 extern bool AskRestartForLanguage(bool bWantVi);	// Winmain.cpp
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(MU_IOS)
 extern void MU_MobileAskRestartForLanguage(bool vietnamese);	// Platform/MobilePlatform.cpp
 #endif
 
@@ -536,8 +536,13 @@ void SEASON3B::CNewUIOptionWindow::RenderCustomFrame()
 	// files are read once, at startup).
 	y = y + 17;
 	{
+#if defined(MU_IOS)
+		const bool s_bStartedVi = IsVietnameseLanguage();
+		bool s_bPending = (GameConfig::GetInstance().GetLanguageSelection() == L"Vtm") != s_bStartedVi;
+#else
 		static bool s_bPending = false;
 		static const bool s_bStartedVi = IsVietnameseLanguage();
+#endif
 		const float langX = x + 15.f;
 		const float langY = y + 15.f;
 
@@ -573,7 +578,7 @@ void SEASON3B::CNewUIOptionWindow::RenderCustomFrame()
 			{
 				AskRestartForLanguage(bWantVi);
 			}
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(MU_IOS)
 			if (s_bPending)
 			{
 				MU_MobileAskRestartForLanguage(bWantVi);

@@ -6,6 +6,7 @@
 #if defined(__ANDROID__) || defined(MU_IOS)
 
 #include "AndroidGDI.h"
+#include "MobileTextEncoding.h"
 #if defined(MU_IOS)
 #include "IosPlatform.h"
 #endif
@@ -172,19 +173,10 @@ static TTF_Font* GetCachedFont(int size, bool bold) {
 
 // ── wchar_t → Uint16 conversion ──────────────────────────────────────────
 // SDL_ttf SizeUNICODE/RenderUNICODE expects UTF-16 Uint16 array.
-// Android wchar_t is 4 bytes (UTF-32). Convert only BMP codepoints (covers Latin, Korean, etc.)
+// Mobile wchar_t is UTF-32. Measurement and rasterisation use this same
+// conversion, including supplementary characters and invalid scalar handling.
 static std::vector<Uint16> ToUint16(const wchar_t* text, int len) {
-    std::vector<Uint16> out;
-    out.reserve(len + 1);
-    for (int i = 0; i < len && text[i]; ++i) {
-        wchar_t c = text[i];
-        if (c < 0xD800 || (c >= 0xE000 && c <= 0xFFFF))
-            out.push_back((Uint16)c);
-        else
-            out.push_back(0x25A1); // □ replacement
-    }
-    out.push_back(0); // null terminator
-    return out;
+    return mu_text::ToUtf16(text, len);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────

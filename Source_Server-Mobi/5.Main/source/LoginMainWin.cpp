@@ -16,11 +16,14 @@
 #include "ZzzCharacter.h"
 #include "wsclientinline.h"
 #include "MultiLanguage.h"
+#if defined(MU_IOS)
+#include "GameConfig/GameConfig.h"
+#endif
 
 extern void SetSelectedLanguage(const char* pszLanguage);
 #if !defined(__ANDROID__) && !defined(MU_IOS)
 extern bool AskRestartForLanguage(bool bWantVi);	// Winmain.cpp
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(MU_IOS)
 extern void MU_MobileAskRestartForLanguage(bool vietnamese);	// Platform/MobilePlatform.cpp
 #endif
 
@@ -73,6 +76,10 @@ void CLoginMainWin::RefreshLanguageButton()
 {
 	static DWORD s_adwClr[4] = { CLRDW_BR_GRAY, CLRDW_BR_GRAY, CLRDW_WHITE, 0 };
 	const bool bVi = IsVietnameseLanguage();
+#if defined(MU_IOS)
+	// Both language controls share the persisted choice, not separate toggle flags.
+	m_bLangChanged = (GameConfig::GetInstance().GetLanguageSelection() == L"Vtm") != bVi;
+#endif
 	const char* pszLabel;
 	if (!m_bLangChanged)
 	{
@@ -108,6 +115,10 @@ void CLoginMainWin::SetPosition(int nXCoord, int nYCoord)
 
 void CLoginMainWin::Show(bool bShow)
 {
+#if defined(MU_IOS)
+	if (bShow)
+		RefreshLanguageButton();
+#endif
 	CWin::Show(bShow);
 
 	for (int i = 0; i < LMW_BTN_MAX; ++i)
@@ -142,6 +153,9 @@ void CLoginMainWin::UpdateWhileActive(double dDeltaTick)
 		// Saved at once; read at the next start (the language data files load once at startup).
 		// Clicking again before restarting switches back.
 		const bool bStartedVi = IsVietnameseLanguage();
+#if defined(MU_IOS)
+		RefreshLanguageButton();
+#endif
 		m_bLangChanged = !m_bLangChanged;
 		const bool bWantVi = m_bLangChanged ? !bStartedVi : bStartedVi;
 		SetSelectedLanguage(bWantVi ? "Vtm" : "Eng");
@@ -152,7 +166,7 @@ void CLoginMainWin::UpdateWhileActive(double dDeltaTick)
 		{
 			AskRestartForLanguage(bWantVi);
 		}
-#elif defined(__ANDROID__)
+#elif defined(__ANDROID__) || defined(MU_IOS)
 		if (m_bLangChanged)
 		{
 			MU_MobileAskRestartForLanguage(bWantVi);
