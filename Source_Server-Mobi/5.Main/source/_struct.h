@@ -973,6 +973,7 @@ struct HELPER_STRUCT
 	int PotionElite;
 	int ShortDistance;
 	int RegularAttack;
+	int TargetConcentration; // attack the biggest group of monsters, not the closest
 	int SkillCache;
 	bool ReBuff[2];
 	int SelectedItem;
@@ -996,7 +997,7 @@ struct HELPER_STRUCT
 		TimerOffline = 0;
 		ReBuff[0] = 0;
 		ReBuff[1] = 0;
-		ReBuff[2] = 0;
+		// ReBuff has 2 entries; [2] used to be written here, past its end.
 		TimerBuffParty = 0;
 		TimerMove = 0;
 		TimerSkill = 0;

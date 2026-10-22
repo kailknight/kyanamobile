@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "BuffIcon.h"
+#include "MultiLanguage.h"
 #include "NewUISystem.h"
 BuffIcon gIconBuff;
 
@@ -115,6 +116,27 @@ void BuffIcon::Recv(PMSG_SEND_BUFF_ICON* DataRecv)
 	}
 }
 
+// UserBuff is filled in the order the server's 0x2D packets arrive and slots
+// are reused when a buff ends, so it does not line up with the sorted icon
+// row. Look a buff's time up by its effect index, never by icon position.
+int BuffIcon::FindUserBuff(int effect)
+{
+	if (effect <= 0)
+	{
+		return -1;
+	}
+
+	for (int i = 0; i < MAX_EFFECT_LIST; i++)
+	{
+		if (this->UserBuff[i].Index == effect)
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
 void BuffIcon::DeleteAllBuff()
 {
 	this->UserBuffCount = 0;
@@ -134,7 +156,7 @@ void BuffIcon::GC_BuffInfo(PMSG_SEND_BUFF_ICON_EX* aRecv)
 
 	std::map<int, RenderTooltipBuff>::iterator it;
 
-	if (strcmp((char*)g_strSelectedML.c_str(), "Eng") == 0)
+	if (!IsVietnameseLanguage())
 	{
 		it = this->BuffEffectTRSData_ENG.find(BuffIndex);
 
@@ -144,7 +166,7 @@ void BuffIcon::GC_BuffInfo(PMSG_SEND_BUFF_ICON_EX* aRecv)
 		}
 	}
 
-	if (strcmp((char*)g_strSelectedML.c_str(), "Vn") == 0)
+	if (IsVietnameseLanguage())
 	{
 		it = this->BuffEffectTRSData_VTM.find(BuffIndex);
 

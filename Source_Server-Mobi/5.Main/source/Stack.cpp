@@ -2,6 +2,10 @@
 #include "StackWalker.h"
 #include <tchar.h>
 #include <time.h>
+#include <exception>
+#include <psapi.h>
+
+#pragma comment(lib, "psapi.lib")
 
 
 static TCHAR s_szExceptionLogFileName[_MAX_PATH] = _T("\\exceptions.log");  // default
@@ -170,6 +174,150 @@ BOOL PreventSetUnhandledExceptionFilter()
 	return bRet;
 }
 
+// dbghelp symbols never load on player machines, so every callstack frame prints
+// "module-name not available". These helpers name the module and offset straight
+// from the loaded-module list; Main.exe offsets resolve against its .map file.
+static void DescribeAddress(DWORD Address, char* Out, size_t OutSize)
+{
+	HMODULE Module = NULL;
+	char Path[MAX_PATH] = "?";
+
+	if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)Address, &Module) && Module != NULL)
+	{
+		GetModuleFileName(Module, Path, MAX_PATH);
+		const char* Name = strrchr(Path, '\\');
+		sprintf_s(Out, OutSize, "%s+0x%X", Name != NULL ? Name + 1 : Path, Address - (DWORD)Module);
+	}
+	else
+	{
+		sprintf_s(Out, OutSize, "0x%08X (no module)", Address);
+	}
+}
+
+static bool IsExecutableAddress(DWORD Address)
+{
+	MEMORY_BASIC_INFORMATION Info;
+
+	if (VirtualQuery((LPCVOID)Address, &Info, sizeof(Info)) == 0 || Info.State != MEM_COMMIT)
+	{
+		return false;
+	}
+
+	return (Info.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+}
+
+// 0xE06D7363 is a C++ throw. ExceptionInformation[1] is the thrown object and [2] the
+// ThrowInfo, whose first catchable type is the thrown type's decorated name.
+static void LogCppException(StackWalkerToConsole& sw, EXCEPTION_RECORD* lpRecord)
+{
+	if (lpRecord->NumberParameters < 3)
+	{
+		return;
+	}
+
+	__try
+	{
+		DWORD* ThrowInfo = (DWORD*)lpRecord->ExceptionInformation[2];
+		DWORD* TypeArray = (DWORD*)ThrowInfo[3];
+		int Count = (int)TypeArray[0];
+		bool IsStdException = false;
+
+		for (int i = 0; i < Count && i < 8; i++)
+		{
+			DWORD* Catchable = (DWORD*)TypeArray[1 + i];
+			const char* TypeName = (const char*)(((DWORD*)Catchable[1]) + 2);
+
+			sw.WriteLine("CppException type[%d]: %s", i, TypeName);
+
+			if (strcmp(TypeName, ".?AVexception@std@@") == 0)
+			{
+				IsStdException = true;
+			}
+		}
+
+		if (IsStdException)
+		{
+			sw.WriteLine("CppException what(): %s", ((std::exception*)lpRecord->ExceptionInformation[1])->what());
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		sw.WriteLine("CppException: could not read the throw info");
+	}
+}
+
+static void LogProcessState(StackWalkerToConsole& sw)
+{
+	MEMORYSTATUSEX Mem;
+	Mem.dwLength = sizeof(Mem);
+
+	if (GlobalMemoryStatusEx(&Mem))
+	{
+		sw.WriteLine("Memory: address space free %u MB of %u MB, physical free %u MB",
+					 (DWORD)(Mem.ullAvailVirtual >> 20), (DWORD)(Mem.ullTotalVirtual >> 20), (DWORD)(Mem.ullAvailPhys >> 20));
+	}
+
+	PROCESS_MEMORY_COUNTERS Counters;
+
+	if (GetProcessMemoryInfo(GetCurrentProcess(), &Counters, sizeof(Counters)))
+	{
+		sw.WriteLine("Process: working set %u MB, peak %u MB, pagefile %u MB",
+					 (DWORD)(Counters.WorkingSetSize >> 20), (DWORD)(Counters.PeakWorkingSetSize >> 20), (DWORD)(Counters.PagefileUsage >> 20));
+	}
+
+	DWORD HandleCount = 0;
+
+	if (GetProcessHandleCount(GetCurrentProcess(), &HandleCount))
+	{
+		sw.WriteLine("Handle count: %u", HandleCount);
+	}
+}
+
+static void LogModuleCallstack(StackWalkerToConsole& sw, CONTEXT* Context)
+{
+	char Text[MAX_PATH + 32];
+
+	DescribeAddress(Context->Eip, Text, sizeof(Text));
+	sw.WriteLine("Fault   : %s", Text);
+
+	// FPO makes the EBP chain unreliable, so scan the stack for return addresses.
+	// A word that points into executable memory and just after a call is a caller.
+	DWORD* Stack = (DWORD*)Context->Esp;
+	int Printed = 0;
+
+	__try
+	{
+		for (int i = 0; i < 4096 && Printed < 40; i++)
+		{
+			DWORD Value = Stack[i];
+
+			if (Value < 0x10000 || !IsExecutableAddress(Value))
+			{
+				continue;
+			}
+
+			BYTE* Code = (BYTE*)Value;
+
+			// E8 rel32 (call) ends 5 bytes before; FF /2 forms end 2 or 6 bytes before.
+			bool AfterCall = (IsExecutableAddress(Value - 5) && Code[-5] == 0xE8)
+				|| (IsExecutableAddress(Value - 2) && Code[-2] == 0xFF)
+				|| (IsExecutableAddress(Value - 6) && Code[-6] == 0xFF);
+
+			if (!AfterCall)
+			{
+				continue;
+			}
+
+			DescribeAddress(Value, Text, sizeof(Text));
+			sw.WriteLine("Stack[%4d]: %s", i, Text);
+			Printed++;
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
+}
+
 static LONG __stdcall CrashHandlerExceptionFilter(EXCEPTION_POINTERS* pExPtrs)
 {
 #ifdef _M_IX86
@@ -222,6 +370,18 @@ static LONG __stdcall CrashHandlerExceptionFilter(EXCEPTION_POINTERS* pExPtrs)
 						 pExPtrs->ContextRecord->Eip,
 						 pExPtrs->ContextRecord->Esp,
 						 pExPtrs->ContextRecord->Ebp);
+		}
+
+		if (lpRecord->ExceptionCode == 0xE06D7363)
+		{
+			LogCppException(sw, lpRecord);
+		}
+
+		LogProcessState(sw);
+
+		if (pExPtrs->ContextRecord != NULL)
+		{
+			LogModuleCallstack(sw, pExPtrs->ContextRecord);
 		}
 	}
 	sw.ShowCallstack(GetCurrentThread(), pExPtrs->ContextRecord);

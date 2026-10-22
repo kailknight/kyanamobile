@@ -1335,6 +1335,12 @@ struct OBJECTSTRUCT
 	DWORD OffActiveTick[2];
 	int OffComboStep;
 	DWORD OffComboTick;
+	// Hunting options from the off-helper start packet (CG_OFFMODE_RESULT.HelperFlags):
+	// 1 Regular Attack, 2 Target Concentration, 4 Use Skills Closely,
+	// 8/16 "Monster Attacking Me" for activation skill 1/2.
+	BYTE OffHelperFlags;
+	int OffCloseTurn;
+	DWORD OffRegularTick;
 
 	short m_OfflineCoordX;
 	short m_OfflineCoordY;

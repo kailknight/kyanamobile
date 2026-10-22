@@ -430,6 +430,38 @@ void MU_MobileRequestMicPermission()
 #endif
 }
 
+void MU_MobileAskRestartForLanguage(bool vietnamese)
+{
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return;
+    }
+
+    jmethodID method =
+        env->GetStaticMethodID(g_keyboardBridgeClass, "askRestartForLanguageFromNative", "(Z)V");
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return;
+    }
+    if (method == nullptr)
+    {
+        return;
+    }
+
+    // Returns at once: the dialog is answered on the UI thread.
+    env->CallStaticVoidMethod(g_keyboardBridgeClass, method, vietnamese ? JNI_TRUE : JNI_FALSE);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+    }
+#else
+    (void)vietnamese;
+#endif
+}
+
 int MU_MobileGetWifiRssiDbm()
 {
 #if defined(__ANDROID__)

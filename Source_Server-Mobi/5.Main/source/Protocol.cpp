@@ -1057,10 +1057,27 @@ void CGSaveDataMuHelper(BYTE* ReceiveBuffer)
 	//CreateNotice("Save CGSaveDataMuHelper", 1);
 }
 
+static DWORD s_LastStopSend = 0; // StartMuHelper
+
 void StartMuHelper(int Type)
 {
+	// One stop request at a time. CNewUIMuHelper::Render stops the helper
+	// while its settings window is open and calls this every frame until the
+	// server's answer clears Started, so each frame sent another stop and each
+	// answer printed "Official Helper is closed" again.
+	if (Type == 1)
+	{
+		if (s_LastStopSend != 0 && (GetTickCount() - s_LastStopSend) < 2000)
+		{
+			return;
+		}
+
+		s_LastStopSend = GetTickCount();
+	}
+
 	if (Type == 0)
 	{
+		s_LastStopSend = 0;
 		//g_ConsoleDebug->Write(1, "%d", g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[0]);
 		if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MuHelper))
 		{
@@ -1131,7 +1148,11 @@ void RecvStartMuHelper(BYTE* ReceiveBuffer)
 	}
 	else
 	{
-		g_pChatListBox->AddText("", GlobalText[3579], SEASON3B::TYPE_ERROR_MESSAGE);
+		// Only when it was actually running - a repeated stop answer is silent.
+		if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Started)
+		{
+			g_pChatListBox->AddText("", GlobalText[3579], SEASON3B::TYPE_ERROR_MESSAGE);
+		}
 		g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Clear();
 	}
 	
@@ -1265,6 +1286,8 @@ void GCNewCharacterInfoRecv(BYTE* ReceiveBuffer)
 	CharacterAttribute->PrintPlayer.ViewEnergy = lpMsg->ViewEnergy;
 	CharacterAttribute->PrintPlayer.ViewLeadership = lpMsg->ViewLeadership;
 }
+void SpeedGuardCommitView(); // ZzzCharacter.cpp
+
 void GCNewCharacterCalcRecv(BYTE* ReceiveBuffer)
 {
 	PMSG_NEW_CHARACTER_CALC_RECV* lpMsg = (PMSG_NEW_CHARACTER_CALC_RECV*)ReceiveBuffer;
@@ -1297,6 +1320,7 @@ void GCNewCharacterCalcRecv(BYTE* ReceiveBuffer)
 	CharacterAttribute->PrintPlayer.ViewCurseDamageRate = lpMsg->ViewCurseDamageRate;
 	CharacterAttribute->PrintPlayer.ViewPhysiSpeed = lpMsg->ViewPhysiSpeed;
 	CharacterAttribute->PrintPlayer.ViewMagicSpeed = lpMsg->ViewMagicSpeed;
+	SpeedGuardCommitView();
 	CharacterAttribute->PrintPlayer.ViewAttackSuccessRate = lpMsg->ViewAttackSuccessRate;
 	CharacterAttribute->PrintPlayer.ViewAttackSuccessRatePvP = lpMsg->ViewAttackSuccessRatePvP;
 	CharacterAttribute->PrintPlayer.ViewDefense = lpMsg->ViewDefense;

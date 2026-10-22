@@ -4,6 +4,9 @@
 
 #include "stdafx.h"
 #include "NewUINPCDialogue.h"
+#include "MultiLanguage.h"
+
+void TranslateTemplate(const char* pszEnglish, char* pszOut, size_t cbOut);	// MultiLanguage.cpp
 #include "wsclientinline.h"
 #include "CRTDBG.h"
 extern int DisplayWinCDepthBox;
@@ -452,7 +455,9 @@ void CNewUINPCDialogue::SetCurSelTexts()
 		pszAnswer = g_QuestMng.GetNPCDlgAnswer(m_dwCurDlgIndex, i);
 		if (NULL == pszAnswer)
 			break;
-		::strcat(szAnswer, pszAnswer);
+		char szTranslated[ND_WORDS_ROW_MAX];
+		TranslateTemplate(pszAnswer, szTranslated, sizeof(szTranslated));
+		::strcat(szAnswer, szTranslated);
 
 		m_anSelTextLine[i] = ::DivideStringByPixel(&m_aszSelTexts[nSelTextLineSum][0],2, ND_WORDS_ROW_MAX, szAnswer, 160, false);
 

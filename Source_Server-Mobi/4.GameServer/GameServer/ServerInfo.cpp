@@ -4659,6 +4659,10 @@ void CServerInfo::ReadSkillInfo(char* section,char* path) // OK
 
 	this->m_ReflectDamageTimeConstB = GetPrivateProfileInt(section,"ReflectDamageTimeConstB",0,path);
 
+	// Fixed duration for a Summoner's buffs (Damage Reflect, Berserker/Sword Power),
+	// whatever the energy. 300 = 5 minutes; 0 goes back to the TimeConst formulas.
+	this->m_SummonerBuffTime = GetPrivateProfileInt(section,"SummonerBuffTime",300,path);
+
 	this->m_ReflectDamageMaxRate = GetPrivateProfileInt(section,"ReflectDamageMaxRate",0,path);
 
 	this->m_SwordPowerConstA = GetPrivateProfileInt(section,"SwordPowerConstA",0,path);

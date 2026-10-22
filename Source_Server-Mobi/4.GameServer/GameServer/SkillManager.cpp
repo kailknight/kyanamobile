@@ -3664,6 +3664,12 @@ bool CSkillManager::SkillDamageReflect(int aIndex,int bIndex,CSkill* lpSkill) //
 
 	int count = gServerInfo.m_ReflectDamageTimeConstA+((lpObj->Energy+lpObj->AddEnergy)/gServerInfo.m_ReflectDamageTimeConstB);
 
+	// Summoner buffs last a fixed time, not an energy-based one (SummonerBuffTime).
+	if(lpObj->Class == CLASS_SU && gServerInfo.m_SummonerBuffTime > 0)
+	{
+		count = gServerInfo.m_SummonerBuffTime;
+	}
+
 	gEffectManager.AddEffect(lpTarget,0,this->GetSkillEffect(lpSkill->m_index),count,value,0,0,0);
 
 	this->GCSkillAttackSend(lpObj,lpSkill->m_index,bIndex,1);
@@ -3705,6 +3711,12 @@ bool CSkillManager::SkillSwordPower(int aIndex,int bIndex,CSkill* lpSkill,bool c
 	}
 
 	int count = gServerInfo.m_SwordPowerTimeConstA+((lpObj->Energy+lpObj->AddEnergy)/gServerInfo.m_SwordPowerTimeConstB);
+
+	// Summoner buffs last a fixed time, not an energy-based one (SummonerBuffTime).
+	if(lpObj->Class == CLASS_SU && gServerInfo.m_SummonerBuffTime > 0)
+	{
+		count = gServerInfo.m_SummonerBuffTime;
+	}
 
 	gEffectManager.AddEffect(lpObj,0,this->GetSkillEffect(lpSkill->m_index),count,value1,value2,value3,value4);
 

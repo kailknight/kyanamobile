@@ -22,8 +22,8 @@ namespace COMGEM
 	BOOL	m_bType = ATTACH;
 	char	m_cState = STATE_READY;
 	char	m_cErr = NOERR;
-	char	m_cGemType = -1;
-	char	m_cComType = -1;
+	signed char	m_cGemType = -1;
+	signed char	m_cComType = -1;
 	BYTE	m_cCount = 0;
 	int		m_iValue = 0;
 	BYTE	m_cPercent = 0;

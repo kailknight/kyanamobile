@@ -1,14 +1,25 @@
 // UIRefinery.cpp: implementation of the UIRefinery class.
 //////////////////////////////////////////////////////////////////////
 #include "stdafx.h"
+#include "MultiLanguage.h"
 #include "ZzzOpenglUtil.h"
 #include "ZzzTexture.h"
 #include "UIManager.h"
 #include "UIJewelHarmony.h"
 #include "wsclientinline.h"
 
-#define HARMONYJEWELOPTION_DATA_FILE std::string("Data\\Local\\"+g_strSelectedML+"\\JewelOfHarmonyOption_"+g_strSelectedML+".bmd").c_str()
-#define NOTSMELTING_DATA_FILE std::string("Data\\Local\\"+g_strSelectedML+"\\JewelOfHarmonySmelt_"+g_strSelectedML+".bmd").c_str()
+static const char* HarmonyOptionFile()
+{
+	static char s_szFile[260];
+	return LocalLanguageFile(s_szFile, sizeof(s_szFile), "Data\\Local\\%s\\JewelOfHarmonyOption_%s.bmd");
+}
+static const char* HarmonySmeltFile()
+{
+	static char s_szFile[260];
+	return LocalLanguageFile(s_szFile, sizeof(s_szFile), "Data\\Local\\%s\\JewelOfHarmonySmelt_%s.bmd");
+}
+#define HARMONYJEWELOPTION_DATA_FILE HarmonyOptionFile()
+#define NOTSMELTING_DATA_FILE HarmonySmeltFile()
 
 extern float		g_fScreenRate_x;
 extern float		g_fScreenRate_y;

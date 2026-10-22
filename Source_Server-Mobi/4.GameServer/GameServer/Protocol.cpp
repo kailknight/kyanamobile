@@ -1583,6 +1583,11 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 				CGClientBuildRecv((PMSG_CLIENT_BUILD_RECV*)lpMsg, size, aIndex);
 			}
 			break;
+			case 0xF5: // client tamper report - see PMSG_CLIENT_TAMPER_RECV
+			{
+				CGClientTamperRecv((PMSG_CLIENT_TAMPER_RECV*)lpMsg, size, aIndex);
+			}
+			break;
 			case 0x8A: //Nhan Thuong
 			{
 				XULY_CGPACKET_SOLAN* mlpMsg = (XULY_CGPACKET_SOLAN*)lpMsg;
@@ -2875,6 +2880,28 @@ void CGMoveRecv(PMSG_MOVE_RECV* lpMsg,int aIndex) // OK
 // here: this packet arrives before the account name is known, so a refusal at
 // this point could not be logged against anybody and the client has no screen
 // up yet to show it. The gate is applied at login, in CGConnectAccountRecv.
+void CGClientTamperRecv(PMSG_CLIENT_TAMPER_RECV* lpMsg,int size,int aIndex) // OK
+{
+	if(size < (int)sizeof(PMSG_CLIENT_TAMPER_RECV) || gObjIsConnected(aIndex) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[aIndex];
+
+	gLog.Output(LOG_HACK,"[%s][%s] Client Memory Tamper Detected (%s) kind %d real %u edited %u",
+		lpObj->Account,lpObj->Name,((lpObj->m_ClientPlatform == 1) ? "Android" : "PC"),(int)lpMsg->Kind,(unsigned)lpMsg->Real,(unsigned)lpMsg->Seen);
+
+	LogAdd(LOG_RED,"[ClientTamper][%s][%s] memory edited: kind %d real %u edited %u",lpObj->Account,lpObj->Name,(int)lpMsg->Kind,(unsigned)lpMsg->Real,(unsigned)lpMsg->Seen);
+
+	// Same switch as the attack-speed check in CGLiveClientRecv: an operator who
+	// turned that off is not surprised by kicks from this one.
+	if(gServerInfo.m_CheckSpeedHack != 0)
+	{
+		GCCloseClientSend(aIndex,0);
+	}
+}
+
 void CGClientBuildRecv(PMSG_CLIENT_BUILD_RECV* lpMsg,int size,int aIndex) // OK
 {
 	LPOBJ lpObj = &gObj[aIndex];

@@ -3,6 +3,7 @@
 //*****************************************************************************
 
 #include "stdafx.h"
+#include "MultiLanguage.h"
 #include "QuestMng.h"
 #include "./Utilities/Log/ErrorReport.h"
 #include "wsclientinline.h"
@@ -12,7 +13,12 @@
 #define	QM_NPCDIALOGUE_FILE			"Data\\Local\\NPCDialogue.bmd"
 #define	QM_QUESTPROGRESS_FILE		"Data\\Local\\QuestProgress.bmd"
 
-#define	QM_QUESTWORDS_FILE			std::string("Data\\Local\\"+g_strSelectedML+"\\QuestWords_"+g_strSelectedML+".bmd").c_str()
+static const char* QuestWordsFile()
+{
+	static char s_szFile[260];
+	return LocalLanguageFile(s_szFile, sizeof(s_szFile), "Data\\Local\\%s\\QuestWords_%s.bmd");
+}
+#define	QM_QUESTWORDS_FILE			QuestWordsFile()
 
 CQuestMng g_QuestMng;
 

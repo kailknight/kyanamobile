@@ -385,6 +385,20 @@ struct PMSG_CLIENT_BUILD_DEVICE_RECV
 	char  DeviceId[32]; // hex, not NUL-terminated
 };
 
+// The client caught one of its protected values being changed from outside
+// (ZzzCharacter.cpp SpeedGuardVerify) - a memory editor such as Cheat Engine or
+// GameGuardian. Sent once per session, by phones and PC alike; phones have no
+// anti-cheat process to report it, so this is how the server hears about it.
+struct PMSG_CLIENT_TAMPER_RECV
+{
+	PSBMSG_HEAD header; // C1:D3:F5
+	BYTE  Kind;         // 1 = attack/magic speed
+	DWORD Real;         // the value the server sent
+	DWORD Seen;         // what it had been changed to
+};
+
+static_assert(sizeof(PMSG_CLIENT_TAMPER_RECV) == 13, "PMSG_CLIENT_TAMPER_RECV must match the client's 13 bytes");
+
 #pragma pack(pop)
 
 struct PMSG_CHARACTER_CREATE_RECV
@@ -1274,6 +1288,7 @@ void CGPetItemInfoRecv(PMSG_PET_ITEM_INFO_RECV* lpMsg,int aIndex);
 void CGMapServerMoveAuthRecv(PMSG_MAP_SERVER_MOVE_AUTH_RECV* lpMsg,int aIndex);
 void CGMoveRecv(PMSG_MOVE_RECV* lpMsg,int aIndex);
 void CGClientBuildRecv(PMSG_CLIENT_BUILD_RECV* lpMsg,int size,int aIndex);
+void CGClientTamperRecv(PMSG_CLIENT_TAMPER_RECV* lpMsg,int size,int aIndex);
 void CGConnectAccountRecv(PMSG_CONNECT_ACCOUNT_RECV* lpMsg,int aIndex);
 void CGCloseClientRecv(PMSG_CLOSE_CLIENT_RECV* lpMsg,int aIndex);
 void CGCharacterListRecv(int aIndex);

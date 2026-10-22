@@ -213,6 +213,15 @@ int CB_MUHelper::SimulateSkill(int iSkill, bool bTargetRequired, int iTarget)
 
 	float fSkillDistance = gSkillManager.GetSkillDistance(iSkill, Hero);
 
+	// Inferno is cast around the caster, so Skill_eng.bmd gives it distance 0.
+	// The approach below casts only once the target is inside that distance,
+	// which 0 never is: the helper kept walking into the monster and never
+	// cast. Treat it as a 3-tile skill here - well inside the ring it hits.
+	if (fSkillDistance < 1.0f && (iSkill == AT_SKILL_INFERNO || iSkill == MASTER_SKILL_ADD_INFERNO_IMPROVED1 || iSkill == MASTER_SKILL_ADD_INFERNO_IMPROVED2))
+	{
+		fSkillDistance = 3.0f;
+	}
+
 	if (bTargetRequired)
 	{
 		if (iTarget == -1)
@@ -497,32 +506,22 @@ bool MuHelperActiveBuff()
 				if (Party[i].index >= 0 && Party[i].index < MAX_CHARACTERS_CLIENT)
 				{
 
+					// Party buffs: the Buff skills you selected (Buff Duration slots), cast
+					// on every party member nearby who does not have that buff - so an
+					// expired buff is put back. Used to be hard-coded per class (Wizard:
+					// Mana Shield, Elf: Greater Damage/Defense) and ignored your choice.
 					CHARACTER* pChar = &CharactersClient[Party[i].index];
-					OBJECT* pObj = &pChar->Object;
-					int iSkillType = -1;
-					if (pChar->SafeZone) continue;
-					if (gCharacterManager.GetBaseClass(Hero->Class) == CNewUIBCustomMenuInfo::Dark_Wizard)
-					{
-						iSkillType = GetSkillBuffParty(2);
-					}
-					if (gCharacterManager.GetBaseClass(Hero->Class) == CNewUIBCustomMenuInfo::Fairy_Elf)
-					{
-						iSkillType = GetSkillBuffParty(3);
-						if (iSkillType == -1 || gCB_MUHelper->BuffTarget(pChar, iSkillType))
-						{
-							iSkillType = GetSkillBuffParty(4);
-						}
-					}
-					if (iSkillType == -1) break;
+					if (pChar == Hero || pChar->SafeZone || pChar->Dead || !pChar->Object.Live || !pChar->Object.Visible) continue;
+					if (GetDistanceXY(Hero->PositionX, Hero->PositionY, pChar->PositionX, pChar->PositionY) > 8) continue;
 
-
-
-					if (!gCB_MUHelper->BuffTarget(pChar, iSkillType))
+					for (int b = 0; b < 3; b++)
 					{
-						//DrawMessage(1, "1Get BuffPT %d <> %d %d", gSkillManager.FindHeroCurrentSkill((ActionSkillType)iSkillType), iSkillType, gCB_MUHelper->BuffTarget(pChar, iSkillType));
+						const int iSkillType = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[b];
+						if (iSkillType <= 0 || gSkillManager.FindHeroSkill((ActionSkillType)iSkillType) == 0) continue;
+						if (gCB_MUHelper->BuffTarget(pChar, iSkillType)) continue;
+
 						Hero->CurrentSkill = gSkillManager.FindHeroCurrentSkill((ActionSkillType)iSkillType);
 						gCB_MUHelper->SimulateSkill(iSkillType, true, pChar->Key);
-						//DrawMessage(1, "MuHelperActiveBuff Char %s Party %d (%d) (%d)", Hero->ID, iSkillType, gCB_MUHelper->BuffTarget(Hero, iSkillType));
 						gCB_MUHelper->CacheAction[CB_MUHelper::eBuffParty]++;
 						return 0;
 					}
@@ -532,7 +531,7 @@ bool MuHelperActiveBuff()
 			if (GetTickCount() >= g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.TimerBuffParty)
 			{
 				gCB_MUHelper->m_bTimerActivatedBuffOngoing = true;
-				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.TimerBuffParty = GetTickCount() * ((g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PartyBuffTime) * 1000);
+				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.TimerBuffParty = GetTickCount() + ((g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PartyBuffTime) * 1000);
 			}
 			else
 			{
@@ -570,114 +569,157 @@ bool MuHelperActiveBuff()
 	return 1;
 }
 
+extern int HeroIndex;
+
+// Debuff skills (Summoner): allowed in the Activation slots, where their
+// "Con" box means Instant Cast - see MuHelperActiveAttack.
+bool IsHelperDebuffSkill(int skill)
+{
+	return skill == AT_SKILL_ALICE_SLEEP || skill == AT_SKILL_ALICE_BLIND
+		|| skill == AT_SKILL_ALICE_WEAKNESS || skill == AT_SKILL_ALICE_ENERVATION
+		|| (skill >= AT_SKILL_ALICE_SLEEP_UP && skill <= AT_SKILL_ALICE_SLEEP_UP + 4)
+		|| skill == MASTER_SKILL_ADD_SLEEP_IMPROVED
+		|| skill == MASTER_SKILL_ADD_BLIND || skill == MASTER_SKILL_ADD_BLIND_IMPROVED;
+}
+
+// Does the monster already carry the debuff this skill puts on?
+static bool HelperTargetHasDebuff(CHARACTER* c, int skill)
+{
+	OBJECT* o = &c->Object;
+	if (skill == AT_SKILL_ALICE_SLEEP || (skill >= AT_SKILL_ALICE_SLEEP_UP && skill <= AT_SKILL_ALICE_SLEEP_UP + 4) || skill == MASTER_SKILL_ADD_SLEEP_IMPROVED)
+		return g_isCharacterBuff(o, eDeBuff_Sleep);
+	if (skill == AT_SKILL_ALICE_BLIND || skill == MASTER_SKILL_ADD_BLIND || skill == MASTER_SKILL_ADD_BLIND_IMPROVED)
+		return g_isCharacterBuff(o, eDeBuff_Blind);
+	if (skill == AT_SKILL_ALICE_WEAKNESS)
+		return g_isCharacterBuff(o, eDeBuff_AttackDown);
+	if (skill == AT_SKILL_ALICE_ENERVATION)
+		return g_isCharacterBuff(o, eDeBuff_DefenseDown);
+	return false;
+}
+
+// A monster whose last attack was at the hero.
+static bool IsMonsterAttackingHero(CHARACTER* c)
+{
+	return c->TargetCharacter == HeroIndex;
+}
+
+static bool IsLiveHelperMonster(CHARACTER* c)
+{
+	OBJECT* o = &c->Object;
+	return KIND_MONSTER == o->Kind && o->Live && o->Visible && o->Alpha > 0.f && o->CurrentAction != 6 && !c->Dead;
+}
+
+// Activation skill condition for slot SkillNum (1 or 2): -1 = not now,
+// otherwise a priority (higher wins when both are ready).
 int ActiveCheckMonterCount(int SkillNum)
 {
-	if (gSkillManager.FindHeroSkill((ActionSkillType)g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SkillNum]) == 0)
+	auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+	const int skill = d.Skill[SkillNum];
+
+	if (gSkillManager.FindHeroSkill((ActionSkillType)skill) == 0)
 	{
 		return -1;
 	}
 
-	if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillDelay[SkillNum - 1] == 1)
+	if (d.SkillDelay[SkillNum - 1] == 1)
 	{
-		if ((GetTickCount() - g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.TimerDelay[SkillNum]) >= (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Delay[SkillNum - 1]) * 1000) //s
+		if ((GetTickCount() - d.TimerDelay[SkillNum]) >= (DWORD)(d.Delay[SkillNum - 1]) * 1000) //s
 		{
 			return 1;
 		}
+		return -1;
 	}
-	else if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillCondition[SkillNum - 1] == 1)
-	{
-		float Distance = 0;
-		int HostileEnemyNum = 0;
-		for (int i = 0; i < MAX_CHARACTERS_CLIENT; i++)
-		{
-			CHARACTER* c = &CharactersClient[i];
-			OBJECT* o = &c->Object;
-			if (KIND_MONSTER == o->Kind && o->Live && o->Visible && o->Alpha > 0.f && o->CurrentAction != 6)
-			{
-				Distance = GetDistance(c);
-				//==Khoang cach rong
-				if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.LongDistance)
-				{
-					if (Distance < g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Range[0] + 1)
-					{
-						HostileEnemyNum++;
-					}
-				}
-				else
-				{
-					float SkillDistance = gSkillManager.GetSkillDistance(gSkillManager.FindHeroCurrentSkill((ActionSkillType)g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SkillNum]), Hero);
-					//if (Distance < g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Range[0]+1)
-					if (Distance < SkillDistance)
-					{
-						HostileEnemyNum++;
-					}
 
-				}
-			}
-		}
-		//char zbtemp[128] = { 0 };
-		//sprintf_s(zbtemp, "ActiveCheckMonterCount %d (%d)", HostileEnemyNum, g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillSubCon[SkillNum - 1]);
-		//g_pChatListBox->AddText("", zbtemp, SEASON3B::TYPE_WHISPER_MESSAGE);
-		//DrawMessage(1, "%d Skill Get %d (%d)  ", SkillNum - 1,HostileEnemyNum, g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillSubCon[SkillNum - 1]);
-		switch (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.SkillSubCon[SkillNum - 1])
+	if (d.SkillCondition[SkillNum - 1] == 1)
+	{
+		// For a debuff the box means Instant Cast, handled before this.
+		if (IsHelperDebuffSkill(skill))
 		{
-		case 3:
-			if (HostileEnemyNum >= 8) return 3;
-			break;
-		case 2:
-			if (HostileEnemyNum >= 6) return 2;
-			break;
-		case 1:
-			if (HostileEnemyNum >= 4) return 1;
-			break;
-		case 0:
-			if (HostileEnemyNum >= 2) return 0;
-			break;
-		default:
 			return -1;
 		}
 
-		return -1;
+		// "Monster Within Hunting range" (PreCon 0) or "Monster Attacking Me" (1).
+		const bool attackingMeOnly = (d.SkillPreCon[SkillNum - 1] == 1);
+		const float SkillDistance = gSkillManager.GetSkillDistance(gSkillManager.FindHeroCurrentSkill((ActionSkillType)skill), Hero);
+		int HostileEnemyNum = 0;
+
+		for (int i = 0; i < MAX_CHARACTERS_CLIENT; i++)
+		{
+			CHARACTER* c = &CharactersClient[i];
+			if (!IsLiveHelperMonster(c))
+			{
+				continue;
+			}
+			if (attackingMeOnly && !IsMonsterAttackingHero(c))
+			{
+				continue;
+			}
+
+			const float Distance = GetDistance(c);
+			const float limit = d.LongDistance ? (float)(d.Range[0] + 1) : SkillDistance;
+			if (Distance < limit)
+			{
+				HostileEnemyNum++;
+			}
+		}
+
+		// The boxes read "More Than 2 / 3 / 4 / 5 Mobs" (they used to need 2/4/6/8).
+		static const int kNeed[4] = { 2, 3, 4, 5 };
+		const int sub = d.SkillSubCon[SkillNum - 1];
+		if (sub < 0 || sub > 3)
+		{
+			return -1;
+		}
+		return (HostileEnemyNum >= kNeed[sub]) ? sub : -1;
 	}
+
 	return -1;
 }
+
 void CB_MUHelper::GetTarget()
 {
-	float Distance = 0;
-	float DistanceTarget = 0;
-	int Target = -1;
-	float CachDis = 0;
+	auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+
 	for (int i = 0; i < MAX_CHARACTERS_CLIENT; i++)
 	{
 		CHARACTER* c = &CharactersClient[i];
 		OBJECT* o = &c->Object;
-		//if (KIND_MONSTER == o->Kind && o->Live && o->Visible && o->Alpha > 0.f && o->CurrentAction != 6)
-		if (KIND_MONSTER == o->Kind && o->Live)
+		if (KIND_MONSTER != o->Kind || !o->Live)
 		{
-			Distance = GetDistance(c);
-			if (!g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.LongDistance)
-			{
-				DistanceTarget = GetDistanceXY(c->PositionX, c->PositionY, g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.StartX, g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.StartY);
-			}
-			else
-			{
-				DistanceTarget = GetDistanceXY(c->PositionX, c->PositionY, Hero->PositionX, Hero->PositionY);
-			}
-
-			if (DistanceTarget > g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Range[0] + 1)
-			{
-				continue;
-			}
-			this->AddTarget(c->Key, false);
+			continue;
 		}
+
+		// A wall between the hero and the monster (it is on the other side of
+		// it): not a target - it cannot be hit and the helper would stand there.
+		if (!CheckWall(Hero->PositionX, Hero->PositionY, c->PositionX, c->PositionY))
+		{
+			continue;
+		}
+
+		// Long Distance Attacks: a monster hitting the hero is fought back
+		// whatever the Range.
+		if (d.LongDistance && IsMonsterAttackingHero(c) && GetDistance(c) <= 12.0f)
+		{
+			this->AddTarget(c->Key, false);
+			continue;
+		}
+
+		const float DistanceTarget = !d.LongDistance
+			? GetDistanceXY(c->PositionX, c->PositionY, d.StartX, d.StartY)
+			: GetDistanceXY(c->PositionX, c->PositionY, Hero->PositionX, Hero->PositionY);
+
+		if (DistanceTarget > d.Range[0] + 1)
+		{
+			continue;
+		}
+		this->AddTarget(c->Key, false);
 	}
 }
+
 int CB_MUHelper::GetMonter()
 {
-	float Distance = 0;
-	float DistanceTarget = 0;
+	auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
 	int Target = -1;
-	float CachDis = 0;
 
 	gCB_MUHelper->CheckLiveTarget();
 
@@ -691,7 +733,6 @@ int CB_MUHelper::GetMonter()
 	if (!m_setTargets.empty())
 	{
 		CleanupTargets();
-		int iMinDistance = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Range[0] + 1;
 
 		std::set<int> setTargets;
 		{
@@ -700,26 +741,129 @@ int CB_MUHelper::GetMonter()
 			_targetsLock.unlock();
 		}
 
+		int bestDistance = 1000;
+		int bestGroup = -1;
+
 		for (const int& iMonsterId : setTargets)
 		{
 			int iIndex = FindCharacterIndex(iMonsterId);
-			CHARACTER* pTarget = &CharactersClient[iIndex];
-
-			int iDistance = GetDistance(pTarget);
-			if (iDistance < iMinDistance)
+			if (iIndex < 0 || iIndex >= MAX_CHARACTERS_CLIENT)
 			{
-				iMinDistance = iDistance;
-				Target = iIndex;
-				//===
-				m_SelectedCharacter = Target;
-				m_DistanceSelectCharacter = iMinDistance;
+				continue;
 			}
+			CHARACTER* pTarget = &CharactersClient[iIndex];
+			const int iDistance = GetDistance(pTarget);
+
+			// Target Concentration: the monster with the most others around it
+			// (within 2 tiles); otherwise the closest.
+			int group = 0;
+			if (d.TargetConcentration)
+			{
+				for (const int& otherId : setTargets)
+				{
+					const int o = FindCharacterIndex(otherId);
+					if (o < 0 || o >= MAX_CHARACTERS_CLIENT || o == iIndex)
+					{
+						continue;
+					}
+					if (GetDistanceXY(pTarget->PositionX, pTarget->PositionY, CharactersClient[o].PositionX, CharactersClient[o].PositionY) <= 2)
+					{
+						group++;
+					}
+				}
+			}
+
+			const bool better = d.TargetConcentration
+				? (group > bestGroup || (group == bestGroup && iDistance < bestDistance))
+				: (iDistance < bestDistance);
+
+			if (better)
+			{
+				bestDistance = iDistance;
+				bestGroup = group;
+				Target = iIndex;
+			}
+		}
+
+		if (Target != -1)
+		{
+			m_SelectedCharacter = Target;
+			m_DistanceSelectCharacter = (float)(bestDistance + 1);
 		}
 	}
 
-
-
 	return Target;
+}
+
+// Use Regular Attack: a plain weapon hit on the target (the helper's lowest
+// priority, when no skill can be used). Same moves as the phone's normal
+// attack button (TriggerVirtualNormalAutoAttack).
+extern int Attacking;
+extern int ActionTarget;
+extern int TargetX, TargetY;
+static bool HelperRegularAttack(int target)
+{
+	if (target < 0 || target >= MAX_CHARACTERS_CLIENT)
+	{
+		return false;
+	}
+	CHARACTER* t = &CharactersClient[target];
+	if (t->Dead > 0 || !t->Object.Live)
+	{
+		return false;
+	}
+
+	SelectedCharacter = target;
+	CHARACTER* c = Hero;
+	OBJECT* o = &c->Object;
+
+	Attacking = 1;
+	c->MovementType = MOVEMENT_ATTACK;
+	ActionTarget = target;
+	TargetX = (int)(t->Object.Position[0] / TERRAIN_SCALE);
+	TargetY = (int)(t->Object.Position[1] / TERRAIN_SCALE);
+
+	if (!CheckWall(c->PositionX, c->PositionY, TargetX, TargetY))
+	{
+		return false;
+	}
+
+	const bool ranged = (gCharacterManager.GetEquipedBowType() != BOWTYPE_NONE);
+	if (!PathFinding2(c->PositionX, c->PositionY, TargetX, TargetY, &c->Path))
+	{
+		if (ranged && !CheckArrow())
+		{
+			return false;
+		}
+		Action(c, o, true);
+		return true;
+	}
+
+	if (ranged)
+	{
+		if (!CheckArrow())
+		{
+			return false;
+		}
+		Action(c, o, true);
+	}
+	else
+	{
+		SendMove(c, o);
+	}
+	return true;
+}
+
+// Can this skill be cast right now (owned, and enough mana)?
+static bool HelperSkillUsable(int skill)
+{
+	if (skill <= 0 || gSkillManager.FindHeroSkill((ActionSkillType)skill) == 0)
+	{
+		return false;
+	}
+	int mana = 0;
+	gSkillManager.GetSkillInformation(skill, 1, NULL, &mana, NULL);
+	return CharacterAttribute->Mana >= mana;
 }
 
 // Combo step bookkeeping (MuHelperActiveAttack).
@@ -730,6 +874,8 @@ static DWORD s_LastComboStepTick = 0;
 // returned. Without this the helper kept re-asking the same step - Twisting
 // over and over - and never reached Activation Skill 2.
 static int s_ComboPendingSlot = -1;
+// Last helper cast that really went out (speed-based attack rate).
+static DWORD s_LastHelperCastTick = 0;
 static DWORD s_ComboPendingSeq = 0;
 static DWORD s_ComboPendingTick = 0;
 
@@ -748,12 +894,13 @@ bool CB_MUHelper::MuHelperActiveAttack()
 			if (g_SkillRequestSendSeq != s_ComboPendingSeq)
 			{
 				// The queued cast went out since the last call: that step is done.
+				s_LastHelperCastTick = GetTickCount();
 				pendData.TimerDelay[s_ComboPendingSlot] = GetTickCount();
 				pendData.SkillCache = (s_ComboPendingSlot >= 2 ? 0 : s_ComboPendingSlot + 1);
 				s_LastComboStepTick = GetTickCount();
 				s_ComboPendingSlot = -1;
 			}
-			else if ((GetTickCount() - s_ComboPendingTick) > 1500)
+			else if ((GetTickCount() - s_ComboPendingTick) > 1200) // Twisting Slash can go out ~1 s later (after the previous swing); 350 ms broke combo
 			{
 				// Never went out (no mana, out of range...): ask again.
 				s_ComboPendingSlot = -1;
@@ -785,15 +932,98 @@ bool CB_MUHelper::MuHelperActiveAttack()
 	}
 	else
 	{
+		auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
 		if (GetCount1 != -1 || GetCount2 != -1)
 		{
 			SelectSkillNum = (GetCount2 > GetCount1 ? 2 : 1);
-			goto SetAttackSkill;
+		}
+		else if (d.ShortDistance)
+		{
+			// Use Skills Closely: activation skills without a Delay/Con
+			// condition are used too, in turn with the Basic Skill, instead
+			// of waiting for a condition that will never be set.
+			static int s_CloseTurn = 0;
+			for (int tries = 0; tries < 3; ++tries)
+			{
+				s_CloseTurn = (s_CloseTurn + 1) % 3;
+				const int slot = s_CloseTurn;
+				if (slot == 0)
+				{
+					SelectSkillNum = 0;
+					break;
+				}
+				if (d.SkillDelay[slot - 1] == 0 && d.SkillCondition[slot - 1] == 0
+					&& !IsHelperDebuffSkill(d.Skill[slot]) && HelperSkillUsable(d.Skill[slot]))
+				{
+					SelectSkillNum = slot;
+					break;
+				}
+			}
+		}
+	}
+
+	// Debuff with Instant Cast (its "Con" box): highest priority, put on the
+	// target as soon as it lacks it - before combo and every other choice.
+	{
+		auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+		for (int slot = 1; slot <= 2; ++slot)
+		{
+			const int skill = d.Skill[slot];
+			if (d.SkillCondition[slot - 1] != 1 || !IsHelperDebuffSkill(skill) || !HelperSkillUsable(skill))
+			{
+				continue;
+			}
+			const int target = GetMonter();
+			if (target != -1 && !HelperTargetHasDebuff(&CharactersClient[target], skill))
+			{
+				SelectSkillNum = slot;
+				break;
+			}
 		}
 	}
 SetAttackSkill:
 	//DrawMessage(1, "%d ~ %d (%d) Check %d", GetCount1, GetCount2, SelectSkillNum, gSkillManager.FindHeroSkill((ActionSkillType)g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SelectSkillNum]));
 	if (SelectSkillNum == -1 || gSkillManager.FindHeroSkill((ActionSkillType)g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SelectSkillNum]) == 0) SelectSkillNum = 0;
+
+	// Use Regular Attack: no skill can be used (none set, not learned, or not
+	// enough mana) - hit with the weapon instead; the lowest priority.
+	if (!HelperSkillUsable(g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SelectSkillNum]))
+	{
+		// Out of mana for the skill (it is learned): drink a mana potion and go
+		// on - the helper used to stand still until mana came back on its own,
+		// which also broke every combo. The AFK helper already does this.
+		{
+			const int sk = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SelectSkillNum];
+			static DWORD s_LastManaPotionTick = 0;
+			if (sk > 0 && gSkillManager.FindHeroSkill((ActionSkillType)sk) == 1 && (GetTickCount() - s_LastManaPotionTick) > 900)
+			{
+				const int potion = g_pMyInventory->FindManaItemIndex();
+				if (potion != -1)
+				{
+					SendRequestUse(potion, 0);
+					s_LastManaPotionTick = GetTickCount();
+				}
+			}
+		}
+		if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.RegularAttack)
+		{
+			static DWORD s_LastRegularTick = 0;
+			const int speed = (CharacterAttribute->AttackSpeed > CharacterAttribute->MagicSpeed)
+				? CharacterAttribute->AttackSpeed : CharacterAttribute->MagicSpeed;
+			const int cut = speed * 5;
+			const DWORD interval = (cut >= 1200) ? 300 : (DWORD)(1500 - cut);
+			if ((GetTickCount() - s_LastRegularTick) >= interval)
+			{
+				const int target = GetMonter();
+				if (target != -1 && HelperRegularAttack(target))
+				{
+					s_LastRegularTick = GetTickCount();
+				}
+			}
+		}
+		return 1;
+	}
+
 	if (gSkillManager.FindHeroSkill((ActionSkillType)g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[SelectSkillNum]) == 1)
 	{
 		SelectedCharacter = GetMonter();
@@ -813,7 +1043,31 @@ SetAttackSkill:
 			// resets it.
 			if (data.Combo == 1 && data.SkillCache != 0 && (GetTickCount() - s_LastComboStepTick) > 2500)
 			{
+				// Restart from the starter - and cast the starter NOW (this used to
+				// reset the step but still cast the finisher it had picked).
 				data.SkillCache = 0;
+				SelectSkillNum = 0;
+				iSkillType = data.Skill[0];
+				if (!HelperSkillUsable(iSkillType))
+				{
+					return 1;
+				}
+			}
+
+			// Attack rate from the character's own speed - the same rule as the
+			// AFK off-helper (OfflineMode::RenderAttack): 1500 ms - 5 x speed
+			// (the faster of attack and magic speed), never under 300 ms, the
+			// fastest SendRequestMagic lets a cast out anyway.
+			{
+				const int speed = (CharacterAttribute->AttackSpeed > CharacterAttribute->MagicSpeed)
+					? CharacterAttribute->AttackSpeed : CharacterAttribute->MagicSpeed;
+				const int cut = speed * 5;
+				const DWORD interval = (cut >= 1200) ? 300 : (DWORD)(1500 - cut);
+				// Not enforced any more: the client already paces casts by attack
+				// speed (the next skill waits for the current swing, whose length
+				// comes from attack speed). On top of that this formula added a
+				// ~1.2 s pause per skill for a normal BK. Kept for reference.
+				(void)interval;
 			}
 
 			//Attacking = 2;
@@ -823,10 +1077,13 @@ SetAttackSkill:
 			gCB_MUHelper->SimulateSkill(iSkillType, true, CharactersClient[SelectedCharacter].Key);
 			const bool sent = (g_SkillRequestSendSeq != sentBefore);
 			//MouseRButtonPush = 1;
-			data.Stage++;
+			// data.Stage++ removed: ZzzInterface re-cast Hero->CurrentSkill once per
+			// Stage point, so every helper cast went out 2-4 times and the next
+			// skill only came ~2 s later. The helper casts directly now.
 
 			if (sent)
 			{
+				s_LastHelperCastTick = GetTickCount();
 				data.TimerDelay[SelectSkillNum] = GetTickCount();
 
 				// Next slot only when this cast really went out. Moving on after a
@@ -836,7 +1093,10 @@ SetAttackSkill:
 				data.SkillCache = (data.SkillCache >= 2 ? 0 : data.SkillCache + 1);
 				s_LastComboStepTick = GetTickCount();
 			}
-			else if (data.Combo == 1 && CheckKQ == 6)
+			// Not waited for any more: late sends came from the removed Stage
+			// re-cast, so a refused cast (swing not finished) just retries on the
+			// next helper tick (0.1 s) instead of idling 1.2 s.
+			else if (false && data.Combo == 1 && CheckKQ == 6)
 			{
 				// ExecuteSkill ran but nothing is on the wire yet: it may be a
 				// queued skill. Check on the next call before moving or retrying.
@@ -984,37 +1244,36 @@ void CheckSyntax(char* text) // OK
 	}
 }
 
+// Add Extra Item list: each entry is looked for, CASE-SENSITIVE, in a line
+// made of the item name plus its level and options, e.g.
+// "Leather Boots +5 Option Luck Skill". So "+5" picks +5 items, "Option" items
+// with a Jewel of Life option, "Boots" any boots, and "leather" no Leather Helm
+// (it used to ignore case and spaces, and only searched the bare name).
 bool PickUpItemName(ITEM * pItem)
 {
 	unicode::t_char szItemName[128];
-	GetItemName(pItem->Type, (pItem->Level >> 3) & 15, szItemName);
-	CheckSyntax(szItemName);
-	std::string szItemNameString = szItemName;
-	szItemNameString.erase(std::remove(szItemNameString.begin(), szItemNameString.end(), ' '), szItemNameString.end());
+	const int level = (pItem->Level >> 3) & 15;
+	GetItemName(pItem->Type, level, szItemName);
 
-	//DrawMessage(4, "Item Drop %s (%d %d", szItemNameString.c_str(), pItem->Type, pItem->Level);
+	std::string text = szItemName;
+	char extra[16];
+	if (level > 0)
+	{
+		sprintf_s(extra, " +%d", level);
+		text += extra;
+	}
+	if ((pItem->Level & 3) != 0 || (pItem->Option1 & 64) != 0) text += " Option";
+	if (((pItem->Level >> 2) & 1) != 0) text += " Luck";
+	if (((pItem->Level >> 7) & 1) != 0) text += " Skill";
+	if ((pItem->Option1 & 63) != 0) text += " Excellent";
+	if (pItem->ExtOption) text += " Ancient";
+
 	for (int n = 0; n < MAX_HELPER_ITEM; n++)
 	{
-		if (strlen(g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.ItemList[n]) > 0)
+		const char* entry = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.ItemList[n];
+		if (entry[0] != 0 && strstr(text.c_str(), entry) != NULL)
 		{
-			unicode::t_char sztemList[128];
-			::wsprintf(sztemList, "%s", g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.ItemList[n]);
-			CheckSyntax(sztemList);
-			std::string ItemListString = sztemList;
-
-			ItemListString.erase(std::remove(ItemListString.begin(), ItemListString.end(), ' '), ItemListString.end());
-
-			//bool CheckText = FindText(szItemNameString.c_str(), ItemListString.c_str());
-
-			//DrawMessage(4, "%s(%d) ~ %s(%d) (%d)", szItemNameString.c_str(),strlen(szItemNameString.c_str()), ItemListString.c_str(),strlen(ItemListString.c_str()), CheckText);
-			//== tim 2 chuoi trung nhau
-			//if (FindItemName(szItemName, g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.ItemList[n]))
-			if (FindItemName(szItemNameString.c_str(), ItemListString.c_str()))
-			{
-				return 1;
-				break;
-			}
-
+			return 1;
 		}
 	}
 
@@ -1069,20 +1328,30 @@ bool CB_MUHelper::ShouldObtainItem(int iItemId)
 	ITEM_t* pDrop = &Items[iItemId];
 	ITEM* pItem = &pDrop->Item;
 
-	if ((pItem->Type == ITEM_POTION + 15 && g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PickMoney)
-		|| ((CheckItemIsJewel(pItem->Type)) && g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PickJewel)
-		|| (pItem->ExtOption && g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PickSet)
-		|| (pItem->Option1 && g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PickExc))
+	auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+
+	// Pick All Near Items: everything.
+	if (d.PickAllItem)
 	{
 		return true;
 	}
 
-	if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PickExtra && PickUpItemName(pItem))
+	// Pick Selected Items: only what is ticked in the list (it used to pick
+	// the ticked kinds even with Pick Selected switched off).
+	if (!d.PickSelected)
+	{
+		return false;
+	}
+
+	if ((pItem->Type == ITEM_POTION + 15 && d.PickMoney)
+		|| (CheckItemIsJewel(pItem->Type) && d.PickJewel)
+		|| (pItem->ExtOption && d.PickSet)
+		|| ((pItem->Option1 & 63) != 0 && d.PickExc))
 	{
 		return true;
 	}
 
-	return g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.PickAllItem;
+	return d.PickExtra && PickUpItemName(pItem);
 }
 int CB_MUHelper::PickUpItemMuHelper()
 {
@@ -1139,7 +1408,7 @@ bool MuHelperRepairItem()
 			ITEM_ATTRIBUTE* p = &ItemAttribute[pItem->Type];
 			int maxDurability = calcMaxDurability(pItem, p, pItem->Level);
 			//DrawMessage(1, "Item %d Dur (%d/%d)", pItem->Type, pItem->Durability, maxDurability);
-			if (pItem->Durability < maxDurability) SendRequestRepair(i, 1);
+			if (maxDurability > 0 && pItem->Durability * 2 <= maxDurability) SendRequestRepair(i, 1); // repair at 50% durability, not at the first point lost
 		}
 		g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.TimerRepair = GetTickCount() + (2 * 60 * 1000);
 	}
@@ -1170,7 +1439,8 @@ void CB_MUHelper::CheckLiveTarget()
 	{
 		CHARACTER* pTarget = &CharactersClient[gCB_MUHelper->m_SelectedCharacter];
 		float fDistanceTarget = GetDistance(pTarget);
-		if (pTarget->Dead || !pTarget->Object.Live || !pTarget->Object.Visible || fDistanceTarget > gCB_MUHelper->m_DistanceSelectCharacter || pTarget->Object.AnimationFrame == 6)
+		if (pTarget->Dead || !pTarget->Object.Live || !pTarget->Object.Visible || fDistanceTarget > gCB_MUHelper->m_DistanceSelectCharacter || pTarget->Object.AnimationFrame == 6
+			|| !CheckWall(Hero->PositionX, Hero->PositionY, pTarget->PositionX, pTarget->PositionY))
 		{
 			gCB_MUHelper->m_SelectedCharacter = -1;
 			gCB_MUHelper->m_DistanceSelectCharacter = 1.f;
@@ -1188,6 +1458,61 @@ bool MUHelperRegenPos()
 	float DistanceTarget = GetDistanceXY(Hero->PositionX, Hero->PositionY, g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.StartX, g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.StartY);
 
 	//gInterface.DrawMessage(1, "Move Regen %f Target %d %f", DistanceTarget, gCB_MUHelper->m_SelectedCharacter, gCB_MUHelper->m_DistanceSelectCharacter);
+
+	// Original Position: every MoveTime SECONDS go back to where the helper was
+	// started. The timer only marks the return as due; the walk back waits
+	// until the current target is dead (CheckLiveTarget above clears it), so a
+	// fight is finished first and the helper does not drop a half-killed
+	// monster. A target that never dies (out of reach, immune) gets 30 s
+	// before the return goes ahead anyway. Busy spots still return, because a
+	// pending return stops a new target being picked.
+	{
+		auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+		static bool s_Returning = false;
+		static bool s_ReturnPending = false;
+		static DWORD s_ReturnDue = 0;
+		static DWORD s_ReturnStart = 0;
+
+		if (d.OriginalPosition != 1)
+		{
+			s_ReturnPending = false;
+		}
+
+		if (d.OriginalPosition == 1 && d.MoveTime > 0 && GetTickCount() > d.TimerMove)
+		{
+			d.TimerMove = GetTickCount() + ((DWORD)d.MoveTime * 1000);
+			if (DistanceTarget > 1 && s_Returning == false && s_ReturnPending == false)
+			{
+				s_ReturnPending = true;
+				s_ReturnDue = GetTickCount();
+			}
+		}
+
+		if (s_ReturnPending && (gCB_MUHelper->m_SelectedCharacter == -1 || (GetTickCount() - s_ReturnDue) > 30000))
+		{
+			s_ReturnPending = false;
+			s_Returning = true;
+			s_ReturnStart = GetTickCount();
+		}
+
+		if (s_Returning)
+		{
+			if (d.OriginalPosition != 1 || DistanceTarget <= 1 || (GetTickCount() - s_ReturnStart) > 10000)
+			{
+				s_Returning = false; // there, switched off, or could not get there in 10 s
+			}
+			else
+			{
+				gCB_MUHelper->m_SelectedCharacter = -1;
+				SelectedCharacter = -1;
+				POINT pos;
+				pos.x = d.StartX;
+				pos.y = d.StartY;
+				gCB_MUHelper->SimulateMove(pos);
+				return 0;
+			}
+		}
+	}
 
 	if (gCB_MUHelper->m_SelectedCharacter != -1) return 1;
 
@@ -1434,6 +1759,37 @@ void CB_MUHelper::Work()
 		{
 			return;
 		}
+		// Stuck-walk guard. The helper waits while Movement is set, so a walk
+		// that never finishes (a knockback or forced move landing mid-path)
+		// parked it for good. Moving but on the same tile for 3 s: drop it.
+		{
+			static int s_StuckX = -1, s_StuckY = -1;
+			static DWORD s_StuckSince = 0;
+
+			if (Hero->Movement && Hero->JumpTime == 0)
+			{
+				if (Hero->PositionX != s_StuckX || Hero->PositionY != s_StuckY)
+				{
+					s_StuckX = Hero->PositionX;
+					s_StuckY = Hero->PositionY;
+					s_StuckSince = GetTickCount();
+				}
+				else if ((GetTickCount() - s_StuckSince) > 3000)
+				{
+					Hero->Movement = false;
+					Hero->Path.PathNum = 0;
+					Hero->Path.CurrentPath = 0;
+					Hero->Path.CurrentPathFloat = 0;
+					SetPlayerStop(Hero);
+					s_StuckX = -1;
+				}
+			}
+			else
+			{
+				s_StuckX = -1;
+			}
+		}
+
 		if (Hero->Movement || Hero->Dead || g_isCharacterBuff((&Hero->Object), eDeBuff_Stun) /*||| Hero->Appear | g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Stage > 1*/)
 		{
 			return;

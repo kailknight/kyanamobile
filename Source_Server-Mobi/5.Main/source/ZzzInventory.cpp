@@ -1755,12 +1755,75 @@ WORD calcMaxDurability(const ITEM* ip, ITEM_ATTRIBUTE* p, int Level)
 }
 
 //=== Fix Get Item Name Pick Up
+// Vietnamese item names by type, from Data\Local\Vtm\Item_Vtm.bmd. Empty when the language is
+// English or the file is missing; GetItemName then keeps its old behaviour.
+// The item-file cipher (the same FC CF AB as BuxConvert in ZzzInfomation.cpp).
+static const BYTE kViItemNameCode[3] = { 0xFC, 0xCF, 0xAB };
+static char s_szVietnameseItemName[MAX_ITEM][MAX_ITEM_NAME];
+static bool s_bVietnameseItemNamesLoaded = false;
+
+static void LoadVietnameseItemNames()
+{
+	if (s_bVietnameseItemNamesLoaded)
+	{
+		return;
+	}
+	s_bVietnameseItemNamesLoaded = true;
+	if (!IsVietnameseLanguage())
+	{
+		return;
+	}
+
+	char szFile[260];
+	LocalLanguageFile(szFile, sizeof(szFile), "Data\\Local\\%s\\Item_%s.bmd");
+	FILE* fp = fopen(szFile, "rb");
+	if (fp == NULL)
+	{
+		return;
+	}
+
+	const int Size = sizeof(ITEM_ATTRIBUTE);
+	BYTE* Buffer = new BYTE[Size * MAX_ITEM];
+	const size_t got = fread(Buffer, Size * MAX_ITEM, 1, fp);
+	fclose(fp);
+	if (got == 1)
+	{
+		for (int i = 0; i < MAX_ITEM; i++)
+		{
+			BYTE* pRecord = Buffer + i * Size;
+			for (int b = 0; b < Size; b++)
+			{
+				pRecord[b] ^= kViItemNameCode[b % 3];
+			}
+			memcpy(s_szVietnameseItemName[i], pRecord, MAX_ITEM_NAME - 1);
+			s_szVietnameseItemName[i][MAX_ITEM_NAME - 1] = '\0';
+		}
+	}
+	delete[] Buffer;
+}
+
 void GetItemName(int iType, int iLevel, char* Text)
 {
 	int ItemType = iType;
 	auto tooltip = m_ItemToolTipData.find(ItemType);
 
-	if (tooltip == m_ItemToolTipData.end()) return;
+	if (tooltip == m_ItemToolTipData.end())
+	{
+		// No tooltip row for this item: use its Vietnamese item-table name when there is one.
+		LoadVietnameseItemNames();
+		if (ItemType >= 0 && ItemType < MAX_ITEM && s_szVietnameseItemName[ItemType][0] != '\0')
+		{
+			if (iLevel == 0)
+			{
+				::wsprintf(Text, "%s", s_szVietnameseItemName[ItemType]);
+			}
+			else
+			{
+				::wsprintf(Text, "%s +%d", s_szVietnameseItemName[ItemType], iLevel);
+			}
+		}
+		return;
+	}
 
 	
 	if (tooltip->second.ItemLevelToolTipIndex != -1) //Get Name Item Level

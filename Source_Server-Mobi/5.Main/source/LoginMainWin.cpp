@@ -15,6 +15,14 @@
 
 #include "ZzzCharacter.h"
 #include "wsclientinline.h"
+#include "MultiLanguage.h"
+
+extern void SetSelectedLanguage(const char* pszLanguage);
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+extern bool AskRestartForLanguage(bool bWantVi);	// Winmain.cpp
+#elif defined(__ANDROID__)
+extern void MU_MobileAskRestartForLanguage(bool vietnamese);	// Platform/MobilePlatform.cpp
+#endif
 
 #ifdef MOVIE_DIRECTSHOW
 #include <dshow.h>
@@ -27,7 +35,7 @@ extern char* g_lpszMp3[NUM_MUSIC];
 
 CLoginMainWin::CLoginMainWin()
 {
-
+	m_bLangChanged = false;
 }
 
 CLoginMainWin::~CLoginMainWin()
@@ -39,12 +47,16 @@ void CLoginMainWin::Create()
 {
 	for (int i = 0; i <= LMW_BTN_CREDIT; ++i)
 		m_aBtn[i].Create(54, 30, BITMAP_LOG_IN+4 + i, 3, 2, 1);
+
+	// Language switch: the same plain text button the system menu uses (SysMenuWin.cpp).
+	m_aBtn[LMW_BTN_LANG].Create(108, 30, BITMAP_TEXT_BTN, 4, 2, 1);
+	RefreshLanguageButton();
 #ifdef MOVIE_DIRECTSHOW
 	m_aBtn[LMW_BTN_MOVIE].Create(54, 30, BITMAP_LOG_IN+15, 3, 2, 1);
 #endif	// MOVIE_DIRECTSHOW
 
 	CWin::Create(CInput::Instance().GetScreenWidth() - 30 * 2,
-		m_aBtn[0].GetHeight(), -2);
+		m_aBtn[0].GetHeight() + LMW_LANG_ROW_H, -2);
 
 	for (int i = 0; i < LMW_BTN_MAX; ++i)
 		CWin::RegisterButton(&m_aBtn[i]);
@@ -57,14 +69,35 @@ void CLoginMainWin::PreRelease()
 	m_sprDeco.Release();
 }
 
+void CLoginMainWin::RefreshLanguageButton()
+{
+	static DWORD s_adwClr[4] = { CLRDW_BR_GRAY, CLRDW_BR_GRAY, CLRDW_WHITE, 0 };
+	const bool bVi = IsVietnameseLanguage();
+	const char* pszLabel;
+	if (!m_bLangChanged)
+	{
+		pszLabel = bVi ? "English" : "Ti\xE1\xBA\xBFng Vi\xE1\xBB\x87t";
+	}
+	else
+	{
+		// bVi is still the language this run STARTED in. The saved choice is the other one.
+		pszLabel = bVi ? "Restart game" : "Kh\xE1\xBB\x9Fi \xC4\x91\xE1\xBB\x99ng l\xE1\xBA\xA1i";
+	}
+	m_aBtn[LMW_BTN_LANG].SetText(pszLabel, s_adwClr);
+}
+
 void CLoginMainWin::SetPosition(int nXCoord, int nYCoord)
 {
 	CWin::SetPosition(nXCoord, nYCoord);
 
-	m_aBtn[LMW_BTN_MENU].SetPosition(nXCoord, nYCoord);
+	// Menu and Credit sit on the bottom row of the (taller) window; the language button is on
+	// the row above Menu, flush left.
+	const int nRowY = nYCoord + LMW_LANG_ROW_H;
+	m_aBtn[LMW_BTN_LANG].SetPosition(nXCoord, nYCoord);
+	m_aBtn[LMW_BTN_MENU].SetPosition(nXCoord, nRowY);
 	m_aBtn[LMW_BTN_CREDIT].SetPosition(
 		nXCoord + CWin::GetWidth() - m_aBtn[LMW_BTN_CREDIT].GetWidth(),
-		nYCoord);
+		nRowY);
 #ifdef MOVIE_DIRECTSHOW
 	m_aBtn[LMW_BTN_MOVIE].SetPosition(m_aBtn[LMW_BTN_CREDIT].GetXPos()
 		- 10 - m_aBtn[LMW_BTN_MOVIE].GetWidth(), nYCoord);
@@ -103,6 +136,28 @@ void CLoginMainWin::UpdateWhileActive(double dDeltaTick)
 		CUIMng& rUIMng = CUIMng::Instance();
 		rUIMng.ShowWin(&rUIMng.m_SysMenuWin);
 		rUIMng.SetSysMenuWinShow(true);
+	}
+	else if (m_aBtn[LMW_BTN_LANG].IsClick())
+	{
+		// Saved at once; read at the next start (the language data files load once at startup).
+		// Clicking again before restarting switches back.
+		const bool bStartedVi = IsVietnameseLanguage();
+		m_bLangChanged = !m_bLangChanged;
+		const bool bWantVi = m_bLangChanged ? !bStartedVi : bStartedVi;
+		SetSelectedLanguage(bWantVi ? "Vtm" : "Eng");
+		RefreshLanguageButton();
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+		// Only when it differs from the language this run started in; going back is silent.
+		if (m_bLangChanged)
+		{
+			AskRestartForLanguage(bWantVi);
+		}
+#elif defined(__ANDROID__)
+		if (m_bLangChanged)
+		{
+			MU_MobileAskRestartForLanguage(bWantVi);
+		}
+#endif
 	}
 	else if (m_aBtn[LMW_BTN_CREDIT].IsClick())
 	{

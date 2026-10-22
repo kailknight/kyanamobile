@@ -42,7 +42,13 @@ bool CSItemOption::OpenItemSetScript(bool bTestServer)
 	strFileName = "Data\\Local\\ItemSetType" + strTest + ".bmd";
 	if (!OpenItemSetType(strFileName.c_str()))		return false;
 
-	strFileName = "Data\\Local\\" + g_strSelectedML + "\\ItemSetOption" + strTest + "_" + g_strSelectedML + ".bmd";
+	{
+		// "ItemSetOption" + "Test" are spliced into the template; both are plain ASCII with no %.
+		char szTemplate[160], szFile[260];
+		snprintf(szTemplate, sizeof(szTemplate), "Data\\Local\\%%s\\ItemSetOption%s_%%s.bmd", strTest.c_str());
+		szTemplate[sizeof(szTemplate) - 1] = 0;
+		strFileName = LocalLanguageFile(szFile, sizeof(szFile), szTemplate);
+	}
 	if (!OpenItemSetOption(strFileName.c_str()))	 	return false;
 	return true;
 }

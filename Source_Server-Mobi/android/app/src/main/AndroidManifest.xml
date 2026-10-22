@@ -74,6 +74,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Starts the game again after a language change; runs in its own process so it outlives the game's. -->
+        <activity
+            android:name=".MuRestartActivity"
+            android:exported="false"
+            android:process=":restart"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity
             android:name=".MuMainNativeActivity"
             android:label="World of Kira"

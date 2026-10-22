@@ -277,13 +277,13 @@ void SEASON3B::CNewUIMuHelper::InitText()
     InsertText(m_Pos.x + 18, m_Pos.y + 78, GlobalText[3526], 1, 0);
     InsertText(m_Pos.x + 18, m_Pos.y + 83, "________", 2, 0);
     InsertText(m_Pos.x + 113, m_Pos.y + 141, GlobalText[3527], 3, 0);
-    InsertText(m_Pos.x + 162, m_Pos.y + 141, GlobalText[3528], 4, 0);
+    InsertText(m_Pos.x + 162, m_Pos.y + 141, "Sec", 4, 0); // was GlobalText[3528] "Min" - these values are seconds
     InsertText(m_Pos.x + 18, m_Pos.y + 160, GlobalText[3529], 5, 0);
     InsertText(m_Pos.x + 59, m_Pos.y + 160, GlobalText[3530], 7, 0);
-    InsertText(m_Pos.x + 162, m_Pos.y + 178, GlobalText[3528], 8, 0);
+    InsertText(m_Pos.x + 162, m_Pos.y + 178, "Sec", 8, 0); // was GlobalText[3528] "Min" - these values are seconds
     InsertText(m_Pos.x + 59, m_Pos.y + 212, GlobalText[3531], 9, 0);
 
-    InsertText(m_Pos.x + 162, m_Pos.y + 230, GlobalText[3528], 10, 0);
+    InsertText(m_Pos.x + 162, m_Pos.y + 230, "Sec", 10, 0); // was GlobalText[3528] "Min" - these values are seconds
     InsertText(m_Pos.x + 18, m_Pos.y + 78, GlobalText[3532], 11, 1);
     InsertText(m_Pos.x + 18, m_Pos.y + 83, "________", 12, 1);
 
@@ -442,6 +442,29 @@ void SEASON3B::CNewUIMuHelper::ClosingProcess()
 
 	SelectitemList = -1;
 }
+// Hunting options, shown at the bottom of the potion "Setting" panel for every
+// class (the main Helper window has no room left).
+static void RenderHelperHuntingOptions(HELPER_STRUCT& d, float PosX, float PosY)
+{
+	g_pBCustomMenuInfo->RenderGroupBox(PosX, PosY, 170, 95, 70, 20);
+	TextDraw(g_hFontBold, PosX + 5, PosY + 5, 0xffffffff, 0x0, 0, 0, 1, "Hunting");
+	PosY += 25;
+	if (g_pBCustomMenuInfo->RenderCheckBox(PosX + 15, PosY, 0xFFFFFFFF, d.RegularAttack == 1 ? TRUE : FALSE, "Use Regular Attack"))
+	{
+		d.RegularAttack ^= 1;
+	}
+	PosY += 20;
+	if (g_pBCustomMenuInfo->RenderCheckBox(PosX + 15, PosY, 0xFFFFFFFF, d.TargetConcentration == 1 ? TRUE : FALSE, "Target Concentration"))
+	{
+		d.TargetConcentration ^= 1;
+	}
+	PosY += 20;
+	if (g_pBCustomMenuInfo->RenderCheckBox(PosX + 15, PosY, 0xFFFFFFFF, d.ShortDistance == 1 ? TRUE : FALSE, "Use Skills Closely"))
+	{
+		d.ShortDistance ^= 1;
+	}
+}
+
 char zbtemp[30] = { 0 };
 void SEASON3B::CNewUIMuHelper::RenderConfigExtra()
 {
@@ -480,6 +503,7 @@ void SEASON3B::CNewUIMuHelper::RenderConfigExtra()
 		g_pBCustomMenuInfo->RederBarOptionW(PosX + 25, PosY, &HVaule);
 		this->DataAutoMu.HealPercent = (HVaule * 10);
 		TextDraw(g_hFont, PosX, PosY + 17, 0xffffffff, 0x0, 170, 0, 3, "%s (%d%%)", GlobalText[3547], this->DataAutoMu.HealPercent);
+		RenderHelperHuntingOptions(this->DataAutoMu, StartX + 10, StartY + 230);
 	}
 	break;
 	case 5: //SUM
@@ -504,6 +528,7 @@ void SEASON3B::CNewUIMuHelper::RenderConfigExtra()
 		g_pBCustomMenuInfo->RederBarOptionW(PosX + 25, PosY, &HVaule);
 		this->DataAutoMu.HealPercent = (HVaule * 10);
 		TextDraw(g_hFont, PosX, PosY + 17, 0xffffffff, 0x0, 170, 0, 3, "%s (%d%%)", GlobalText[3547], this->DataAutoMu.HealPercent);
+		RenderHelperHuntingOptions(this->DataAutoMu, StartX + 10, StartY + 230);
 	}
 	break;
 	case 6:
@@ -518,6 +543,7 @@ void SEASON3B::CNewUIMuHelper::RenderConfigExtra()
 		g_pBCustomMenuInfo->RederBarOptionW(PosX+25, PosY, &TestVaule);
 		this->DataAutoMu.PotPercent = (TestVaule * 10);
 		TextDraw(g_hFont, PosX, PosY + 17, 0xffffffff, 0x0, 170, 0, 3, "%s (%d%%)",GlobalText[3547], this->DataAutoMu.PotPercent);
+		RenderHelperHuntingOptions(this->DataAutoMu, StartX + 10, StartY + 230);
 	}
 	break;
 	//====================================================
@@ -536,7 +562,7 @@ void SEASON3B::CNewUIMuHelper::RenderConfigExtra()
 			this->DataAutoMu.PartyAutoBuff ^= 1;
 		}
 		TextDraw(g_hFont, PosX + 15, PosY + 20, 0xffffffff, 0x0, 0, 0, 1, GlobalText[3551]);
-		TextDraw(g_hFont, PosX + 105, PosY + 20, 0xffffffff, 0x0, 0, 0, 1, GlobalText[3528]);
+		TextDraw(g_hFont, PosX + 105, PosY + 20, 0xffffffff, 0x0, 0, 0, 1, "Sec"); // was GlobalText[3528] "Min"
 
 		RenderImage(IMAGE_MACROUI_HELPER_INPUTNUMBER, PosX + 78, PosY + 16, 28, 15);
 		char ztemp[30] = { 0 };
@@ -593,7 +619,7 @@ void SEASON3B::CNewUIMuHelper::RenderConfigExtra()
 			this->DataAutoMu.PartyAutoBuff  ^= 1;
 		}
 		TextDraw(g_hFont, PosX + 15, PosY + 20, 0xffffffff, 0x0, 0, 0, 1, GlobalText[3551]);
-		TextDraw(g_hFont, PosX + 105, PosY + 20, 0xffffffff, 0x0, 0, 0, 1, GlobalText[3528]);
+		TextDraw(g_hFont, PosX + 105, PosY + 20, 0xffffffff, 0x0, 0, 0, 1, "Sec"); // was GlobalText[3528] "Min"
 		
 		RenderImage(IMAGE_MACROUI_HELPER_INPUTNUMBER, PosX + 78, PosY + 16, 45, 15);
 		char ztemp[30] = { 0 };
@@ -902,6 +928,10 @@ bool SEASON3B::CNewUIMuHelper::Render()
 		}
 		//======
 		int mPage = m_pScrollBarItem->GetCurPos();
+		// The added items are listed in white. They used to take whatever text
+		// color the previous widget left behind.
+		const DWORD ItemListSavedColor = g_pRenderText->GetTextColor();
+		g_pRenderText->SetTextColor(255, 255, 255, 255);
 		for (int n = (mPage*5); n < MAX_HELPER_ITEM; n++)
 		{
 			if (strlen(this->DataAutoMu.ItemList[n]) < 1) continue;
@@ -927,6 +957,7 @@ bool SEASON3B::CNewUIMuHelper::Render()
 			Line++;
 			if (Line >= 5) break;
 		}
+		g_pRenderText->SetTextColor(ItemListSavedColor);
 
 			
 	}
@@ -935,6 +966,42 @@ bool SEASON3B::CNewUIMuHelper::Render()
 
     return true;
 }
+// Skill / buff slots: click (tap) opens the list, right click clears it.
+// A phone has no right click, so there a press held for 0.6 s clears.
+static DWORD s_HelperSlotPressTick = 0;
+
+static bool HelperSlotTap()
+{
+	if (SEASON3B::IsPress(VK_LBUTTON))
+	{
+		s_HelperSlotPressTick = GetTickCount();
+	}
+	if (!SEASON3B::IsRelease(VK_LBUTTON))
+	{
+		return false;
+	}
+#if defined(MU_TOUCH_UI)
+	if (s_HelperSlotPressTick != 0 && (GetTickCount() - s_HelperSlotPressTick) >= 600)
+	{
+		return false; // a hold: HelperSlotHold clears it
+	}
+#endif
+	s_HelperSlotPressTick = 0;
+	return true;
+}
+
+static bool HelperSlotHold()
+{
+#if defined(MU_TOUCH_UI)
+	if (SEASON3B::IsRelease(VK_LBUTTON) && s_HelperSlotPressTick != 0 && (GetTickCount() - s_HelperSlotPressTick) >= 600)
+	{
+		s_HelperSlotPressTick = 0;
+		return true;
+	}
+#endif
+	return SEASON3B::IsRelease(VK_RBUTTON);
+}
+
 bool SEASON3B::CNewUIMuHelper::CheckMouseSelectSkill()
 {
 	if (m_iNumCurOpenTab == 0) //table select skill
@@ -942,14 +1009,14 @@ bool SEASON3B::CNewUIMuHelper::CheckMouseSelectSkill()
 		//==Click chon skill
 		if (SEASON3B::CheckMouseIn(m_Pos.x + 17 + 5, m_Pos.y + 171 + 5, 20, 28))
 		{
-			if (SEASON3B::IsRelease(VK_LBUTTON))
+			if (HelperSlotTap())
 			{
 				ShowSelectSkillMuHelper ^= 1;
 				bShowSelectSkill = 0;
 				bShowType = 0;
 				return true;
 			}
-			else if (SEASON3B::IsRelease(VK_RBUTTON))
+			else if (HelperSlotHold())
 			{
 				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[0] = -1;
 				return true;
@@ -958,14 +1025,14 @@ bool SEASON3B::CNewUIMuHelper::CheckMouseSelectSkill()
 
 		if (SEASON3B::CheckMouseIn(m_Pos.x + 61 + 5, m_Pos.y + 171 + 5, 20, 28))
 		{
-			if (SEASON3B::IsRelease(VK_LBUTTON))
+			if (HelperSlotTap())
 			{
 				ShowSelectSkillMuHelper ^= 1;
 				bShowSelectSkill = 1;
 				bShowType = 0;
 				return true;
 			}
-			else if (SEASON3B::IsRelease(VK_RBUTTON))
+			else if (HelperSlotHold())
 			{
 				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[1] = -1;
 				return true;
@@ -974,14 +1041,14 @@ bool SEASON3B::CNewUIMuHelper::CheckMouseSelectSkill()
 
 		if (SEASON3B::CheckMouseIn(m_Pos.x + 61 + 5, m_Pos.y + 222 + 5, 20, 28) && gCharacterManager.GetBaseClass(Hero->Class) != Dark_Lord)
 		{
-			if (SEASON3B::IsRelease(VK_LBUTTON))
+			if (HelperSlotTap())
 			{
 				ShowSelectSkillMuHelper ^= 1;
 				bShowSelectSkill = 2;
 				bShowType = 0;
 				return true;
 			}
-			else if (SEASON3B::IsRelease(VK_RBUTTON))
+			else if (HelperSlotHold())
 			{
 				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[2] = -1;
 				return true;
@@ -990,14 +1057,14 @@ bool SEASON3B::CNewUIMuHelper::CheckMouseSelectSkill()
 		//-==Buff
 		if (SEASON3B::CheckMouseIn(m_Pos.x + 21 + 5, m_Pos.y + 293 + 5, 20, 28))
 		{
-			if (SEASON3B::IsRelease(VK_LBUTTON))
+			if (HelperSlotTap())
 			{
 				ShowSelectSkillMuHelper ^= 1;
 				bShowSelectSkill = 0;
 				bShowType = 1;
 				return true;
 			}
-			else if (SEASON3B::IsRelease(VK_RBUTTON))
+			else if (HelperSlotHold())
 			{
 				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[0] = -1;
 				return true;
@@ -1005,14 +1072,14 @@ bool SEASON3B::CNewUIMuHelper::CheckMouseSelectSkill()
 		}
 		if (SEASON3B::CheckMouseIn(m_Pos.x + 55 + 5, m_Pos.y + 293 + 5, 20, 28))
 		{
-			if (SEASON3B::IsRelease(VK_LBUTTON))
+			if (HelperSlotTap())
 			{
 				ShowSelectSkillMuHelper ^= 1;
 				bShowSelectSkill = 1;
 				bShowType = 1;
 				return true;
 			}
-			else if (SEASON3B::IsRelease(VK_RBUTTON))
+			else if (HelperSlotHold())
 			{
 				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[1] = -1;
 				return true;
@@ -1021,14 +1088,14 @@ bool SEASON3B::CNewUIMuHelper::CheckMouseSelectSkill()
 
 		if (SEASON3B::CheckMouseIn(m_Pos.x + 89 + 5, m_Pos.y + 293 + 5, 20, 28))
 		{
-			if (SEASON3B::IsRelease(VK_LBUTTON))
+			if (HelperSlotTap())
 			{
 				ShowSelectSkillMuHelper ^= 1;
 				bShowSelectSkill = 2;
 				bShowType = 1;
 				return true;
 			}
-			else if (SEASON3B::IsRelease(VK_RBUTTON))
+			else if (HelperSlotHold())
 			{
 				g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[2] = -1;
 				return true;
@@ -1764,6 +1831,7 @@ void SEASON3B::CNewUIMuHelper::LoadConfig(BYTE* Data)
 		this->Helper.PotionElite = (lpMsg->OptionFlag >> 28) & 1;
 		this->Helper.ShortDistance = (lpMsg->OptionFlag >> 29) & 1;
 		this->Helper.RegularAttack = (lpMsg->OptionFlag >> 30) & 1;
+		this->Helper.TargetConcentration = (lpMsg->OptionFlag >> 31) & 1;
 
 		this->DataAutoMu = this->Helper;
 	}
@@ -1830,6 +1898,7 @@ HELPER_INFO ConvertToHelperInfo(const HELPER_STRUCT& helperStruct)
 	result.OptionFlag |= (helperStruct.PotionElite & 1) << 28;
 	result.OptionFlag |= (helperStruct.ShortDistance & 1) << 29;
 	result.OptionFlag |= (helperStruct.RegularAttack & 1) << 30;
+	result.OptionFlag |= ((DWORD)(helperStruct.TargetConcentration & 1)) << 31;
 
 	return result;
 }

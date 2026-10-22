@@ -1092,6 +1092,9 @@ void gObjCharZeroSet(int aIndex) // OK
 	memset(lpObj->OffActiveTick,0,sizeof(lpObj->OffActiveTick));
 	lpObj->OffComboStep = 0;
 	lpObj->OffComboTick = 0;
+	lpObj->OffHelperFlags = 0;
+	lpObj->OffCloseTurn = 0;
+	lpObj->OffRegularTick = 0;
 	lpObj->m_OfflineReturnTries = 0;
 	lpObj->m_OfflineReturnTick = 0;
 	lpObj->m_OfflineReturnStart = 0;

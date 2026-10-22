@@ -519,8 +519,14 @@ android {
         // survives the target teleporting (3 s out-of-sight grace, no 12-tile
         // drop); it ends when the target dies, enters a safe zone or leaves the
         // map, or the hero dies or changes map.
-        versionCode 39
-        versionName "1.0.39"
+        // 42 (2026-10-19): every mobile window (top bar, chat tabs, tutorial, pickers, friends/mail,
+        // settings, redeem code) shows Vietnamese text in Vietnamese mode, through Lang_Vtm.txt.
+        // 41 (2026-10-19): Vietnamese language (Settings row or the login button; a
+        // modern dialog offers to restart so it shows at once; needs the new data.zip
+        // with Data/Local/Vtm); master level EXP bar shows the progress inside the
+        // level instead of sitting at 99%. (40 was built the same day, not released.)
+        versionCode 47
+        versionName "1.0.47"
 
         // A diagnostics build can be CPU-profiled with simpleperf without
         // being debuggable (which would change its performance).

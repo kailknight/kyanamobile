@@ -27,12 +27,12 @@ void Other::Load()
 {
 	//==Check Local
 
-	char NameFileLocal[55] = { 0 };
+	char NameFileLocal[MAX_PATH] = { 0 };
 	wsprintf(NameFileLocal, "./Data/Custom/Text_%s.ini", g_strSelectedML.c_str());
 
 	if (FileExist(NameFileLocal) == false)
 	{
-		wsprintf(NameFileLocal, "./Data/Custom/Text_Eng.ini", (char*)g_strSelectedML.c_str());
+		strcpy(NameFileLocal, "./Data/Custom/Text_Eng.ini");
 	}
 
 	char GetFotText[55] = { 0 };

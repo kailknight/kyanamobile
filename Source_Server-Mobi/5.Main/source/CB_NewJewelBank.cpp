@@ -11,6 +11,19 @@
 #include "ZzzInterface.h"
 #include "ZzzInventory.h"
 
+void TranslateTemplate(const char* pszEnglish, char* pszOut, size_t cbOut);	// MultiLanguage.cpp
+
+// Label for the current language: the English literal, or its Vietnamese line from
+// Data\Custom\Lang_Vtm.txt. Each call returns its own slot, so several can sit in one statement.
+static char* JewelBankText(const char* pszEnglish)
+{
+	static char s_Text[8][256];
+	static int s_Next = 0;
+	char* out = s_Text[s_Next++ & 7];
+	TranslateTemplate(pszEnglish, out, sizeof(s_Text[0]));
+	return out;
+}
+
 CB_NewJewelBank* gCB_NewJewelBank;
 
 CB_NewJewelBank::CB_NewJewelBank()
@@ -171,7 +184,7 @@ void CB_NewJewelBank::DrawNhapSoNgoc()
 	float StartY = ((MAX_WIN_HEIGHT - 51) / 2) - (WindowH / 2);
 	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowJewelBankRut, " ");
 
-	TextDraw((HFONT)g_hFontBold, StartX + 5, StartY + 10, 0xffffffff, 0x3a4b3978, WindowW - 10, 0, 3, "Enter withdrawal amount: "); //"Yêu Cầu");
+	TextDraw((HFONT)g_hFontBold, StartX + 5, StartY + 10, 0xffffffff, 0x3a4b3978, WindowW - 10, 0, 3, JewelBankText("Enter withdrawal amount: ")); //"Yêu Cầu");
 
 	float NTCoinX = StartX + 45;
 	float NTCoinY = StartY + 35;
@@ -207,7 +220,7 @@ void CB_NewJewelBank::DrawNhapSoNgoc()
 		}
 	}
 
-	if (g_pBCustomMenuInfo->DrawButton(StartX + 50, StartY + 50, 100, 12, "Withdraw", 50))
+	if (g_pBCustomMenuInfo->DrawButton(StartX + 50, StartY + 50, 100, 12, JewelBankText("Withdraw"), 50))
 	{
 		RutBankSoLuong(atoi(GetSoLuongNgoc), IndexNgoc);
 		InputSoLuongNgoc->SetText("0");
@@ -265,15 +278,15 @@ void CB_NewJewelBank::DrawWindow()
 	float CenterX = StartX + (CuaSoW / 2);
 	float MaxY = StartY + CuaSoH;
 
-	TextDraw((HFONT)g_hFont, StartX, StartY + 45, 0xFF6600FF, 0x0, CuaSoW, 0, 3, "Click the (Deposit) button to deposit Jewels into the bank, or Shift + right-click to quick-deposit");
-	TextDraw((HFONT)g_hFont, StartX, StartY + 45 + 15, 0xFF6600FF, 0x0, CuaSoW, 0, 3, "* Auto Pick automatically deposits into the bank on pickup");
+	TextDraw((HFONT)g_hFont, StartX, StartY + 45, 0xFF6600FF, 0x0, CuaSoW, 0, 3, JewelBankText("Click the (Deposit) button to deposit Jewels into the bank, or Shift + right-click to quick-deposit"));
+	TextDraw((HFONT)g_hFont, StartX, StartY + 45 + 15, 0xFF6600FF, 0x0, CuaSoW, 0, 3, JewelBankText("* Auto Pick automatically deposits into the bank on pickup"));
 
 	float StartXItem = StartX + 10;
 	float StartYItem = StartY + 75;
 
-	TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70, StartYItem + 15, 0xFFFFFFFF, 0xD69015A9, 138, 0, 3, "Withdraw Jewel");
-	TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + 138, StartYItem + 15, 0xFFFFFFFF, 0x15D6C9A9, 40, 0, 3, "Deposit Jewel");
-	TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + 138 + 40, StartYItem + 15, 0xFFFFFFFF, 0x9C15D6A9, 40, 0, 3, "Auto Pick");
+	TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70, StartYItem + 15, 0xFFFFFFFF, 0xD69015A9, 138, 0, 3, JewelBankText("Withdraw Jewel"));
+	TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + 138, StartYItem + 15, 0xFFFFFFFF, 0x15D6C9A9, 40, 0, 3, JewelBankText("Deposit Jewel"));
+	TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + 138 + 40, StartYItem + 15, 0xFFFFFFFF, 0x9C15D6A9, 40, 0, 3, JewelBankText("Auto Pick"));
 	float KhoangCach = 25;
 
 	// Was RenderItem3DFree() per row below - each call redid a full
@@ -330,7 +343,7 @@ void CB_NewJewelBank::DrawWindow()
 				gInterface.Data[eWindowJewelBankRut].OnShow ^= 1;
 			}
 		}
-		TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + (28 * nCount++), (StartYItem + (n * KhoangCach)) + 30, 0xFFFFFFBE, 0x0, 26, 0, 3, "Withdraw");
+		TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + (28 * nCount++), (StartYItem + (n * KhoangCach)) + 30, 0xFFFFFFBE, 0x0, 26, 0, 3, JewelBankText("Withdraw"));
 
 		//==ButtonRut 10
 		if (UIController.BButton(gInterface.Data[IMG_31618].ModelID, StartXItem + 36 + 100 + 70 + (28 * nCount), (StartYItem + (n * KhoangCach)) + 25, 25, 22, 25, 22, 3, state) && !gInterface.Data[eWindowJewelBankRut].OnShow)
@@ -361,7 +374,7 @@ void CB_NewJewelBank::DrawWindow()
 		{
 			NewBankSendGS(eGuiAll, r);
 		}
-		TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + (28 * nCount++), (StartYItem + (n * KhoangCach)) + 30, 0xFFFFFFBE, 0x0, 38, 0, 3, "Deposit");
+		TextDraw((HFONT)g_hFont, StartXItem + 36 + 100 + 70 + (28 * nCount++), (StartYItem + (n * KhoangCach)) + 30, 0xFFFFFFBE, 0x0, 38, 0, 3, JewelBankText("Deposit"));
 		//==Auto Pick
 		if (g_pBCustomMenuInfo->RenderCheckBox(StartXItem + 36 + 100 + 70 + (28 * nCount) + 20, (StartYItem + (n * KhoangCach)) + 28, 0xFFCC00C8, gCB_NewJewelBank->mCListItemBank[r].AutoPick, "") && !gInterface.Data[eWindowJewelBankRut].OnShow)
 		{

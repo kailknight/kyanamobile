@@ -84,6 +84,37 @@ int CJewelMix::GetJewelBundleIndex(int type) // OK
 	return -1;
 }
 
+// Whether the player may use Lahap right now. The window state alone is not
+// enough: opening Lahap's window calls HideAll() on the client, and any window
+// it closes that sends 0x31 (CNpcTalk::CGNpcTalkCloseRecv) resets
+// Interface.use before the mix request arrives. The request was then dropped
+// with no answer at all - players pressed OK and "nothing happened", on PC and
+// phone alike. Standing next to Lahap proves the same thing the window state
+// was there to prove, so either one is accepted.
+static bool CanUseLahap(LPOBJ lpObj,const char* action)
+{
+	if(lpObj->Interface.use != 0 && lpObj->Interface.type == INTERFACE_COMMON)
+	{
+		return 1;
+	}
+
+	if(lpObj->Interface.use == 0)
+	{
+		for(int n = 0; n < MAX_OBJECT_MONSTER; n++)
+		{
+			LPOBJ lpNpc = &gObj[n];
+
+			if(lpNpc->Type == OBJECT_NPC && lpNpc->Class == 256 && lpNpc->Map == lpObj->Map && gObjCalcDistance(lpObj,lpNpc) <= 6)
+			{
+				return 1;
+			}
+		}
+	}
+
+	LogAdd(LOG_RED,"[JewelMix][%s][%s] %s refused: interface use %d type %d, not near Lahap",lpObj->Account,lpObj->Name,action,(int)lpObj->Interface.use,(int)lpObj->Interface.type);
+	return 0;
+}
+
 void CJewelMix::CGJewelMixRecv(PMSG_JEWEL_MIX_RECV* lpMsg,int aIndex) // OK
 {
 	LPOBJ lpObj = &gObj[aIndex];
@@ -93,7 +124,7 @@ void CJewelMix::CGJewelMixRecv(PMSG_JEWEL_MIX_RECV* lpMsg,int aIndex) // OK
 		return;
 	}
 	
-	if(lpObj->Interface.use == 0 || lpObj->Interface.type != INTERFACE_COMMON)
+	if(CanUseLahap(lpObj,"mix") == 0)
 	{
 		return;
 	}
@@ -160,7 +191,7 @@ void CJewelMix::CGJewelUnMixRecv(PMSG_JEWEL_UNMIX_RECV* lpMsg,int aIndex) // OK
 		return;
 	}
 	
-	if(lpObj->Interface.use == 0 || lpObj->Interface.type != INTERFACE_COMMON)
+	if(CanUseLahap(lpObj,"unmix") == 0)
 	{
 		return;
 	}

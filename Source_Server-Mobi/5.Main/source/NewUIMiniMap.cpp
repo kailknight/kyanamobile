@@ -460,7 +460,14 @@ void SEASON3B::CNewUIMiniMap::LoadImages(const char* Filename)
 	{
 		m_bSuccess = true;
 	}
-	sprintf(Fname,"Data\\Local\\%s\\Minimap\\Minimap_%s_%s.bmd", g_strSelectedML.c_str(), Filename, g_strSelectedML.c_str());
+	{
+		// The world name sits between the two language codes, so fill it in first and
+		// let the helper substitute the code for the remaining two %s.
+		char szTemplate[260];
+		snprintf(szTemplate, sizeof(szTemplate), "Data\\Local\\%%s\\Minimap\\Minimap_%s_%%s.bmd", Filename);
+		szTemplate[sizeof(szTemplate) - 1] = 0;
+		LocalLanguageFile(Fname, sizeof(Fname), szTemplate);
+	}
 	
 	for(i = 0; i < MAX_MINI_MAP_DATA; i++)
 	{

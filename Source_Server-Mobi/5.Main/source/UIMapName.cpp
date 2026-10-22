@@ -3,6 +3,7 @@
 //*****************************************************************************
 
 #include "stdafx.h"
+#include "MultiLanguage.h"
 #include "UIMapName.h"
 #include "MapManager.h"
 #include "ZzzOpenglUtil.h"
@@ -53,6 +54,10 @@ CUIMapName::~CUIMapName()
 void CUIMapName::InitImgPathMap()
 {
 	std::string strFolderName = "Local\\" + g_strSelectedML + "\\ImgsMapName\\";
+	if (IsVietnameseLanguage() && GetFileAttributesA(("Data\\" + strFolderName).c_str()) == INVALID_FILE_ATTRIBUTES)
+	{
+		strFolderName = "Local\\Eng\\ImgsMapName\\";
+	}
 
 	m_mapImgPath[0] = strFolderName + "lorencia.tga";
 	m_mapImgPath[1] = strFolderName + "dungeun.tga";

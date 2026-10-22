@@ -2,6 +2,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "MultiLanguage.h"
 
 #include "NewUISlideWindow.h"
 #include "NewUIManager.h"
@@ -25,8 +26,8 @@ bool SEASON3B::CNewUISlideWindow::Create(CNewUIManager* pNewUIMng)
 	m_pNewUIMng = pNewUIMng;
 	m_pNewUIMng->AddUIObj(SEASON3B::INTERFACE_SLIDEWINDOW, this);
 	m_pSlideMgr = new CSlideHelpMgr;
-	std::string strFileName = "Data\\Local\\"+g_strSelectedML+"\\Slide_"+g_strSelectedML+".bmd";
-	m_pSlideMgr->OpenSlideTextFile(strFileName.c_str());
+	char szSlideFile[260];
+	m_pSlideMgr->OpenSlideTextFile(LocalLanguageFile(szSlideFile, sizeof(szSlideFile), "Data\\Local\\%s\\Slide_%s.bmd"));
 
 	return true;
 }

@@ -9,6 +9,9 @@
 #include "NewUISystem.h"
 #include "DSPlaySound.h"
 #include "FriendMailWindow.h"
+#include "MultiLanguage.h"
+
+void TranslateTemplate(const char* pszEnglish, char* pszOut, size_t cbOut);	// MultiLanguage.cpp
 #include <cstddef>
 #ifdef KJH_ADD_INGAMESHOP_UI_SYSTEM
 #include "GameShop/NewUIInGameShop.h"
@@ -128,9 +131,21 @@ void CB_KiraPass::DrawWindow()
 	float StartX = (MAX_WIN_WIDTH / 2) - (WindowW / 2);
 	float StartY = 40;
 
-	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowKiraPass, "Kira Pass");
+	// Vietnamese text for the English templates below. Falls back to the English when the
+	// language is English or the template has no translation (TranslateTemplate decides).
+	auto T = [](const char* en) -> const char* {
+		static char s_buf[8][256];
+		static int s_next = 0;
+		char* out = s_buf[s_next];
+		s_next = (s_next + 1) % 8;
+		TranslateTemplate(en, out, 256);
+		return out;
+	};
+
+	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, WindowW, WindowH, eWindowKiraPass, T("Kira Pass"));
 
 	int x = (int)StartX + 15;
+
 	int y = (int)StartY + 40;
 	int w = (int)WindowW - 30;
 
@@ -148,40 +163,40 @@ void CB_KiraPass::DrawWindow()
 	}
 #endif
 
-	y = gInterface.DrawFormat(eGold, x, y, w, 3, "%s for %d days", price, (int)this->m_Days);
+	y = gInterface.DrawFormat(eGold, x, y, w, 3, T("%s for %d days"), price, (int)this->m_Days);
 	y += 6;
-	y = gInterface.DrawFormat(eWhite, x, y, w, 1, "- %d WCoin (C) right away", (int)this->m_Instant);
-	y = gInterface.DrawFormat(eWhite, x, y, w, 1, "- %d WCoin (C) every day you log in", (int)this->m_Daily);
-	y = gInterface.DrawFormat(eWhite, x, y, w, 1, "- Rewards arrive in your mailbox (Friends)");
-	y = gInterface.DrawFormat(eWhite, x, y, w, 1, "- Claim them within 14 days");
-	y = gInterface.DrawFormat(eRed, x, y, w, 1, "A day you don't log in is lost.");
-	y = gInterface.DrawFormat(eWhite, x, y, w, 1, "Buying again adds %d more days.", (int)this->m_Days);
+	y = gInterface.DrawFormat(eWhite, x, y, w, 1, T("- %d WCoin (C) right away"), (int)this->m_Instant);
+	y = gInterface.DrawFormat(eWhite, x, y, w, 1, T("- %d WCoin (C) every day you log in"), (int)this->m_Daily);
+	y = gInterface.DrawFormat(eWhite, x, y, w, 1, T("- Rewards arrive in your mailbox (Friends)"));
+	y = gInterface.DrawFormat(eWhite, x, y, w, 1, T("- Claim them within 14 days"));
+	y = gInterface.DrawFormat(eRed, x, y, w, 1, T("A day you don't log in is lost."));
+	y = gInterface.DrawFormat(eWhite, x, y, w, 1, T("Buying again adds %d more days."), (int)this->m_Days);
 	y += 8;
 
 	if (!this->m_Known)
 	{
-		gInterface.DrawFormat(eWhite, x, y, w, 3, "Status: checking...");
+		gInterface.DrawFormat(eWhite, x, y, w, 3, T("Status: checking..."));
 	}
 	else if (this->m_DaysLeft > 0)
 	{
-		y = gInterface.DrawFormat(eExcellent, x, y, w, 3, "Active - %d day(s) left", (int)this->m_DaysLeft);
+		y = gInterface.DrawFormat(eExcellent, x, y, w, 3, T("Active - %d day(s) left"), (int)this->m_DaysLeft);
 		gInterface.DrawFormat(this->m_PaidToday ? eExcellent : eGold, x, y, w, 3,
-			this->m_PaidToday ? "Today's reward: sent to your mailbox" : "Today's reward: on your next login");
+			this->m_PaidToday ? T("Today's reward: sent to your mailbox") : T("Today's reward: on your next login"));
 	}
 	else
 	{
-		gInterface.DrawFormat(eWhite, x, y, w, 3, "Status: not active");
+		gInterface.DrawFormat(eWhite, x, y, w, 3, T("Status: not active"));
 	}
 
 	const float BtnW = 100;
 	const float BtnY = StartY + WindowH - 40;
 
-	if (g_pBCustomMenuInfo->DrawButton(StartX + 15, BtnY, 170, 12, (char*)(this->m_DaysLeft > 0 ? "Extend" : "Buy"), BtnW))
+	if (g_pBCustomMenuInfo->DrawButton(StartX + 15, BtnY, 170, 12, (char*)(this->m_DaysLeft > 0 ? T("Extend") : T("Buy")), BtnW))
 	{
 		this->Buy();
 	}
 
-	if (g_pBCustomMenuInfo->DrawButton(StartX + WindowW - 15 - BtnW, BtnY, 170, 12, (char*)"Close", BtnW))
+	if (g_pBCustomMenuInfo->DrawButton(StartX + WindowW - 15 - BtnW, BtnY, 170, 12, (char*)T("Close"), BtnW))
 	{
 		gInterface.Data[eWindowKiraPass].OnShow = 0;
 		PlayBuffer(SOUND_CLICK01);

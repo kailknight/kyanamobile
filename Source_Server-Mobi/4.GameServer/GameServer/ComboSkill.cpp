@@ -101,6 +101,16 @@ bool CComboSkill::CheckCombo(WORD skill) // OK
 			this->Init();
 			return 1;
 		}
+
+		// The same finisher again: an area skill (Twisting Slash) reaches this
+		// check once for the cast and again for its multi-hit packet. That is
+		// one use of the skill, not a broken chain - keep the combo going (it
+		// used to reset here, so starter -> Twisting -> Death Stab never
+		// combo'd, by hand or with the helper).
+		if(this->m_index == 1 && this->m_skill[1] == skill)
+		{
+			return 0;
+		}
 	}
 
 	this->Init();

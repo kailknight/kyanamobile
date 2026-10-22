@@ -5,8 +5,8 @@ typedef std::pair<int, BYTE> INTBYTEPAIR;
 namespace COMGEM
 {
 	extern	BOOL	m_bType;
-	extern	char	m_cGemType;
-	extern	char	m_cComType;
+	extern	signed char	m_cGemType; // signed: NOGEM is -1, and plain char is unsigned on Android
+	extern	signed char	m_cComType; // signed: NOCOM is -1
 	extern	BYTE	m_cCount;
 	extern	int		m_iValue;
 	extern	BYTE	m_cPercent;
@@ -42,8 +42,8 @@ namespace COMGEM
 	int		Check_Jewel( int _nJewel, int _nType = 0, bool _bModel=false );
 
 	inline	void	SetMode(BOOL mode)	{ m_bType = mode; }	
-	inline	void	SetGem(char gem)	{ m_cGemType = gem; }
-	inline	void	SetComType(char type)	{ m_cComType = type; }
+	inline	void	SetGem(signed char gem)	{ m_cGemType = gem; }
+	inline	void	SetComType(signed char type)	{ m_cComType = type; }
 	inline	void	SetState(char state)	{ m_cState = state; }
 	inline	void	SetError(char err)	{ m_cErr = err; }
 	inline	char	GetError()	{ return m_cErr; }

@@ -5697,36 +5697,36 @@ void OpenBasicData(HDC hDC)
 #endif
 	g_ServerListManager->LoadServerListScript();
 
-	sprintf(Text, "Data\\Local\\%s\\Dialog_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\Dialog_%s.bmd");
 	OpenDialogFile(Text);
 
-	sprintf(Text, "Data\\Local\\%s\\Item_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\Item_%s.bmd");
 	OpenItemScript(Text);
 //===Tool tip
-	sprintf(Text, "Data\\Local\\%s\\itemtooltip_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\itemtooltip_%s.bmd");
 	load_item_tooltip(Text);
-	sprintf(Text, "Data\\Local\\%s\\itemleveltooltip_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\itemleveltooltip_%s.bmd");
 	load_item_level_tooltip(Text);
-	sprintf(Text, "Data\\Local\\%s\\itemtooltiptext_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\itemtooltiptext_%s.bmd");
 	load_item_tooltip_text(Text);
 
 	set_item_tooltip();
 	set_item_level_tooltip();
 	set_item_text_tooltip();
 //====
-	sprintf(Text, "Data\\Local\\%s\\movereq_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\movereq_%s.bmd");
 	SEASON3B::CMoveCommandData::OpenMoveReqScript(Text);
 	
-	sprintf(Text, "Data\\Local\\%s\\NpcName(%s).txt", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\NpcName(%s).txt");
    	OpenMonsterScript(Text);
 	
-	sprintf(Text, "Data\\Local\\%s\\Quest_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\Quest_%s.bmd");
 	g_csQuest.OpenQuestScript (Text);
 
-	sprintf(Text, "Data\\Local\\%s\\Skill_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\Skill_%s.bmd");
 	OpenSkillScript(Text);
 
-	sprintf(Text, "Data\\Local\\%s\\SocketItem_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\SocketItem_%s.bmd");
 	g_SocketItemMgr.OpenSocketItemScript(Text);
 
 #if defined(__ANDROID__) || defined(MU_IOS)
@@ -5752,7 +5752,7 @@ void OpenBasicData(HDC hDC)
 	//g_pMasterLevelInterface->OpenMasterLevel("Data\\Local\\MasterSKillTree.bmd");
 
 	g_pMasterSkillTreeInterface->OpenMasterSkillTreeData("Data\\Local\\MasterSkillTreeData.bmd");
-	sprintf(Text, "Data\\Local\\%s\\MasterSkillTooltip_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\MasterSkillTooltip_%s.bmd");
 	g_pMasterSkillTreeInterface->OpenMasterSkillTooltip(Text);
 
 #if defined(__ANDROID__) || defined(MU_IOS)
@@ -5784,7 +5784,7 @@ void OpenTextData()
 {
 	char Text[100];
 
-	sprintf(Text,"Data\\Local\\%s\\Text_%s.bmd", g_strSelectedML.c_str(), g_strSelectedML.c_str());
+	LocalLanguageFile(Text, sizeof(Text), "Data\\Local\\%s\\Text_%s.bmd");
 	GlobalText.Load(Text, CGlobalText::LD_USA_CANADA_TEXTS|CGlobalText::LD_FOREIGN_TEXTS);
 	OpenMacro("Data\\Macro.txt");
 }

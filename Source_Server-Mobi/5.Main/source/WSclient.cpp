@@ -1933,6 +1933,17 @@ void ReceiveMovePosition( BYTE *ReceiveBuffer )
 	c->TargetX = Data->PositionX;
 	c->TargetY = Data->PositionY;
 	c->JumpTime = 1;
+
+	// Knockback on our own character: drop the walk that was in progress.
+	// Its path was planned from the old tile, and left running it kept
+	// Movement set, which the MU Helper waits on - so it stopped working.
+	if (c == Hero)
+	{
+		c->Movement = false;
+		c->Path.PathNum = 0;
+		c->Path.CurrentPath = 0;
+		c->Path.CurrentPathFloat = 0;
+	}
 }
 
 extern int EnableEvent;
@@ -5975,24 +5986,26 @@ BOOL ReceiveDieExp(BYTE *ReceiveBuffer,BOOL bEncrypted)
 	c->Movement = false;
 	
 
-	//if(gCharacterManager.IsMasterLevel(Hero->Class) == true)
-	//{
-	//	g_pMainFrame->SetPreExp_Wide(Master_Level_Data.lMasterLevel_Experince);
-	//	g_pMainFrame->SetGetExp_Wide(Exp);	
-	//	Master_Level_Data.lMasterLevel_Experince += Exp;
-	//}
-	//else
+		// Master EXP (3rd class at level 400+) goes to the Master numbers the
+	// bottom bar shows; below 400 it is the normal EXP.
+	if(gCharacterManager.IsMasterLevel(Hero->Class) == true && CharacterAttribute->Level >= 400)
+	{
+		g_pMainFrame->SetPreExp_Wide(Master_Level_Data.lMasterLevel_Experince);
+		g_pMainFrame->SetGetExp_Wide(Exp);
+		Master_Level_Data.lMasterLevel_Experince += Exp;
+	}
+	else
 	{
 		g_pMainFrame->SetPreExp(CharacterAttribute->Experience);
 		g_pMainFrame->SetGetExp(Exp);
-		CharacterAttribute->Experience += Exp;	
+		CharacterAttribute->Experience += Exp;
 	}
 	
 	if(Exp > 0)
 	{
 		
 		char Text[100];
-		if(gCharacterManager.IsMasterLevel(Hero->Class) == true)
+		if(gCharacterManager.IsMasterLevel(Hero->Class) == true && CharacterAttribute->Level >= 400)
 		{
 			sprintf(Text,GlobalText[1750],Exp);
 		}
@@ -6047,24 +6060,26 @@ BOOL ReceiveDieExpLarge(BYTE *ReceiveBuffer,BOOL bEncrypted)
 	c->Dead = true;
 	c->Movement = false;
 
-	//if(gCharacterManager.IsMasterLevel(Hero->Class) == true)
-	//{
-	//	g_pMainFrame->SetPreExp_Wide(Master_Level_Data.lMasterLevel_Experince);
-	//	g_pMainFrame->SetGetExp_Wide(Exp);	
-	//	Master_Level_Data.lMasterLevel_Experince += Exp;
-	//}
-	//else
+		// Master EXP (3rd class at level 400+) goes to the Master numbers the
+	// bottom bar shows; below 400 it is the normal EXP.
+	if(gCharacterManager.IsMasterLevel(Hero->Class) == true && CharacterAttribute->Level >= 400)
+	{
+		g_pMainFrame->SetPreExp_Wide(Master_Level_Data.lMasterLevel_Experince);
+		g_pMainFrame->SetGetExp_Wide(Exp);
+		Master_Level_Data.lMasterLevel_Experince += Exp;
+	}
+	else
 	{
 		g_pMainFrame->SetPreExp(CharacterAttribute->Experience);
-		g_pMainFrame->SetGetExp(Exp);	
-		CharacterAttribute->Experience += Exp;	
+		g_pMainFrame->SetGetExp(Exp);
+		CharacterAttribute->Experience += Exp;
 	}
 	
 	if(Exp > 0)
 	{
 		char Text[100];
 
-		if(gCharacterManager.IsMasterLevel(Hero->Class) == true)
+		if(gCharacterManager.IsMasterLevel(Hero->Class) == true && CharacterAttribute->Level >= 400)
 		{
 			sprintf(Text,GlobalText[1750],Exp);
 		}

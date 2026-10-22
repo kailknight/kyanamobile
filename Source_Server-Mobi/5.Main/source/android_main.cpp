@@ -173,6 +173,9 @@ int AndroidBindVirtualPotionSlotFromInventory(int itemType, int itemLevel);
 #include "stb_image.h"
 
 #define LOG_TAG "MuMain"
+
+// Global scope on purpose (a declaration inside an anonymous namespace would not link).
+bool TranslateDrawnText(const char* pszText, char* pszOut, size_t cbOut);	// MultiLanguage.cpp
 #if defined(MU_ANDROID_DISABLE_LOG)
 #define LOGI(...) ((void)0)
 #define LOGE(...) ((void)0)
@@ -7436,9 +7439,21 @@ void EnsureNormalAttackTarget()
     }
 }
 
+// Elf summons (Goblin .. Bali and the rest). AttackElf always sends them on the
+// hero's own key, but they are neither buff nor friendly in the skill tables,
+// so they fell into "offensive" below and the "no target" guard dropped every
+// press with no monster selected - summon could not be cast at all.
+bool IsElfSummonSkill(int skillType)
+{
+    return skillType >= AT_SKILL_SUMMON && skillType <= AT_SKILL_SUMMON + 7;
+}
+
+// Dark Lord's Summon (party teleport) has the same problem: Skill_eng.bmd types
+// it as a plain attack (0), yet AttackKnight sends it on the hero's own key.
 bool IsSupportOrSelfSkill(ActionSkillType skillType)
 {
-    return IsCorrectSkillType_Buff(skillType) || IsCorrectSkillType_FrendlySkill(skillType);
+    return IsCorrectSkillType_Buff(skillType) || IsCorrectSkillType_FrendlySkill(skillType)
+        || IsElfSummonSkill(skillType) || skillType == AT_SKILL_PARTY_TELEPORT;
 }
 
 bool TriggerVirtualNormalAutoAttack()
@@ -13001,6 +13016,14 @@ int DrawAndroidTutorialWrappedText(HFONT font, float x, float y, float w, DWORD 
     if (text == nullptr || g_pRenderText == nullptr)
     {
         return 0;
+    }
+
+    // Vietnamese mode: the whole caption is translated before it is cut into lines (the lines
+    // themselves would no longer match Lang_Vtm.txt).
+    char viText[512];
+    if (TranslateDrawnText(text, viText, sizeof(viText)))
+    {
+        text = viText;
     }
 
     // Two things about CutStr's contract that both bite if you get them wrong,
@@ -18761,6 +18784,10 @@ const char* GetAndroidSkillTypeLabel(int skillType)
     {
         return "Support";
     }
+    if (IsElfSummonSkill(skillType) || skillType == AT_SKILL_PARTY_TELEPORT)
+    {
+        return "Summon";
+    }
     return "Attack";
 }
 
@@ -19868,7 +19895,11 @@ float GetAndroidExperienceRatio()
         return 0.0f;
     }
 
-    const bool masterLevel = gCharacterManager.IsMasterLevel(CharacterAttribute->Class);
+    // The master gauge is for level 400 and up, exactly as on the desktop
+    // (NewUIMainFrameWindow.cpp RenderExperience): below 400 a master-class
+    // character still earns normal EXP, and Master_Level_Data is empty.
+    const bool masterLevel = gCharacterManager.IsMasterLevel(CharacterAttribute->Class)
+        && CharacterAttribute->Level >= 400;
 
     double current = 0.0;
     double next = 0.0;
@@ -19876,16 +19907,19 @@ float GetAndroidExperienceRatio()
 
     if (masterLevel)
     {
-        // Unlike regular Experience (cumulative since level 1, hence the
-        // "prior threshold" subtraction below), lMasterLevel_Experince is
-        // already progress *within the current master level* - WSclient.cpp's
-        // own iExp = lNext_MasterLevel_Experince - lMasterLevel_Experince
-        // (remaining-to-level) and ZzzInfomation.cpp's lMasterLevel_Experince
-        // = lNext_MasterLevel_Experince snap-to-100%-on-level-up both treat
-        // the two fields as directly comparable. prior stays 0: subtracting
-        // a "level below" threshold here (the previous version's approach)
-        // double-counted the level's own base, which is what put the bar at
-        // ~50% immediately after levelling instead of 0%.
+        // lMasterLevel_Experince and lNext_MasterLevel_Experince are both
+        // totals on the master curve, like the normal ones, so the level's own
+        // base has to come off both or the bar sits at 99% from the first
+        // master levels on (ZzzInfomation.cpp builds the next threshold with
+        // the same formula). This is the base NewUIMasterSkillTree.cpp and the
+        // desktop gauge subtract: (A - 3892250000) / 2 for the master level
+        // counted from 400.
+        const __int64 totalLevel = static_cast<__int64>(Master_Level_Data.nMLevel) + 400;
+        const __int64 overLevel = totalLevel - 255;
+        const __int64 curve = (9 + totalLevel) * totalLevel * totalLevel * 10
+            + (9 + overLevel) * overLevel * overLevel * 1000;
+
+        prior = static_cast<double>((curve - static_cast<__int64>(3892250000)) / 2);
         current = static_cast<double>(Master_Level_Data.lMasterLevel_Experince);
         next = static_cast<double>(Master_Level_Data.lNext_MasterLevel_Experince);
     }
@@ -20100,7 +20134,7 @@ void RenderVirtualPortraitHud()
              0xFFF0E4CC, 0x0, static_cast<int>(kStatLevelW), 0, 3,
              "LVL:%d | ML:%d",
              CharacterAttribute->Level,
-             gCharacterManager.IsMasterLevel(CharacterAttribute->Class)
+             (gCharacterManager.IsMasterLevel(CharacterAttribute->Class) && CharacterAttribute->Level >= 400)
                  ? Master_Level_Data.nMLevel
                  : 0);
 
@@ -24605,13 +24639,13 @@ static void RunAndroidGameFrame()
     }
 
     int muHelperTickBudget = 4;
-    while ((nowTicks - g_AndroidFrameState.muHelperLastTickMs) >= 250u && (muHelperTickBudget-- > 0))
+    while ((nowTicks - g_AndroidFrameState.muHelperLastTickMs) >= 100u && (muHelperTickBudget-- > 0))
     {
         if (SceneFlag == MAIN_SCENE && gCB_MUHelper != nullptr)
         {
             gCB_MUHelper->Work();
         }
-        g_AndroidFrameState.muHelperLastTickMs += 250u;
+        g_AndroidFrameState.muHelperLastTickMs += 100u; // was 250; attack rate comes from attack speed (CB_MUHelper.cpp)
     }
 
     // NOTE: this is the live per-frame path (sokol_app desc.frame_cb =

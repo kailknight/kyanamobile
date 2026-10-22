@@ -1631,6 +1631,177 @@ float BCalculateAttackSpeed(int Type)
 	return SpeedReturn;
 }
 
+// ---------------------------------------------------------------------------
+// Attack/magic speed tamper check.
+//
+// A memory editor (Cheat Engine or anything like it, 32- or 64-bit, even a
+// driver) can raise these fields and every attack animation speeds up with
+// them. The anti-cheat cannot see every tool's writes, but the client knows
+// exactly where these fields are legitimately written: the server's stats
+// packet (ViewPhysiSpeed/ViewMagicSpeed, Protocol.cpp) and the two places
+// that copy them into AttackSpeed/MagicSpeed (SetAttackSpeed below,
+// CHARACTER_MACHINE::CalculateAttackSpeed). Each of those commits a scrambled
+// copy here, and SpeedGuardVerify compares the live fields with it once a
+// frame. Any other change is an outside write: the real values are put back
+// and, on PC with the anti-cheat loaded, it is reported as a memory detection.
+// ---------------------------------------------------------------------------
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+#include "Protect.h"
+extern "C" void GuardReportClientTamper(const char *Text);
+#endif
+
+namespace
+{
+	enum { SPEED_VIEW_PHYSI, SPEED_VIEW_MAGIC, SPEED_ATTACK, SPEED_MAGIC, SPEED_COUNT };
+
+	DWORD g_SpeedKey = 0;
+	DWORD g_SpeedSeal[SPEED_COUNT] = { 0 };
+	DWORD g_SpeedSum = 0;
+	DWORD g_SpeedArmed = 0;	// bit 0 = view committed, bit 1 = attack committed
+	bool g_SpeedReported = false;
+
+	DWORD SpeedRotl(DWORD v, int n)
+	{
+		return (v << n) | (v >> (32 - n));
+	}
+
+	DWORD SpeedSlotKey(int Slot)
+	{
+		if (g_SpeedKey == 0)
+		{
+			g_SpeedKey = (GetTickCount() * 2654435761u) ^ (DWORD)(size_t)&g_SpeedKey ^ 0x5A17C3E9u;
+
+			if (g_SpeedKey == 0)
+			{
+				g_SpeedKey = 0x13579BDFu;
+			}
+		}
+
+		return g_SpeedKey + (DWORD)Slot * 0x9E3779B9u;
+	}
+
+	DWORD SpeedSealSum()
+	{
+		return g_SpeedSeal[0] ^ SpeedRotl(g_SpeedSeal[1], 7) ^ SpeedRotl(g_SpeedSeal[2], 13) ^ SpeedRotl(g_SpeedSeal[3], 19) ^ g_SpeedKey;
+	}
+
+	void SpeedSeal(int Slot, DWORD Value)
+	{
+		g_SpeedSeal[Slot] = Value ^ SpeedSlotKey(Slot);
+	}
+
+	DWORD SpeedUnseal(int Slot)
+	{
+		return g_SpeedSeal[Slot] ^ SpeedSlotKey(Slot);
+	}
+}
+
+void SpeedGuardCommitView()
+{
+	if (CharacterAttribute == NULL)
+	{
+		return;
+	}
+
+	SpeedSeal(SPEED_VIEW_PHYSI, CharacterAttribute->PrintPlayer.ViewPhysiSpeed);
+	SpeedSeal(SPEED_VIEW_MAGIC, CharacterAttribute->PrintPlayer.ViewMagicSpeed);
+	g_SpeedSum = SpeedSealSum();
+	g_SpeedArmed |= 1;
+}
+
+void SpeedGuardCommitAttack()
+{
+	if (CharacterAttribute == NULL)
+	{
+		return;
+	}
+
+	SpeedSeal(SPEED_ATTACK, CharacterAttribute->AttackSpeed);
+	SpeedSeal(SPEED_MAGIC, CharacterAttribute->MagicSpeed);
+	g_SpeedSum = SpeedSealSum();
+	g_SpeedArmed |= 2;
+}
+
+void SpeedGuardVerify()
+{
+	if (CharacterAttribute == NULL || g_SpeedArmed != 3)
+	{
+		return;
+	}
+
+	const DWORD ViewPhysi = SpeedUnseal(SPEED_VIEW_PHYSI);
+	const DWORD ViewMagic = SpeedUnseal(SPEED_VIEW_MAGIC);
+	const WORD Attack = (WORD)SpeedUnseal(SPEED_ATTACK);
+	const WORD Magic = (WORD)SpeedUnseal(SPEED_MAGIC);
+
+	const bool SealBroken = (g_SpeedSum != SpeedSealSum());
+
+	if (SealBroken == false
+		&& CharacterAttribute->PrintPlayer.ViewPhysiSpeed == ViewPhysi
+		&& CharacterAttribute->PrintPlayer.ViewMagicSpeed == ViewMagic
+		&& CharacterAttribute->AttackSpeed == Attack
+		&& CharacterAttribute->MagicSpeed == Magic)
+	{
+		return;
+	}
+
+	// What it was changed to, read before the real values are put back below.
+	// Editors usually hit AttackSpeed/MagicSpeed (what the animation reads)
+	// rather than the View copy, so report whichever moved.
+	DWORD SeenSpeed = CharacterAttribute->PrintPlayer.ViewPhysiSpeed;
+	if (SeenSpeed == ViewPhysi)
+	{
+		SeenSpeed = (CharacterAttribute->AttackSpeed != Attack) ? CharacterAttribute->AttackSpeed
+			: (CharacterAttribute->MagicSpeed != Magic) ? CharacterAttribute->MagicSpeed
+			: CharacterAttribute->PrintPlayer.ViewMagicSpeed;
+	}
+
+	char Text[128];
+
+	snprintf(Text, sizeof(Text) - 1, "Client memory edited: attack speed %u -> %u%s",
+		(unsigned)ViewPhysi, (unsigned)SeenSpeed, SealBroken ? " (seal)" : "");
+
+	Text[sizeof(Text) - 1] = '\0';
+
+	if (SealBroken == false)
+	{
+		// Undo the edit before anything else, so it never reaches an attack.
+		CharacterAttribute->PrintPlayer.ViewPhysiSpeed = ViewPhysi;
+		CharacterAttribute->PrintPlayer.ViewMagicSpeed = ViewMagic;
+		SetAttackSpeed();
+	}
+
+	if (g_SpeedReported)
+	{
+		return;
+	}
+
+	g_SpeedReported = true;
+
+	g_ErrorReport.Write("%s\r\n", Text);
+
+	// Tell the GameServer (0xD3:0xF5, Protocol.cpp CGClientTamperRecv). This is
+	// the only report a phone has - there is no anti-cheat process on Android -
+	// and on PC it puts the edit in the server's hack log too. UNENCRYPTED like
+	// every 0xD3 packet (see SendClientBuild in wsclientinline.h).
+	{
+		CStreamPacketEngine spe;
+		spe.Init(0xC1, 0xD3);
+		spe << (BYTE)0xF5;
+		spe << (BYTE)1;
+		spe << (DWORD)ViewPhysi;
+		spe << (DWORD)SeenSpeed;
+		spe.Send();
+	}
+
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	if (gProtect.m_MainInfo.LoadAntihack)
+	{
+		GuardReportClientTamper(Text);
+	}
+#endif
+}
+
 void SetAttackSpeed()
 {
 	//float AttackSpeed1 = CharacterAttribute->AttackSpeed * 0.004f;
@@ -1639,9 +1810,10 @@ void SetAttackSpeed()
 	//===Fix Attack Speed
 	CharacterAttribute->AttackSpeed = (WORD)CharacterAttribute->PrintPlayer.ViewPhysiSpeed;
 	CharacterAttribute->MagicSpeed = (WORD)CharacterAttribute->PrintPlayer.ViewMagicSpeed;
+	SpeedGuardCommitAttack();
 
 
-	float AttackSpeed1 = (BCalculateAttackSpeed(1)) * 0.004f;    // 
+	float AttackSpeed1 = (BCalculateAttackSpeed(1)) * 0.004f;    //
 	float MagicSpeed1 = (BCalculateAttackSpeed(0)) * 0.004f;    // 
 	float MagicSpeed2 = (BCalculateAttackSpeed(0)) * 0.002f;    // 
 

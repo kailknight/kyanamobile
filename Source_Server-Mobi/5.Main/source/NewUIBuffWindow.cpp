@@ -4,6 +4,7 @@
 #include "stdafx.h"
 
 #include "NewUIBuffWindow.h"
+#include "MultiLanguage.h"
 #include "ZzzBMD.h"
 #include "ZzzCharacter.h"
 #include "ZzzTexture.h"
@@ -311,21 +312,44 @@ void SEASON3B::CNewUIBuffWindow::RenderBuffStatus( BUFF_RENDER renderstate ) //D
 //			RenderNumber(x+5, y+5, buff, 1.f);
 //#endif //_DEBUG
 			//===Render Bar Time
-			if (gIconBuff.UserBuff[IndexTime].Index != NULL)
+			const int slot = gIconBuff.FindUserBuff((int)buff);
+			if (slot != -1)
 			{
-				if (gIconBuff.UserBuff[IndexTime].Index != 28)
+				if (gIconBuff.UserBuff[slot].Index != 28)
 				{
 					int pBuffHp = 100;
 
-					if (gIconBuff.UserBuff[IndexTime].MaxTime > 0 && gIconBuff.UserBuff[IndexTime].Time > 0)
+					if (gIconBuff.UserBuff[slot].MaxTime > 0 && gIconBuff.UserBuff[slot].Time > 0)
 					{
-						pBuffHp = (gIconBuff.UserBuff[IndexTime].Time * 100) / gIconBuff.UserBuff[IndexTime].MaxTime;
+						pBuffHp = (gIconBuff.UserBuff[slot].Time * 100) / gIconBuff.UserBuff[slot].MaxTime;
 					}
 					EnableAlphaTest();
 					glColor4f(0.0, 1.0, 0.0, 1.0);
 					RenderColor(x, (y + BUFF_IMG_HEIGHT), (BUFF_IMG_WIDTH * pBuffHp / 100.0f), 2.0f, 0.0f, 0);
 					::EnableAlphaTest();
 					::glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+					// Remaining time on the icon itself - the tooltip needs a
+					// mouse hover, which a phone does not have.
+					const int remain = gIconBuff.UserBuff[slot].Time;
+					if (remain > 0)
+					{
+						char szRemain[16];
+						if (remain < 60)
+							sprintf(szRemain, "%d", remain);
+						else if (remain < 3600)
+							sprintf(szRemain, "%dm", remain / 60);
+						else if (remain < 86400)
+							sprintf(szRemain, "%dh", remain / 3600);
+						else
+							sprintf(szRemain, "%dd", remain / 86400);
+
+						g_pRenderText->SetFont(g_hFont);
+						g_pRenderText->SetTextColor(RGBA(255, 255, 255, 255));
+						g_pRenderText->SetBgColor(RGBA(0, 0, 0, 160));
+						g_pRenderText->RenderText((int)x, (int)(y + BUFF_IMG_HEIGHT - 9), szRemain, (int)BUFF_IMG_WIDTH, 0, RT3_SORT_CENTER);
+						g_pRenderText->SetBgColor(0);
+					}
 				}
 			}
 		}
@@ -337,7 +361,7 @@ void SEASON3B::CNewUIBuffWindow::RenderBuffStatus( BUFF_RENDER renderstate ) //D
 				float fTooltip_x = x + (BUFF_IMG_WIDTH / 2);
 				float fTooltip_y = y + BUFF_IMG_WIDTH;
 				eBuffClass buffclass = g_IsBuffClass(buff);
-				RenderBuffTooltip( buffclass, buff, fTooltip_x, fTooltip_y , IndexTime);
+				RenderBuffTooltip( buffclass, buff, fTooltip_x, fTooltip_y , gIconBuff.FindUserBuff((int)buff));
 			}
 		}
 		IndexTime++;
@@ -447,7 +471,7 @@ void SEASON3B::CNewUIBuffWindow::RenderBuffTooltip(eBuffClass& eBuffClassType, e
 
 	std::map<int, RenderTooltipBuff>::iterator it;
 
-	if (strcmp((char*)g_strSelectedML.c_str(), "Eng") == 0)
+	if (!IsVietnameseLanguage())
 	{
 		it = gIconBuff.BuffEffectTRSData_ENG.find(eBuffType);
 
@@ -457,7 +481,7 @@ void SEASON3B::CNewUIBuffWindow::RenderBuffTooltip(eBuffClass& eBuffClassType, e
 		}
 	}
 
-	if (strcmp((char*)g_strSelectedML.c_str(), "Vn") == 0)
+	if (IsVietnameseLanguage())
 	{
 		it = gIconBuff.BuffEffectTRSData_VTM.find(eBuffType);
 

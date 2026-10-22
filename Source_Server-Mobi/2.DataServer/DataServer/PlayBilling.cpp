@@ -844,6 +844,7 @@ namespace
 		memcpy(msg.ProductId,job.Req.ProductId,sizeof(msg.ProductId));
 		memcpy(msg.Token,job.Req.Token,sizeof(msg.Token));
 		msg.Result = PLAY_RESULT_RETRY;
+		msg.Quantity = 1;
 
 		if(IsAppleToken(job.Req.Token))
 		{
@@ -872,6 +873,13 @@ namespace
 						CopyField(msg.OrderId,sizeof(msg.OrderId),orderId.c_str());
 
 					msg.Consumed = (JsonInt(response,"consumptionState",0) == 1) ? 1 : 0;
+
+					// Multi-quantity purchase: the player can buy N of a pack in one
+					// payment. Google omits the field when it is 1. Read it from
+					// Google's answer, never from the phone - this used to credit one
+					// pack whatever was paid for.
+					int quantity = JsonInt(response,"quantity",1);
+					msg.Quantity = (WORD)((quantity < 1) ? 1 : ((quantity > 1000) ? 1000 : quantity));
 					msg.Result = (state == 0) ? PLAY_RESULT_CREDITED : ((state == 2) ? PLAY_RESULT_PENDING : PLAY_RESULT_INVALID);
 				}
 				else if(status == 400 || status == 404 || status == 410)
@@ -1102,9 +1110,17 @@ void CPlayBilling::OnPurchaseVerified(SDHP_PLAY_PURCHASE_VERIFIED* lpMsg,int ind
 	// A Kira Pass purchase goes through the same token record (with 0 WCoin) so
 	// it keeps every protection below, then grants the month instead.
 	const bool monthly = IsMonthlyCardProduct(lpMsg->ProductId);
-	const int coins = monthly ? 0 : GetPrivateProfileIntA("Products",lpMsg->ProductId,0,kConfigFile);
+	const int packCoins = monthly ? 0 : GetPrivateProfileIntA("Products",lpMsg->ProductId,0,kConfigFile);
+	const int quantity = (lpMsg->Quantity < 1) ? 1 : (int)lpMsg->Quantity;
+	const int coins = packCoins * quantity;
 
-	if(!monthly && coins <= 0)
+	if(monthly && quantity > 1)
+	{
+		// The monthly-card grant is keyed on the order, so one order = one month.
+		LogAdd(LOG_RED,"[PlayBilling] %s bought %d x %s in one order - only one month is granted",lpMsg->AccountID,quantity,lpMsg->ProductId);
+	}
+
+	if(!monthly && packCoins <= 0)
 	{
 		this->SendResult(index,lpMsg->aIndex,lpMsg->AccountID,lpMsg->ProductId,PLAY_RESULT_UNKNOWN_PRODUCT,0);
 		return;
@@ -1141,7 +1157,7 @@ void CPlayBilling::OnPurchaseVerified(SDHP_PLAY_PURCHASE_VERIFIED* lpMsg,int ind
 
 	if(result == PLAY_RESULT_CREDITED)
 	{
-		LogAdd(LOG_GREEN,"[%s] %s bought %s: +%d WCoin (C) (order %s)",IsAppleToken(lpMsg->Token) ? "AppStore" : "PlayBilling",lpMsg->AccountID,lpMsg->ProductId,coins,lpMsg->OrderId);
+		LogAdd(LOG_GREEN,"[%s] %s bought %d x %s: +%d WCoin (C) (order %s)",IsAppleToken(lpMsg->Token) ? "AppStore" : "PlayBilling",lpMsg->AccountID,quantity,lpMsg->ProductId,coins,lpMsg->OrderId);
 	}
 
 	this->SendResult(index,lpMsg->aIndex,lpMsg->AccountID,lpMsg->ProductId,result,(result == PLAY_RESULT_CREDITED) ? (DWORD)coins : 0);

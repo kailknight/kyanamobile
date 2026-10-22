@@ -3110,12 +3110,22 @@ void MU_ResetTextRenderCache()
 }
 #endif
 
+bool TranslateDrawnText(const char* pszText, char* pszOut, size_t cbOut);	// MultiLanguage.cpp
+
 void CUIRenderText::RenderText(int iPos_x, int iPos_y, const char* pszText, int iBoxWidth /* = 0 */, int iBoxHeight /* = 0 */, int iSort /* = RT3_SORT_LEFT */, OUT SIZE* lpTextSize /* = NULL */)
 {
 
 	if(m_pRenderText)
 	{
-		m_pRenderText->RenderText(iPos_x, iPos_y, pszText, iBoxWidth, iBoxHeight, iSort, lpTextSize);
+		// Vietnamese mode: a plain English line that Lang_Vtm.txt knows is drawn in Vietnamese
+		// (MultiLanguage.cpp). Costs one flag test in English.
+		char szViText[512];
+		const char* pszDraw = pszText;
+		if (pszText != NULL && TranslateDrawnText(pszText, szViText, sizeof(szViText)))
+		{
+			pszDraw = szViText;
+		}
+		m_pRenderText->RenderText(iPos_x, iPos_y, pszDraw, iBoxWidth, iBoxHeight, iSort, lpTextSize);
 	}
 }
 CUIRenderTextOriginal::CUIRenderTextOriginal() 

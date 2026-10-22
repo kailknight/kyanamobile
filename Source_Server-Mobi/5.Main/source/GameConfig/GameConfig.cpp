@@ -493,6 +493,8 @@ void GameConfig::Load()
     SetVoiceMicBoost(MobileSettingsGetInt("Voice.MicBoost", m_voiceMicBoost));
     m_voiceNoiseGate  = MobileSettingsGetInt("Voice.NoiseGate", m_voiceNoiseGate ? 1 : 0) != 0;
     SetVoiceTalkMode(MobileSettingsGetInt("Voice.TalkMode", m_voiceTalkMode));
+    // Language: 1 = Vietnamese ("Vtm"), anything else English. The startup code reads it right after this.
+    m_languageSelection = (MobileSettingsGetInt("Language.Vi", 0) != 0) ? L"Vtm" : L"Eng";
 }
 
 void GameConfig::Save()
@@ -526,6 +528,19 @@ void GameConfig::SetVoiceTalkMode(int mode)           { m_voiceTalkMode = (mode 
 void GameConfig::SetRenderTextType(int type)          { m_renderTextType = type; }
 void GameConfig::SetRememberMe(bool remember)         { m_rememberMe = remember; }
 void GameConfig::SetLanguageSelection(const std::wstring& lang) { m_languageSelection = lang; }
+
+void NormalizeLanguageCode(const char* pszIn, char* pszOut);	// MultiLanguage.cpp
+
+// Saves the language the player picked ("Eng" or "Vtm") for the next start, like the PC build does
+// in Winmain.cpp. The language data files are read once at startup.
+void SetSelectedLanguage(const char* pszLanguage)
+{
+    char szCode[8];
+    NormalizeLanguageCode(pszLanguage, szCode);
+    const bool vi = (strcmp(szCode, "Vtm") == 0);
+    MobileSettingsSetInt("Language.Vi", vi ? 1 : 0);
+    GameConfig::GetInstance().SetLanguageSelection(vi ? L"Vtm" : L"Eng");
+}
 void GameConfig::SetEncryptedUsername(const std::wstring& u)    { m_encryptedUsername = u; }
 void GameConfig::SetEncryptedPassword(const std::wstring& p)    { m_encryptedPassword = p; }
 void GameConfig::SetServerIP(const std::wstring& ip)  { m_serverIP = ip; }

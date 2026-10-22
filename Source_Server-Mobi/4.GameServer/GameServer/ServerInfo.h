@@ -838,6 +838,7 @@ public:
 	int m_ReflectDamageRate[MAX_CLASS];
 	int m_ReflectDamageTimeConstA;
 	int m_ReflectDamageTimeConstB;
+	int m_SummonerBuffTime; // seconds; 0 = use the energy formulas
 	int m_ReflectDamageMaxRate;
 	int m_SwordPowerConstA;
 	int m_SwordPowerConstB;

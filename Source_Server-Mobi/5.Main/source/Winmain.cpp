@@ -13,6 +13,8 @@
 #include "ZzzOpenglUtil.h"
 #include "ZzzTexture.h"
 #include "ZzzOpenData.h"
+#include "Other.h"
+#include "MultiLanguage.h"
 #include "ZzzScene.h"
 #include "ZzzBMD.h"
 #include "ZzzInfomation.h"
@@ -1225,6 +1227,140 @@ void SaveConfigDword(const char* lpszName, int iValue)
 char g_aszMLSelection[MAX_LANGUAGE_NAME_LENGTH] = {'\0'};
 std::string g_strSelectedML = "";
 
+// Saves the language the player picked ("Eng" or "Vtm"). It takes effect on the next start:
+// the data files are read once at startup (see LocalLanguageFile). config.ini is ours and is
+// read first; the registry value is also written because the older launcher / .reg scripts
+// use it, and a stale one there must not disagree with what the player chose.
+void SetSelectedLanguage(const char* pszLanguage)
+{
+	char szCode[8];
+	NormalizeLanguageCode(pszLanguage, szCode);
+
+	WritePrivateProfileStringA("LOGIN", "Language", szCode, "./config.ini");
+
+	HKEY hKey;
+	if (ERROR_SUCCESS == RegCreateKeyExA(HKEY_CURRENT_USER, "SOFTWARE\\Webzen\\Mu\\Config", 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL))
+	{
+		RegSetValueExA(hKey, "LangSelection", 0, REG_SZ, (const BYTE*)szCode, (DWORD)strlen(szCode) + 1);
+		RegCloseKey(hKey);
+	}
+}
+
+// Starts this exe again, with the command line of this run, a few seconds from now. The delay is
+// done by a plain cmd.exe that holds no handle to this process (so the anti-cheat's handle scan
+// sees nothing new) and gives the old client time to close first.
+static void LaunchGameAfterDelay()
+{
+	char szExe[MAX_PATH] = { 0 };
+	GetModuleFileNameA(NULL, szExe, MAX_PATH);
+
+	char szDir[MAX_PATH] = { 0 };
+	strncpy(szDir, szExe, MAX_PATH - 1);
+	char* pSlash = strrchr(szDir, '\\');
+	if (pSlash != NULL)
+	{
+		*pSlash = '\0';
+	}
+
+	// Everything after the program name in the command line.
+	const char* pszArgs = GetCommandLineA();
+	if (*pszArgs == '"')
+	{
+		++pszArgs;
+		while (*pszArgs != '\0' && *pszArgs != '"') ++pszArgs;
+		if (*pszArgs == '"') ++pszArgs;
+	}
+	else
+	{
+		while (*pszArgs != '\0' && *pszArgs != ' ') ++pszArgs;
+	}
+	while (*pszArgs == ' ') ++pszArgs;
+
+	char szCommand[2048];
+	_snprintf(szCommand, sizeof(szCommand) - 1, "cmd.exe /C \"ping -n 6 127.0.0.1 >nul & start \"\" /D \"%s\" \"%s\" %s\"", szDir, szExe, pszArgs);
+	szCommand[sizeof(szCommand) - 1] = '\0';
+
+	// CREATE_NO_WINDOW alone: cmd gets a hidden console that ping inherits. With DETACHED_PROCESS
+	// (which overrides CREATE_NO_WINDOW) cmd has no console and ping opens its own visible one.
+	STARTUPINFOA si;
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESHOWWINDOW;
+	si.wShowWindow = SW_HIDE;
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&pi, sizeof(pi));
+	if (CreateProcessA(NULL, szCommand, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, szDir, &si, &pi))
+	{
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+	}
+}
+
+// After the player changed the language (SetSelectedLanguage already saved it): asks, in the language
+// just chosen, whether to restart the game now. The data files are read once at startup, so the
+// change only shows after a restart. Returns true when the game is closing to restart; false when the
+// player said no (the choice stays saved for the next start).
+bool AskRestartForLanguage(bool bWantVi)
+{
+	const wchar_t* pszTitle = bWantVi ? L"Ngôn ngữ" : L"Language";
+	const wchar_t* pszText = bWantVi
+		? L"Đã đổi ngôn ngữ sang Tiếng Việt.\nKhởi động lại game ngay bây giờ?"
+		: L"Language changed to English.\nRestart the game now?";
+
+	// The game hides the system cursor (ShowCursor(false) on every WM_SETCURSOR, so the counter is far
+	// below zero) and may clip it to its window: bring the cursor back for the box, then put the counter
+	// back where it was.
+	ReleaseCapture();
+	ClipCursor(NULL);
+	int iShown = 0;
+	int iCount = ShowCursor(TRUE);
+	++iShown;
+	while (iCount < 0 && iShown < 2000)
+	{
+		iCount = ShowCursor(TRUE);
+		++iShown;
+	}
+
+	// No owner window on purpose: a box owned by the game window passes its WM_SETCURSOR up to the
+	// game's WndProc, which calls ShowCursor(false) on every mouse move and keeps the cursor hidden.
+	// MB_TASKMODAL still blocks the game's own windows while it is open.
+	const int iAnswer = MessageBoxW(NULL, pszText, pszTitle, MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TOPMOST | MB_TASKMODAL);
+
+	while (iShown-- > 0)
+	{
+		ShowCursor(FALSE);
+	}
+
+	if (iAnswer != IDYES)
+	{
+		return false;
+	}
+
+	g_ErrorReport.Write("> Language changed, restarting the game.");
+
+	if (SceneFlag == MAIN_SCENE)
+	{
+		// In the world: leave the way the Exit Game button does, so the server saves and closes the
+		// session. The server's reply ends this process.
+		if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MIXINVENTORY))
+		{
+			g_pChatListBox->AddText("", GlobalText[592], SEASON3B::TYPE_ERROR_MESSAGE);
+			return false;
+		}
+
+		LaunchGameAfterDelay();
+		SaveOptions();
+		SaveMacro("Data\\Macro.txt");
+		SendRequestLogOut(0);
+	}
+	else
+	{
+		LaunchGameAfterDelay();
+		SendMessage(g_hWnd, WM_DESTROY, 0, 0);
+	}
+	return true;
+}
+
 BOOL OpenInitFile()
 {
 	//char szTemp[50];
@@ -1354,6 +1490,20 @@ BOOL OpenInitFile()
 		g_strSelectedML = g_aszMLSelection;
 	}
 	RegCloseKey( hKey);
+
+	{
+		char szLanguage[16] = "";
+		GetPrivateProfileString("LOGIN", "Language", "", szLanguage, sizeof(szLanguage), szIniFilePath);
+		if (szLanguage[0] != '\0')
+		{
+			g_strSelectedML = szLanguage;
+		}
+		char szCode[8];
+		NormalizeLanguageCode(g_strSelectedML.c_str(), szCode);
+		g_strSelectedML = szCode;
+		strcpy(g_aszMLSelection, szCode);
+		gOther.Load();
+	}
 
 	// MusicOnOff / SoundOnOff / VolumeLevel stay in the registry under
 	// SOFTWARE\Webzen\Mu\Config - the same values Scripts\*.reg toggles
@@ -2074,7 +2224,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLin
 	SetTimer(g_hWnd, HACK_TIMER, 20*1000, NULL);
 
 	gCB_MUHelper = new CB_MUHelper;
-	SetTimer(g_hWnd, MU_HELPERAUTO, 250, MUHelperTimerProc);
+	SetTimer(g_hWnd, MU_HELPERAUTO, 100, MUHelperTimerProc); // was 250; the attack rate itself comes from attack speed (CB_MUHelper.cpp)
 
 	srand((unsigned)time(NULL));
 	for(int i=0;i<100;i++)

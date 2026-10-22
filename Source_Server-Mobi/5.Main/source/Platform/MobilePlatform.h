@@ -101,5 +101,8 @@ int MU_MobileGetWifiRssiDbm();
 // callers ask again rather than waiting on it.
 bool MU_MobileHasMicPermission();
 void MU_MobileRequestMicPermission();
+// After a language change: shows the "restart now?" dialog (Android). "Restart" ends the process and
+// starts the game again; nothing happens on iOS, where the new language shows at the next launch.
+void MU_MobileAskRestartForLanguage(bool vietnamese);
 
 #endif // defined(__ANDROID__) || defined(MU_IOS)

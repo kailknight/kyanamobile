@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "CustomMessage.h"
+#include "MultiLanguage.h"
 
 CCustomMessage gCustomMessage;
 //////////////////////////////////////////////////////////////////////
@@ -103,7 +104,7 @@ CUSTOM_MESSAGE_INFO* CCustomMessage::GetInfoVtm(int index) // OK
 
 char* CCustomMessage::GetMessage(int index) // OK
 {
-	if(strcmp(g_strSelectedML.c_str(),"Eng") == 0)
+	if(!IsVietnameseLanguage())
 	{
 		CUSTOM_MESSAGE_INFO* lpInfo = this->GetInfoEng(index);
 		if(lpInfo==0)
@@ -113,14 +114,12 @@ char* CCustomMessage::GetMessage(int index) // OK
 		return lpInfo->Message;
 	}
 
-	if(strcmp(g_strSelectedML.c_str(),"Vtm") == 0)
+	// Vietnamese mode: the VTM block of CustomMessage.txt (written in Vietnamese since 19 Oct).
+	// A message missing from it falls back to the English one instead of an error line.
+	CUSTOM_MESSAGE_INFO* lpVtm = this->GetInfoVtm(index);
+	if(lpVtm!=0)
 	{
-		CUSTOM_MESSAGE_INFO* lpInfo = this->GetInfoVtm(index);
-		if(lpInfo==0)
-		{
-			return this->m_DefaultMessage;
-		}
-		return lpInfo->Message;
+		return lpVtm->Message;
 	}
 
 	CUSTOM_MESSAGE_INFO* lpInfo = this->GetInfoEng(index);

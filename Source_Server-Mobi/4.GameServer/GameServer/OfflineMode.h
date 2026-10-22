@@ -139,7 +139,13 @@ struct CG_OFFMODE_RESULT
 	BYTE ActiveSkillConditionOn[2];
 	BYTE ActiveSkillSubCon[2];
 	WORD ActiveSkillDelay[2];
+	// Hunting option bits + mark 0xA5 (the old end padding; see the client
+	// CB_OffMuHelper.h). Without the mark they are ignored.
+	BYTE HelperFlags;
+	BYTE HelperFlagsMark;
 };
+
+static_assert(sizeof(CG_OFFMODE_RESULT) == 252, "CG_OFFMODE_RESULT must match the client and stay a C1 packet");
 
 #define CG_OFFMODE_RESULT_OLD_SIZE (offsetof(CG_OFFMODE_RESULT, ActiveSkill))
 
@@ -154,6 +160,7 @@ public:
 	int m_MUOffHelperEnabled[MAX_ACCOUNT_LEVEL];
 	int m_MUOffHelperTimer[MAX_ACCOUNT_LEVEL];
 	int m_MUOffHelperReturn[MAX_ACCOUNT_LEVEL];
+	int m_MUOffHelperMaxPerDevice; // 0 = no limit; see OfflineMode::Start
 	void ReadOffLine(char* section,char* path);
 	void Start(CG_OFFMODE_RESULT* aRecv, int UserIndex);
 	void Attack(int UserIndex);
@@ -161,7 +168,8 @@ public:
 	void RenderAttack(int UserIndex);
 	CSkill* GetSlotSkill(LPOBJ lpObj, int slot);
 	int CheckActiveSkill(LPOBJ lpObj, int n);
-	int SelectSkillSlot(LPOBJ lpObj);
+	int SelectSkillSlot(LPOBJ lpObj, int target);
+	int SelectTarget(LPOBJ lpObj, int distance);
 	void RenderAutoBuffParty(int aIndex);
 	void RenderAutoPote(int aIndex);
 	int PickUP(int aIndex);

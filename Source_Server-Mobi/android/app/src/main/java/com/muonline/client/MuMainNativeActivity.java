@@ -326,6 +326,144 @@ public class MuMainNativeActivity extends NativeActivity {
         });
     }
 
+    // After the player changed the language (already saved by the game): asks whether to restart now.
+    // The language data is read once at startup, so the change only shows after a restart. A system
+    // dialog, shown in the language just chosen; "Restart" ends this process and starts the game again
+    // through MuRestartActivity, "Later" keeps the saved choice for the next start.
+    public static void askRestartForLanguageFromNative(final boolean vietnamese) {
+        final MuMainNativeActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String title = vietnamese ? "Ngôn ngữ" : "Language";
+                    String message = vietnamese
+                        ? "Đã đổi ngôn ngữ sang Tiếng Việt.\nKhởi động lại game ngay bây giờ?"
+                        : "Language changed to English.\nRestart the game now?";
+                    String restart = vietnamese ? "Khởi động lại" : "Restart";
+                    String later = vietnamese ? "Để sau" : "Later";
+                    showModernDialog(activity, title, message, restart, later);
+                } catch (Exception e) {
+                    Log.w(TAG, "language restart dialog failed", e);
+                }
+            }
+        });
+    }
+
+    private static int dp(MuMainNativeActivity a, int v) {
+        return Math.round(v * a.getResources().getDisplayMetrics().density);
+    }
+
+    // A dark rounded card with a gold edge and two pill buttons, drawn in code (no theme or library
+    // needed), instead of the stock system AlertDialog.
+    private static void showModernDialog(final MuMainNativeActivity activity, String title, String message,
+                                         String confirmText, String cancelText) {
+        final android.app.Dialog dialog = new android.app.Dialog(activity);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+
+        android.graphics.drawable.GradientDrawable card = new android.graphics.drawable.GradientDrawable();
+        card.setColor(Color.parseColor("#F2161320"));
+        card.setCornerRadius(dp(activity, 20));
+        card.setStroke(dp(activity, 1), Color.parseColor("#B8A04A"));
+
+        android.widget.LinearLayout root = new android.widget.LinearLayout(activity);
+        root.setOrientation(android.widget.LinearLayout.VERTICAL);
+        root.setBackground(card);
+        root.setPadding(dp(activity, 24), dp(activity, 22), dp(activity, 24), dp(activity, 18));
+
+        android.widget.TextView titleView = new android.widget.TextView(activity);
+        titleView.setText(title);
+        titleView.setTextColor(Color.parseColor("#F4D98A"));
+        titleView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20);
+        titleView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        root.addView(titleView);
+
+        android.widget.TextView messageView = new android.widget.TextView(activity);
+        messageView.setText(message);
+        messageView.setTextColor(Color.parseColor("#E6E1F0"));
+        messageView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
+        messageView.setLineSpacing(0f, 1.15f);
+        android.widget.LinearLayout.LayoutParams mp = new android.widget.LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mp.topMargin = dp(activity, 12);
+        root.addView(messageView, mp);
+
+        android.widget.LinearLayout row = new android.widget.LinearLayout(activity);
+        row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.END);
+        android.widget.LinearLayout.LayoutParams rp = new android.widget.LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rp.topMargin = dp(activity, 22);
+        root.addView(row, rp);
+
+        android.widget.Button cancel = new android.widget.Button(activity);
+        cancel.setText(cancelText);
+        cancel.setAllCaps(false);
+        cancel.setTextColor(Color.parseColor("#C9C3DA"));
+        cancel.setBackground(null);
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        row.addView(cancel);
+
+        android.graphics.drawable.GradientDrawable pill = new android.graphics.drawable.GradientDrawable();
+        pill.setColor(Color.parseColor("#B8892B"));
+        pill.setCornerRadius(dp(activity, 22));
+        android.widget.Button confirm = new android.widget.Button(activity);
+        confirm.setText(confirmText);
+        confirm.setAllCaps(false);
+        confirm.setTextColor(Color.parseColor("#1A1410"));
+        confirm.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        confirm.setBackground(pill);
+        confirm.setPadding(dp(activity, 22), 0, dp(activity, 22), 0);
+        confirm.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                restartGame(activity);
+            }
+        });
+        android.widget.LinearLayout.LayoutParams cp = new android.widget.LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 44));
+        cp.leftMargin = dp(activity, 10);
+        row.addView(confirm, cp);
+
+        dialog.setContentView(root);
+        dialog.setCancelable(true);
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            window.setDimAmount(0.6f);
+            window.setLayout(Math.min(dp(activity, 420), (int) (activity.getResources().getDisplayMetrics().widthPixels * 0.9f)),
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+    }
+
+    private static void restartGame(MuMainNativeActivity activity) {
+        try {
+            Intent launch = activity.getPackageManager().getLaunchIntentForPackage(activity.getPackageName());
+            if (launch == null) {
+                return;
+            }
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            Intent phoenix = new Intent(activity, MuRestartActivity.class);
+            phoenix.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            phoenix.putExtra(MuRestartActivity.EXTRA_INTENT, launch);
+            activity.startActivity(phoenix);
+            activity.finishAffinity();
+            android.os.Process.killProcess(android.os.Process.myPid());
+        } catch (Exception e) {
+            Log.w(TAG, "restart failed", e);
+        }
+    }
+
     public static int getBatteryPercentFromNative() {
         final MuMainNativeActivity activity = instance;
         if (activity == null) {

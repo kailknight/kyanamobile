@@ -221,6 +221,7 @@ public:
 
 	void Recv(PMSG_SEND_BUFF_ICON* DataRecv);
 	void DeleteAllBuff();
+	int FindUserBuff(int effect);
 	void GC_BuffInfo(PMSG_SEND_BUFF_ICON_EX* aRecv);
 	int LoadBuffCount;
 	int UserBuffCount;

@@ -1235,20 +1235,26 @@ void SEASON3B::CNewUIMainFrameWindow::RenderExperience()
 	double x, y, width, height;
 
 
-	//if(gCharacterManager.IsMasterLevel(CharacterAttribute->Class) == true)
-	//{
-	//	wLevel = (__int64)Master_Level_Data.nMLevel;
-	//	dwNexExperience = (__int64)Master_Level_Data.lNext_MasterLevel_Experince;
-	//	dwExperience = (__int64)Master_Level_Data.lMasterLevel_Experince;
-	//}
-	//else
+	// Master gauge (the blue bar and its x10 counter) from level 400 on, fed
+	// with the Master level / EXP; below 400 the normal bar. It used to switch
+	// on the class alone and read the NORMAL EXP, so a 3rd class showed an
+	// empty bar at every level.
+	const bool bMasterBar = (gCharacterManager.IsMasterLevel(CharacterAttribute->Class) == true && CharacterAttribute->Level >= 400);
+
+	if (bMasterBar)
+	{
+		wLevel = (__int64)Master_Level_Data.nMLevel;
+		dwNexExperience = (__int64)Master_Level_Data.lNext_MasterLevel_Experince;
+		dwExperience = (__int64)Master_Level_Data.lMasterLevel_Experince;
+	}
+	else
 	{
 		wLevel = CharacterAttribute->Level;
 		dwNexExperience = CharacterAttribute->NextExperince;
 		dwExperience = CharacterAttribute->Experience;
 	}
 
-	if (gCharacterManager.IsMasterLevel(CharacterAttribute->Class) == true)
+	if (bMasterBar)
 	{
 		x = DisplayWinExt; y = 470 + DisplayHeightExt; width = 6; height = 4;
 
@@ -3356,6 +3362,8 @@ void SEASON3B::CNewUISkillList::RenderCurrentSkillAndHotSkillList()
 	}
 }
 //=== Type = 1
+bool IsHelperDebuffSkill(int skill); // CB_MUHelper.cpp
+
 bool SEASON3B::CNewUISkillList::RenderMuHelper(float X, float Y, int SkillSelect, int SkillBuff)
 {
 	int i;
@@ -3394,8 +3402,13 @@ bool SEASON3B::CNewUISkillList::RenderMuHelper(float X, float Y, int SkillSelect
 						continue;
 					}
 
+					// Basic Skill: attack skills only. Activation Skills: attack and
+					// debuff skills. Buff Duration: buffs only (debuffs used to show
+					// up as buffs). IsHelperDebuffSkill is in CB_MUHelper.cpp.
+					const bool isDebuff = IsHelperDebuffSkill(iSkillType);
 					if (SkillBuff) //Show Buff
 					{
+						if (isDebuff) continue;
 						if (SkillAttribute[iSkillType].Magic_Icon == 0 || SkillAttribute[iSkillType].MasteryType != 255) continue;
 
 						if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Buff[0] == iSkillType
@@ -3407,7 +3420,11 @@ bool SEASON3B::CNewUISkillList::RenderMuHelper(float X, float Y, int SkillSelect
 					}
 					else
 					{
-						if (SkillAttribute[iSkillType].Magic_Icon > 0 && SkillAttribute[iSkillType].MasteryType == 255) continue;
+						if (isDebuff)
+						{
+							if (SkillSelect == 0) continue; // not as the Basic Skill
+						}
+						else if (SkillAttribute[iSkillType].Magic_Icon > 0 && SkillAttribute[iSkillType].MasteryType == 255) continue;
 
 						if (g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[0] == iSkillType
 							|| g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Skill[1] == iSkillType

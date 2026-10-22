@@ -7532,6 +7532,7 @@ void Attack(CHARACTER *c)
 		}
         if( 
 			g_pOption->IsAutoAttack()
+			&& !g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Started // the helper picks every cast itself
 			&& gMapManager.WorldActive != WD_6STADIUM 
 			&& gMapManager.InChaosCastle() == false
 			&& Attacking == 2 

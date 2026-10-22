@@ -2285,6 +2285,8 @@ bool MoveMainCamera()
 
 void MoveMainScene()
 {
+	SpeedGuardVerify();
+
 	if(!InitMainScene)
 	{
 		g_pMainFrame->ResetSkillHotKey();

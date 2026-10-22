@@ -102,6 +102,14 @@ void CB_OffMuHelper::RunningOffHelper()
 		pRequest.ActiveSkillDelay[i] = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.Delay[i];
 	}
 
+	{
+		const auto& d = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu;
+		pRequest.HelperFlags = (BYTE)((d.RegularAttack ? 1 : 0) | (d.TargetConcentration ? 2 : 0) | (d.ShortDistance ? 4 : 0)
+			| (d.SkillPreCon[0] == 1 ? 8 : 0) | (d.SkillPreCon[1] == 1 ? 16 : 0));
+		pRequest.HelperFlagsMark = 0xA5;
+	}
+	static_assert(sizeof(CG_OFFMODE_RESULT) <= 255, "C1 packet: the size is one byte");
+
 	DataSend((LPBYTE)& pRequest, pRequest.h.size);
 }
 #endif

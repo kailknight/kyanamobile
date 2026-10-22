@@ -65,6 +65,7 @@ struct SDHP_PLAY_PURCHASE_VERIFIED
 	char Token[PLAY_TOKEN_SIZE];
 	BYTE Result;					// PLAY_RESULT_*; CREDITED here means "Google says paid and unused"
 	BYTE Consumed;					// Google already shows it consumed
+	WORD Quantity;					// packs bought in this one purchase (Google's own "quantity"), >= 1
 };
 
 // DataServer -> GameServer, 0xD9/0x37.

@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "MultiLanguage.h"
 #include "ReadScript.h"
 #include "UIManager.h"
 #include "ItemAddOptioninfo.h"
@@ -69,7 +70,8 @@ BuffScriptLoaderPtr BuffScriptLoader::Make()
 
 BuffScriptLoader::BuffScriptLoader()
 {
-	std::string filename = "data/local/"+g_strSelectedML+"/BuffEffect_"+g_strSelectedML+".bmd";
+	char szBuffFile[260];
+	std::string filename = LocalLanguageFile(szBuffFile, sizeof(szBuffFile), "data/local/%s/BuffEffect_%s.bmd");
 
 	if( !Load( filename ) )
 	{

@@ -18,6 +18,7 @@
 #include "ServerInfo.h"
 #include "ObjectManager.h"
 #include "Viewport.h"
+#include "DeviceBan.h"
 #include "EffectManager.h"
 #include "CustomAttack.h"
 #include "ItemManager.h"
@@ -56,6 +57,20 @@ void OfflineMode::ReadOffLine(char* section,char* path)
 	this->m_MUOffHelperReturn[1] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL1", 0, path);
 	this->m_MUOffHelperReturn[2] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL2", 0, path);
 	this->m_MUOffHelperReturn[3] = GetPrivateProfileInt(section, "MuOffHelperReturn_AL3", 0, path);
+	// Most characters one phone/PC may have in off helper at once (0 = no limit).
+	this->m_MUOffHelperMaxPerDevice = GetPrivateProfileInt(section, "MuOffHelperMaxPerDevice", 0, path);
+}
+
+// Same machine as lpObj: the hardware id when both sides sent one (0xD3:0x7D),
+// otherwise the IP, so a client too old to send an id cannot dodge the limit.
+static bool OffHelperSameDevice(LPOBJ lpObj,LPOBJ lpOther)
+{
+	if(DeviceIdValid(lpObj->m_DeviceId) && DeviceIdValid(lpOther->m_DeviceId))
+	{
+		return strcmp(lpObj->m_DeviceId,lpOther->m_DeviceId) == 0;
+	}
+
+	return strcmp(lpObj->IpAddr,lpOther->IpAddr) == 0;
 }
 
 // Ends a character's off helper and removes it from the game. Called when the
@@ -128,6 +143,29 @@ void OfflineMode::Start(CG_OFFMODE_RESULT* aRecv, int aIndex)
 		return;
 	}
 
+	// Per-device limit (MuOffHelperMaxPerDevice in GameServerInfo - Custom.ini).
+	// Counts this machine's characters that are already in off helper; the one
+	// asking now is still online, so it is never counted.
+	if(this->m_MUOffHelperMaxPerDevice > 0 && lpObj->IsFakeOnline == 0)
+	{
+		int count = 0;
+
+		for(int n = OBJECT_START_USER; n < MAX_OBJECT; n++)
+		{
+			if(n != aIndex && gObj[n].m_OfflineMode != 0 && gObj[n].IsFakeOnline == 0 && OffHelperSameDevice(lpObj,&gObj[n]))
+			{
+				count++;
+			}
+		}
+
+		if(count >= this->m_MUOffHelperMaxPerDevice)
+		{
+			gNotice.GCNoticeSend(aIndex,1,0,0,0,0,0,"[OfflineMode] This device already has %d character(s) in off helper (limit %d)",count,this->m_MUOffHelperMaxPerDevice);
+			LogAdd(LOG_RED,"[OfflineMode][%s][%s] refused: %d off helper(s) already on device %s / %s",lpObj->Account,lpObj->Name,count,DeviceIdValid(lpObj->m_DeviceId) ? lpObj->m_DeviceId : "(no id)",lpObj->IpAddr);
+			return;
+		}
+	}
+
 	/*if (lpObj->PShopOpen == true)
 	{
 		if (this->bOnlyLorenMarket != 0 && lpObj->Map != 79)
@@ -174,6 +212,11 @@ void OfflineMode::Start(CG_OFFMODE_RESULT* aRecv, int aIndex)
 	}
 	lpObj->OffComboStep = 0;
 	lpObj->OffComboTick = 0;
+	// Hunting options: only from a client that marked them (older clients
+	// leave the end padding as junk).
+	lpObj->OffHelperFlags = (aRecv->h.size >= sizeof(CG_OFFMODE_RESULT) && aRecv->HelperFlagsMark == 0xA5) ? aRecv->HelperFlags : 0;
+	lpObj->OffCloseTurn = 0;
+	lpObj->OffRegularTick = 0;
 	//--
 	lpObj->PartyModeOn = aRecv->PartyModeOn;
 	lpObj->PartyModeHealOn = (lpObj->Class == CLASS_FE) ? aRecv->PartyModeHealOn : 0;		//-> CLASS_ELF
@@ -193,11 +236,15 @@ void OfflineMode::Start(CG_OFFMODE_RESULT* aRecv, int aIndex)
 	lpObj->ObtainPickMoney = (aRecv->ObtainPickMoney != 0) ? 1 : 0;
 	lpObj->ObtainPickExcellent = (aRecv->ObtainPickExcellent != 0) ? 1 : 0;
 	lpObj->ObtainPickExtra = (aRecv->ObtainPickExtra != 0) ? 1 : 0;
-	lpObj->ObtainPickExtraCount = aRecv->ObtainPickExtraCount;
-	
-	for(int i = 0 ; i < lpObj->ObtainPickExtraCount ; ++i)
+	// All 12 slots, always: the client sends how many are FILLED, and copying
+	// that many from the top lost entries after a gap (and a count above 12
+	// wrote past the list). Empty slots are skipped when matching.
+	lpObj->ObtainPickExtraCount = 12;
+
+	for(int i = 0 ; i < 12 ; ++i)
 	{
 		memcpy(lpObj->ObtainPickItemList[ i ], aRecv->ObtainPickItemList[ i ], sizeof(lpObj->ObtainPickItemList[ i ]));
+		lpObj->ObtainPickItemList[ i ][ sizeof(lpObj->ObtainPickItemList[ i ]) - 1 ] = 0;
 	}
 
 	//===========
@@ -304,10 +351,23 @@ void MuOffHelperRepair(int aIndex)
 
 	LPOBJ lpObj = &gObj[aIndex];
 
+	// Only with Repair Item ticked in the helper, and only once an equipped
+	// item is down to half its durability (it used to repair everything on
+	// every tick, whatever the setting).
+	if(lpObj->ObtainRepairOn == 0)
+	{
+		return;
+	}
+
 	for(int n=0 ; n < INVENTORY_WEAR_SIZE; ++n)
 	{
 		if(lpObj->Inventory[n].IsItem() != 0)
 		{
+			if(lpObj->Inventory[n].m_BaseDurability <= 0 || (lpObj->Inventory[n].m_Durability * 2) > lpObj->Inventory[n].m_BaseDurability)
+			{
+				continue;
+			}
+
 			int money = gItemManager.RepairItem(lpObj,&lpObj->Inventory[n], n, 1);
 
 			if(money != 0)
@@ -774,6 +834,23 @@ CSkill* OfflineMode::GetSlotSkill(LPOBJ lpObj, int slot)
 	return gSkillManager.GetSkill(lpObj, id);
 }
 
+// Summoner debuffs (Sleep, Weakness, Innovation, Blind): in an activation
+// slot their "Con" box means Instant Cast (same as the online helper).
+static bool OffHelperIsDebuff(CSkill* lpSkill)
+{
+	if(lpSkill == 0)
+	{
+		return false;
+	}
+	const int base = lpSkill->m_skill;
+	return base == SKILL_SLEEP || base == SKILL_LESSER_DAMAGE || base == SKILL_LESSER_DEFENSE || base == SKILL_BLIND;
+}
+
+static bool OffHelperMonsterAttackingMe(LPOBJ lpObj, LPOBJ lpMon)
+{
+	return lpMon->TargetNumber == lpObj->Index;
+}
+
 // Mirrors the client's ActiveCheckMonterCount: -1 = not now, else a priority.
 int OfflineMode::CheckActiveSkill(LPOBJ lpObj, int n)
 {
@@ -792,6 +869,13 @@ int OfflineMode::CheckActiveSkill(LPOBJ lpObj, int n)
 
 	if(lpObj->OffActiveConditionOn[n] != 0)
 	{
+		if(OffHelperIsDebuff(lpSkill))
+		{
+			return -1; // Instant Cast, handled in SelectSkillSlot
+		}
+
+		// "Monster Within Hunting range", or "Monster Attacking Me" (flag 8/16).
+		const bool attackingMeOnly = (lpObj->OffHelperFlags & (n == 0 ? 8 : 16)) != 0;
 		int count = 0;
 
 		for(int v = 0; v < MAX_VIEWPORT; v++)
@@ -804,6 +888,11 @@ int OfflineMode::CheckActiveSkill(LPOBJ lpObj, int n)
 			LPOBJ lpTarget = &gObj[lpObj->VpPlayer2[v].index];
 
 			if(lpTarget->Live == 0 || lpTarget->State == OBJECT_EMPTY)
+			{
+				continue;
+			}
+
+			if(attackingMeOnly && OffHelperMonsterAttackingMe(lpObj, lpTarget) == 0)
 			{
 				continue;
 			}
@@ -821,7 +910,8 @@ int OfflineMode::CheckActiveSkill(LPOBJ lpObj, int n)
 			}
 		}
 
-		static const int need[4] = { 2, 4, 6, 8 };
+		// The boxes read "More Than 2 / 3 / 4 / 5 Mobs" (they used to need 2/4/6/8).
+		static const int need[4] = { 2, 3, 4, 5 };
 		int sub = lpObj->OffActiveSubCon[n];
 
 		if(sub < 0 || sub > 3)
@@ -835,8 +925,23 @@ int OfflineMode::CheckActiveSkill(LPOBJ lpObj, int n)
 	return -1;
 }
 
-int OfflineMode::SelectSkillSlot(LPOBJ lpObj)
+int OfflineMode::SelectSkillSlot(LPOBJ lpObj, int target)
 {
+	// Debuff with Instant Cast: highest priority, as soon as the target lacks it.
+	if(OBJECT_RANGE(target) != 0)
+	{
+		for(int n = 0; n < 2; n++)
+		{
+			CSkill* lpSkill = this->GetSlotSkill(lpObj, n + 1);
+
+			if(lpObj->OffActiveConditionOn[n] != 0 && OffHelperIsDebuff(lpSkill)
+				&& gEffectManager.CheckEffect(&gObj[target], gSkillManager.GetSkillEffect(lpSkill->m_index)) == 0)
+			{
+				return n + 1;
+			}
+		}
+	}
+
 	if(lpObj->ComboOn != 0)
 	{
 		// Combo: basic -> skill 1 -> skill 2. A half-built chain older than
@@ -867,7 +972,115 @@ int OfflineMode::SelectSkillSlot(LPOBJ lpObj)
 		return (c2 > c1) ? 2 : 1;
 	}
 
+	// Use Skills Closely: activation skills with no Delay/Con condition are
+	// used too, in turn with the Basic Skill.
+	if((lpObj->OffHelperFlags & 4) != 0)
+	{
+		for(int tries = 0; tries < 3; tries++)
+		{
+			lpObj->OffCloseTurn = (lpObj->OffCloseTurn + 1) % 3;
+			const int slot = lpObj->OffCloseTurn;
+
+			if(slot == 0)
+			{
+				return 0;
+			}
+
+			CSkill* lpSkill = this->GetSlotSkill(lpObj, slot);
+
+			if(lpSkill != 0 && lpObj->OffActiveDelayOn[slot - 1] == 0 && lpObj->OffActiveConditionOn[slot - 1] == 0 && OffHelperIsDebuff(lpSkill) == 0)
+			{
+				return slot;
+			}
+		}
+	}
+
 	return 0;
+}
+
+// The monster to fight: within the helper Range (from the start spot, or from
+// the character with Long Distance on). With Long Distance on, a monster
+// attacking the character counts whatever the Range. Target Concentration
+// picks the one with the most other monsters within 2 tiles; otherwise the
+// closest.
+int OfflineMode::SelectTarget(LPOBJ lpObj, int distance)
+{
+	const bool longDistance = (lpObj->DistanceLongOn != 0);
+	const bool concentration = (lpObj->OffHelperFlags & 2) != 0;
+	const int ox = longDistance ? lpObj->X : lpObj->m_OfflineCoordX;
+	const int oy = longDistance ? lpObj->Y : lpObj->m_OfflineCoordY;
+
+	int best = -1;
+	int bestDist = 1000;
+	int bestGroup = -1;
+
+	for(int v = 0; v < MAX_VIEWPORT; v++)
+	{
+		if(lpObj->VpPlayer2[v].state == VIEWPORT_NONE || OBJECT_RANGE(lpObj->VpPlayer2[v].index) == 0 || lpObj->VpPlayer2[v].type != OBJECT_MONSTER)
+		{
+			continue;
+		}
+
+		LPOBJ lpMon = &gObj[lpObj->VpPlayer2[v].index];
+
+		if(lpMon->Live == 0 || lpMon->State == OBJECT_EMPTY || lpMon->RegenType != 0 || lpMon->Map != lpObj->Map || gServerInfo.InSafeZone(lpMon->Index) == true)
+		{
+			continue;
+		}
+
+		if(gSkillManager.CheckSkillTarget(lpObj, lpMon->Index, -1, OBJECT_MONSTER) == 0)
+		{
+			continue;
+		}
+
+		// A wall between us (the monster is on the other side of it): not a target.
+		// It could not be hit, and the helper would stand there trying.
+		if(gMap[lpObj->Map].CheckWall(lpObj->X, lpObj->Y, lpMon->X, lpMon->Y) == FALSE)
+		{
+			continue;
+		}
+
+		const int d = gObjCalcDistance(lpObj, lpMon);
+		const int fromSpot = (int)sqrt((float)((ox - lpMon->X) * (ox - lpMon->X) + (oy - lpMon->Y) * (oy - lpMon->Y)));
+		const bool inRange = (fromSpot <= distance);
+		const bool counter = longDistance && OffHelperMonsterAttackingMe(lpObj, lpMon) && d <= 12;
+
+		if(inRange == false && counter == false)
+		{
+			continue;
+		}
+
+		int group = 0;
+
+		if(concentration)
+		{
+			for(int w = 0; w < MAX_VIEWPORT; w++)
+			{
+				if(w == v || lpObj->VpPlayer2[w].state == VIEWPORT_NONE || OBJECT_RANGE(lpObj->VpPlayer2[w].index) == 0 || lpObj->VpPlayer2[w].type != OBJECT_MONSTER)
+				{
+					continue;
+				}
+
+				LPOBJ lpOther = &gObj[lpObj->VpPlayer2[w].index];
+
+				if(lpOther->Live != 0 && gObjCalcDistance(lpMon, lpOther) <= 2)
+				{
+					group++;
+				}
+			}
+		}
+
+		const bool better = concentration ? (group > bestGroup || (group == bestGroup && d < bestDist)) : (d < bestDist);
+
+		if(better)
+		{
+			best = lpMon->Index;
+			bestDist = d;
+			bestGroup = group;
+		}
+	}
+
+	return best;
 }
 
 void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
@@ -879,14 +1092,23 @@ void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
 
 	LPOBJ lpObj = &gObj[aIndex];
 	int caminar = 0;
-	int distance = (lpObj->HuntingRange > 6) ? 6 : lpObj->HuntingRange;
+	// Helper Range as set (was silently capped at 6); 15 = about the viewport.
+	int distance = (lpObj->HuntingRange > 15) ? 15 : lpObj->HuntingRange;
 
 	//-- SKILL ATTACK
 	CSkill * SkillRender = 0;
 
-	// Same choice as the online helper (CB_MUHelper::MuHelperActiveAttack):
+	// Target first (Range, Long Distance counter-attack, Target Concentration),
+	// then the skill for it - the same choices as the online helper.
+	const int target = this->SelectTarget(lpObj, distance);
+
+	if(target == -1)
+	{
+		return;
+	}
+
 	// slot 0 = basic skill, 1/2 = activation skills.
-	int slot = this->SelectSkillSlot(lpObj);
+	int slot = this->SelectSkillSlot(lpObj, target);
 
 	if(lpObj->RecoveryDrainOn != 0 && lpObj->Life < (( lpObj->MaxLife * lpObj->RecoveryDrainPercent) / 100))
 	{
@@ -908,16 +1130,55 @@ void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
 	}
 
 
-	if (SkillRender == 0)
+	// Use Regular Attack: no skill to use (none set or not learned, or not
+	// enough mana and no potion) - a plain weapon hit, at the same speed rule.
+	bool regular = (SkillRender == 0);
+
+	if(SkillRender != 0 && lpObj->Mana < gSkillManager.GetSkillMana(SkillRender->m_index)
+		&& gItemManager.GetInventoryItemSlot(lpObj, GET_ITEM(14,6), -1) < 0
+		&& gItemManager.GetInventoryItemSlot(lpObj, GET_ITEM(14,5), -1) < 0
+		&& gItemManager.GetInventoryItemSlot(lpObj, GET_ITEM(14,4), -1) < 0)
 	{
+		regular = true;
+	}
+
+	if(regular)
+	{
+		if((lpObj->OffHelperFlags & 1) == 0)
+		{
+			return;
+		}
+
+		LPOBJ lpTarget = &gObj[target];
+
+		if(gObjCalcDistance(lpObj, lpTarget) > 1)
+		{
+			PATH_INFO path;
+
+			if(gMap[lpObj->Map].PathFinding2(lpObj->X, lpObj->Y, lpTarget->X, lpTarget->Y, &path) != 0 && path.PathNum > 1)
+			{
+				const int step = (path.PathNum > 2) ? 2 : 1;
+				AnimationMove(lpObj->Index, path.PathX[step], path.PathY[step]);
+			}
+			return;
+		}
+
+		const DWORD hitSpeed = (DWORD)lpObj->PhysiSpeed * 5;
+		const DWORD hitDelay = (hitSpeed >= 1200) ? 300 : (1500 - hitSpeed);
+
+		if((GetTickCount() - lpObj->OffRegularTick) >= hitDelay)
+		{
+			lpObj->OffRegularTick = GetTickCount();
+			lpObj->Dir = GetPathPacketDirPos(lpTarget->X - lpObj->X, lpTarget->Y - lpObj->Y);
+			gAttack.Attack(lpObj, lpTarget, 0, FALSE, 1, 0, FALSE, 0);
+		}
 		return;
 	}
 
 	int atacar = 0;
 
-	int tObjNum = -1;
+	int tObjNum = target;
 
-	if (gCustomAttack.GetTargetMonster(lpObj, SkillRender->m_index, &tObjNum) != 0)
 	{
 		
 		atacar = 0;
@@ -942,40 +1203,23 @@ void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
 			return;
 		}
 
-		int dis = (int) sqrt((float)((lpObj->X - gObj[tObjNum].X) * (lpObj->X - gObj[tObjNum].X) + (lpObj->Y - gObj[tObjNum].Y) * (lpObj->Y - gObj[tObjNum].Y)));
-
-		if (dis > distance)
+		// Out of the skill's reach: walk toward it, 2 tiles a step (it used to
+		// jump straight onto the monster), and attack once there.
+		if(gSkillManager.CheckSkillRange(SkillRender->m_index, lpObj->X, lpObj->Y, gObj[tObjNum].X, gObj[tObjNum].Y) == 0
+			&& gSkillManager.CheckSkillRadio(SkillRender->m_index, lpObj->X, lpObj->Y, gObj[tObjNum].X, gObj[tObjNum].Y) == 0)
 		{
+			PATH_INFO path;
+
+			if(gMap[lpObj->Map].PathFinding2(lpObj->X, lpObj->Y, gObj[tObjNum].X, gObj[tObjNum].Y, &path) != 0 && path.PathNum > 1)
+			{
+				const int step = (path.PathNum > 2) ? 2 : 1;
+				AnimationMove(lpObj->Index, path.PathX[step], path.PathY[step]);
+			}
 			return;
 		}
-		else
-		{
-			if(gSkillManager.CheckSkillRange(SkillRender->m_index, lpObj->X, lpObj->Y, gObj[tObjNum].X, gObj[tObjNum].Y) != 0)
-			{
-				caminar = 0;
-			}
-			else
-			{
-				caminar = 1;
-				
-			}
 
-			if(gSkillManager.CheckSkillRadio(SkillRender->m_index, lpObj->X, lpObj->Y,gObj[tObjNum].X, gObj[tObjNum].Y) != 0)
-			{
-				caminar = 0;
-			}
-			else
-			{
-				caminar = 1;
-			}
-
-			if(caminar == 1)
-			{
-				AnimationMove(lpObj->Index, gObj[tObjNum].X, gObj[tObjNum].Y);
-			}
-
-			atacar = 1;
-		}
+		atacar = 1;
+		(void)caminar;
 
 		if(atacar != 0)
 		{
@@ -1008,9 +1252,27 @@ void OfflineMode::RenderAttack(int aIndex)	//-- INCOMPLETO
 				}
 			}
 
-			int MultiPlicador = (lpObj->Class == CLASS_RF)? 1 : 5;
+			// Time between casts, matched to how fast the ONLINE helper casts.
+			// Online skill casts are not on the 1500 - 5 x speed timer (that one
+			// is only for its regular attack); they are held back by the client:
+			// - every attack locks the next for 14 AttackTime steps at 25/s
+			//   (560 ms) and the helper polls every 100 ms, so ~600 ms at best;
+			// - below that the attack animation sets the pace: PlaySpeed is
+			//   0.25 + speed x 0.004 for weapon skills, 0.29 + magic speed x
+			//   0.002 for spells (ZzzCharacter.cpp SetAttackSpeed), over ~10
+			//   animation frames at 25/s.
+			// AFK used 1500 - 5 x speed here, which made it slower than online
+			// for anything under ~180 speed. Never slower than that old value.
+			const bool castMagic = (lpObj->Class == CLASS_DW || lpObj->Class == CLASS_SU);
+			const DWORD castSpeed = (DWORD)(castMagic ? lpObj->MagicSpeed : lpObj->PhysiSpeed);
+			const double castPlay = castMagic ? (0.29 + castSpeed * 0.002) : (0.25 + castSpeed * 0.004);
+			DWORD castDelay = (DWORD)(10.0 * 1000.0 / (25.0 * castPlay));
+			if(castDelay < 600) castDelay = 600;
+			const DWORD castBest = (DWORD)((lpObj->PhysiSpeed > lpObj->MagicSpeed) ? lpObj->PhysiSpeed : lpObj->MagicSpeed);
+			const DWORD castOld = ((castBest * 5) >= 1200) ? 300 : (1500 - castBest * 5);
+			if(castDelay > castOld) castDelay = castOld;
 
-			if((GetTickCount()-((DWORD) lpObj->AttackCustomDelay )) >= (((((DWORD) lpObj->PhysiSpeed) * MultiPlicador) > 1500 ) ? 0 : ( 1500 - (((DWORD) lpObj->PhysiSpeed) * MultiPlicador ))))
+			if((GetTickCount()-((DWORD) lpObj->AttackCustomDelay )) >= castDelay)
 			{
 				lpObj->AttackCustomDelay = GetTickCount();
 
@@ -1120,11 +1382,31 @@ bool isJewels(int index)
 	return false;
 }
 
-bool itemListPickUp(int Index, int Level, LPOBJ lpObj)
+// Add Extra Item list, same as the online helper (CB_MUHelper.cpp): each
+// entry is looked for, case-sensitive, in "Name +Level Option Luck Skill
+// Excellent Ancient", so "+5" and "Option" work as well as part of a name.
+bool itemListPickUp(CItem* lpItem, LPOBJ lpObj)
 {
-	for( int i = 0 ; i < lpObj->ObtainPickExtraCount ; i++ )
+	char text[160];
+	_snprintf(text, sizeof(text) - 1, "%s", gItemLevel.GetItemName(lpItem->m_Index, lpItem->m_Level));
+	text[sizeof(text) - 1] = 0;
+
+	char extra[16];
+	if(lpItem->m_Level > 0)
 	{
-		if( strstr(gItemLevel.GetItemName(Index, Level), lpObj->ObtainPickItemList[ i ]) != NULL )
+		_snprintf(extra, sizeof(extra) - 1, " +%d", (int)lpItem->m_Level);
+		extra[sizeof(extra) - 1] = 0;
+		strncat(text, extra, sizeof(text) - strlen(text) - 1);
+	}
+	if(lpItem->m_Option3 != 0) strncat(text, " Option", sizeof(text) - strlen(text) - 1);
+	if(lpItem->m_Option2 != 0) strncat(text, " Luck", sizeof(text) - strlen(text) - 1);
+	if(lpItem->m_Option1 != 0) strncat(text, " Skill", sizeof(text) - strlen(text) - 1);
+	if((lpItem->m_NewOption & 63) != 0) strncat(text, " Excellent", sizeof(text) - strlen(text) - 1);
+	if(lpItem->m_SetOption != 0) strncat(text, " Ancient", sizeof(text) - strlen(text) - 1);
+
+	for( int i = 0 ; i < lpObj->ObtainPickExtraCount && i < 12 ; i++ )
+	{
+		if( lpObj->ObtainPickItemList[ i ][0] != 0 && strstr(text, lpObj->ObtainPickItemList[ i ]) != NULL )
 		{
 			return true;
 		}
@@ -1194,7 +1476,14 @@ int OfflineMode::PickUP(int aIndex)
 			}
 			OldX = lpObj->X;
 			OldY = lpObj->Y;
-			if (lpObj->ObtainPickSelected == 1)
+			// "Pick up all items nearby". It was received but never read here,
+			// so with only that box ticked the AFK helper picked up nothing.
+			if (lpObj->ObtainPickNear == 1)
+			{
+				PickItem = true;
+				AnimationMove(lpObj->Index, lpMapItem->m_X, lpMapItem->m_Y);
+			}
+			else if (lpObj->ObtainPickSelected == 1)
 			{
 				if( (lpObj->ObtainPickMoney == 1 && lpMapItem->m_Index == GET_ITEM(14, 15)) 
 					|| (lpObj->ObtainPickExcellent == 1 && lpMapItem->m_NewOption > 0) 
@@ -1206,7 +1495,7 @@ int OfflineMode::PickUP(int aIndex)
 				}
 				else if(lpObj->ObtainPickExtra == 1)
 				{
-					if( itemListPickUp(lpMapItem->m_Index, lpMapItem->m_Level, lpObj) == true )
+					if( itemListPickUp(lpMapItem, lpObj) == true )
 					{
 						PickItem = true;
 						AnimationMove(lpObj->Index, lpMapItem->m_X, lpMapItem->m_Y);

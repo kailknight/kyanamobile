@@ -7,6 +7,9 @@
 #include "UIControls.h"
 #include "NewUISystem.h"
 #include "NewUIMasterSkillTree.h"
+#include "MultiLanguage.h"
+
+void TranslateTemplate(const char* pszEnglish, char* pszOut, size_t cbOut);	// MultiLanguage.cpp
 #include "CharacterManager.h"
 #include "NewUICustomMessageBox.h"
 #include <vector>
@@ -887,7 +890,9 @@ void SEASON3B::CNewUIMasterSkillTree::RenderIcon()
 			g_pRenderText->SetBgColor(0, 0, 0, 200);
 			g_pRenderText->SetTextColor(255, 210, 40, 255);
 			char pickText[16];
-			sprintf(pickText, "PICK +%d", recommendedPoints);
+			char szPickFormat[32];
+			TranslateTemplate("PICK +%d", szPickFormat, sizeof(szPickFormat));
+			sprintf(pickText, szPickFormat, recommendedPoints);
 			g_pRenderText->RenderText(CalcX + 3, CalcY + 2, pickText, 0, 0, RT3_SORT_LEFT, 0);
 			g_pRenderText->SetFont(g_hFont);
 			g_pRenderText->SetBgColor(0);
@@ -1163,13 +1168,17 @@ void SEASON3B::CNewUIMasterSkillTree::RenderToolTip()
 
 		if (Skill == this->FindRecommendedSkill(&pointsToAdd))
 		{
-			sprintf(buffer, "Recommended next pick: add %d point%s", pointsToAdd, (pointsToAdd == 1) ? "" : "s");
+			char szRecFormat[160];
+			TranslateTemplate("Recommended next pick: add %d point%s", szRecFormat, sizeof(szRecFormat));
+			sprintf(buffer, szRecFormat, pointsToAdd, (pointsToAdd == 1) ? "" : "s");
 			lineCount = this->SetDivideString(buffer, 0, lineCount, TEXT_COLOR_YELLOW, 1, false);
 		}
 
 		if (recommend != NULL && g_MasterRecommendSample > 0)
 		{
-			sprintf(buffer, "Learned by %d of the top %d players of your class, most to level %d", recommend->Picks, g_MasterRecommendSample, recommend->Level);
+			char szLearnFormat[192];
+			TranslateTemplate("Learned by %d of the top %d players of your class, most to level %d", szLearnFormat, sizeof(szLearnFormat));
+			sprintf(buffer, szLearnFormat, recommend->Picks, g_MasterRecommendSample, recommend->Level);
 			lineCount = this->SetDivideString(buffer, 0, lineCount, TEXT_COLOR_GREEN, 0, false);
 		}
 

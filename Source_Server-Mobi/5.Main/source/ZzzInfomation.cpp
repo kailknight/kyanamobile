@@ -3616,6 +3616,7 @@ void CHARACTER_MACHINE::CalculateAttackSpeed()
 	//===Fix Info View Attack Speed
 	Character.AttackSpeed = (WORD)CharacterAttribute->PrintPlayer.ViewPhysiSpeed;
 	Character.MagicSpeed = (WORD)CharacterAttribute->PrintPlayer.ViewMagicSpeed;
+	SpeedGuardCommitAttack();
 	return;
 	WORD Dexterity;
 

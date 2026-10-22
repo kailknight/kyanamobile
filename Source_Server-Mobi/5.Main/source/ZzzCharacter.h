@@ -84,6 +84,11 @@ CHARACTER *CreateMonster(int Type,int PositionX,int PositionY,int Key=0);
 CHARACTER*  CreateHellGate ( BYTE* ID, int Key, int Index, int x, int y, int CreateFlag );
 
 void SetAttackSpeed();
+// Attack/magic speed tamper check (ZzzCharacter.cpp). Commit after every
+// legitimate write of those fields; Verify runs once a frame.
+void SpeedGuardCommitView();
+void SpeedGuardCommitAttack();
+void SpeedGuardVerify();
 void SetPlayerShock(CHARACTER *c,int Hit);
 void SetPlayerStop(CHARACTER *c);
 void SetPlayerWalk(CHARACTER *c);

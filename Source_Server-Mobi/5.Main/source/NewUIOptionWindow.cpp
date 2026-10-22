@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "NewUIOptionWindow.h"
 #include "NewUISystem.h"
+#include "MultiLanguage.h"
 #include "ZzzTexture.h"
 #include "DSPlaySound.h"
 #include "ZzzInterface.h"
@@ -13,6 +14,13 @@
 #include "VoiceClient.h"
 #include "VoiceAudio.h"
 #include "GameConfig/GameConfigConstants.h"
+
+extern void SetSelectedLanguage(const char* pszLanguage);	// Winmain.cpp, GameConfig.cpp on mobile
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+extern bool AskRestartForLanguage(bool bWantVi);	// Winmain.cpp
+#elif defined(__ANDROID__)
+extern void MU_MobileAskRestartForLanguage(bool vietnamese);	// Platform/MobilePlatform.cpp
+#endif
 
 using namespace SEASON3B;
 
@@ -235,7 +243,7 @@ bool SEASON3B::CNewUIOptionWindow::UpdateMouseEvent()
 	// The whole Config System window (RenderFrame draws it 360x275), not the
 	// original 190x249 option panel: taps on the right half - the graphics and
 	// display checkboxes - went through to the world and walked the character.
-	if(CheckMouseIn(m_Pos.x, m_Pos.y, 360, 275) == true)
+	if(CheckMouseIn(m_Pos.x, m_Pos.y, 360, 295) == true)
 	{
 		return false;
 	}
@@ -362,7 +370,7 @@ void SEASON3B::CNewUIOptionWindow::RenderFrame()
 		return;
 	}
 	float MainWidth = 360;
-	float MainHeight = 275;
+	float MainHeight = 295;	// 275 + 20 for the language row (RenderCustomFrame)
 	float StartX = (MAX_WIN_WIDTH / 2) - (MainWidth / 2);
 	float StartY = m_Pos.y;
 	//--
@@ -522,6 +530,56 @@ void SEASON3B::CNewUIOptionWindow::RenderCustomFrame()
 		// device name does not fit in one; it ran off the bottom of the window
 		// instead. The left panel has a genuinely empty strip below the render
 		// level bar, which is where they belong.
+	}
+
+	// Language. English <-> Vietnamese. Saved at once, applied at the next start (the language data
+	// files are read once, at startup).
+	y = y + 17;
+	{
+		static bool s_bPending = false;
+		static const bool s_bStartedVi = IsVietnameseLanguage();
+		const float langX = x + 15.f;
+		const float langY = y + 15.f;
+
+		const char* pszLabel;
+		if (s_bStartedVi)
+		{
+			pszLabel = s_bPending
+				? "Ng\xC3\xB4n ng\xE1\xBB\xAF: English - kh\xE1\xBB\x9Fi \xC4\x91\xE1\xBB\x99ng l\xE1\xBA\xA1i game"
+				: "Ng\xC3\xB4n ng\xE1\xBB\xAF: Ti\xE1\xBA\xBFng Vi\xE1\xBB\x87t   (ch\xE1\xBA\xA1m \xC4\x91\xE1\xBB\x83 \xC4\x91\xE1\xBB\x95i)";
+		}
+		else
+		{
+			pszLabel = s_bPending
+				? "Language: Ti\xE1\xBA\xBFng Vi\xE1\xBB\x87t - restart game"
+				: "Language: English   (tap to change)";
+		}
+		TextDraw(g_hFont, (int)langX, (int)langY, 0xFFCC00C8, 0x0, 0, 0, 1, "%s", pszLabel);
+
+		const bool bClickReady =
+			((GetKeyState(VK_LBUTTON) & 0x8000) != 0)
+			&& (GetTickCount() - gInterface.Data[eTIME].EventTick > 500);
+
+		if (bClickReady && SEASON3B::CheckMouseIn(langX, langY, 170, 15) == 1)
+		{
+			gInterface.Data[eTIME].EventTick = GetTickCount();
+			PlayBuffer(SOUND_CLICK01);
+			s_bPending = !s_bPending;
+			const bool bWantVi = s_bPending ? !s_bStartedVi : s_bStartedVi;
+			SetSelectedLanguage(bWantVi ? "Vtm" : "Eng");
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+			// Only when it differs from the language this run started in; going back is silent.
+			if (s_bPending)
+			{
+				AskRestartForLanguage(bWantVi);
+			}
+#elif defined(__ANDROID__)
+			if (s_bPending)
+			{
+				MU_MobileAskRestartForLanguage(bWantVi);
+			}
+#endif
+		}
 	}
 
 #if defined(__ANDROID__) || defined(MU_IOS)

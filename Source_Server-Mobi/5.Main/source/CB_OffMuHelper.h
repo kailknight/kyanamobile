@@ -46,6 +46,12 @@ public:
 		BYTE ActiveSkillConditionOn[2];
 		BYTE ActiveSkillSubCon[2];
 		WORD ActiveSkillDelay[2];
+		// Hunting options (bits): 1 Regular Attack, 2 Target Concentration, 4 Use
+		// Skills Closely, 8/16 "Monster Attacking Me" for activation skill 1/2.
+		// These two bytes were the struct's end padding, so the packet stays 252
+		// bytes; the mark tells the server they are set (an old client leaves junk).
+		BYTE HelperFlags;
+		BYTE HelperFlagsMark;  // 0xA5
 	};
 
 	CB_OffMuHelper();
