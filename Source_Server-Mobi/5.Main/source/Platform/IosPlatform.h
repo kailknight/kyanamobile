@@ -33,6 +33,10 @@ void MU_IosEndBackgroundKeepAlive();
 // Opens a web page in Safari (account deletion, terms). Any thread.
 void MU_IosOpenURL(const char* url);
 
+// Confirms the saved language and explains a manual close/reopen. Never exits
+// or attempts to relaunch the app. Any thread; presentation is on the main queue.
+void MU_IosAskRestartForLanguage(bool vietnamese);
+
 // Shows the community rules once per install and records that the player
 // agreed (App Store guideline 1.2: zero tolerance for objectionable content,
 // how to block and report). Main thread; safe to call every launch.

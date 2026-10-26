@@ -457,8 +457,8 @@ void MU_MobileAskRestartForLanguage(bool vietnamese)
     {
         env->ExceptionClear();
     }
-#else
-    (void)vietnamese;
+#elif defined(MU_IOS)
+    MU_IosAskRestartForLanguage(vietnamese);
 #endif
 }
 
