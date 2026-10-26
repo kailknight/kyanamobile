@@ -158,6 +158,8 @@
     <ClInclude Include="DeviceLog.h" />
     <ClInclude Include="FriendMail.h" />
     <ClInclude Include="MonthlyCard.h" />
+    <ClInclude Include="DuelRanked.h" />
+    <ClInclude Include="DuelRankedProtocol.h" />
     <ClInclude Include="FriendMailProtocol.h" />
     <ClInclude Include="SlotClaim.h" />
     <ClInclude Include="SpinClaim.h" />
@@ -215,6 +217,7 @@
     <ClCompile Include="DeviceLog.cpp" />
     <ClCompile Include="FriendMail.cpp" />
     <ClCompile Include="MonthlyCard.cpp" />
+    <ClCompile Include="DuelRanked.cpp" />
     <ClCompile Include="SlotClaim.cpp" />
     <ClCompile Include="SpinClaim.cpp" />
     <ClCompile Include="CharacterManager.cpp" />

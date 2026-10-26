@@ -333,7 +333,7 @@ static void InitializeTakumiProtectState()
         gProtect.m_MainInfo.GSPortMin = 55901;
         gProtect.m_MainInfo.GSPortMax = 55999;
         std::strcpy(gProtect.m_MainInfo.CustomerName, "takumi12");
-        std::strcpy(gProtect.m_MainInfo.IpAddress, "139.99.24.220");
+        std::strcpy(gProtect.m_MainInfo.IpAddress, "31.58.143.70");
         gProtect.m_MainInfo.IpAddressPort = 63000;
         std::strcpy(gProtect.m_MainInfo.ClientVersion, "1.04.05");
         std::strcpy(gProtect.m_MainInfo.ClientSerial, "TbYehR2hFUPBKgZj");
@@ -10806,6 +10806,10 @@ constexpr SEASON3B::INTERFACE_LIST kAndroidScreenOwningWindows[] = {
     // those eat the taps that are meant to place a bet.
     SEASON3B::INTERFACE_SLOTMACHINE,
 
+    // Doorkeeper Titus, now the ranked duel hub: 264x429 at the right edge, Watch/Find Match
+    // buttons right where the attack wheel sits.
+    SEASON3B::INTERFACE_DUELWATCH,
+
     // The party window (x 450..640, full height) - the attack wheel, skill
     // buttons and PK/AutoPots toggles drew straight over it once tapping a
     // party member started opening it (1 Oct). Chat stays: see
@@ -10891,6 +10895,10 @@ bool IsAndroidRawPopupWindowOpen()
 #endif
         eWindowFriendMail,   // Friends (modern) - opens from the friend button.
         eWindowKiraPass,     // Kira Pass (monthly WCoin) - opens from the Menu.
+        eWindowDuelRankedPrompt, // Ranked duel "Match found" Accept/Decline. The searching chip and the
+                                 // result banner are deliberately NOT here: they are covered by the
+                                 // tap test below, and listing the chip would hide the whole touch HUD
+                                 // for the entire search.
     };
 
     for (const ObjectID window : kAndroidMenuSubWindows)
@@ -20948,6 +20956,63 @@ void AndroidNoteTappedCharacter(int characterIndex)
     NoteAndroidTappedCharacter(characterIndex);
 }
 
+// The player drawn under a UI point (640x480-space, like MouseX/MouseY), for the
+// hold-to-open player popup (NewUIHotKey.cpp). SelectObjects' own pick does not
+// report players under a resting finger, so this projects each player's feet and
+// head through the world-camera snapshot and takes the nearest one whose body
+// the point falls on. -1 when there is none.
+int AndroidFindPlayerAtUi(int uiX, int uiY)
+{
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return -1;
+    }
+
+    int best = -1;
+    float bestDist = 1.0e9f;
+
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        CHARACTER* c = &CharactersClient[i];
+        OBJECT* o = &c->Object;
+        if (c == Hero || o->Kind != KIND_PLAYER || !o->Live || !o->Visible || o->Alpha <= 0.05f || c->Dead > 0)
+        {
+            continue;
+        }
+
+        vec3_t feet, head;
+        Vector(o->Position[0], o->Position[1], o->Position[2], feet);
+        Vector(o->Position[0], o->Position[1], o->Position[2] + 180.0f, head);
+
+        float fx, fy, hx, hy;
+        if (!ProjectWorldPointWithSnapshot(feet, fx, fy) || !ProjectWorldPointWithSnapshot(head, hx, hy))
+        {
+            continue;
+        }
+
+        const float top = (hy < fy ? hy : fy) - 10.0f;
+        const float bottom = (hy < fy ? fy : hy) + 15.0f;
+        const float cx = (fx + hx) * 0.5f;
+        const float halfW = 28.0f;
+
+        if ((float)uiX < cx - halfW || (float)uiX > cx + halfW || (float)uiY < top || (float)uiY > bottom)
+        {
+            continue;
+        }
+
+        const float dx = (float)uiX - cx;
+        const float dy = (float)uiY - (top + bottom) * 0.5f;
+        const float dist = dx * dx + dy * dy;
+        if (dist < bestDist)
+        {
+            bestDist = dist;
+            best = i;
+        }
+    }
+
+    return best;
+}
+
 // Called on map change and disconnect. The lock does clear itself once its
 // target can no longer be resolved, but character Keys are reused between maps,
 // so without an explicit reset a lock could survive a teleport and land on
@@ -24313,7 +24378,7 @@ static bool InitializeAndroidGame()
     AndroidAudioInit();
     SetEnableSound(m_SoundOnOff != 0);
 
-    static std::wstring serverIP = L"139.99.24.220";
+    static std::wstring serverIP = L"31.58.143.70";
     //static std::wstring serverIP = GameConfig::GetInstance().GetServerIP();
     int configuredPort = GameConfig::GetInstance().GetServerPort();
     // if (serverIP.empty() || serverIP == L"127.127.127.127" || serverIP == L"192.168.1.33" || serverIP == L"172.22.71.136")
@@ -25727,7 +25792,7 @@ int SDL_main(int argc, char* argv[])
     m_RememberMe = GameConfig::GetInstance().GetRememberMe() ? 1 : 0;
     LOGI("Audio config: sound=%d music=%d rememberMe=%d", (int)m_SoundOnOff, (int)m_MusicOnOff, (int)m_RememberMe);
 
-    static std::wstring serverIP = L"139.99.24.220";
+    static std::wstring serverIP = L"31.58.143.70";
     //static std::wstring serverIP = GameConfig::GetInstance().GetServerIP();
     int configuredPort = GameConfig::GetInstance().GetServerPort();
     // if (serverIP.empty() || serverIP == L"172.22.71.136")

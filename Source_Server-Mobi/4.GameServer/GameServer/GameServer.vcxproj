@@ -366,6 +366,8 @@
     <ClInclude Include="CustomMonster.h" />
     <ClInclude Include="MonsterScaling.h" />
     <ClInclude Include="MonthlyCard.h" />
+    <ClInclude Include="DuelRanked.h" />
+    <ClInclude Include="MasterPage.h" />
     <ClInclude Include="CustomMonsterSkill.h" />
     <ClInclude Include="CustomMonterPoint.h" />
     <ClInclude Include="CustomMove.h" />
@@ -657,6 +659,8 @@
     <ClCompile Include="CustomMonster.cpp" />
     <ClCompile Include="MonsterScaling.cpp" />
     <ClCompile Include="MonthlyCard.cpp" />
+    <ClCompile Include="DuelRanked.cpp" />
+    <ClCompile Include="MasterPage.cpp" />
     <ClCompile Include="CustomMonsterSkill.cpp" />
     <ClCompile Include="CustomMonterPoint.cpp" />
     <ClCompile Include="CustomMove.cpp" />

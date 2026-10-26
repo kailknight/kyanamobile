@@ -262,6 +262,9 @@ enum ObjectID
 #endif
 	eAutoPotionConfig, // QuickToggles.cpp - hold ~ (auto potion + auto combo)
 	eWindowKiraPass, // CB_KiraPass.cpp - monthly WCoin pass (Menu)
+	eWindowDuelRankedChip,   // CB_DuelRanked.cpp - "Searching..." chip. Rect only: Android hit-tests taps against it
+	eWindowDuelRankedPrompt, // CB_DuelRanked.cpp - "Match found" Accept/Decline prompt
+	eWindowDuelRankedBanner, // CB_DuelRanked.cpp - win/loss result banner
 	eEndWindowCustom, //ket thuc
 
 

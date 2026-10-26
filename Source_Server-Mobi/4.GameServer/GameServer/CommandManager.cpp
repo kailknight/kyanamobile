@@ -22,6 +22,7 @@
 #include "OfflineMode.h"
 #include "DevilSquare.h"
 #include "DSProtocol.h"
+#include "DuelRanked.h"
 #include "EventHideAndSeek.h"
 #include "EventKillAll.h"
 #include "EventPvP.h"
@@ -44,6 +45,7 @@
 #include "JSProtocol.h"
 #include "Log.h"
 #include "MapServerManager.h"
+#include "MasterPage.h"
 #include "MasterSkillTree.h"
 #include "Message.h"
 #include "Monster.h"
@@ -223,6 +225,20 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 		}
 
 		return this->CommandDeviceBan(lpObj,command,argument);
+	}
+
+	// Ranked duel routing tests (GM only, not in Command.txt): /rankedhop goes to the
+	// host's arena map, /rankedhome [map x y] comes back.
+	if(_stricmp(command,"/rankedhop") == 0 || _stricmp(command,"/rankedhome") == 0)
+	{
+		char* argument = &message[strlen(command)];
+
+		if(argument[0] == 0x20)
+		{
+			argument++;
+		}
+
+		return this->CommandRankedTest(lpObj,command,argument);
 	}
 
 	COMMAND_LIST CommandData;
@@ -2133,6 +2149,10 @@ void CCommandManager::DGCommandResetRecv(SDHP_COMMAND_RESET_RECV* lpMsg) // OK
 			lpObj->MasterSkill[n].Clear();
 		}
 
+		// Every parked master page goes with the tree (it is class specific); the
+		// unlocked count and the page names stay.
+		gMasterPage.OnFullWipe(lpObj);
+
 		gMasterSkillTree.GCMasterSkillListSend(lpObj->Index);
 
 		gSkillManager.GCSkillListSend(lpObj,0);
@@ -2427,6 +2447,10 @@ void CCommandManager::DGCommandMasterResetRecv(SDHP_COMMAND_MASTER_RESET_RECV* l
 		{
 			lpObj->MasterSkill[n].Clear();
 		}
+
+		// Every parked master page goes with the tree (it is class specific); the
+		// unlocked count and the page names stay.
+		gMasterPage.OnFullWipe(lpObj);
 
 		gMasterSkillTree.GCMasterSkillListSend(lpObj->Index);
 
@@ -3093,7 +3117,8 @@ bool CCommandManager::CommandChangeClass(LPOBJ lpObj,char* arg,int Npc) // OK
 {
     char classe[4] = {0};
     this->GetString(arg,classe,sizeof(classe),0);
-	if (gChangeClass.Enable) return 0;
+	// /classe works whether or not the Change Class window is on (ChangeClass.ini
+	// Enable). It used to be refused while the window was on, silently.
 	if(lpObj->Interface.use != 0 || lpObj->Teleport != 0 || lpObj->DieRegen != 0 || lpObj->PShopOpen != 0)
 	{
 		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,gMessage.GetMessage(659));
@@ -3361,7 +3386,12 @@ bool CCommandManager::CommandChangeClass(LPOBJ lpObj,char* arg,int Npc) // OK
 			lpObj->MasterSkill[n].Clear();
 		}
 
+		// A new class cannot inherit the old class' parked pages.
+		gMasterPage.OnFullWipe(lpObj);
+
 		gEffectManager.ClearAllEffect(lpObj);
+
+		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,"Class changed. Returning to character selection...");
 
 		lpObj->CloseCount   = 1;
 		lpObj->CloseType    = 1;
@@ -3971,6 +4001,21 @@ bool CCommandManager::CommandDeviceBan(LPOBJ lpObj,char* command,char* arg) // O
 	}
 
 	return 1;
+}
+
+bool CCommandManager::CommandRankedTest(LPOBJ lpObj,char* command,char* arg) // OK
+{
+	if(gGameMaster.CheckGameMasterLevel(lpObj,1) == 0)
+	{
+		return 0;
+	}
+
+	if(_stricmp(command,"/rankedhop") == 0)
+	{
+		return gDuelRanked.TestHop(lpObj);
+	}
+
+	return gDuelRanked.TestHome(lpObj,arg);
 }
 
 bool CCommandManager::CommandBlocAcc(LPOBJ lpObj,char* arg) // OK
@@ -5048,6 +5093,9 @@ bool CCommandManager::CommandSetMasterLevel(LPOBJ lpObj, char* arg) // OK
 
 	lpTarget->MasterLevel = MasterLevel;
 
+	// Master pages: this only sets the LIVE page's remaining points. The other
+	// pages' budgets are Earned - their own spending, with Earned = MasterPoint +
+	// what the live page has spent, so they follow whatever is set here.
 	lpTarget->MasterPoint = MasterLevel;
 
 	// Drop the experience onto the exact threshold for the new level first.

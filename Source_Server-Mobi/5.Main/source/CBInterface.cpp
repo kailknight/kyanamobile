@@ -40,6 +40,7 @@
 #include "CB_DoiMK.h"
 #include "RedeemCodeWindow.h"
 #include "CB_KiraPass.h"
+#include "CB_DuelRanked.h"
 #endif
 #include "APICB.h"
 
@@ -695,6 +696,7 @@ void Interface::Init()
 	gFriendMailWindow = new CFriendMailWindow;
 	ANDROID_IF_STAGE("FriendMailWindow ok");
 	gCB_KiraPass = new CB_KiraPass;
+	gCB_DuelRanked = new CB_DuelRanked;
 	gTradeCoinPanel = new CTradeCoinPanel;
 	ANDROID_IF_STAGE("TradeCoinPanel ok");
 #if(CB_CUSTOMMIXINFO)
@@ -722,6 +724,8 @@ void Interface::Init()
 
 void Interface::Clear()
 {
+	SAFE_DELETE(gCB_DuelRanked);
+
 	SAFE_DELETE(gCB_BXHTopDmg);
 
 	SAFE_DELETE(gCB_BotTrader);
@@ -817,6 +821,7 @@ void Interface::Work()
 #endif
 	if (gFriendMailWindow) gFriendMailWindow->DrawWindow();
 	if (gCB_KiraPass) gCB_KiraPass->DrawWindow();
+	if (gCB_DuelRanked) gCB_DuelRanked->DrawWindow();
 	if (gTradeCoinPanel) gTradeCoinPanel->Draw();
 #if(CUSTOM_WINDOWLOCKITEM)
 	if(gCB_LockItem) gCB_LockItem->DrawWindow();
@@ -907,6 +912,10 @@ void Interface::BLoadImage()
 	// is opened and closed constantly, and DeleteBitmap/LoadBitmap churn on a
 	// 256x256 texture every time would be worse than holding 256 KB.
 	LoadBitmap("Custom\\Interface\\arrow.tga", BITMAP_SPINWHEEL_ARROW, GL_LINEAR, GL_CLAMP_TO_EDGE);
+
+	// Rank badges on the name plates (RankedUi::DrawRankBadge). A missing file just leaves the
+	// code-drawn shield in place.
+	LoadBitmap("Custom\\Interface\\DuelRankBadges.tga", BITMAP_DUELRANK_BADGES, GL_LINEAR, GL_CLAMP_TO_EDGE);
 
 	gCBCTCMini.LoadImg();
 }

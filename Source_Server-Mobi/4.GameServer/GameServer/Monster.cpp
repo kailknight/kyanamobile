@@ -732,6 +732,7 @@ void gObjMonsterSetHitDamage(LPOBJ lpObj,int aIndex, QWORD damage) // OK
 			lpObj->HitDamage[n].damage = (((lpObj->HitDamage[n].damage+damage)>(QWORD)lpObj->MaxLife)?(QWORD)lpObj->MaxLife:(lpObj->HitDamage[n].damage+damage));
 			lpObj->HitDamage[n].time = GetTickCount();
 #if(CB_BXHDMG)
+			gObj[aIndex].HitDmgIndexTarget = lpObj->Index;
 			goto NextHitDmgTop;
 #endif
 			return;
@@ -778,13 +779,16 @@ int gObjMonsterDelHitDamageUser(LPOBJ lpObj) // OK
 		{
 			result = 1;
 		}
-		else if(lpObj->Map != gObj[lpObj->HitDamage[n].index].Map)
+		else if(lpObj->Map != gObj[lpObj->HitDamage[n].index].Map || gObjCalcDistance(lpObj,&gObj[lpObj->HitDamage[n].index]) > 20)
 		{
-			result = 1;
-		}
-		else if(gObjCalcDistance(lpObj,&gObj[lpObj->HitDamage[n].index]) > 20)
-		{
-			result = 1;
+			// A ranked boss keeps the row while it lives: a knockback, a
+			// teleport or the boss moving puts the player >20 tiles away,
+			// and erasing it here lost the damage for good. Rewards and the
+			// display still filter by distance when they read the list.
+			if(lpObj->Type != OBJECT_MONSTER || gCustomMonster.GetShowBXHDmg(lpObj->Class,lpObj->Map) == 0 || lpObj->Live == 0)
+			{
+				result = 1;
+			}
 		}
 
 		if(result != 0)
@@ -808,6 +812,9 @@ int gObjMonsterGetTopHitDamageUser(LPOBJ lpObj) // OK
 	int PartyTopHitDamageUser = -1;
 	QWORD PartyTopHitDamage = 0;
 
+	// BossRewardTopDamage: only for bosses that show the damage list.
+	bool TopDamageMode = (gServerInfo.m_BossRewardTopDamage == 1 && lpObj->Type == OBJECT_MONSTER && gCustomMonster.GetShowBXHDmg(lpObj->Class,lpObj->Map) != 0);
+
 	for(int n=0;n < MAX_HIT_DAMAGE;n++)
 	{
 		if(gObjIsConnected(lpObj->HitDamage[n].index) == 0)
@@ -825,12 +832,23 @@ int gObjMonsterGetTopHitDamageUser(LPOBJ lpObj) // OK
 			continue;
 		}
 
-		if(gObjCalcDistance(lpObj,&gObj[lpObj->HitDamage[n].index]) > 20)
+		if(TopDamageMode == 0 && gObjCalcDistance(lpObj,&gObj[lpObj->HitDamage[n].index]) > 20)
 		{
 			continue;
 		}
 
-		if (gServerInfo.m_TinhDameBoss == 1)
+		if (TopDamageMode)
+		{
+			// The reward goes to whoever tops the damage list the players
+			// see: single player, no party totals. Same map is enough here;
+			// the list itself no longer drops rows for distance.
+			if (lpObj->HitDamage[n].damage > TopHitDamage)
+			{
+				TopHitDamageUser = lpObj->HitDamage[n].index;
+				TopHitDamage = lpObj->HitDamage[n].damage;
+			}
+		}
+		else if (gServerInfo.m_TinhDameBoss == 1)
 		{
 			if (OBJECT_RANGE(gObj[lpObj->HitDamage[n].index].PartyNumber) == 0)
 			{
@@ -873,10 +891,6 @@ void SendBXHDmgTopHitDmg(LPOBJ lpObj, BYTE* lpMsg, DWORD size)
 			continue;
 		}
 
-		if (gObjCalcDistance(lpObj, &gObj[lpObj->HitDamage[n].index]) > 20)
-		{
-			continue;
-		}
 		if (gObj[lpObj->HitDamage[n].index].HitDmgIndexTarget != -1 && gObj[lpObj->HitDamage[n].index].HitDmgIndexTarget != lpObj->Index)
 		{
 			continue;
@@ -914,15 +928,9 @@ void gObjMonsterUpdateTop5HitDamage(LPOBJ lpObj)
 			continue;
 		}
 
-		if (gObjCalcDistance(lpObj, &gObj[lpObj->HitDamage[n].index]) > 20)
-		{
-			continue;
-		}
 #if(CB_BXHDMG)	
 		if (gObj[lpObj->HitDamage[n].index].HitDmgIndexTarget != -1 && gObj[lpObj->HitDamage[n].index].HitDmgIndexTarget != lpObj->Index)
 		{
-			lpObj->HitDamage[n].index = -1;
-			lpObj->HitDamageCount--;
 			continue;
 		}
 #endif

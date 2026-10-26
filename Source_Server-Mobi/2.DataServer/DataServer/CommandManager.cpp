@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "CommandManager.h"
+#include "MasterSkillTree.h"
 #include "QueryManager.h"
 #include "SocketManager.h"
 #include "Util.h"
@@ -135,8 +136,10 @@ void CCommandManager::GDCommandRenameRecv(SDHP_COMMAND_RENAME_RECV* lpMsg, int i
 				pMsg.result = gQueryManager.GetResult(0);
 
 				gQueryManager.Close();
+
+				gMasterSkillTree.PagesRename(lpMsg->name,lpMsg->newname);
 			}
-			
+
 			gSocketManager.DataSend(index,(BYTE*)&pMsg,pMsg.header.size);
 }
 

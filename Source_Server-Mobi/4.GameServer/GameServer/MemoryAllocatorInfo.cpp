@@ -9,6 +9,7 @@
 #include "EventInventory.h"
 #include "GensSystem.h"
 #include "HackPacketCheck.h"
+#include "MasterPage.h"
 #include "MuRummy.h"
 #include "MuunSystem.h"
 #include "PentagramSystem.h"
@@ -68,6 +69,7 @@ void CMemoryAllocatorInfo::Clear() // OK
 	this->m_EquipInventoryMap2 = 0;
 #endif
 	this->m_MasterSkill = 0;
+	this->m_MasterPages = 0;
 	this->m_QuestKillCount = 0;
 	this->m_QuestWorldList = 0;
 	this->m_GensVictimList = 0;
@@ -92,8 +94,8 @@ void CMemoryAllocatorInfo::Alloc() // OK
 	this->m_Skill = new CSkill[MAX_SKILL_LIST];
 	this->m_VpPlayer = new VIEWPORT_STRUCT[MAX_VIEWPORT];
 	this->m_VpPlayer2 = new VIEWPORT_STRUCT[MAX_VIEWPORT];
-	this->m_VpPlayerItem = new VIEWPORT_STRUCT[MAX_VIEWPORT];
-	this->m_VpPlayerItemSerial = new DWORD[MAX_VIEWPORT];
+	this->m_VpPlayerItem = new VIEWPORT_STRUCT[MAX_VIEWPORT_ITEM];
+	this->m_VpPlayerItemSerial = new DWORD[MAX_VIEWPORT_ITEM];
 	this->m_HitDamage = new HIT_DAMAGE_STRUCT[MAX_HIT_DAMAGE];
 	this->m_Effect = new CEffect[MAX_EFFECT_LIST];
 
@@ -131,6 +133,8 @@ void CMemoryAllocatorInfo::Alloc() // OK
 		this->m_EquipInventoryMap2 = new BYTE[EQUIP_INVENTORY_SIZE];
 #endif
 		this->m_MasterSkill = new CSkill[MAX_MASTER_SKILL_LIST];
+		this->m_MasterPages = new MASTER_PAGES_DATA;
+		memset(this->m_MasterPages,0,sizeof(MASTER_PAGES_DATA));
 		this->m_QuestKillCount = new QUEST_KILL_COUNT[MAX_QUEST_KILL_COUNT];
 		this->m_QuestWorldList = new QUEST_WORLD_LIST[MAX_QUEST_WORLD_LIST];
 		this->m_GensVictimList = new GENS_SYSTEM_VICTIM_LIST[MAX_GENS_SYSTEM_VICTIM];

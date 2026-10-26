@@ -60,6 +60,7 @@ public:
 	BYTE* m_EquipInventoryMap2;
 #endif
 	CSkill* m_MasterSkill;
+	struct MASTER_PAGES_DATA* m_MasterPages;
 	QUEST_KILL_COUNT* m_QuestKillCount;
 	QUEST_WORLD_LIST* m_QuestWorldList;
 	GENS_SYSTEM_VICTIM_LIST* m_GensVictimList;

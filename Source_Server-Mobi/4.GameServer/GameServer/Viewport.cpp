@@ -9,6 +9,7 @@
 #include "CustomArena.h"
 #include "CustomRankUser.h"
 #include "Duel.h"
+#include "DuelRanked.h"
 #include "EffectManager.h"
 #include "EventTvT.h"
 #include "GensSystem.h"
@@ -86,7 +87,7 @@ bool CViewport::CheckViewportObjectItem(int aIndex,int bIndex,int type) // OK
 {
 	LPOBJ lpObj = &gObj[aIndex];
 
-	for(int n=0;n < MAX_VIEWPORT;n++)
+	for(int n=0;n < MAX_VIEWPORT_ITEM;n++)
 	{
 		if(lpObj->VpPlayerItem[n].state != VIEWPORT_NONE && lpObj->VpPlayerItem[n].index == bIndex && lpObj->VpPlayerItem[n].type == type)
 		{
@@ -155,7 +156,7 @@ bool CViewport::AddViewportObjectItem(int aIndex,int bIndex,int type) // OK
 		return 0;
 	}
 
-	for(int n=0;n < MAX_VIEWPORT;n++)
+	for(int n=0;n < MAX_VIEWPORT_ITEM;n++)
 	{
 		if(lpObj->VpPlayerItem[n].state == VIEWPORT_NONE)
 		{
@@ -385,7 +386,7 @@ void CViewport::DestroyViewportItem(int aIndex) // OK
 {
 	LPOBJ lpObj = &gObj[aIndex];
 
-	for(int n=0;n < MAX_VIEWPORT;n++)
+	for(int n=0;n < MAX_VIEWPORT_ITEM;n++)
 	{
 		if(lpObj->VpPlayerItem[n].state != VIEWPORT_SEND && lpObj->VpPlayerItem[n].state != VIEWPORT_WAIT)
 		{
@@ -601,7 +602,7 @@ void CViewport::GCViewportDestroyItemSend(int aIndex) // OK
 
 	PMSG_VIEWPORT_DESTROY info;
 
-	for(int n=0;n < MAX_VIEWPORT;n++)
+	for(int n=0;n < MAX_VIEWPORT_ITEM;n++)
 	{
 		if(lpObj->VpPlayerItem[n].state != VIEWPORT_DESTROY)
 		{
@@ -833,6 +834,9 @@ void CViewport::GCViewportPlayerSend(int aIndex) // OK
 		memcpy(send,&pMsg,sizeof(pMsg));
 
 		DataSend(aIndex,send,size);
+
+		// Ranked duel icons of the players just sent (and of this client itself).
+		gDuelRanked.SendRanksToViewer(aIndex);
 	}
 }
 
@@ -1108,7 +1112,7 @@ void CViewport::GCViewportItemSend(int aIndex) // OK
 
 	PMSG_VIEWPORT_ITEM info;
 
-	for(int n=0;n < MAX_VIEWPORT;n++)
+	for(int n=0;n < MAX_VIEWPORT_ITEM;n++)
 	{
 		if(lpObj->VpPlayerItem[n].state != VIEWPORT_SEND)
 		{
@@ -1841,6 +1845,9 @@ void CViewport::GCViewportSimplePlayerSend(LPOBJ lpObj) // OK
 
 	DataSend(lpObj->Index,send,size);
 	MsgSendV2(lpObj,send,size);
+
+	// Ranked duel icon of this player, for itself and for the players that see it.
+	gDuelRanked.SendRankToAll(lpObj->Index);
 }
 
 void CViewport::GCViewportSimpleMonsterSend(LPOBJ lpObj) // OK

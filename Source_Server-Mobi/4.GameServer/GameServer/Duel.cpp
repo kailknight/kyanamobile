@@ -7,6 +7,7 @@
 #include "CastleSiege.h"
 #include "DarkSpirit.h"
 #include "DSProtocol.h"
+#include "DuelRanked.h"
 #include "EffectManager.h"
 #include "Guild.h"
 #include "Map.h"
@@ -37,6 +38,9 @@ CDuel::CDuel() // OK
 		lpInfo->RemainTime = 0;
 		lpInfo->TargetTime = 0;
 		lpInfo->TickCount = GetTickCount();
+		lpInfo->Ranked = 0;
+		lpInfo->RankedWin = 0;
+		lpInfo->MatchId = 0;
 
 		memset(lpInfo->Gladiator,-1,sizeof(lpInfo->Gladiator));
 		memset(lpInfo->Spectator,-1,sizeof(lpInfo->Spectator));
@@ -54,9 +58,19 @@ void CDuel::MainProc() // OK
 {
 	#if(GAMESERVER_UPDATE>=402)
 
+	// Ranked 1v1 (DuelRanked.cpp): its inbox and its per second watcher run
+	// before any room changes state.
+	gDuelRanked.MainProc();
+
 	for(int n=0;n < MAX_DUEL_ARENA;n++)
 	{
 		DUEL_ARENA_INFO* lpInfo = &this->m_DuelArenaInfo[n];
+
+		// A ranked room is controlled only by the ranked code.
+		if(lpInfo->Ranked != 0)
+		{
+			continue;
+		}
 
 		if((GetTickCount()-lpInfo->TickCount) >= 1000)
 		{
@@ -156,6 +170,10 @@ void CDuel::SetState_EMPTY(DUEL_ARENA_INFO* lpInfo) // OK
 	this->ClearDuelArenaGladiator(lpInfo);
 
 	this->ClearDuelArenaSpectator(lpInfo);
+
+	lpInfo->Ranked = 0;
+	lpInfo->RankedWin = 0;
+	lpInfo->MatchId = 0;
 
 	#endif
 }
@@ -581,7 +599,14 @@ void CDuel::ClearDuelArenaGladiator(DUEL_ARENA_INFO* lpInfo) // OK
 	{
 		if(OBJECT_RANGE(lpInfo->Gladiator[n]) != 0)
 		{
-			gObjMoveGate(lpInfo->Gladiator[n],17);
+			if(lpInfo->Ranked != 0)
+			{
+				gDuelRanked.SendHome(lpInfo->Gladiator[n]);
+			}
+			else
+			{
+				gObjMoveGate(lpInfo->Gladiator[n],17);
+			}
 
 			lpInfo->Gladiator[n] = -1;
 		}
@@ -602,7 +627,14 @@ void CDuel::ClearDuelArenaSpectator(DUEL_ARENA_INFO* lpInfo) // OK
 
 			gEffectManager.DelEffect(&gObj[lpInfo->Spectator[n]],EFFECT_DUEL_ARENA_WATCH);
 
-			gObjMoveGate(lpInfo->Spectator[n],17);
+			if(lpInfo->Ranked != 0)
+			{
+				gDuelRanked.SendHome(lpInfo->Spectator[n]);
+			}
+			else
+			{
+				gObjMoveGate(lpInfo->Spectator[n],17);
+			}
 
 			lpInfo->Spectator[n] = -1;
 		}
@@ -677,6 +709,185 @@ bool CDuel::CheckDuel(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	return 0;
 }
 
+DUEL_ARENA_INFO* CDuel::GetDuelArenaByIndex(int index) // OK
+{
+	#if(GAMESERVER_UPDATE>=402)
+
+	if(CHECK_RANGE(index,MAX_DUEL_ARENA) == 0)
+	{
+		return 0;
+	}
+
+	return &this->m_DuelArenaInfo[index];
+
+	#else
+
+	return 0;
+
+	#endif
+}
+
+bool CDuel::IsRankedGladiator(int aIndex) // OK
+{
+	DUEL_ARENA_INFO* lpInfo = this->GetDuelArenaByGladiator(aIndex);
+
+	return ((lpInfo!=0 && lpInfo->Ranked!=0)?1:0);
+}
+
+// Reserves the first empty room for a ranked match (DuelRanked.cpp). The fighters
+// are placed on the spawn cells and the fight is started by StartRankedFight.
+// Returns the room, -1 when there is none.
+int CDuel::BeginDuel(LPOBJ lpObj,LPOBJ lpTarget,DWORD matchId) // OK
+{
+	#if(GAMESERVER_UPDATE>=402)
+
+	for(int n=0;n < MAX_DUEL_ARENA;n++)
+	{
+		DUEL_ARENA_INFO* lpInfo = &this->m_DuelArenaInfo[n];
+
+		if(lpInfo->State != DA_STATE_EMPTY)
+		{
+			continue;
+		}
+
+		memset(lpInfo->Gladiator,-1,sizeof(lpInfo->Gladiator));
+		memset(lpInfo->Spectator,-1,sizeof(lpInfo->Spectator));
+
+		if(this->AddDuelArenaGladiator(lpInfo,lpObj->Index) == 0 || this->AddDuelArenaGladiator(lpInfo,lpTarget->Index) == 0)
+		{
+			memset(lpInfo->Gladiator,-1,sizeof(lpInfo->Gladiator));
+			return -1;
+		}
+
+		lpInfo->Ranked = 1;
+		lpInfo->RankedWin = 0;
+		lpInfo->MatchId = matchId;
+
+		lpObj->Interface.use = 0;
+		lpObj->Interface.type = INTERFACE_NONE;
+		lpObj->Interface.state = 0;
+
+		lpTarget->Interface.use = 0;
+		lpTarget->Interface.type = INTERFACE_NONE;
+		lpTarget->Interface.state = 0;
+
+		this->SetState(lpInfo,DA_STATE_START);
+
+		return n;
+	}
+
+	return -1;
+
+	#else
+
+	return -1;
+
+	#endif
+}
+
+// The post-block of CGDuelOkRecv for a ranked room, also used when a fight resumes
+// after a reconnect (fresh = 0: the score is kept and the spectators are told).
+void CDuel::StartRankedFight(DUEL_ARENA_INFO* lpInfo,LPOBJ lpObj,LPOBJ lpTarget,BYTE scoreA,BYTE scoreB,bool fresh) // OK
+{
+	#if(GAMESERVER_UPDATE>=402)
+
+	lpObj->DuelUserReserved = -1;
+	lpObj->DuelUserRequested = -1;
+	lpObj->DuelScore = scoreA;
+	lpObj->DuelUser = lpTarget->Index;
+	lpObj->DuelTickCount = GetTickCount();
+
+	lpTarget->DuelUserReserved = -1;
+	lpTarget->DuelUserRequested = -1;
+	lpTarget->DuelScore = scoreB;
+	lpTarget->DuelUser = lpObj->Index;
+	lpTarget->DuelTickCount = GetTickCount();
+
+	lpInfo->RankedWin = 0;
+
+	if(fresh != 0 && gServerInfo.m_DuelArenaAnnounceSwitch != 0)
+	{
+		gNotice.GCNoticeSendToAll(0,0,0,0,0,0,gMessage.GetMessage(174),lpObj->Name,lpTarget->Name);
+	}
+
+	this->GCDuelStartSend(lpObj->Index,1,lpTarget->Index);
+
+	this->GCDuelStartSend(lpTarget->Index,1,lpObj->Index);
+
+	this->GCDuelScoreSend(lpObj->Index,lpTarget->Index);
+
+	if(fresh == 0)
+	{
+		this->GCDuelRoundStartSend(lpInfo,0);
+	}
+
+	#endif
+}
+
+// A spectator of a ranked room: CGDuelWatchRecv without the "talked to Titus" check.
+bool CDuel::AddRankedSpectator(DUEL_ARENA_INFO* lpInfo,LPOBJ lpObj) // OK
+{
+	#if(GAMESERVER_UPDATE>=402)
+
+	int aIndex = lpObj->Index;
+
+	if(this->AddDuelArenaSpectator(lpInfo,aIndex) == 0)
+	{
+		return 0;
+	}
+
+	if(OBJECT_RANGE(lpObj->SummonIndex) != 0)
+	{
+		gObjSummonKill(aIndex);
+		GCSummonLifeSend(aIndex,0,1);
+	}
+
+	lpObj->Interface.use = 0;
+	lpObj->Interface.type = INTERFACE_NONE;
+	lpObj->Interface.state = 0;
+
+	gEffectManager.AddEffect(lpObj,0,EFFECT_INVISIBILITY,0,0,0,0,0);
+
+	gEffectManager.AddEffect(lpObj,0,EFFECT_DUEL_ARENA_WATCH,0,0,0,0,0);
+
+	gObjMoveGate(aIndex,(303+lpInfo->Index));
+
+	this->GCDuelGladiatorAddSend(aIndex,lpInfo);
+
+	this->GCDuelSpectatorListSend(aIndex,lpInfo);
+
+	this->GCDuelSpectatorAddSend(aIndex,lpInfo);
+
+	if(this->GetDuelArenaGladiatorCount(lpInfo) >= MAX_DUEL_ARENA_GLADIATOR)
+	{
+		this->GCDuelInterfaceSend(lpInfo);
+
+		this->GCDuelScoreSend(lpInfo);
+	}
+
+	return 1;
+
+	#else
+
+	return 0;
+
+	#endif
+}
+
+// A fighter reached the winning score in a ranked room: the ranked code settles
+// it (no legacy ranking, no Gladiator's Glory).
+void CDuel::RankedScoreWin(DUEL_ARENA_INFO* lpInfo,LPOBJ lpWinner,LPOBJ lpLoser) // OK
+{
+	if(lpInfo->RankedWin != 0)
+	{
+		return;
+	}
+
+	lpInfo->RankedWin = 1;
+
+	gDuelRanked.OnScoreWin(lpInfo->MatchId,lpWinner->Name,lpLoser->Name,lpWinner->DuelScore,lpLoser->DuelScore);
+}
+
 void CDuel::CheckDuelScore(LPOBJ lpObj,LPOBJ lpTarget) // OK
 {
 	if(this->CheckDuel(lpObj,lpTarget) == 0)
@@ -688,6 +899,18 @@ void CDuel::CheckDuelScore(LPOBJ lpObj,LPOBJ lpTarget) // OK
 
 	if(lpObj->DuelScore >= 10)
 	{
+		#if(GAMESERVER_UPDATE>=402)
+
+		DUEL_ARENA_INFO* lpRanked = this->GetDuelArenaByGladiator(lpObj->Index);
+
+		if(lpRanked != 0 && lpRanked->Ranked != 0)
+		{
+			this->RankedScoreWin(lpRanked,lpObj,lpTarget);
+			return;
+		}
+
+		#endif
+
 		this->ResetDuel(lpObj);
 
 		this->GCDuelEndSend(lpObj->Index,0);
@@ -770,6 +993,12 @@ void CDuel::CheckDuelUser() // OK
 
 		if(OBJECT_RANGE(lpObj->DuelUser) != 0)
 		{
+			// A ranked fight has its own idle rule (DuelRanked.cpp).
+			if(this->IsRankedGladiator(lpObj->Index) != 0)
+			{
+				continue;
+			}
+
 			if((GetTickCount()-lpObj->DuelTickCount) > 60000)
 			{
 				this->ResetDuel(&gObj[lpObj->DuelUser]);
@@ -1285,6 +1514,13 @@ void CDuel::CGDuelButtonRecv(PMSG_DUEL_BUTTON_RECV* lpMsg,int aIndex) // OK
 		return;
 	}
 
+	// A ranked room: the ranked code sends the spectator home (it knows where from).
+	if(lpInfo->Ranked != 0)
+	{
+		gDuelRanked.OnSpectatorLeave(aIndex);
+		return;
+	}
+
 	gEffectManager.DelEffect(lpObj,EFFECT_INVISIBILITY);
 
 	gEffectManager.DelEffect(lpObj,EFFECT_DUEL_ARENA_WATCH);
@@ -1437,6 +1673,11 @@ void CDuel::GCDuelScoreSend(DUEL_ARENA_INFO* lpInfo) // OK
 {
 	#if(GAMESERVER_UPDATE>=402)
 
+	if(OBJECT_RANGE(lpInfo->Gladiator[0]) == 0 || OBJECT_RANGE(lpInfo->Gladiator[1]) == 0)
+	{
+		return;
+	}
+
 	PMSG_DUEL_SCORE_SEND pMsg;
 
 	pMsg.header.set(0xAA,0x04,sizeof(pMsg));
@@ -1464,6 +1705,11 @@ void CDuel::GCDuelScoreSend(DUEL_ARENA_INFO* lpInfo) // OK
 void CDuel::GCDuelInterfaceSend(DUEL_ARENA_INFO* lpInfo) // OK
 {
 	#if(GAMESERVER_UPDATE>=402)
+
+	if(OBJECT_RANGE(lpInfo->Gladiator[0]) == 0 || OBJECT_RANGE(lpInfo->Gladiator[1]) == 0)
+	{
+		return;
+	}
 
 	PMSG_DUEL_INTERFACE_SEND pMsg;
 

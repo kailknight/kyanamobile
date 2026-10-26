@@ -1137,6 +1137,17 @@ int CChaosCastle::GetMonsterCount(CHAOS_CASTLE_LEVEL* lpLevel) // OK
 	{
 		if(OBJECT_RANGE(lpLevel->MonsterIndex[n]) != 0)
 		{
+			// A monster that died or was removed without MonsterDieProc (poison, reflect, a fall, a
+			// deleted object) stayed in the list for good: the HUD showed 2/100 with nobody to kill and
+			// the round could not end. Drop entries that are no longer a live monster of this map.
+			LPOBJ lpMonster = &gObj[lpLevel->MonsterIndex[n]];
+
+			if(lpMonster->Connected != OBJECT_ONLINE || lpMonster->Type != OBJECT_MONSTER || lpMonster->Live == 0 || lpMonster->Map != lpLevel->Map)
+			{
+				lpLevel->MonsterIndex[n] = -1;
+				continue;
+			}
+
 			count++;
 		}
 	}

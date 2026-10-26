@@ -3,6 +3,7 @@
 #include "DataServer.h"
 #include "AllowableIpList.h"
 #include "BadSyntax.h"
+#include "DuelRanked.h"
 #include "GuildManager.h"
 #include "MiniDump.h"
 #include "Protect.h"
@@ -24,6 +25,36 @@ char CustomerHardwareId[36];
 int AdvancedLog;
 int ShowLogProtocol;
 int ShowLogQuery;
+int LogVerbose;
+int ItemSerialBlock;
+
+// LogVerbose=0 (the default) keeps the window and DataServer.txt to errors and
+// key events: AdvancedLog / ShowLogProtocol / ShowLogQuery (every packet head,
+// every SQL statement) only take effect when LogVerbose=1.
+void LoadLogConfig()
+{
+	LogVerbose = GetPrivateProfileInt("DataServerInfo","LogVerbose",0,".\\DataServer.ini");
+
+	AdvancedLog = GetPrivateProfileInt("DataServerInfo","AdvancedLog",0,".\\DataServer.ini");
+
+	ShowLogProtocol = GetPrivateProfileInt("DataServerInfo","ShowLogProtocol",0,".\\DataServer.ini");
+
+	ShowLogQuery = GetPrivateProfileInt("DataServerInfo","ShowLogQuery",0,".\\DataServer.ini");
+
+	if(LogVerbose == 0)
+	{
+		AdvancedLog = 0;
+		ShowLogProtocol = 0;
+		ShowLogQuery = 0;
+	}
+
+	// How many item serials one DB round trip reserves (1 = one per item, as before).
+	ItemSerialBlock = GetPrivateProfileInt("DataServerInfo","ItemSerialBlock",500,".\\DataServer.ini");
+
+	if(ItemSerialBlock < 1){ItemSerialBlock = 1;}
+
+	if(ItemSerialBlock > 100000){ItemSerialBlock = 100000;}
+}
 
 int APIENTRY WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,int nCmdShow) // OK
 {
@@ -85,13 +116,12 @@ int APIENTRY WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine
 
 		WORD DataServerPort = GetPrivateProfileInt("DataServerInfo","DataServerPort",55960,".\\DataServer.ini");
 
-		AdvancedLog = GetPrivateProfileInt("DataServerInfo","AdvancedLog",0,".\\DataServer.ini");
-
-		ShowLogProtocol = GetPrivateProfileInt("DataServerInfo", "ShowLogProtocol", 0, ".\\DataServer.ini");
-		ShowLogQuery = GetPrivateProfileInt("DataServerInfo", "ShowLogQuery", 0, ".\\DataServer.ini");
+		LoadLogConfig();
 #if(CB_AutoBanking)
 		gCBAutoNapGame.LoadConfig();
 #endif
+
+		gDuelRanked.LoadConfig(true);
 
 		if(gQueryManager.Connect(DataServerODBC,DataServerUSER,DataServerPASS) == 0)
 		{
@@ -208,8 +238,8 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam) // 
 					break;
 				case ID_FILE_RELOADCONFIG:
 				{
-					ShowLogProtocol = GetPrivateProfileInt("DataServerInfo", "ShowLogProtocol", 0, ".\\DataServer.ini");
-					ShowLogQuery = GetPrivateProfileInt("DataServerInfo", "ShowLogQuery", 0, ".\\DataServer.ini");
+					LoadLogConfig();
+					gDuelRanked.PostReload();
 				}
 				break;
 				case ID_AUTONAP_RELOADCONFIG:
@@ -233,6 +263,7 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam) // 
 			switch(wParam)
 			{
 				case TIMER_1000:
+					gDuelRanked.PostTick();
 					break;
 				case TIMER_2000:
 				{

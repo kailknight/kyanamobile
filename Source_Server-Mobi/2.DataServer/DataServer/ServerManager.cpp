@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "ServerManager.h"
 #include "CharacterManager.h"
+#include "DuelRanked.h"
 #include "GuildMatching.h"
 #include "PartyMatching.h"
 #include "Util.h"
@@ -139,6 +140,9 @@ void CServerManager::DelServer() // OK
 	gPartyMatching.ClearPartyMatchingInfo(ServerCode);
 
 	gPartyMatching.ClearPartyMatchingJoinInfo(ServerCode);
+
+	// IOCP thread: the ranked duel module only notes the code, the queue thread acts on it.
+	gDuelRanked.OnServerDown(ServerCode);
 }
 
 void CServerManager::SetServerInfo(char* name,WORD port,WORD code) // OK

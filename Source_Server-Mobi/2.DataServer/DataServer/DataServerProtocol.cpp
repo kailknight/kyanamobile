@@ -44,10 +44,19 @@
 #include "DeviceLog.h"
 #include "FriendMail.h"
 #include "MonthlyCard.h"
+#include "DuelRanked.h"
 #include "SpinClaim.h"
 #include "SlotClaim.h"
 void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 {
+	// The ranked duel tick is the DataServer talking to itself: it is not a sign of
+	// life from the GameServer it was posted under, so it skips m_PacketTime.
+	if(CDuelRanked::IsInternal(head,lpMsg,size) != 0)
+	{
+		gDuelRanked.OnPacket(lpMsg,size,index);
+		return;
+	}
+
 	PROTECT_START
 
 	gServerManager[index].m_PacketTime = GetTickCount();
@@ -148,6 +157,15 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 					#if(DATASERVER_UPDATE>=401)
 					gMasterSkillTree.GDMasterSkillTreeSaveRecv((SDHP_MASTER_SKILL_TREE_SAVE_RECV*)lpMsg);
 					#endif
+					break;
+				case 0x01: //Master skill tree pages - load (MasterSkillPage_Schema.sql)
+					if(size >= (int)sizeof(SDHP_MASTER_PAGES_REQ_RECV))
+					{
+						gMasterSkillTree.GDMasterPagesRecv((SDHP_MASTER_PAGES_REQ_RECV*)lpMsg,index);
+					}
+					break;
+				case 0x31: //Master skill tree pages - save
+					gMasterSkillTree.GDMasterPagesSaveRecv((SDHP_MASTER_PAGES_SAVE_RECV*)lpMsg,size);
 					break;
 			}
 			break;
@@ -982,6 +1000,13 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 			case 0x50: //==Kira Pass (monthly WCoin) - pay on login / status
 				gMonthlyCard.OnRequest((SDHP_MONTHLYCARD_REQ*)lpMsg, index);
 				break;
+			case 0x51: //==Ranked duel - request / host report / depart / host event / result
+			case 0x52:
+			case 0x53:
+			case 0x54:
+			case 0x55:
+				gDuelRanked.OnPacket(lpMsg, size, index);
+				break;
 			}
 			break;
 		case 0xEC:
@@ -1275,6 +1300,9 @@ void GDCharacterCreateRecv(SDHP_CHARACTER_CREATE_RECV* lpMsg,int index) // OK
 			{
 				gQueryManager.ExecQuery("UPDATE AccountCharacter SET GameID%d='%s' WHERE Id='%s'",(pMsg.slot+1),lpMsg->name,lpMsg->account);
 				gQueryManager.Close();
+
+				// A new character never inherits master pages left under its name.
+				gMasterSkillTree.PagesDelete(lpMsg->name);
 			}
 		}
 	}
@@ -1315,6 +1343,8 @@ void GDCharacterDeleteRecv(SDHP_CHARACTER_DELETE_RECV* lpMsg,int index) // OK
 
 		if(pMsg.result == 1)
 		{
+			gMasterSkillTree.PagesDelete(lpMsg->name);
+
 			char CharacterName[5][11] = {0};
 
 			if(gQueryManager.ExecQuery("SELECT * FROM AccountCharacter WHERE Id='%s'",lpMsg->account) == 0 || gQueryManager.Fetch() == SQL_NO_DATA)
@@ -1556,6 +1586,56 @@ void GDCharacterInfoRecv(SDHP_CHARACTER_INFO_RECV* lpMsg,int index) // OK
 	gSocketManager.DataSend(index,(BYTE*)&pMsg,sizeof(pMsg));
 }
 
+// Item serials come from GameServerInfo.ItemCount (what WZ_GetItemSerial bumps by 1
+// per call). Instead of one DB round trip per created item, a block of
+// ItemSerialBlock serials is reserved with a single UPDATE and handed out from memory.
+// The DB counter is always advanced BEFORE a serial is used, so serials stay unique
+// across every GameServer and across DataServer restarts; the unused rest of a block
+// is simply skipped. Only ever touched from the queue thread.
+static int gSerialNext = 0;
+static int gSerialLast = 0; // inclusive; next > last = pool empty
+
+static int GetNewItemSerial()
+{
+	if(gSerialNext > 0 && gSerialNext <= gSerialLast)
+	{
+		return gSerialNext++;
+	}
+
+	int block = ((ItemSerialBlock>1)?ItemSerialBlock:1);
+
+	if(block > 1)
+	{
+		int last = 0;
+
+		if(gQueryManager.ExecQuery("SET NOCOUNT ON; DECLARE @s int; BEGIN TRANSACTION; UPDATE GameServerInfo SET @s = ItemCount = ItemCount+%d; IF (@@ERROR <> 0) BEGIN ROLLBACK TRANSACTION; SELECT -1; END ELSE BEGIN COMMIT TRANSACTION; SELECT @s; END",block) != 0 && gQueryManager.Fetch() != SQL_NO_DATA)
+		{
+			last = gQueryManager.GetResult(0);
+		}
+
+		gQueryManager.Close();
+
+		if(last >= block)
+		{
+			gSerialNext = last-block+2;
+			gSerialLast = last;
+			return (last-block+1);
+		}
+	}
+
+	// Block reservation unavailable (or ItemSerialBlock=1): the old one-at-a-time proc.
+	int serial = 0;
+
+	if(gQueryManager.ExecQuery("EXEC WZ_GetItemSerial") != 0 && gQueryManager.Fetch() != SQL_NO_DATA)
+	{
+		serial = gQueryManager.GetResult(0);
+	}
+
+	gQueryManager.Close();
+
+	return serial;
+}
+
 void GDCreateItemRecv(SDHP_CREATE_ITEM_RECV* lpMsg,int index) // OK
 {
 	SDHP_CREATE_ITEM_SEND pMsg;
@@ -1572,18 +1652,7 @@ void GDCreateItemRecv(SDHP_CREATE_ITEM_RECV* lpMsg,int index) // OK
 
 	pMsg.Map = lpMsg->Map;
 
-	if(gQueryManager.ExecQuery("EXEC WZ_GetItemSerial") == 0 || gQueryManager.Fetch() == SQL_NO_DATA)
-	{
-		gQueryManager.Close();
-
-		pMsg.Serial = 0;
-	}
-	else
-	{
-		pMsg.Serial = gQueryManager.GetResult(0);
-
-		gQueryManager.Close();
-	}
+	pMsg.Serial = GetNewItemSerial();
 
 	if(lpMsg->ItemIndex == 0x1A04 || lpMsg->ItemIndex == 0x1A05)
 	{
@@ -1805,6 +1874,8 @@ void GDCharacterNameChangeRecv(SDHP_CHARACTER_NAME_CHANGE_RECV* lpMsg,int index)
 			pMsg.result = gQueryManager.GetResult(0);
 
 			gQueryManager.Close();
+
+			gMasterSkillTree.PagesRename(lpMsg->OldName,lpMsg->NewName);
 		}
 	}
 
@@ -2206,6 +2277,8 @@ void GDConnectCharacterRecv(SDHP_CONNECT_CHARACTER_RECV* lpMsg,int index) // OK
 
 	gCharacterManager.InsertCharacterInfo(CharacterInfo);
 
+	gDuelRanked.OnCharacterRegistered(lpMsg->name,index);
+
 	FriendStateRecv(lpMsg->name,0);
 }
 
@@ -2229,6 +2302,8 @@ void GDDisconnectCharacterRecv(SDHP_DISCONNECT_CHARACTER_RECV* lpMsg,int index) 
 	}
 
 	gCharacterManager.RemoveCharacterInfo(CharacterInfo);
+
+	gDuelRanked.OnCharacterLeft(lpMsg->name,index);
 
 	FriendStateRecv(lpMsg->name,1);
 }

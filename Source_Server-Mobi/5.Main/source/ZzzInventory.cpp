@@ -2782,6 +2782,11 @@ bool pSetTooltipValueText(std::string* new_text, std::string Format, int* line, 
 	return 1;
 }
 
+// Set by CB_ViewCharItem (viewing another player's equipment): the option
+// lines are replaced by a short summary - Luck / Option +N / N Excellent option -
+// instead of the real excellent options.
+bool g_bItemInfoOptionSummary = false;
+
 void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bItemTextListBoxUse, bool Render3DItem)
 {
 	if (!ip)
@@ -3343,7 +3348,33 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 	TextNum = g_csItemOption.RenderDefaultOptionText(ip, TextNum);
 
 	int iMana;
-	for (int i = 0; i < ip->SpecialNum; i++)
+	if (g_bItemInfoOptionSummary)
+	{
+		const bool bLuck = (ip->Level & 4) != 0;
+		const int iOption = (ip->Level & 3) + (((ip->Option1 & 64) != 0) ? 4 : 0);
+		int iExc = 0;
+		for (int b = 0; b < 6; b++)
+		{
+			if ((ip->Option1 >> b) & 1) iExc++;
+		}
+
+		if (bLuck)
+		{
+			sprintf(TextList[TextNum], "Luck");
+			TextListColor[TextNum] = TEXT_COLOR_BLUE; TextBold[TextNum] = false; TextNum++;
+		}
+		if (iOption > 0)
+		{
+			sprintf(TextList[TextNum], "Option +%d", iOption);
+			TextListColor[TextNum] = TEXT_COLOR_BLUE; TextBold[TextNum] = false; TextNum++;
+		}
+		if (iExc > 0)
+		{
+			sprintf(TextList[TextNum], "%d Excellent option%s", iExc, (iExc > 1) ? "s" : "");
+			TextListColor[TextNum] = TEXT_COLOR_BLUE; TextBold[TextNum] = false; TextNum++;
+		}
+	}
+	for (int i = 0; !g_bItemInfoOptionSummary && i < ip->SpecialNum; i++)
 	{
 		if (ITEM_HELPER + 109 <= ip->Type && ITEM_HELPER + 115 >= ip->Type)
 		{
@@ -10233,9 +10264,8 @@ bool IsStoreBan(ITEM* pItem)
 #ifdef ASG_ADD_TIME_LIMIT_QUEST_ITEM
 		|| (pItem->Type >= ITEM_POTION+151 && pItem->Type <= ITEM_POTION+156)
 #endif	// ASG_ADD_TIME_LIMIT_QUEST_ITEM
-#ifdef KJH_ADD_PERIOD_ITEM_SYSTEM
-		|| (pItem->bPeriodItem == true)
-#endif // KJH_ADD_PERIOD_ITEM_SYSTEM
+		// Items with an expiry time may be stored in the vault now (the server allows
+		// it); they stay untradeable.
 #ifdef LJH_ADD_SYSTEM_OF_EQUIPPING_ITEM_FROM_INVENTORY
 		|| (g_pMyInventory->IsInvenItem(pItem->Type) && pItem->Durability == 254)
 #endif //LJH_ADD_SYSTEM_OF_EQUIPPING_ITEM_FROM_INVENTORY
@@ -11011,7 +11041,7 @@ void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t 
 		Position[0] += 0.01f;
 		Vector(270.f, 0.f, 0.f, ObjectSelect.Angle);
 	}
-	else if( Type >= MODEL_POTION+72 && Type <= MODEL_POTION+77 )
+	else if( (Type >= MODEL_POTION+72 && Type <= MODEL_POTION+77) || Type == MODEL_POTION+493 )	// +493 Master Page Scroll: same elite scroll model, so the same pose
 	{
 		Position[1] += 0.08f;
 		Vector(0.f, 0.f, 0.f, ObjectSelect.Angle);
@@ -12098,7 +12128,7 @@ void RenderObjectScreen(int Type,int ItemLevel,int Option1,int ExtOption,vec3_t 
 		{
 			Scale = 0.0028f;
 		}
-		else if( Type >= MODEL_POTION+72 && Type <= MODEL_POTION+77 )
+		else if( (Type >= MODEL_POTION+72 && Type <= MODEL_POTION+77) || Type == MODEL_POTION+493 )	// +493 Master Page Scroll: same elite scroll model, so the same pose
 		{
 			Scale = 0.0025f;
 		}

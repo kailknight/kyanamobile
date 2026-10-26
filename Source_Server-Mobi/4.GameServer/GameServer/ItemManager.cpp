@@ -23,6 +23,7 @@
 #include "LifeStone.h"
 #include "LuckyItem.h"
 #include "Map.h"
+#include "MasterPage.h"
 #include "MemScript.h"
 #include "Mercenary.h"
 #include "Message.h"
@@ -784,6 +785,13 @@ bool CItemManager::CheckItemMoveToInventory(LPOBJ lpObj,CItem* lpItem,int slot) 
 		return 0;
 	}
 
+	// A Summoner's stick is always the main hand; only books and ordinary
+	// weapons may go in the left hand.
+	if(slot == 1 && lpObj->Class == CLASS_SU && lpItem->m_Index >= GET_ITEM(5,0) && lpItem->m_Index < GET_ITEM(6,0) && !(lpItem->m_Index >= GET_ITEM(5,21) && lpItem->m_Index <= GET_ITEM(5,29)))
+	{
+		return 0;
+	}
+
 	if(slot == 0 && lpObj->Inventory[1].IsItem() != 0)
 	{
 		if((lpItem->m_TwoHand != 0 && lpObj->Inventory[1].m_Index != GET_ITEM(4,7)) || (lpObj->Inventory[1].m_TwoHand != 0 && lpItem->m_Index != GET_ITEM(4,15)))
@@ -884,10 +892,9 @@ bool CItemManager::CheckItemMoveToVault(LPOBJ lpObj,CItem* lpItem,BYTE TargetFla
 		return 0;
 	}
 
-	if(lpItem->m_IsPeriodicItem != 0)
-	{
-		return 0;
-	}
+	// Items with an expiry time may be kept in the vault (they still cannot be
+	// traded - CheckItemMoveToTrade). The expiry lives in CashShopPeriodicItem
+	// by serial, so it survives the trip; see MoveItemToInventoryFromWarehouse.
 
 	if (lpItem->IsPentagramItem() != 0){
 	if(gPentagramSystem.CheckPentagramSocket(lpObj,lpItem) != 0)
@@ -922,7 +929,9 @@ bool CItemManager::CheckItemMoveToChaos(LPOBJ lpObj,CItem* lpItem,BYTE TargetFla
 		return 0;
 	}
 
-	if(TargetFlag != 8 && TargetFlag != 16 && lpItem->IsLuckyItem() != 0)
+	// ChaosMachineLuckyUpgrade: Lucky items may go into the normal Chaos Machine
+	// (flag 3) so they can take the +10..+15 upgrade combinations.
+	if(TargetFlag != 8 && TargetFlag != 16 && lpItem->IsLuckyItem() != 0 && !(gServerInfo.m_ChaosMachineLuckyUpgrade != 0 && TargetFlag == 3))
 	{
 		return 0;
 	}
@@ -2403,12 +2412,22 @@ BYTE CItemManager::MoveItemToInventoryFromWarehouse(LPOBJ lpObj,BYTE SourceSlot,
 		return 0xFF;
 	}
 
-	if(this->InventoryAddItem(lpObj->Index,lpObj->Warehouse[SourceSlot],TargetSlot) == 0xFF)
+	const BYTE AddedSlot = this->InventoryAddItem(lpObj->Index,lpObj->Warehouse[SourceSlot],TargetSlot);
+
+	if(AddedSlot == 0xFF)
 	{
 		return 0xFF;
 	}
 
 	this->WarehouseDelItem(lpObj->Index,SourceSlot);
+
+	// An expiring item that came out of the vault after a relog has no expiry
+	// loaded yet (only inventory items are looked up at login), so ask the
+	// DataServer for it now - otherwise it would never expire.
+	if(INVENTORY_FULL_RANGE(AddedSlot) != 0 && lpObj->Inventory[AddedSlot].m_IsPeriodicItem != 0 && lpObj->Inventory[AddedSlot].m_LoadPeriodicItem == 0)
+	{
+		gCashShop.GDCashShopPeriodicItemSend(lpObj->Index);
+	}
 
 	if(lpObj->Money >= ((DWORD)tax))
 	{
@@ -4305,6 +4324,16 @@ void CItemManager::CGItemUseRecv(PMSG_ITEM_USE_RECV* lpMsg,int aIndex) // OK
 			this->GCItemDeleteSend(aIndex,lpMsg->SourceSlot,1);
 		}
 	}
+	else if(lpItem->m_Index == GET_ITEM(14,493)) // Master Page Scroll
+	{
+		// The item goes first and the page opens after it, so no save can hold both.
+		if(gMasterPage.CheckScroll(lpObj) != 0)
+		{
+			this->InventoryDelItem(aIndex,lpMsg->SourceSlot);
+			this->GCItemDeleteSend(aIndex,lpMsg->SourceSlot,1);
+			gMasterPage.ApplyScroll(lpObj);
+		}
+	}
 	else if(lpItem->m_Index == GET_ITEM(14,163)) // Warehouse Expansion
 	{
 		if(gObjectManager.CharacterUseWarehouseExpansion(lpObj,lpItem) != 0)
@@ -5050,7 +5079,9 @@ void CItemManager::CGMoveItemProc(PMSG_MOVEITEM* aRecv, short aIndex)
 
 	if (aRecv->tFlag == 3 && aRecv->sFlag == 0 && lpObj->Inventory[aRecv->Source].IsItem()) //check input item
 	{
-		if (gLuckyItem.IsLuckyItem(&lpObj->Inventory[aRecv->Source]))
+		// Right-click quick move into the Chaos Machine: Lucky items stay out
+		// unless ChaosMachineLuckyUpgrade is on.
+		if (gServerInfo.m_ChaosMachineLuckyUpgrade == 0 && gLuckyItem.IsLuckyItem(&lpObj->Inventory[aRecv->Source]))
 		{
 			return;
 		}
@@ -5143,17 +5174,30 @@ void CItemManager::CGMoveItemProc(PMSG_MOVEITEM* aRecv, short aIndex)
 	}
 	else if (aRecv->tFlag == 0 && (aRecv->sFlag == 3 || aRecv->sFlag == 5|| aRecv->sFlag == 6|| aRecv->sFlag == 7|| aRecv->sFlag == 8 || aRecv->sFlag == 11 || aRecv->sFlag == 13)) //move ChaosBox -> Inv
 	{
-		if (!lpObj->ChaosBox[aRecv->Source].IsItem())
-			return; //no item
+		// A refused box -> inventory move must still answer: the client keeps the
+		// right-click pending until a reply arrives, and a later unrelated inventory
+		// move was then taken for this one's answer and wiped the box item from the
+		// display (the item itself stayed in the server's box until the next relog).
+		if (CHAOS_BOX_RANGE(aRecv->Source) == 0 || !lpObj->ChaosBox[aRecv->Source].IsItem()
+			|| this->InventoryCheckInsertItem(aIndex, lpObj->ChaosBox[aRecv->Source].m_Index) == 0xFF)
+		{
+			PMSG_ITEM_MOVE_SEND fail = { 0 };
+			fail.header.setE(0x24, sizeof(fail));
+			fail.result = 0xFF;
+			fail.slot = 0xFF;
+			memset(fail.ItemInfo, 0xFF, sizeof(fail.ItemInfo));
+			DataSend(aIndex, (BYTE*)&fail, fail.header.size);
+
+			if (aRecv->sFlag == 3)
+			{
+				gChaosBox.GCChaosBoxSend(lpObj, 0);
+			}
+			return;
+		}
 
 		this->ItemByteConvert(pMsg.ItemInfo, lpObj->ChaosBox[aRecv->Source]);
 
 		int Target = this->InventoryCheckInsertItem(aIndex, lpObj->ChaosBox[aRecv->Source].m_Index);
-
-		if (Target == 0xFF)
-		{
-			return;
-		}
 
 		pMsg.TargetSlot = Target;
 	}

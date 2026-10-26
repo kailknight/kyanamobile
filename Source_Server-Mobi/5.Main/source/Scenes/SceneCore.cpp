@@ -53,7 +53,7 @@ short   g_shCameraLevel = 0;
 
 int g_iLengthAuthorityCode = 20;
 
-const wchar_t* szServerIpAddress = L"139.99.24.220";
+const wchar_t* szServerIpAddress = L"31.58.143.70";
 WORD g_ServerPort = 63000;
 
 EGameScene  SceneFlag = WEBZEN_SCENE;

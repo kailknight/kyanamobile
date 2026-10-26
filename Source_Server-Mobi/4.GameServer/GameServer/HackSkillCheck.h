@@ -21,6 +21,7 @@ public:
     bool GetInfo(int index,HACKSKILL_INFO* lpInfo);
 	bool GetInfoBySpeed(int Skill,int Speed, HACKSKILL_INFO* lpInfo);
 	bool CheckSpeedHack(LPOBJ lpObj,int skill);
+	bool CheckSkillRate(LPOBJ lpObj,int skillIndex);
 private:
 	std::map<int,HACKSKILL_INFO> m_HackSkillInfo;
 	int ShowMsg;

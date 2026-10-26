@@ -805,6 +805,10 @@ public:
 	void CalcMasterSkillTreeOption(LPOBJ lpObj,bool flag);
 	void InsertOption(LPOBJ lpObj,int index,int value,bool flag);
 	bool ReplaceMasterSkill(LPOBJ lpObj,int index,int skill,int level);
+	// Back to the base skills: master ids leave Skill[], MasterSkill[] is emptied.
+	// MasterPoint is NOT touched (the caller decides what the points become). The
+	// shared first half of gObjRebuildMasterSkillTree and a master page switch.
+	void RestoreBaseSkills(LPOBJ lpObj);
 	void CGMasterSkillRecv(PMSG_MASTER_SKILL_RECV* lpMsg,int aIndex);
 	void GCMasterInfoSend(LPOBJ lpObj);
 	void GCMasterLevelUpSend(LPOBJ lpObj);

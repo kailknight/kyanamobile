@@ -65,7 +65,7 @@ public class PreloadActivity extends Activity {
         // which is Cloudflare-fronted and does not proxy 8888 anyway.
         // A test copy lives at /dl2/data.zip (C:\xampp\htdocs\dl2, aliased into
         // the 8888 vhost) - point here at it for a test build, never commit it.
-        "http://139.99.24.220:8888/data.zip"
+        "http://31.58.143.70:8888/data.zip"
     };
     private static final String BASIC_AUTH_USERNAME = "admin";
     private static final String BASIC_AUTH_PASSWORD = "openmu";

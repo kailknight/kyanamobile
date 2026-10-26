@@ -789,11 +789,10 @@ void ItemConvert(ITEM *ip,BYTE Attribute1,BYTE Attribute2, BYTE Attribute3 )
     if ( ( ip->Type>=ITEM_WING+3 && ip->Type<=ITEM_WING+6 )
 		|| ( ip->Type >= ITEM_WING+36 && ip->Type <= ITEM_WING+40 )
 		|| (ip->Type >= ITEM_WING+42 && ip->Type <= ITEM_WING+43)
-		|| ip->Type==ITEM_SWORD+19
+		// The Divine (Archangel) Sword, Crossbow, Staff and Scepter used to be in
+		// this list, which zeroed the excellent damage bonus on them. The server
+		// adds it, so their tooltip and the stats window were short by it.
 		|| gCustomWing.CheckCustomWingByItem(ip->Type) //Custom Wing
-		|| ip->Type==ITEM_BOW+18	
-		|| ip->Type==ITEM_STAFF+10
-		|| ip->Type==ITEM_MACE+13
 		|| ip->Type == ITEM_HELPER+30
 		|| ( ITEM_WING+130 <= ip->Type && ip->Type <= ITEM_WING+134 )
 #ifdef PBG_ADD_NEWCHAR_MONK_ITEM

@@ -281,7 +281,11 @@ float SEASON3B::CNewUIQuickCommandWindow::GetMenuFillerHeight() const
 		last row between them: below about three entries there is simply no filler
 		left to remove, and a negative height would flip the art inside out.
 	*/
-	float fFiller = 65.f - ((float)(QCE_COUNT - GetVisibleRowCount()) * 19.f);
+	// 65px is the filler of the ORIGINAL six-row menu, not of QCE_COUNT rows:
+	// Block and Report were added after it, and counting from QCE_COUNT left the
+	// frame two rows short, so the last two entries were drawn off the background.
+	const int kOriginalRows = 6;
+	float fFiller = 65.f - ((float)(kOriginalRows - GetVisibleRowCount()) * 19.f);
 
 	return (fFiller < 0.f) ? 0.f : fFiller;
 }

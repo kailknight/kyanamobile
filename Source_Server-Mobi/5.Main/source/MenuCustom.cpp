@@ -47,6 +47,23 @@ namespace
 	// Kira Pass (monthly WCoin): an extra menu slot after the server's 15, on
 	// every platform - opens CB_KiraPass.
 	const int kKiraPassSlot = 16;
+
+	// Duel Matchmaking: the same ranked duel hub the Doorkeeper Titus NPC opens
+	// (INTERFACE_DUELWATCH), so it can be reached from the menu as well.
+	const int kDuelMatchSlot = 17;
+
+	// Facebook / Discord: open the link set in GetMainMainInfo.ini (LinkFacbook /
+	// LinkDiscord). PC only - shown when the link starts with http and the
+	// MenuFacebook / MenuDiscord switch is not off. Kira Pass and Duel Matchmaking
+	// have the same kind of switch (MenuKiraPass / MenuDuelMatchmaking). The four
+	// switches arrive as "hidden" bits in MAIN_FILE_INFO::EnableNapBankButton.
+	const int kFacebookSlot = 18;
+	const int kDiscordSlot = 19;
+
+	bool MenuLinkOk(const char* url)
+	{
+		return url != NULL && (_strnicmp(url, "http://", 7) == 0 || _strnicmp(url, "https://", 8) == 0);
+	}
 }
 
 cCustomMenu gCustomMenu;
@@ -211,7 +228,7 @@ void cCustomMenu::Draw()
 	// Collect enabled slots first, then paginate that filtered list - some
 	// slots are off (Menu[i]==0) on any given server, so pagination has to
 	// be based on how many buttons actually show, not raw slot index range.
-	int enabledSlots[18];
+	int enabledSlots[22];
 	int enabledCount = 0;
 	for (int i = 0; i < 15; i++)
 	{
@@ -229,7 +246,24 @@ void cCustomMenu::Draw()
 #if !(defined(MU_IOS) && !defined(MU_MACOS))
 	// Hidden on iPhone until the Kira Pass in-app purchase is approved by Apple:
 	// its Buy button would answer "not available on the App Store" in review.
-	enabledSlots[enabledCount++] = kKiraPassSlot;
+	if ((gProtect.m_MainInfo.EnableNapBankButton & 1) == 0)
+	{
+		enabledSlots[enabledCount++] = kKiraPassSlot;
+	}
+#endif
+	if ((gProtect.m_MainInfo.EnableNapBankButton & 2) == 0)
+	{
+		enabledSlots[enabledCount++] = kDuelMatchSlot;
+	}
+#if defined(_WIN32)
+	if ((gProtect.m_MainInfo.EnableNapBankButton & 4) == 0 && MenuLinkOk(gProtect.m_MainInfo.LinkFacbook))
+	{
+		enabledSlots[enabledCount++] = kFacebookSlot;
+	}
+	if ((gProtect.m_MainInfo.EnableNapBankButton & 8) == 0 && MenuLinkOk(gProtect.m_MainInfo.LinkZalo))
+	{
+		enabledSlots[enabledCount++] = kDiscordSlot;
+	}
 #endif
 #if defined(MU_IOS) && !defined(MU_MACOS)
 	enabledSlots[enabledCount++] = kIosDeleteAccountSlot;
@@ -268,6 +302,33 @@ void cCustomMenu::Draw()
 		// to it (GetMainInfo.cpp/MenuName.h) - an empty slot there (not
 		// migrated yet) falls back to the old Text_Button/Text_<lang>.ini
 		// label, so nothing changes for a server that hasn't set this up.
+#if defined(_WIN32)
+		if (i == kFacebookSlot)
+		{
+			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Facebook", BtnW))
+			{
+				ShellExecuteA(0, "open", gProtect.m_MainInfo.LinkFacbook, 0, 0, SW_SHOWNORMAL);
+			}
+		}
+		else
+		if (i == kDiscordSlot)
+		{
+			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Discord", BtnW))
+			{
+				ShellExecuteA(0, "open", gProtect.m_MainInfo.LinkZalo, 0, 0, SW_SHOWNORMAL);
+			}
+		}
+		else
+#endif
+		if (i == kDuelMatchSlot)
+		{
+			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Duel Matchmaking", BtnW))
+			{
+				gInterface.Data[eMenu_MAIN].OnShow = 0;
+				if (g_pNewUISystem != NULL) g_pNewUISystem->Show(SEASON3B::INTERFACE_DUELWATCH);
+			}
+		}
+		else
 		if (i == kKiraPassSlot)
 		{
 			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Kira Pass", BtnW))

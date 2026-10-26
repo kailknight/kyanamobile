@@ -76,5 +76,5 @@ bool CQueue::GetFromQueue(QUEUE_INFO* lpInfo) // OK
 
 	this->m_critical.unlock();
 
-	return 1;
+	return result;
 }

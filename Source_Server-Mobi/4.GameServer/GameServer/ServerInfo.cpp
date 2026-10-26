@@ -184,6 +184,11 @@ CServerInfo::CServerInfo() // OK
 	// an arbitrary number. (Not a default member initializer at the
 	// declaration: Release_EX603CS's older toolset rejects those - C2864 -
 	// on a plain non-static int.)
+	// Master pages: the defaults in code, until CustomConfig.ini says otherwise.
+	this->m_MasterPageSwitch = 1;
+	this->m_MasterPageSwitchDelaySec = 10;
+	this->m_MasterPageRelogOnSwitch = 0;
+	this->m_MasterPageMaxCount = 5;
 	this->m_DWAttackSuccessRatePvPConstA = 0;
 	this->m_DWAttackSuccessRatePvPConstB = 0;
 	this->m_DWAttackSuccessRatePvPConstC = 0;
@@ -3327,6 +3332,35 @@ void CServerInfo::ReadCommonInfo(char* section,char* path) // OK
 
 	this->m_DuelArenaDisableRestoreSD = GetPrivateProfileInt(section,"DuelArenaDisableRestoreSD",0,path);
 
+	// Ranked 1v1 (DuelRanked.cpp). The defaults apply when the ini has no key.
+	this->m_DuelRankedSwitch = GetPrivateProfileInt(section,"DuelRankedSwitch",1,path);
+
+	this->m_DuelRankedHostServer = GetPrivateProfileInt(section,"DuelRankedHostServer",19,path);
+
+	this->m_DuelRankedMinLevel = GetPrivateProfileInt(section,"DuelRankedMinLevel",50,path);
+
+	this->m_DuelRankedStageGate = GetPrivateProfileInt(section,"DuelRankedStageGate",303,path);
+
+	this->m_DuelRankedMaxConcurrent = GetPrivateProfileInt(section,"DuelRankedMaxConcurrent",3,path);
+
+	this->m_DuelRankedMatchSec = GetPrivateProfileInt(section,"DuelRankedMatchSec",600,path);
+
+	this->m_DuelRankedReconnectGraceSec = GetPrivateProfileInt(section,"DuelRankedReconnectGraceSec",60,path);
+
+	this->m_DuelRankedMaxReconnects = GetPrivateProfileInt(section,"DuelRankedMaxReconnects",1,path);
+
+	this->m_DuelRankedReadyHoldSec = GetPrivateProfileInt(section,"DuelRankedReadyHoldSec",3,path);
+
+	this->m_DuelRankedNoShowSec = GetPrivateProfileInt(section,"DuelRankedNoShowSec",55,path);
+
+	this->m_DuelRankedMaxConcurrent = ((this->m_DuelRankedMaxConcurrent<0)?0:((this->m_DuelRankedMaxConcurrent>4)?4:this->m_DuelRankedMaxConcurrent));
+
+	this->m_DuelRankedMatchSec = ((this->m_DuelRankedMatchSec<30)?30:this->m_DuelRankedMatchSec);
+
+	this->m_DuelRankedReadyHoldSec = ((this->m_DuelRankedReadyHoldSec<1)?1:((this->m_DuelRankedReadyHoldSec>30)?30:this->m_DuelRankedReadyHoldSec));
+
+	this->m_DuelRankedNoShowSec = ((this->m_DuelRankedNoShowSec<10)?10:this->m_DuelRankedNoShowSec);
+
 	this->m_GuildCreateSwitch = GetPrivateProfileInt(section,"GuildCreateSwitch",0,path);
 
 	this->m_GuildDeleteSwitch = GetPrivateProfileInt(section,"GuildDeleteSwitch",0,path);
@@ -4451,11 +4485,29 @@ void CServerInfo::ReadHackInfo(char* section,char* path) // OK
 	this->m_SpeedHackSkillDialog = GetPrivateProfileInt(section,"SpeedHackSkillDialog",0,path);
 
 	this->m_SpeedHackSkillDebug = GetPrivateProfileInt(section,"SpeedHackSkillDebug",0,path);
+
+	// Skill cast rate check. 1 << CLASS_DK = 2: Dark Knight line only by default.
+	this->m_SkillRateEnable = GetPrivateProfileInt(section,"SkillRateEnable",1,path);
+
+	this->m_SkillRateClassMask = GetPrivateProfileInt(section,"SkillRateClassMask",(1 << CLASS_DK),path);
+
+	this->m_SkillRateBaseMS = GetPrivateProfileInt(section,"SkillRateBaseMS",400,path);
+
+	this->m_SkillRatePercent = GetPrivateProfileInt(section,"SkillRatePercent",50,path);
+
+	this->m_SkillRateMinMS = GetPrivateProfileInt(section,"SkillRateMinMS",40,path);
+
+	this->m_SkillRateKickCount = GetPrivateProfileInt(section,"SkillRateKickCount",15,path);
 }
 
 void CServerInfo::ReadSkillInfo(char* section,char* path) // OK
 {
 	char GameServerInfo[100] = {0};
+
+	// The client starts a melee skill at 1.2x the skill range measured between
+	// float positions; the server measures whole tiles, so a target two tiles
+	// out and one over (2.24) was cast but never hit at range 2. 20 = the client's 1.2x.
+	this->m_SkillMeleeRangeTolerance = GetPrivateProfileInt(section,"SkillMeleeRangeTolerance",20,path);
 
 	this->m_ManaShieldConstA = GetPrivateProfileInt(section,"ManaShieldConstA",0,path);
 
@@ -4934,6 +4986,8 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	this->m_TimeTopHitDmg = GetPrivateProfileInt(section, "TimeTopHitDmg", 0, path);
 	this->m_TimeTop5Hit = GetPrivateProfileInt(section, "TimeTop5HitDmg", 0, path);
 	this->m_TinhDameBoss = this->GetProfileIntEx(section, "UseTotalDamage", "TinhDameTong", 0, path);
+	this->m_BossRewardTopDamage = GetPrivateProfileInt(section, "BossRewardTopDamage", 0, path);
+	this->m_ChaosMachineLuckyUpgrade = GetPrivateProfileInt(section, "ChaosMachineLuckyUpgrade", 0, path);
 
 	// Combo always push and show effect after kill - see FixSkillGiatLui()
 	// (BCustomEdit.cpp) and CSkillManager::ApplyEarthquakeEffect()
@@ -5181,6 +5235,28 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	if (this->m_MasterRecommendMinPlayers < 1)
 	{
 		this->m_MasterRecommendMinPlayers = 1;
+	}
+
+	// MasterPageSwitch / MasterPageSwitchDelaySec / MasterPageRelogOnSwitch /
+	// MasterPageMaxCount (CustomConfig.ini): see the header.
+	this->m_MasterPageSwitch = GetPrivateProfileInt(section, "MasterPageSwitch", 1, path);
+	this->m_MasterPageSwitchDelaySec = GetPrivateProfileInt(section, "MasterPageSwitchDelaySec", 10, path);
+	this->m_MasterPageRelogOnSwitch = GetPrivateProfileInt(section, "MasterPageRelogOnSwitch", 0, path);
+	this->m_MasterPageMaxCount = GetPrivateProfileInt(section, "MasterPageMaxCount", 5, path);
+
+	if (this->m_MasterPageSwitchDelaySec < 0)
+	{
+		this->m_MasterPageSwitchDelaySec = 0;
+	}
+
+	if (this->m_MasterPageMaxCount < 1)
+	{
+		this->m_MasterPageMaxCount = 1;
+	}
+
+	if (this->m_MasterPageMaxCount > 5)
+	{
+		this->m_MasterPageMaxCount = 5;
 	}
 
 	// DuelKillEffect / DuelKillPushDistance (CustomConfig.ini): see the header.

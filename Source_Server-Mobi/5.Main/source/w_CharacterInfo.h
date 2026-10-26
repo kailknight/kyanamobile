@@ -207,6 +207,8 @@ public:
 	char		CollisionTime;
 
 	short       GuildMarkIndex;
+	BYTE        DuelRankTier;	// ranked duel icon (C1:D3:C4): tier + 1, 0 = none
+	BYTE        DuelRankDiv;	// 3 = III, 2 = II, 1 = I, 0 = no division
 	SHORT       Key;
 	short   	TargetCharacter;
 

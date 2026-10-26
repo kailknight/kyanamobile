@@ -78,7 +78,19 @@ CServerDisplayer::~CServerDisplayer() // OK
 // because logging is registered in Init(), before the server info load runs.
 static BOOL ReadLogActive(const char* key) // OK
 {
-	return (BOOL)GetPrivateProfileInt("Log Settings",key,1,".\\Data\\GameServerInfo - Common.ini");
+	// The live ini has no [Log Settings] section (its keys sit under [GameServerInfo]),
+	// so a key missing there is looked up in [GameServerInfo] before the default of 1.
+	int fallback = GetPrivateProfileInt("GameServerInfo",key,1,".\\Data\\GameServerInfo - Common.ini");
+
+	return (BOOL)GetPrivateProfileInt("Log Settings",key,fallback,".\\Data\\GameServerInfo - Common.ini");
+}
+
+// Same two-section lookup for the log file policy keys below.
+static int ReadLogValue(const char* key,int value) // OK
+{
+	int fallback = GetPrivateProfileInt("GameServerInfo",key,value,".\\Data\\GameServerInfo - Common.ini");
+
+	return GetPrivateProfileInt("Log Settings",key,fallback,".\\Data\\GameServerInfo - Common.ini");
 }
 
 void CServerDisplayer::Init(HWND hWnd) // OK
@@ -102,6 +114,17 @@ void CServerDisplayer::Init(HWND hWnd) // OK
 	// Order matters and must stay in step with eLogType (Log.h): CLog::Output
 	// indexes m_LogInfo by the enum value, which is just the order these are
 	// registered in.
+	// File policy, also in GameServerInfo - Common.ini ([GameServerInfo] or [Log Settings]):
+	//   LogOverwrite  = 1 (default) one fixed file per category (e.g. LOG\LOG_CHAT\LOG_CHAT.txt),
+	//                   emptied when the day changes and when it reaches LogMaxSizeMB;
+	//                   0 = the old one dated file per day (YYYY-MM-DD.txt), never emptied.
+	//   LogMaxSizeMB  = 50 (default) per file in overwrite mode, 0 = no size limit.
+	//   LogItemDropErrorsOnly = 1 makes LOG_ITEMDROPBAG record only drops that FAILED
+	//                   (default 0 = every dropped item, the biggest log by far).
+	gLog.SetPolicy(ReadLogValue("LogOverwrite",1) != 0,(DWORD)ReadLogValue("LogMaxSizeMB",50));
+
+	gLogItemDropErrorsOnly = ReadLogValue("LogItemDropErrorsOnly",0);
+
 	gLog.AddLog(ReadLogActive("LOG_GENERAL"),        "LOG");
 	gLog.AddLog(ReadLogActive("LOG_CHAT"),           "LOG\\LOG_CHAT");
 	gLog.AddLog(ReadLogActive("LOG_COMMAND"),        "LOG\\LOG_COMMAND");

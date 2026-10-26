@@ -67,6 +67,7 @@
 #include "Map.h"
 #include "MapManager.h"
 #include "MapServerManager.h"
+#include "MasterPage.h"
 #include "MasterSkillTree.h"
 #include "MemoryAllocator.h"
 #include "Message.h"
@@ -902,6 +903,7 @@ void gObjCharZeroSet(int aIndex) // OK
 	lpObj->LoadQuestKillCount = 0;
 	lpObj->QuestKillCountIndex = -1;
 	lpObj->LoadMasterLevel = 0;
+	gMasterPage.Reset(lpObj);
 	lpObj->MasterLevel = 0;
 	lpObj->MasterPoint = 0;
 	lpObj->MasterExperience = 0;
@@ -1073,6 +1075,13 @@ void gObjCharZeroSet(int aIndex) // OK
 	lpObj->SpeedHackCount = 0;
 	lpObj->SpeedHackSkill = 0;
 	lpObj->SpeedHackDialog = 0;
+	memset(lpObj->SkillRateTick,0,sizeof(lpObj->SkillRateTick));
+	lpObj->SkillRatePos = 0;
+	lpObj->SkillRateFilled = 0;
+	lpObj->SkillRateStrikes = 0;
+	lpObj->SkillRateStrikeTick = 0;
+	lpObj->SkillRateLogTick = 0;
+	lpObj->SkillRateLockUntil = 0;
 
 	lpObj->ShopDelay = 0;
 	//======================================================
@@ -2306,6 +2315,10 @@ void gObjSetViewport(int aIndex,int state) // OK
 			}
 		}
 
+	}
+
+	for(int n=0;n < MAX_VIEWPORT_ITEM;n++)
+	{
 		if(lpObj->VpPlayerItem[n].state == state)
 		{
 			switch(state)
@@ -2331,6 +2344,10 @@ void gObjClearViewport(LPOBJ lpObj) // OK
 		lpObj->VpPlayer[n].index = -1;
 		lpObj->VpPlayer2[n].state = VIEWPORT_NONE;
 		lpObj->VpPlayer2[n].index = -1;
+	}
+
+	for(int n=0;n < MAX_VIEWPORT_ITEM;n++)
+	{
 		lpObj->VpPlayerItem[n].state = VIEWPORT_NONE;
 		lpObj->VpPlayerItem[n].index = -1;
 	}
@@ -3952,6 +3969,35 @@ void gObjDelayLifeCheck(int aIndex)
 	}
 }
 
+// Can a knockback carry a character from (fx,fy) onto (tx,ty)? The tile must be
+// on the map and walkable (not safe zone, wall, no-move or the 16 block), and a
+// diagonal step may not cut between two blocked tiles - that squeezed players
+// through wall corners into spots they could not walk out of.
+static bool BackSpringStepOk(BYTE map,int fx,int fy,int tx,int ty)
+{
+	if(tx < 0 || tx > 255 || ty < 0 || ty > 255)
+	{
+		return false;
+	}
+
+	const BYTE mask = 1 | 4 | 8 | 16;
+
+	if((gMap[map].GetAttr(tx,ty) & mask) != 0)
+	{
+		return false;
+	}
+
+	if(tx != fx && ty != fy)
+	{
+		if((gMap[map].GetAttr(tx,fy) & mask) != 0 || (gMap[map].GetAttr(fx,ty) & mask) != 0)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 BOOL gObjBackSpring(LPOBJ lpObj,LPOBJ lpTarget) // OK
 {
 	LPOBJ lpTargetObj = lpTarget;
@@ -4089,12 +4135,7 @@ BOOL gObjBackSpring(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	y += RoadPathTable[1+tdir];
 	attr = gMap[lpObj->Map].GetAttr(x, y);
 
-	if ( (attr&1)==1 ||
-		(attr&2)==2 || 
-		(attr&4)== 4 || 
-		(attr&8)== 8 
-		||(attr&16)== 16 
-		)
+	if ( (attr&2)==2 || BackSpringStepOk(lpObj->Map, lpObj->X, lpObj->Y, x, y) == false )
 	{
 		return FALSE;
 	}
@@ -4124,30 +4165,17 @@ BOOL gObjBackSpring(LPOBJ lpObj,LPOBJ lpTarget) // OK
 
 BOOL BackSpringCheck(int & x, int & y, int & dir, BYTE map)
 {
-	BYTE attr;
 	int tx = x;
 	int ty = y;
-	int tdir = dir/2;
 
 	tx = tx + RoadPathTable[dir];
 	ty = ty + RoadPathTable[1+dir];
 
-	attr = gMap[map].GetAttr(tx, ty);
-
-	if	(  (attr&1)==1 || 
-		(attr&4)== 4 || 
-		(attr&8)== 8
-		||(attr&16)== 16 
-		)
+	// Stop at the last walkable tile. The old code turned the push round instead
+	// (dir + 4) and kept stepping, which bounced the target back toward the
+	// attacker and could still end inside a wall corner.
+	if ( BackSpringStepOk(map, x, y, tx, ty) == false )
 	{
-		tdir += 4;
-		
-		if ( tdir > 7 )
-		{
-			tdir -= 8;
-		}
-		
-		dir = tdir * 2;
 		return FALSE;
 	}
 
@@ -4293,13 +4321,20 @@ BOOL gObjBackSpring2(LPOBJ lpObj, LPOBJ lpTargetObj, int count)
 		{
 			if ( lpObj->Class == 4 || lpObj->Class == 3 || lpObj->Class == 1 )
 			{
-				BackSpringCheck(x, y, tdir, lpObj->Map);
+				if ( BackSpringCheck(x, y, tdir, lpObj->Map) == FALSE ) break;
 			}
 		}
 		else
 		{
-			BackSpringCheck(x, y, tdir, lpObj->Map);
+			if ( BackSpringCheck(x, y, tdir, lpObj->Map) == FALSE ) break;
 		}
+	}
+
+	if ( x == lpObj->X && y == lpObj->Y )
+	{
+		// Nowhere walkable to go: no knockback at all, rather than a position
+		// packet that only resynchronises the client onto its own tile.
+		return FALSE;
 	}
 
 	PMSG_POSITION_RECV pMsg;
@@ -5129,38 +5164,20 @@ bool gObjRebuildMasterSkillTree(LPOBJ lpObj)
 		return 0;
 	}
 
-	for(int n=0;n < MAX_SKILL_LIST;n++)
-	{
-		if(lpObj->Skill[n].IsMasterSkill() != 0)
-		{
-			if(lpObj->Skill[n].m_skill >= 300)
-			{
-				lpObj->Skill[n].Clear();
-				continue;
-			}
+	// Resets the LIVE master page only; parked pages and the unlocked count are
+	// not touched. The lock keeps a save from copying a half reset tree.
+	CMasterPageGuard MasterPageGuard;
 
-			lpObj->Skill[n].m_level = 0;
+	// What the character has earned in total, worked out before anything is cleared.
+	// With pages on, the other pages' budgets are Earned - their own spending, so the
+	// live page must get back exactly Earned (this also covers /setML and level ups).
+	const bool pages = (gMasterPage.IsReady(lpObj) != 0);
 
-			lpObj->Skill[n].m_skill = lpObj->Skill[n].m_skill;
+	const int earned = gMasterPage.GetEarned(lpObj);
 
-			lpObj->Skill[n].m_index = lpObj->Skill[n].m_skill;
+	gMasterSkillTree.RestoreBaseSkills(lpObj);
 
-			lpObj->Skill[n].m_DamageMin = gSkillManager.GetSkillDamage(lpObj->Skill[n].m_skill);
-
-			lpObj->Skill[n].m_DamageMax = lpObj->Skill[n].m_DamageMin+(lpObj->Skill[n].m_DamageMin/2);
-		}
-	}
-
-	#if(GAMESERVER_UPDATE>=602)
-
-	for(int n=0;n < MAX_MASTER_SKILL_LIST;n++)
-	{
-		lpObj->MasterSkill[n].Clear();
-	}
-
-	#endif
-
-	lpObj->MasterPoint = (lpObj->MasterLevel * gServerInfo.m_MasterSkillTreePoint);
+	lpObj->MasterPoint = ((pages != 0) ? earned : (lpObj->MasterLevel * gServerInfo.m_MasterSkillTreePoint));
 
 	#if(GAMESERVER_UPDATE>=602)
 

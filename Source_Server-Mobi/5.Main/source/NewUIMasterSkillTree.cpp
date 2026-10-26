@@ -8,6 +8,7 @@
 #include "NewUISystem.h"
 #include "NewUIMasterSkillTree.h"
 #include "MultiLanguage.h"
+#include "ZzzLodTerrain.h"
 
 void TranslateTemplate(const char* pszEnglish, char* pszOut, size_t cbOut);	// MultiLanguage.cpp
 #include "CharacterManager.h"
@@ -91,6 +92,355 @@ _MASTER_SKILL_TOOLTIP m_stMasterSkillTooltip[MAX_MASTER_SKILL_DATA];
 BOOL  InBounds(int a1, int  a2, int a3)
 {
 	return a1 >= (int)a2 && a1 <= (int)a3;
+}
+
+//**********************************************//
+//************ Master skill pages **************//
+//**********************************************//
+// The server (MasterPage.cpp) keeps up to five pages per character; only the ACTIVE one is
+// live and is what F3:53 describes, so the tree below always shows the live page. Another
+// page is shown as a read-only preview from a D3:C2 snapshot, drawn over the same icons.
+// All page state is file-static: CheckBtn reads window members by raw offset, so no data
+// members are added to the class.
+namespace
+{
+	const int kPgCount = 5;
+	const int kPgNameSize = 13;
+
+	// Strip below the 428 px window (virtual 640x480 space), relative to the window's x.
+	const int kPgStripY = 432;
+	const int kPgRow2Y = 459;
+	const int kPgTabX = 10;
+	const int kPgTabW = 96;
+	const int kPgTabStep = 99;
+	const int kPgTabH = 22;
+	const int kPgRenameX = 508;
+	const int kPgRenameW = 58;
+	const int kPgActivateX = 570;
+	const int kPgActivateW = 60;
+
+	struct MasterPageUi
+	{
+		bool Have;					// a PAGES_INFO arrived: the server knows pages
+		BYTE Active;
+		BYTE Unlocked;
+		BYTE Count;
+		char Names[kPgCount][kPgNameSize];
+		WORD Total;
+		WORD Used[kPgCount];
+		int Viewed;					// 1..5, 0 = the active page
+		bool PreviewValid;			// the snapshot of Viewed has arrived
+		WORD PreviewUsed;
+		std::vector<BYTE> PreviewRaw;	// skill, level pairs as sent
+		std::map<DWORD, BYTE> PreviewPts;	// SkillAttribute index -> points, built against the window's data
+		BYTE PreviewCat[3];
+		int PendingActivate;		// page asked for, 0 = none
+		bool Renaming;
+		int RenamePage;
+		DWORD ToastTick;
+		char Toast[96];
+		DWORD LastRender;
+		DWORD StaleTick;			// F3:53 arrived and the page list was asked for again; 0 = the list is current
+	};
+
+	MasterPageUi g_Pg;
+
+#if !defined(MU_TOUCH_UI)
+	CUITextInputBox* g_PgRenameBox = NULL;
+#endif
+
+#pragma pack(push,1)
+	struct PMSG_MPAGE_REQ_SEND
+	{
+		PSBMSG_HEAD header;		// C1:D3:C0
+	};
+
+	struct PMSG_MPAGE_SELECT_SEND
+	{
+		PSBMSG_HEAD header;		// C1:D3:C1 (view), C1:D3:C3 (activate)
+		BYTE Page;
+	};
+
+	struct PMSG_MPAGE_RENAME_SEND
+	{
+		PSBMSG_HEAD header;		// C1:D3:C4
+		BYTE Page;
+		char Name[kPgNameSize];
+	};
+#pragma pack(pop)
+
+	// The page controls show: a page list is known, and an unanswered refresh is under 3 s old
+	// (a character or server without pages never answers, so its strip goes away).
+	bool PgOn()
+	{
+		if (g_Pg.Have == false)
+		{
+			return false;
+		}
+
+		return (g_Pg.StaleTick == 0 || (GetTickCount() - g_Pg.StaleTick) < 3000);
+	}
+
+	int PgViewed()
+	{
+		if (g_Pg.Viewed >= 1 && g_Pg.Viewed <= g_Pg.Count && g_Pg.Viewed <= kPgCount)
+		{
+			return g_Pg.Viewed;
+		}
+
+		return (g_Pg.Active >= 1 && g_Pg.Active <= kPgCount) ? g_Pg.Active : 1;
+	}
+
+	void PgToast(const char* text)
+	{
+		strncpy(g_Pg.Toast, text, sizeof(g_Pg.Toast) - 1);
+		g_Pg.Toast[sizeof(g_Pg.Toast) - 1] = 0;
+		g_Pg.ToastTick = GetTickCount();
+
+		if (g_Pg.ToastTick == 0)
+		{
+			g_Pg.ToastTick = 1;
+		}
+	}
+
+	void PgSendReq()
+	{
+		PMSG_MPAGE_REQ_SEND pMsg;
+		pMsg.header.set(0xD3, 0xC0, sizeof(pMsg));
+		DataSend((LPBYTE)&pMsg, pMsg.header.size);
+	}
+
+	void PgSendSelect(BYTE sub, int page)
+	{
+		PMSG_MPAGE_SELECT_SEND pMsg;
+		pMsg.header.set(0xD3, sub, sizeof(pMsg));
+		pMsg.Page = (BYTE)page;
+		DataSend((LPBYTE)&pMsg, pMsg.header.size);
+	}
+
+	void PgSendRename(int page, const char* name)
+	{
+		PMSG_MPAGE_RENAME_SEND pMsg;
+		memset(&pMsg, 0, sizeof(pMsg));
+		pMsg.header.set(0xD3, 0xC4, sizeof(pMsg));
+		pMsg.Page = (BYTE)page;
+		strncpy(pMsg.Name, name, kPgNameSize - 1);
+		DataSend((LPBYTE)&pMsg, pMsg.header.size);
+	}
+
+	// The hero stands in a safe zone (the server decides again).
+	bool PgInSafeZone()
+	{
+		if (Hero == NULL)
+		{
+			return false;
+		}
+
+		int index = TERRAIN_INDEX_REPEAT(Hero->PositionX, Hero->PositionY);
+
+		return (TerrainWall[index] & TW_SAFEZONE) == TW_SAFEZONE;
+	}
+
+	void PgRect(int x, int y, int w, int h, float r, float g, float b, float a)
+	{
+		::EnableAlphaTest();
+		::glColor4f(r, g, b, a);
+		RenderColor((float)x, (float)y, (float)w, (float)h);
+		EndRenderColor();
+		::glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	}
+
+	void PgFrame(int x, int y, int w, int h, float r, float g, float b, float a)
+	{
+		PgRect(x, y, w, 1, r, g, b, a);
+		PgRect(x, y + h - 1, w, 1, r, g, b, a);
+		PgRect(x, y, 1, h, r, g, b, a);
+		PgRect(x + w - 1, y, 1, h, r, g, b, a);
+	}
+
+	void PgCancelRename()
+	{
+		const bool wasRenaming = g_Pg.Renaming;
+
+		g_Pg.Renaming = false;
+
+		// Key events only reach a window while the focus is on its related window.
+		if (g_pMasterSkillTreeInterface)
+		{
+			g_pMasterSkillTreeInterface->SetRelatedWnd(NULL);
+		}
+#if !defined(MU_TOUCH_UI)
+		if (g_PgRenameBox)
+		{
+			g_PgRenameBox->SetText("");
+			g_PgRenameBox->SetState(UISTATE_HIDE);
+
+			// Hiding the focused edit control leaves the focus nowhere, and the game
+			// only reads keys while its own window has it.
+			if (wasRenaming)
+			{
+				SetFocus(g_hWnd);
+			}
+		}
+#endif
+	}
+}
+
+// F3:53 is sent at login and after every activation, always BEFORE the page list (D3:C0).
+// Clearing here keeps one character's page list from showing on the next one (or on a
+// server where pages are off). PendingActivate survives: its result follows the list.
+void MasterPagesOnTreeRebuilt()
+{
+	// The tree changed (login, activation, /remaster, and every point spent). Keep the strip,
+	// ask for the page list again (Used changes with every point) and drop it if none comes.
+	g_Pg.StaleTick = GetTickCount() | 1;
+	PgSendReq();
+	g_Pg.Viewed = 0;
+	g_Pg.PreviewValid = false;
+	g_Pg.PreviewPts.clear();
+	memset(g_Pg.PreviewCat, 0, sizeof(g_Pg.PreviewCat));
+
+	PgCancelRename();
+}
+
+void MasterPagesRecvInfo(const BYTE* data, int size)
+{
+	// C1:D3:C0, 84 bytes: Active, Unlocked, Count, Names[5][13], Total, Used[5]
+	if (size < 84 || data[0] != 0xC1)
+	{
+		return;
+	}
+
+	g_Pg.Active = data[4];
+	g_Pg.Unlocked = data[5];
+	g_Pg.Count = data[6];
+
+	if (g_Pg.Count < 1 || g_Pg.Count > kPgCount || g_Pg.Active < 1 || g_Pg.Active > kPgCount)
+	{
+		return;
+	}
+
+	if (g_Pg.Unlocked < 1 || g_Pg.Unlocked > g_Pg.Count)
+	{
+		g_Pg.Unlocked = 1;
+	}
+
+	for (int n = 0; n < kPgCount; n++)
+	{
+		memcpy(g_Pg.Names[n], &data[7 + (n * kPgNameSize)], kPgNameSize);
+		g_Pg.Names[n][kPgNameSize - 1] = 0;
+	}
+
+	g_Pg.Total = (WORD)(data[72] | (data[73] << 8));
+
+	for (int n = 0; n < kPgCount; n++)
+	{
+		g_Pg.Used[n] = (WORD)(data[74 + (n * 2)] | (data[75 + (n * 2)] << 8));
+	}
+
+	g_Pg.Have = true;
+	g_Pg.StaleTick = 0;
+
+	if (g_Pg.Viewed < 1 || g_Pg.Viewed > g_Pg.Unlocked)
+	{
+		g_Pg.Viewed = g_Pg.Active;
+	}
+
+	if (g_Pg.Viewed == g_Pg.Active)
+	{
+		g_Pg.PreviewValid = false;
+	}
+}
+
+void MasterPagesRecvSnapshot(const BYTE* data, int size)
+{
+	// C1:D3:C2: Page, Used (WORD), Count, then Count x { skill, level }
+	if (size < 8 || data[0] != 0xC1)
+	{
+		return;
+	}
+
+	const int page = data[4];
+	const int count = data[7];
+
+	if (count > MAX_MASTER_SKILL_DATA || size < (8 + (count * 2)))
+	{
+		return;
+	}
+
+	// An answer for a page that is no longer the one on screen is stale.
+	if (page != PgViewed() || page == g_Pg.Active)
+	{
+		return;
+	}
+
+	g_Pg.PreviewUsed = (WORD)(data[5] | (data[6] << 8));
+	g_Pg.PreviewRaw.assign(&data[8], &data[8] + (count * 2));
+	g_Pg.PreviewValid = true;
+
+#if(NEW_MASTER_SKILL_TREE == 1)
+	if (g_pMasterSkillTreeInterface)
+	{
+		g_pMasterSkillTreeInterface->BuildPagePreview();
+	}
+#endif
+}
+
+void MasterPagesRecvResult(const BYTE* data, int size)
+{
+	// C1:D3:C3: Code, P1
+	if (size < 6 || data[0] != 0xC1)
+	{
+		return;
+	}
+
+	const int code = data[4];
+	const int p1 = data[5];
+	char text[96];
+
+	const int pending = g_Pg.PendingActivate;
+
+	g_Pg.PendingActivate = 0;
+
+	switch (code)
+	{
+	case 0:
+		if (pending != 0)
+		{
+			// PAGES_INFO (already handled) says which page is live now; F3:53 rebuilt the tree.
+			g_Pg.Viewed = g_Pg.Active;
+			g_Pg.PreviewValid = false;
+			sprintf(text, "Master page %d activated.", (int)g_Pg.Active);
+			PgToast(text);
+		}
+		else
+		{
+			PgToast("Page renamed.");
+		}
+		return;
+	case 1:
+		PgToast("Switching pages needs a safe zone.");
+		return;
+	case 2:
+		PgToast("That page is locked. Use a Master Page Scroll.");
+		return;
+	case 3:
+		PgToast("That page is already active.");
+		return;
+	case 4:
+		sprintf(text, "Wait %d s before switching again.", p1);
+		PgToast(text);
+		return;
+	case 5:
+		PgToast("Close other windows and finish duels or events first.");
+		return;
+	case 6:
+		PgToast("Names: 1-12 letters, numbers, space, - or _.");
+		return;
+	default:
+		PgToast("Master pages are not available right now.");
+		return;
+	}
 }
 
 SEASON3B::CNewUIMasterSkillTree::CNewUIMasterSkillTree()
@@ -563,6 +913,28 @@ bool SEASON3B::CNewUIMasterSkillTree::Render()
 	s_LastRenderTick = renderNow;
 #endif
 
+	// Render only runs while the window is open: a gap means it was just opened, so look at
+	// the live page again and ask the server for the page list.
+	{
+		const DWORD pageNow = GetTickCount();
+
+		if ((pageNow - g_Pg.LastRender) > 500)
+		{
+			g_Pg.Viewed = 0;
+			g_Pg.PreviewValid = false;
+			g_Pg.PendingActivate = 0;
+			PgCancelRename();
+			PgSendReq();
+
+			if (PgOn())
+			{
+				g_Pg.Viewed = g_Pg.Active;
+			}
+		}
+
+		g_Pg.LastRender = pageNow;
+	}
+
 	EnableAlphaTest();
 
 	glColor4f(1.0, 1.0, 1.0, 1.0);
@@ -580,11 +952,346 @@ bool SEASON3B::CNewUIMasterSkillTree::Render()
 
 	this->RenderText();
 
+	this->RenderPageStrip();
+
+	DisableAlphaBlend();
+
 	return true;
+}
+
+bool SEASON3B::CNewUIMasterSkillTree::IsPagePreview()
+{
+	return (PgOn() && PgViewed() != (int)g_Pg.Active);
+}
+
+// Turns the snapshot (tree index + points) into the same per-skill lookup the window uses
+// for the live page, so RenderIcon can draw either one.
+void SEASON3B::CNewUIMasterSkillTree::BuildPagePreview()
+{
+	g_Pg.PreviewPts.clear();
+
+	memset(g_Pg.PreviewCat, 0, sizeof(g_Pg.PreviewCat));
+
+	for (size_t n = 0; (n + 1) < g_Pg.PreviewRaw.size(); n += 2)
+	{
+		std::map<BYTE, _MASTER_SKILLTREE_DATA>::iterator it = this->map_masterData.find(g_Pg.PreviewRaw[n]);
+
+		if (it == this->map_masterData.end())
+		{
+			continue;
+		}
+
+		g_Pg.PreviewPts[it->second.Skill] = g_Pg.PreviewRaw[n + 1];
+
+		if (it->second.Group < MAX_MASTER_SKILL_CATEGORY)
+		{
+			g_Pg.PreviewCat[it->second.Group] += g_Pg.PreviewRaw[n + 1];
+		}
+	}
+}
+
+// Mouse on the page strip below the window. True = the event was used.
+bool SEASON3B::CNewUIMasterSkillTree::UpdatePageStrip()
+{
+	if (PgOn() == false)
+	{
+		return false;
+	}
+
+	const int x0 = this->PosX;
+
+	if (SEASON3B::CheckMouseIn(x0, kPgStripY - 2, 640, 50) == false)
+	{
+		return false;
+	}
+
+	if (SEASON3B::IsPress(VK_LBUTTON) == false)
+	{
+		return true;
+	}
+
+	const int viewed = PgViewed();
+
+#if !defined(MU_TOUCH_UI)
+	if (g_Pg.Renaming)
+	{
+		// OK and Cancel sit on the second row, next to the text box.
+		if (SEASON3B::CheckMouseIn(x0 + 270, kPgRow2Y - 2, 40, 18))
+		{
+			PlayBuffer(SOUND_CLICK01);
+
+			char name[kPgNameSize];
+
+			memset(name, 0, sizeof(name));
+
+			if (g_PgRenameBox)
+			{
+				g_PgRenameBox->GetText(name, kPgNameSize);
+			}
+
+			name[kPgNameSize - 1] = 0;
+
+			if (name[0] != 0)
+			{
+				PgSendRename(g_Pg.RenamePage, name);
+			}
+
+			PgCancelRename();
+
+			return true;
+		}
+
+		if (SEASON3B::CheckMouseIn(x0 + 314, kPgRow2Y - 2, 56, 18))
+		{
+			PlayBuffer(SOUND_CLICK01);
+
+			PgCancelRename();
+
+			return true;
+		}
+
+		return true;
+	}
+#endif
+
+	for (int n = 0; n < kPgCount; n++)
+	{
+		if (SEASON3B::CheckMouseIn(x0 + kPgTabX + (n * kPgTabStep), kPgStripY, kPgTabW, kPgTabH) == false)
+		{
+			continue;
+		}
+
+		PlayBuffer(SOUND_CLICK01);
+
+		if ((n + 1) > g_Pg.Unlocked || (n + 1) > g_Pg.Count)
+		{
+			PgToast("Locked - use a Master Page Scroll.");
+		}
+		else if ((n + 1) != viewed)
+		{
+			g_Pg.Viewed = n + 1;
+			g_Pg.PreviewValid = false;
+			g_Pg.PreviewPts.clear();
+			memset(g_Pg.PreviewCat, 0, sizeof(g_Pg.PreviewCat));
+
+			if ((n + 1) != g_Pg.Active)
+			{
+				PgSendSelect(0xC1, n + 1);
+			}
+		}
+
+		return true;
+	}
+
+#if !defined(MU_TOUCH_UI)
+	if (SEASON3B::CheckMouseIn(x0 + kPgRenameX, kPgStripY, kPgRenameW, kPgTabH))
+	{
+		PlayBuffer(SOUND_CLICK01);
+
+		g_Pg.Renaming = true;
+		g_Pg.RenamePage = viewed;
+
+		if (g_PgRenameBox == NULL)
+		{
+			g_PgRenameBox = new CUITextInputBox;
+			g_PgRenameBox->Init(g_hWnd, 150, 16, kPgNameSize - 1);
+			g_PgRenameBox->SetBackColor(255, 25, 25, 25);
+			g_PgRenameBox->SetTextColor(255, 255, 255, 255);
+			g_PgRenameBox->SetFont((HFONT)g_hFont);
+		}
+
+		g_PgRenameBox->SetState(UISTATE_NORMAL);
+		g_PgRenameBox->SetText(g_Pg.Names[viewed - 1]);
+		g_PgRenameBox->SetPosition(x0 + 110, kPgRow2Y - 1);
+		g_PgRenameBox->GiveFocus(1);
+
+		this->SetRelatedWnd(g_PgRenameBox->GetHandle());
+
+		return true;
+	}
+#endif
+
+	if (SEASON3B::CheckMouseIn(x0 + kPgActivateX, kPgStripY, kPgActivateW, kPgTabH))
+	{
+		PlayBuffer(SOUND_CLICK01);
+
+		if (viewed == (int)g_Pg.Active)
+		{
+			PgToast("That page is already active.");
+		}
+		else if (PgInSafeZone() == false)
+		{
+			PgToast("Switching pages needs a safe zone.");
+		}
+		else
+		{
+			g_Pg.PendingActivate = viewed;
+
+			PgSendSelect(0xC3, viewed);
+		}
+
+		return true;
+	}
+
+	return true;
+}
+
+void SEASON3B::CNewUIMasterSkillTree::RenderPageStrip()
+{
+	if (PgOn() == false)
+	{
+		return;
+	}
+
+	const int x0 = this->PosX;
+	const int viewed = PgViewed();
+	const bool preview = (viewed != (int)g_Pg.Active);
+
+	PgRect(x0 + 4, kPgStripY - 3, 632, 49, 0.0f, 0.0f, 0.0f, 0.75f);
+
+	g_pRenderText->SetFont(g_hFont);
+	g_pRenderText->SetBgColor(0, 0, 0, 0);
+
+	for (int n = 0; n < kPgCount; n++)
+	{
+		const int x = x0 + kPgTabX + (n * kPgTabStep);
+		const bool locked = ((n + 1) > g_Pg.Unlocked || (n + 1) > g_Pg.Count);
+		const bool isActive = ((n + 1) == (int)g_Pg.Active);
+		const bool isViewed = ((n + 1) == viewed);
+		const bool hover = SEASON3B::CheckMouseIn(x, kPgStripY, kPgTabW, kPgTabH);
+
+		if (locked)
+		{
+			PgRect(x, kPgStripY, kPgTabW, kPgTabH, 0.12f, 0.12f, 0.12f, 0.9f);
+		}
+		else if (isViewed)
+		{
+			PgRect(x, kPgStripY, kPgTabW, kPgTabH, 0.38f, 0.30f, 0.08f, 0.95f);
+		}
+		else
+		{
+			PgRect(x, kPgStripY, kPgTabW, kPgTabH, hover ? 0.30f : 0.20f, hover ? 0.30f : 0.20f, hover ? 0.30f : 0.20f, 0.95f);
+		}
+
+		if (isActive && locked == false)
+		{
+			PgFrame(x, kPgStripY, kPgTabW, kPgTabH, 1.0f, 0.82f, 0.15f, 1.0f);
+		}
+		else
+		{
+			PgFrame(x, kPgStripY, kPgTabW, kPgTabH, 0.45f, 0.45f, 0.45f, 0.8f);
+		}
+
+		char label[40];
+
+		if (locked)
+		{
+			sprintf(label, "%s (locked)", g_Pg.Names[n]);
+			g_pRenderText->SetTextColor(110, 110, 110, 255);
+		}
+		else
+		{
+			sprintf(label, "%s", g_Pg.Names[n]);
+			g_pRenderText->SetTextColor(isViewed ? 255 : 210, isViewed ? 230 : 210, isViewed ? 150 : 210, 255);
+		}
+
+		g_pRenderText->RenderText(x, kPgStripY + 6, label, kPgTabW, 0, RT3_SORT_CENTER);
+	}
+
+	// Rename and Activate.
+#if !defined(MU_TOUCH_UI)
+	{
+		const int x = x0 + kPgRenameX;
+		const bool hover = SEASON3B::CheckMouseIn(x, kPgStripY, kPgRenameW, kPgTabH);
+
+		PgRect(x, kPgStripY, kPgRenameW, kPgTabH, hover ? 0.30f : 0.20f, hover ? 0.30f : 0.20f, hover ? 0.30f : 0.20f, 0.95f);
+		PgFrame(x, kPgStripY, kPgRenameW, kPgTabH, 0.45f, 0.45f, 0.45f, 0.8f);
+		g_pRenderText->SetTextColor(230, 230, 230, 255);
+		g_pRenderText->RenderText(x, kPgStripY + 6, "Rename", kPgRenameW, 0, RT3_SORT_CENTER);
+	}
+#endif
+
+	{
+		const int x = x0 + kPgActivateX;
+		const bool canActivate = (preview && PgInSafeZone());
+		const bool hover = canActivate && SEASON3B::CheckMouseIn(x, kPgStripY, kPgActivateW, kPgTabH);
+
+		PgRect(x, kPgStripY, kPgActivateW, kPgTabH, canActivate ? (hover ? 0.55f : 0.40f) : 0.15f, canActivate ? (hover ? 0.42f : 0.30f) : 0.15f, canActivate ? 0.08f : 0.15f, 0.95f);
+		PgFrame(x, kPgStripY, kPgActivateW, kPgTabH, canActivate ? 1.0f : 0.4f, canActivate ? 0.82f : 0.4f, canActivate ? 0.15f : 0.4f, 0.9f);
+
+		if (canActivate)
+		{
+			g_pRenderText->SetTextColor(255, 235, 160, 255);
+		}
+		else
+		{
+			g_pRenderText->SetTextColor(120, 120, 120, 255);
+		}
+
+		g_pRenderText->RenderText(x, kPgStripY + 6, "Activate", kPgActivateW, 0, RT3_SORT_CENTER);
+	}
+
+	// Second row: points of the viewed page, then what the page is, or the last message.
+	char text[128];
+
+	g_pRenderText->SetTextColor(255, 155, 0, 255);
+
+	sprintf(text, "Used %d / %d", (int)g_Pg.Used[viewed - 1], (int)g_Pg.Total);
+
+	g_pRenderText->RenderText(x0 + 14, kPgRow2Y, text, 0, 0, RT3_SORT_LEFT);
+
+#if !defined(MU_TOUCH_UI)
+	if (g_Pg.Renaming)
+	{
+		if (g_PgRenameBox)
+		{
+			g_PgRenameBox->SetPosition(x0 + 110, kPgRow2Y - 1);
+			g_PgRenameBox->Render();
+		}
+
+		PgRect(x0 + 270, kPgRow2Y - 2, 40, 18, 0.20f, 0.30f, 0.20f, 0.95f);
+		PgRect(x0 + 314, kPgRow2Y - 2, 56, 18, 0.30f, 0.20f, 0.20f, 0.95f);
+		g_pRenderText->SetTextColor(230, 230, 230, 255);
+		g_pRenderText->RenderText(x0 + 270, kPgRow2Y + 1, "OK", 40, 0, RT3_SORT_CENTER);
+		g_pRenderText->RenderText(x0 + 314, kPgRow2Y + 1, "Cancel", 56, 0, RT3_SORT_CENTER);
+		g_pRenderText->RenderText(x0 + 380, kPgRow2Y, "Enter to confirm, Esc to cancel", 0, 0, RT3_SORT_LEFT);
+
+		return;
+	}
+#endif
+
+	if (g_Pg.ToastTick != 0 && (GetTickCount() - g_Pg.ToastTick) < 4000)
+	{
+		g_pRenderText->SetTextColor(255, 220, 90, 255);
+		g_pRenderText->RenderText(x0 + 150, kPgRow2Y, g_Pg.Toast, 0, 0, RT3_SORT_LEFT);
+	}
+	else if (preview)
+	{
+		g_pRenderText->SetTextColor(150, 200, 255, 255);
+
+		if (g_Pg.PreviewValid)
+		{
+			g_pRenderText->RenderText(x0 + 150, kPgRow2Y, "Preview only - activate this page in a safe zone to use it.", 0, 0, RT3_SORT_LEFT);
+		}
+		else
+		{
+			g_pRenderText->RenderText(x0 + 150, kPgRow2Y, "Loading page...", 0, 0, RT3_SORT_LEFT);
+		}
+	}
+	else
+	{
+		g_pRenderText->SetTextColor(255, 210, 40, 255);
+		g_pRenderText->RenderText(x0 + 150, kPgRow2Y, "ACTIVE page", 0, 0, RT3_SORT_LEFT);
+	}
 }
 
 bool SEASON3B::CNewUIMasterSkillTree::Update()
 {
+	if (g_Pg.Renaming && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL) == false)
+	{
+		PgCancelRename();
+	}
+
 	return 1;
 }
 
@@ -609,6 +1316,8 @@ bool SEASON3B::CNewUIMasterSkillTree::UpdateMouseEvent()
 
 	if (this->m_CloseBT.UpdateMouseEvent() == true)
 	{
+		PgCancelRename();
+
 		g_pNewUISystem->Hide(SEASON3B::INTERFACE_MASTER_LEVEL);
 
 		return true;
@@ -622,6 +1331,12 @@ bool SEASON3B::CNewUIMasterSkillTree::UpdateMouseEvent()
 	//	SendChat(szCmd);
 	//	return true;
 	//}
+
+	// The page strip sits under the window, outside its rectangle.
+	if (this->UpdatePageStrip() == true)
+	{
+		return false;
+	}
 
 	bool result = true;
 
@@ -657,6 +1372,46 @@ bool SEASON3B::CNewUIMasterSkillTree::UpdateMouseEvent()
 
 bool SEASON3B::CNewUIMasterSkillTree::UpdateKeyEvent()
 {
+#if !defined(MU_TOUCH_UI)
+	// Typing a page name: Enter confirms, Esc cancels, and no letter (A closes this window)
+	// reaches the window hotkeys.
+	if (g_Pg.Renaming && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL) == false)
+	{
+		// Closed while typing (X, or another window took over): put the text box away.
+		PgCancelRename();
+	}
+
+	if (g_Pg.Renaming && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL))
+	{
+		if (SEASON3B::IsPress(VK_RETURN))
+		{
+			char name[kPgNameSize];
+
+			memset(name, 0, sizeof(name));
+
+			if (g_PgRenameBox)
+			{
+				g_PgRenameBox->GetText(name, kPgNameSize);
+			}
+
+			name[kPgNameSize - 1] = 0;
+
+			if (name[0] != 0)
+			{
+				PgSendRename(g_Pg.RenamePage, name);
+			}
+
+			PgCancelRename();
+		}
+		else if (SEASON3B::IsPress(VK_ESCAPE))
+		{
+			PgCancelRename();
+		}
+
+		return false;
+	}
+#endif
+
 	if (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_MASTER_LEVEL) == false || SEASON3B::IsPress(VK_ESCAPE) == false && SEASON3B::IsPress('A') == false)
 	{
 		return true;
@@ -742,7 +1497,21 @@ void SEASON3B::CNewUIMasterSkillTree::RenderText()
 
 	g_pRenderText->RenderText(275 + DisplayWinExt, 11, Buffer, 0, 0, 1, 0);
 
-	sprintf(Buffer, GlobalText[1747], Master_Level_Data.nMLevelUpMPoint);
+	// A previewed page shows what is left on THAT page; the live page shows the live points.
+	const bool pagePreview = this->IsPagePreview();
+	const BYTE* categoryShown = (pagePreview ? g_Pg.PreviewCat : this->CategoryPoint);
+
+	{
+		int pointsShown = Master_Level_Data.nMLevelUpMPoint;
+
+		if (pagePreview)
+		{
+			pointsShown = (int)g_Pg.Total - (int)g_Pg.Used[PgViewed() - 1];
+			pointsShown = (pointsShown < 0) ? 0 : pointsShown;
+		}
+
+		sprintf(Buffer, GlobalText[1747], pointsShown);
+	}
 
 	g_pRenderText->RenderText(372 + DisplayWinExt, 11, Buffer, 0, 0, 1, 0);
 
@@ -788,15 +1557,15 @@ void SEASON3B::CNewUIMasterSkillTree::RenderText()
 
 	g_pRenderText->SetTextColor(255, 155, 0, 0xFFu);
 
-	sprintf(Buffer, GlobalText[this->CategoryTextIndex], this->CategoryPoint[0]);
+	sprintf(Buffer, GlobalText[this->CategoryTextIndex], categoryShown[0]);
 
 	g_pRenderText->RenderText(92 + DisplayWinExt, 40, Buffer, 0, 0, 1, 0);
 
-	sprintf(Buffer, GlobalText[this->CategoryTextIndex + 1], this->CategoryPoint[1]);
+	sprintf(Buffer, GlobalText[this->CategoryTextIndex + 1], categoryShown[1]);
 
 	g_pRenderText->RenderText(302 + DisplayWinExt, 40, Buffer, 0, 0, 1, 0);
 
-	sprintf(Buffer, GlobalText[this->CategoryTextIndex + 2], this->CategoryPoint[2]);
+	sprintf(Buffer, GlobalText[this->CategoryTextIndex + 2], categoryShown[2]);
 
 	g_pRenderText->RenderText(513 + DisplayWinExt, 40, Buffer, 0, 0, 1, 0);
 }
@@ -827,7 +1596,10 @@ void SEASON3B::CNewUIMasterSkillTree::RenderIcon()
 	float v32; // [esp+78h] [ebp-138h]
 	char Buffer[256];
 	int recommendedPoints = 0;
-	const int recommended = this->FindRecommendedSkill(&recommendedPoints);
+	// Another page than the live one: its points come from the snapshot, nothing is
+	// recommended and nothing can be bought.
+	const bool pagePreview = this->IsPagePreview();
+	const int recommended = (pagePreview ? -1 : this->FindRecommendedSkill(&recommendedPoints));
 	for (std::map<BYTE, _MASTER_SKILLTREE_DATA>::iterator it = this->map_masterData.begin(); it != this->map_masterData.end(); it++)
 	{
 		BYTE Group = it->second.Group;
@@ -844,18 +1616,27 @@ void SEASON3B::CNewUIMasterSkillTree::RenderIcon()
 
 		std::map<DWORD, CSkillTreeInfo>::iterator sit = this->map_skilltreeinfo.find(Skill);
 
-		if (sit != this->map_skilltreeinfo.end())
+		if (pagePreview)
+		{
+			std::map<DWORD, BYTE>::iterator pit = g_Pg.PreviewPts.find(Skill);
+
+			if (pit != g_Pg.PreviewPts.end())
+			{
+				skillPoint = pit->second;
+			}
+		}
+		else if (sit != this->map_skilltreeinfo.end())
 		{
 			skillPoint = sit->second.GetSkillPoint();
 		}
-		
+
 		DWORD textColor = RGBA(255, 255, 255, 255);
 		::EnableAlphaTest();
 		::glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 		g_pRenderText->SetBgColor(0);
 		g_pRenderText->SetTextColor(textColor);
 
-		if (this->CheckParentSkill(it->second.RequireSkill[0], it->second.RequireSkill[1]) == false || this->CheckRankPoint(Group, rank, skillPoint) == false || this->CheckBeforeSkill(Skill, skillPoint) == false || this->CheckBeforeSkill(Skill, skillPoint) == false)
+		if (pagePreview ? (skillPoint == 0) : (this->CheckParentSkill(it->second.RequireSkill[0], it->second.RequireSkill[1]) == false || this->CheckRankPoint(Group, rank, skillPoint) == false || this->CheckBeforeSkill(Skill, skillPoint) == false || this->CheckBeforeSkill(Skill, skillPoint) == false))
 		{
 			textColor = RGBA(120, 120, 120, 255);
 
@@ -978,6 +1759,12 @@ void SEASON3B::CNewUIMasterSkillTree::RenderIcon()
 
 void SEASON3B::CNewUIMasterSkillTree::RenderToolTip()
 {
+	// The effect numbers belong to the live skills; another page is only previewed.
+	if (this->IsPagePreview())
+	{
+		return;
+	}
+
 	for (std::map<BYTE, _MASTER_SKILLTREE_DATA>::iterator it = this->map_masterData.begin(); it != this->map_masterData.end(); it++)
 	{
 		BYTE group = it->second.Group;
@@ -1291,6 +2078,16 @@ bool SEASON3B::CNewUIMasterSkillTree::CheckAttributeArea(int group, int index, i
 
 	if (SEASON3B::IsPress(1) && SEASON3B::CheckMouseIn(posX + 8, posY + 5, 20, 28))
 	{
+		// Points are only spent on the live page.
+		if (this->IsPagePreview())
+		{
+			PlayBuffer(SOUND_CLICK01);
+
+			PgToast("Preview only - activate this page to spend points.");
+
+			return 1;
+		}
+
 #if defined(MU_TOUCH_UI)
 		// No hover on a touch screen, so a tap used to add a point straight
 		// away with no way to read the skill first. First tap: select it and

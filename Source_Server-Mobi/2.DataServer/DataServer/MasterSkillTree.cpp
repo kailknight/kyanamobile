@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "MasterSkillTree.h"
 #include "QueryManager.h"
+#include "Util.h"
 #include "SocketManager.h"
 #include <algorithm>
 #include <map>
@@ -109,6 +110,299 @@ void CMasterSkillTree::GDMasterSkillTreeSaveRecv(SDHP_MASTER_SKILL_TREE_SAVE_REC
 	}
 
 	#endif
+}
+
+//**********************************************//
+//************* Master skill pages *************//
+//**********************************************//
+
+// Page names that reach SQL are bound parameters, never part of the query text.
+// A blob is the same 3 byte format as MasterSkillTree.MasterSkill (FF 00 FF = empty).
+static void MasterPageFillDefault(SDHP_MASTER_PAGE_DATA* lpPage,int page) // OK
+{
+	memset(lpPage,0,sizeof(SDHP_MASTER_PAGE_DATA));
+
+	sprintf_s(lpPage->PageName,sizeof(lpPage->PageName),"Page %d",page);
+
+	for(int n=0;n < MAX_MASTER_SKILL_LIST;n++)
+	{
+		lpPage->Skill[(n*3)+0] = 0xFF;
+		lpPage->Skill[(n*3)+1] = 0x00;
+		lpPage->Skill[(n*3)+2] = 0xFF;
+	}
+}
+
+void CMasterSkillTree::GDMasterPagesRecv(SDHP_MASTER_PAGES_REQ_RECV* lpMsg,int index) // OK
+{
+	SDHP_MASTER_PAGES_SEND pMsg;
+
+	memset(&pMsg,0,sizeof(pMsg));
+
+	pMsg.header.set(0x0D,0x01,sizeof(pMsg));
+
+	pMsg.index = lpMsg->index;
+
+	memcpy(pMsg.account,lpMsg->account,sizeof(pMsg.account));
+
+	memcpy(pMsg.name,lpMsg->name,sizeof(pMsg.name));
+
+	pMsg.name[sizeof(pMsg.name)-1] = 0;
+
+	pMsg.Active = 1;
+
+	pMsg.Unlocked = 1;
+
+	for(int n=0;n < MASTER_PAGE_COUNT;n++)
+	{
+		MasterPageFillDefault(&pMsg.Page[n],(n+1));
+	}
+
+	if(CheckTextSyntax(pMsg.name,sizeof(pMsg.name)) == 0)
+	{
+		return;
+	}
+
+	// The info row. Failing to ask at all (the table is missing) is NOT the same
+	// as having no row: it stays unanswered, so the GameServer keeps pages off for
+	// this session instead of loading defaults it would later save over real data.
+	bool asked = 0;
+
+	gQueryManager.BindParameterAsString(1,pMsg.name,sizeof(pMsg.name));
+
+	if(gQueryManager.ExecQuery("SELECT ActivePage,UnlockedPages FROM MasterSkillPageInfo WHERE Name=?") != 0)
+	{
+		asked = 1;
+
+		if(gQueryManager.Fetch() != SQL_NO_DATA)
+		{
+			pMsg.Active = (BYTE)gQueryManager.GetAsInteger("ActivePage");
+
+			pMsg.Unlocked = (BYTE)gQueryManager.GetAsInteger("UnlockedPages");
+		}
+	}
+
+	gQueryManager.Close();
+
+	if(asked == 0)
+	{
+		LogAdd(LOG_RED,"[MasterPage] %s: MasterSkillPageInfo could not be read (run MasterSkillPage_Schema.sql), pages stay off",pMsg.name);
+		return;
+	}
+
+	if(pMsg.Unlocked < 1 || pMsg.Unlocked > MASTER_PAGE_COUNT)
+	{
+		pMsg.Unlocked = 1;
+	}
+
+	if(pMsg.Active < 1 || pMsg.Active > pMsg.Unlocked)
+	{
+		pMsg.Active = 1;
+	}
+
+	gQueryManager.BindParameterAsString(1,pMsg.name,sizeof(pMsg.name));
+
+	if(gQueryManager.ExecQuery("SELECT Page,PageName,MasterSkill FROM MasterSkillPage WHERE Name=?") == 0)
+	{
+		gQueryManager.Close();
+
+		LogAdd(LOG_RED,"[MasterPage] %s: MasterSkillPage could not be read, pages stay off",pMsg.name);
+		return;
+	}
+
+	while(gQueryManager.Fetch() != SQL_NO_DATA)
+	{
+		const int page = gQueryManager.GetAsInteger("Page");
+
+		if(page < 1 || page > MASTER_PAGE_COUNT)
+		{
+			continue;
+		}
+
+		SDHP_MASTER_PAGE_DATA* lpPage = &pMsg.Page[(page-1)];
+
+		char PageName[MASTER_PAGE_NAME_SIZE] = {0};
+
+		gQueryManager.GetAsString("PageName",PageName,sizeof(PageName));
+
+		if(PageName[0] != 0)
+		{
+			memcpy(lpPage->PageName,PageName,sizeof(lpPage->PageName));
+		}
+
+		BYTE Skill[MASTER_PAGE_BLOB_SIZE];
+
+		memset(Skill,0xFF,sizeof(Skill));
+
+		gQueryManager.GetAsBinary("MasterSkill",Skill,sizeof(Skill));
+
+		memcpy(lpPage->Skill,Skill,sizeof(lpPage->Skill));
+	}
+
+	gQueryManager.Close();
+
+	gSocketManager.DataSend(index,(BYTE*)&pMsg,sizeof(pMsg));
+}
+
+void CMasterSkillTree::GDMasterPagesSaveRecv(SDHP_MASTER_PAGES_SAVE_RECV* lpMsg,int size) // OK
+{
+	if(size != (int)sizeof(SDHP_MASTER_PAGES_SAVE_RECV))
+	{
+		LogAdd(LOG_RED,"[MasterPage] Bad save packet size %d (want %d)",size,(int)sizeof(SDHP_MASTER_PAGES_SAVE_RECV));
+		return;
+	}
+
+	lpMsg->name[sizeof(lpMsg->name)-1] = 0;
+
+	if(lpMsg->name[0] == 0 || CheckTextSyntax(lpMsg->name,sizeof(lpMsg->name)) == 0)
+	{
+		return;
+	}
+
+	int unlocked = lpMsg->Unlocked;
+
+	unlocked = ((unlocked < 1) ? 1 : ((unlocked > MASTER_PAGE_COUNT) ? MASTER_PAGE_COUNT : unlocked));
+
+	int active = lpMsg->Active;
+
+	active = (((active < 1) || (active > unlocked)) ? 1 : active);
+
+	// Upsert the info row. UPDATE first, INSERT when nothing matched.
+	gQueryManager.BindParameterAsString(1,lpMsg->name,sizeof(lpMsg->name));
+
+	gQueryManager.ExecQuery("UPDATE MasterSkillPageInfo SET ActivePage=%d,UnlockedPages=%d WHERE Name=?",active,unlocked);
+
+	gQueryManager.Close();
+
+	gQueryManager.BindParameterAsString(1,lpMsg->name,sizeof(lpMsg->name));
+
+	gQueryManager.BindParameterAsString(2,lpMsg->name,sizeof(lpMsg->name));
+
+	gQueryManager.ExecQuery("INSERT INTO MasterSkillPageInfo (Name,ActivePage,UnlockedPages) SELECT ?,%d,%d WHERE NOT EXISTS (SELECT 1 FROM MasterSkillPageInfo WHERE Name=?)",active,unlocked);
+
+	gQueryManager.Close();
+
+	for(int n=0;n < MASTER_PAGE_COUNT;n++)
+	{
+		char PageName[MASTER_PAGE_NAME_SIZE];
+
+		memcpy(PageName,lpMsg->Page[n].PageName,sizeof(PageName));
+
+		PageName[sizeof(PageName)-1] = 0;
+
+		gQueryManager.BindParameterAsString(1,PageName,sizeof(PageName));
+
+		gQueryManager.BindParameterAsBinary(2,lpMsg->Page[n].Skill,sizeof(lpMsg->Page[n].Skill));
+
+		gQueryManager.BindParameterAsString(3,lpMsg->name,sizeof(lpMsg->name));
+
+		gQueryManager.ExecQuery("UPDATE MasterSkillPage SET PageName=?,MasterSkill=? WHERE Name=? AND Page=%d",(n+1));
+
+		gQueryManager.Close();
+
+		gQueryManager.BindParameterAsString(1,lpMsg->name,sizeof(lpMsg->name));
+
+		gQueryManager.BindParameterAsString(2,PageName,sizeof(PageName));
+
+		gQueryManager.BindParameterAsBinary(3,lpMsg->Page[n].Skill,sizeof(lpMsg->Page[n].Skill));
+
+		gQueryManager.BindParameterAsString(4,lpMsg->name,sizeof(lpMsg->name));
+
+		gQueryManager.ExecQuery("INSERT INTO MasterSkillPage (Name,Page,PageName,MasterSkill) SELECT ?,%d,?,? WHERE NOT EXISTS (SELECT 1 FROM MasterSkillPage WHERE Name=? AND Page=%d)",(n+1),(n+1));
+
+		gQueryManager.Close();
+	}
+}
+
+// Drops both page tables' rows of a character name. Called when a character is deleted and
+// again when one is created, so rows left by an earlier delete never reach a new owner.
+void CMasterSkillTree::PagesDelete(const char* name) // OK
+{
+	char nm[11];
+
+	memset(nm,0,sizeof(nm));
+
+	strncpy_s(nm,sizeof(nm),name,(sizeof(nm)-1));
+
+	if(nm[0] == 0 || CheckTextSyntax(nm,sizeof(nm)) == 0)
+	{
+		return;
+	}
+
+	gQueryManager.BindParameterAsString(1,nm,sizeof(nm));
+
+	gQueryManager.ExecQuery("DELETE FROM MasterSkillPage WHERE Name=?");
+
+	gQueryManager.Close();
+
+	gQueryManager.BindParameterAsString(1,nm,sizeof(nm));
+
+	gQueryManager.ExecQuery("DELETE FROM MasterSkillPageInfo WHERE Name=?");
+
+	gQueryManager.Close();
+}
+
+// After WZ_RenameCharacter: the pages follow the character, but only when the rename really
+// happened (the new name exists as a character and the old one no longer does).
+void CMasterSkillTree::PagesRename(const char* oldName,const char* newName) // OK
+{
+	char from[11];
+	char to[11];
+
+	memset(from,0,sizeof(from));
+	memset(to,0,sizeof(to));
+
+	strncpy_s(from,sizeof(from),oldName,(sizeof(from)-1));
+	strncpy_s(to,sizeof(to),newName,(sizeof(to)-1));
+
+	if(from[0] == 0 || to[0] == 0 || CheckTextSyntax(from,sizeof(from)) == 0 || CheckTextSyntax(to,sizeof(to)) == 0)
+	{
+		return;
+	}
+
+	bool newExists = 0;
+	bool oldExists = 1;
+
+	gQueryManager.BindParameterAsString(1,to,sizeof(to));
+
+	if(gQueryManager.ExecQuery("SELECT Name FROM Character WHERE Name=?") != 0)
+	{
+		newExists = (gQueryManager.Fetch() != SQL_NO_DATA);
+	}
+
+	gQueryManager.Close();
+
+	gQueryManager.BindParameterAsString(1,from,sizeof(from));
+
+	if(gQueryManager.ExecQuery("SELECT Name FROM Character WHERE Name=?") != 0)
+	{
+		oldExists = (gQueryManager.Fetch() != SQL_NO_DATA);
+	}
+
+	gQueryManager.Close();
+
+	if(newExists == 0 || oldExists != 0)
+	{
+		return;
+	}
+
+	// Anything under the new name is a leftover.
+	this->PagesDelete(to);
+
+	gQueryManager.BindParameterAsString(1,to,sizeof(to));
+
+	gQueryManager.BindParameterAsString(2,from,sizeof(from));
+
+	gQueryManager.ExecQuery("UPDATE MasterSkillPage SET Name=? WHERE Name=?");
+
+	gQueryManager.Close();
+
+	gQueryManager.BindParameterAsString(1,to,sizeof(to));
+
+	gQueryManager.BindParameterAsString(2,from,sizeof(from));
+
+	gQueryManager.ExecQuery("UPDATE MasterSkillPageInfo SET Name=? WHERE Name=?");
+
+	gQueryManager.Close();
 }
 
 void CMasterSkillTree::GDMasterRecommendRecv(SDHP_MASTER_RECOMMEND_RECV* lpMsg,int index) // OK

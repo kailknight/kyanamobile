@@ -10,6 +10,62 @@
 #include "Other.h"
 #include "ZzzInventory.h"
 #if CUSTOM_BCHOTROI
+// "Buy this item for this price? Yes / No" before a flea market purchase is sent.
+namespace
+{
+	int g_FleaBuyId = -1;	// the listing the open confirmation is about
+}
+
+namespace SEASON3B
+{
+	class CFleaBuyConfirmMsgBoxLayout : public TMsgBoxLayout<CNewUICommonMessageBox>
+	{
+	public:
+		bool SetLayout()
+		{
+			CNewUICommonMessageBox* pMsgBox = GetMsgBox();
+			if (0 == pMsgBox)
+				return false;
+			if (false == pMsgBox->Create(MSGBOX_COMMON_TYPE_OKCANCEL))
+				return false;
+
+			pMsgBox->AddCallbackFunc(OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
+			pMsgBox->AddCallbackFunc(CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
+
+			return true;
+		}
+
+		static CALLBACK_RESULT OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+		{
+			if (g_FleaBuyId >= 0)
+			{
+				CBChotroi::PMSG_REQ_MARKET_BUY pBuy;
+				pBuy.h.set(0xD3, 0x21, sizeof(pBuy));
+				pBuy.Result = 1;
+				pBuy.ID = g_FleaBuyId;
+				pBuy.Pass = 0;
+				DataSend((LPBYTE)& pBuy, pBuy.h.size);
+			}
+
+			g_FleaBuyId = -1;
+
+			PlayBuffer(SOUND_CLICK01);
+			g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+			return CALLBACK_BREAK;
+		}
+
+		static CALLBACK_RESULT CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+		{
+			g_FleaBuyId = -1;
+
+			PlayBuffer(SOUND_CLICK01);
+			g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+			return CALLBACK_BREAK;
+		}
+	};
+}
 
 CBChotroi gCBChotroi;
 CUIPhotoViewer m_PhotoViewChotroi;
@@ -46,6 +102,7 @@ bool LocItemCoSkill = false;
 bool LocItemCoLuck = false;
 bool LocItemCoOpt = false;
 bool LocItemCoExc = false;
+int LocItemClass = 0;	// class filter: 0 = every class, 1..7 = Wizard, Knight, Elf, Gladiator, Lord, Summoner, Fighter
 bool HoverItemSell = false;
 
 bool ShowWindowChoOK = false;
@@ -102,7 +159,7 @@ void DrawInfoPhai(int X, int Y)
 		//=================== Khung Loc List
 		float LocListItemX = X;
 		float LocListItemY = Y+120;
-		float LocListH = 100;
+		float LocListH = 120;
 		g_pBCustomMenuInfo->DrawInfoBox(LocListItemX + 7, LocListItemY, (WindowHoatAnhW - 25), LocListH, 0x00000096, 0);
 		TextDraw((HFONT)g_hFontBold, LocListItemX + 9, LocListItemY + 2, 0xFFFFFFFF, 0x00BFFF96, WindowHoatAnhW - 21, 0, 3, gOther.TextVN_CHOTROI[21]);//
 		float CheckBoxX = LocListItemX + 12;
@@ -173,6 +230,24 @@ void DrawInfoPhai(int X, int Y)
 		}
 
 		//	gInterface.DrawMessage(1, "LocItemTypCoin %d",LocItemTypCoin);
+		// Class filter: one button that steps through the classes (items nobody has a class
+		// restriction for, such as jewels, only show under "All").
+		{
+			static const char* kClassFilterName[8] = { "All classes", "Wizard", "Knight", "Elf", "Gladiator", "Lord", "Summoner", "Fighter" };
+			char szClassButton[40];
+			sprintf(szClassButton, "Class: %s", kClassFilterName[LocItemClass]);
+
+			if (g_pBCustomMenuInfo->DrawButton(CheckBoxX, LocListItemY + 100, 100, 12, szClassButton, WindowHoatAnhW - 40))
+			{
+				LocItemClass = (LocItemClass + 1) % 8;
+
+				if (WindowChoTroiScrollBar)
+				{
+					WindowChoTroiScrollBar->SetCurPos(0);
+				}
+			}
+		}
+
 		CheckBoxY += 18;
 		//===========
 		if (g_pBCustomMenuInfo->RenderCheckBox(CheckBoxX, CheckBoxY + (15 * 1), 0xFFCC00C8, LocItemCoSkill == 1 ? TRUE : FALSE, gOther.TextVN_CHOTROI[22]))
@@ -660,6 +735,11 @@ void DrawWindowChoTroi()
 			g_pNewItemMng->DeleteItem(CTItem);
 			continue;
 		}
+		if (LocItemClass != 0 && !ItemAttribute[CTItem->Type].RequireClass[LocItemClass - 1])
+		{
+			g_pNewItemMng->DeleteItem(CTItem);
+			continue;
+		}
 		if (LocItemCoExc && !CTItem->Option1)
 		{
 			g_pNewItemMng->DeleteItem(CTItem);
@@ -735,7 +815,30 @@ void DrawWindowChoTroi()
 				//pMsg.ID = gInterface.m_DataChoTroi[n].ID;
 				//DataSend((LPBYTE)& pMsg, pMsg.h.size);
 				BuyID = gCBChotroi.m_DataChoTroi[n].ID;
-				gInterface.Data[eWindowNhapPass].OnShow ^= 1;
+					// Ask first: item and price, Yes buys, No leaves it.
+					{
+						g_FleaBuyId = BuyID;
+
+						SEASON3B::CNewUICommonMessageBox* pConfirm = NULL;
+						SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CFleaBuyConfirmMsgBoxLayout), &pConfirm);
+
+						if (pConfirm)
+						{
+							char szLine[160];
+
+							pConfirm->AddMsg("Buy this item?", RGBA(255, 255, 255, 255), MSGBOX_FONT_BOLD);
+
+							sprintf(szLine, "%s", BGetItemName(CTItemIndex, CTItem->Level));
+							pConfirm->AddMsg(szLine, RGBA(255, 255, 0, 255), MSGBOX_FONT_BOLD);
+
+							sprintf(szLine, "Price: %s %s", gInterface.NumberFormat(gCBChotroi.m_DataChoTroi[n].Price), NameGiaCoin[gCBChotroi.m_DataChoTroi[n].PriceType]);
+							pConfirm->AddMsg(szLine, RGBA(255, 255, 0, 255), MSGBOX_FONT_BOLD);
+						}
+						else
+						{
+							g_FleaBuyId = -1;
+						}
+					}
 				//if (hienpass == true)
 				//{
 				//	hienpass = false;

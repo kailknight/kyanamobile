@@ -25,6 +25,7 @@
 #include "DSProtocol.h"
 #include "DeviceBan.h"
 #include "Duel.h"
+#include "DuelRanked.h"
 #include "EffectManager.h"
 #include "ESProtocol.h"
 #include "EventInventory.h"
@@ -47,6 +48,7 @@
 #include "LuckyCoin.h"
 #include "Map.h"
 #include "MapServerManager.h"
+#include "MasterPage.h"
 #include "MasterSkillTree.h"
 #include "Message.h"
 #include "MiniMap.h"
@@ -371,7 +373,7 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			gAttack.CGAttackRecv((PMSG_ATTACK_RECV*)lpMsg,aIndex);
 			break;
 		case PROTOCOL_CODE3:
-			CGPositionRecv((PMSG_POSITION_RECV*)lpMsg,aIndex);
+			CGPositionClientRecv((PMSG_POSITION_RECV*)lpMsg,aIndex);
 			break;
 		case 0x18:
 			CGActionRecv((PMSG_ACTION_RECV*)lpMsg,aIndex);
@@ -670,6 +672,22 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 					break;
 				case 0x09:
 					gDuel.CGDuelButtonRecv((PMSG_DUEL_BUTTON_RECV*)lpMsg,aIndex);
+					break;
+				// Ranked 1v1 matchmaking (DuelRanked.cpp); old clients never send these.
+				case 0x10:
+					gDuelRanked.CGStatusRecv(aIndex);
+					break;
+				case 0x11:
+					gDuelRanked.CGQueueRecv((PMSG_DUELRANKED_QUEUE_RECV*)lpMsg,size,aIndex);
+					break;
+				case 0x12:
+					gDuelRanked.CGAcceptRecv((PMSG_DUELRANKED_ACCEPT_RECV*)lpMsg,size,aIndex);
+					break;
+				case 0x13:
+					gDuelRanked.CGListRecv(aIndex);
+					break;
+				case 0x14:
+					gDuelRanked.CGWatchRecv((PMSG_DUELRANKED_WATCH_RECV*)lpMsg,size,aIndex);
 					break;
 			}
 			#else
@@ -1588,6 +1606,18 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 				CGClientTamperRecv((PMSG_CLIENT_TAMPER_RECV*)lpMsg, size, aIndex);
 			}
 			break;
+			case 0xC0: //Master skill pages - the client asks for the page list (MasterPage.h)
+				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_MASTER_PAGES_REQ_RECV)) { gMasterPage.CGPagesReqRecv(aIndex); }
+				break;
+			case 0xC1: //Master skill pages - look at one page
+				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_MASTER_PAGE_SELECT_RECV)) { gMasterPage.CGPageViewRecv((PMSG_MASTER_PAGE_SELECT_RECV*)lpMsg, aIndex); }
+				break;
+			case 0xC3: //Master skill pages - make a page the active one
+				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_MASTER_PAGE_SELECT_RECV)) { gMasterPage.CGPageActivateRecv((PMSG_MASTER_PAGE_SELECT_RECV*)lpMsg, aIndex); }
+				break;
+			case 0xC4: //Master skill pages - rename a page
+				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_MASTER_PAGE_RENAME_RECV)) { gMasterPage.CGPageRenameRecv((PMSG_MASTER_PAGE_RENAME_RECV*)lpMsg, aIndex); }
+				break;
 			case 0x8A: //Nhan Thuong
 			{
 				XULY_CGPACKET_SOLAN* mlpMsg = (XULY_CGPACKET_SOLAN*)lpMsg;
@@ -2307,6 +2337,43 @@ void CGLiveClientRecv(PMSG_LIVE_CLIENT_RECV* lpMsg,int aIndex) // OK
 	}
 
 	lpObj->ConnectTickCount = GetTickCount();
+}
+
+// The 0x15 position packet as a client sends it (a knight closing on its target,
+// a Rage Fighter dash). CGPositionRecv itself is also what knockbacks call for
+// a tile they already claimed, so the wall and occupied-tile test lives here.
+// A refused spot is answered with the real position so the client snaps back
+// rather than standing somewhere the server does not have it.
+void CGPositionClientRecv(PMSG_POSITION_RECV* lpMsg,int aIndex)
+{
+	LPOBJ lpObj = &gObj[aIndex];
+
+	if(gObjIsConnectedGS(aIndex) != 0 && MAP_RANGE(lpObj->Map) != 0 && (lpMsg->x != lpObj->X || lpMsg->y != lpObj->Y))
+	{
+		BYTE attr = gMap[lpObj->Map].GetAttr(lpMsg->x,lpMsg->y);
+
+		// 4 / 8 = wall and no-move tiles, 2 = a tile something else stands on.
+		if((attr & (2|4|8)) != 0)
+		{
+			PMSG_POSITION_SEND pMsg;
+
+			pMsg.header.set(PROTOCOL_CODE3,sizeof(pMsg));
+
+			pMsg.index[0] = SET_NUMBERHB(aIndex);
+
+			pMsg.index[1] = SET_NUMBERLB(aIndex);
+
+			pMsg.x = (BYTE)lpObj->X;
+
+			pMsg.y = (BYTE)lpObj->Y;
+
+			DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
+
+			return;
+		}
+	}
+
+	CGPositionRecv(lpMsg,aIndex);
 }
 
 void CGPositionRecv(PMSG_POSITION_RECV* lpMsg,int aIndex) // OK

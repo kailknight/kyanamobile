@@ -195,6 +195,8 @@ namespace SEASON3B
 		};
 		void BMoveItemNew(int Type);
 		int SlotAutoMove;
+		int SlotAutoMoveType;
+		DWORD SlotAutoMoveTick;
 		bool CheckIsToolTip() const;
 	protected:
 		void DeleteEquippingEffect();

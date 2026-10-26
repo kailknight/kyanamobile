@@ -119,6 +119,16 @@ public:
 	int m_DuelArenaAnnounceSwitch;
 	int m_DuelArenaDisableRestoreHP;
 	int m_DuelArenaDisableRestoreSD;
+	int m_DuelRankedSwitch;
+	int m_DuelRankedHostServer;
+	int m_DuelRankedMinLevel;
+	int m_DuelRankedStageGate;
+	int m_DuelRankedMaxConcurrent;
+	int m_DuelRankedMatchSec;
+	int m_DuelRankedReconnectGraceSec;
+	int m_DuelRankedMaxReconnects;
+	int m_DuelRankedReadyHoldSec;
+	int m_DuelRankedNoShowSec;
 	int m_GuildCreateSwitch;
 	int m_GuildDeleteSwitch;
 	int m_GuildCreateMinLevel;
@@ -1172,6 +1182,15 @@ public:
 	int m_SpeedHackSkillPenalty;
 	int m_SpeedHackSkillDialog;
 	int m_SpeedHackSkillDebug;
+	//Skill cast rate check (GameServerInfo - Common.ini), see CHackSkillCheck::CheckSkillRate
+	int m_SkillRateEnable;
+	int m_SkillRateClassMask;
+	int m_SkillRateBaseMS;
+	int m_SkillRatePercent;
+	int m_SkillRateMinMS;
+	int m_SkillRateKickCount;
+	//Melee range slack in percent (GameServerInfo - Skill.ini), see CSkillManager::CheckSkillRange
+	int m_SkillMeleeRangeTolerance;
 	//Custom Shop MessageBox
 	int m_CustomShopMessageBox;
 	//party pk
@@ -1266,6 +1285,8 @@ public:
 	int m_TimeTopHitDmg;
 	int m_TimeTop5Hit;
 	int m_TinhDameBoss;
+	int m_BossRewardTopDamage;
+	int m_ChaosMachineLuckyUpgrade;
 	int m_CommboEffectEnable;
 	int m_DarkHorsePushBackChance;
 	// ItemDropLog (CustomConfig.ini): 1 enables the [ItemLog] ground-item
@@ -1398,6 +1419,18 @@ public:
 	// have spent master points - fewer than that is one player's guess, not a
 	// trend. Default 5.
 	int m_MasterRecommendMinPlayers;
+	// MasterPageSwitch / MasterPageSwitchDelaySec / MasterPageRelogOnSwitch /
+	// MasterPageMaxCount (CustomConfig.ini): master skill tree pages, see
+	// MasterPage.h. Switch 1 = pages on (default 1; 0 = the master tree behaves
+	// exactly as before pages existed). DelaySec = seconds between two page
+	// switches of one character (default 10). RelogOnSwitch 1 = after a switch
+	// the player is sent back to character select like /remaster used to do
+	// (default 0, the window refreshes in place). MaxCount = pages offered, 1-5
+	// (default 5; the packets and tables are sized for 5).
+	int m_MasterPageSwitch;
+	int m_MasterPageSwitchDelaySec;
+	int m_MasterPageRelogOnSwitch;
+	int m_MasterPageMaxCount;
 	// DuelKillEffect (CustomConfig.ini): 1 = in the Duel Arena, every kill
 	// plays the SD-broken effect on the player who died and knocks them
 	// DuelKillPushDistance tiles back from the killer. 0 = off.

@@ -39,6 +39,7 @@ struct LOG_INFO
 	int Year;
 	char Filename[256];
 	HANDLE File;
+	DWORD Size;
 };
 
 class CLog
@@ -47,6 +48,10 @@ public:
 	CLog();
 	virtual ~CLog();
 	void AddLog(BOOL active,char* directory);
+	// File policy (call before AddLog). overwrite=1: one fixed file per category
+	// (<Directory><Name>.txt) that is emptied when the day changes and when it
+	// passes maxMB (0 = no size limit). overwrite=0: the old one-dated-file-per-day.
+	void SetPolicy(BOOL overwrite,DWORD maxMB);
 	void Output(eLogType type,char* text,...);
 	// Writes the file exactly like Output but never mirrors to the log panel.
 	// For high-frequency forensic dumps that are worth keeping on disk and
@@ -54,8 +59,16 @@ public:
 	void OutputNoMirror(eLogType type,char* text,...);
 private:
 	void WriteFileLine(eLogType type,char* composed);
+	bool OpenFile(LOG_INFO* lpInfo,const SYSTEMTIME& today);
 	LOG_INFO m_LogInfo[MAX_LOG];
 	int m_count;
+	BOOL m_overwrite;
+	DWORD m_maxBytes;
+	CRITICAL_SECTION m_lock;
 };
+
+// 1 = LOG_ITEMBAGDROP only records the failures (items that could not be dropped),
+// not one block per successful drop. Set from [GameServerInfo] LogItemDropErrorsOnly.
+extern int gLogItemDropErrorsOnly;
 
 extern CLog gLog;

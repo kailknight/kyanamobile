@@ -51,6 +51,7 @@
 #include "GMSwampOfQuiet.h"
 #include "w_MapHeaders.h"
 #include "DuelMgr.h"
+#include "CB_DuelRanked.h"
 #include "ChangeRingManager.h"
 #include "NewUIGensRanking.h"
 #ifdef PBG_ADD_NEWCHAR_MONK_SKILL
@@ -97,6 +98,8 @@ extern vec3_t MousePosition, MouseTarget;
 extern bool IsAndroidVirtualJoystickHoldingMovement();
 extern bool AndroidIsVirtualPadAvailable();
 extern void AndroidNoteTappedCharacter(int characterIndex);
+int g_TouchTappedPlayer = -1;		// player under the finger when it went down (phone)
+DWORD g_TouchTappedTick = 0;
 #endif
 
 extern void RegisterBuff( eBuffState buff, OBJECT* o, const int bufftime = 0 );
@@ -880,6 +883,8 @@ typedef struct
 	char      szShopTitle[16];
 	char      Color;
 	char      GuildColor;
+	float       GuildTextW;	// text widths in 640x480 units, set by SetBooleanPosition (ranked icon placement)
+	float       IDTextW;
 	float       IDLifeTime;
 	char      Text[2][256];
 	float       LifeTime[2];
@@ -894,6 +899,20 @@ typedef struct
 
 CHAT Chat[MAX_CHAT];
 
+
+// Ranked duel icon of the name plate's owner (C1:D3:C4): beside the guild name, or beside the
+// name when there is no guild. Players who never played ranked have none.
+static bool HasDuelRankIcon(const CHAT* c)
+{
+	return c->Owner != NULL && c->Owner->DuelRankTier > 0 && c->Owner->Object.Kind == KIND_PLAYER;
+}
+
+static void RenderDuelRankIcon(const CHAT* c, float x, float lineY, int lineHeight)
+{
+	const BYTE tier = (BYTE)(c->Owner->DuelRankTier - 1);
+	const float h = RankedUi::RankBadgeHeight(tier);
+	RankedUi::DrawRankBadge(x, lineY + ((float)lineHeight - h) * 0.5f, tier, c->Owner->DuelRankDiv);
+}
 
 void SetBooleanPosition(CHAT* c)
 {
@@ -917,6 +936,13 @@ void SetBooleanPosition(CHAT* c)
 	bResult[2] = g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), c->Text[1], lstrlen(c->Text[1]), &Size[2]);
 	bResult[3] = g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), c->Union, lstrlen(c->Union), &Size[3]);
 	bResult[4] = g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), c->Guild, lstrlen(c->Guild), &Size[4]);
+
+	{
+		const float rateX = (g_fScreenRate_x > 0.0f) ? g_fScreenRate_x : 1.0f;
+		c->GuildTextW = (float)Size[4].cx / rateX;
+		c->IDTextW = (float)Size[0].cx / rateX;
+
+	}
 
 	Size[0].cx += 3;
 
@@ -1443,6 +1469,19 @@ void RenderBoolean(int x, int y, CHAT* c)
 #endif
 		gCustomRankUser.DrawInfo(c->Owner->Key,x, y, RenderBoxSize.cx, iLineHeight);
 
+		// Ranked duel badge (C1:D3:C4): left of the plate, past the guild logo when that is shown.
+		if (HasDuelRankIcon(c))
+		{
+			const BYTE rankTier = (BYTE)(c->Owner->DuelRankTier - 1);
+			const float badgeW = RankedUi::RankBadgeWidth(rankTier, c->Owner->DuelRankDiv);
+			const float badgeH = RankedUi::RankBadgeHeight(rankTier);
+			float badgeX = (float)x - 3.0f - badgeW;
+#if(ShowLogoGuild)
+			if (gProtect.m_MainInfo.PlayerShowGuildLogo && c->Guild && c->Guild[0])
+				badgeX -= 20.0f;
+#endif
+			RankedUi::DrawRankBadge(badgeX, ((float)(RenderPos.y - y) - badgeH) / 2.0f + (float)y, rankTier, c->Owner->DuelRankDiv);
+		}
 	}
 }
 #endif
@@ -2627,6 +2666,91 @@ bool SkillWarrior(CHARACTER *c,ITEM *p)
 	return Success;
 }
 
+// A melee skill used to send the target's own tile as the knight's position, so
+// the knight ended up standing on top of whatever it hit. This picks the free
+// tile next to the target that is closest to the knight instead, and sends
+// nothing when the knight is already next to it. A tile counts only if it is
+// walkable, has a clear line from the knight and nobody else stands on it; the
+// GameServer applies the same wall / occupied test (CGPositionClientRecv).
+static void SendMeleeStopPosition(CHARACTER *c, int targetX, int targetY)
+{
+	const int fromX = c->PositionX;
+	const int fromY = c->PositionY;
+
+	if(abs(targetX-fromX) <= 1 && abs(targetY-fromY) <= 1)
+	{
+		return;
+	}
+
+	int bestX = -1;
+	int bestY = -1;
+	int bestDist = 0x7fffffff;
+
+	for(int oy=-1;oy<=1;oy++)
+	{
+		for(int ox=-1;ox<=1;ox++)
+		{
+			if(ox == 0 && oy == 0)
+			{
+				continue;
+			}
+
+			const int cx = targetX+ox;
+			const int cy = targetY+oy;
+
+			if(cx < 1 || cx > 254 || cy < 1 || cy > 254)
+			{
+				continue;
+			}
+
+			const int cell = TERRAIN_INDEX(cx,cy);
+
+			if((TerrainWall[cell]&TW_NOMOVE) == TW_NOMOVE || (TerrainWall[cell]&TW_NOGROUND) == TW_NOGROUND)
+			{
+				continue;
+			}
+
+			bool taken = false;
+
+			for(int i=0;i<MAX_CHARACTERS_CLIENT;i++)
+			{
+				CHARACTER* other = &CharactersClient[i];
+
+				if(other != c && other->Object.Live && other->Dead == 0 && other->PositionX == cx && other->PositionY == cy)
+				{
+					taken = true;
+					break;
+				}
+			}
+
+			if(taken || !CheckWall(fromX,fromY,cx,cy))
+			{
+				continue;
+			}
+
+			const int dist = ((cx-fromX)*(cx-fromX))+((cy-fromY)*(cy-fromY));
+
+			if(dist < bestDist)
+			{
+				bestDist = dist;
+				bestX = cx;
+				bestY = cy;
+			}
+		}
+	}
+
+	if(bestX < 0)
+	{
+		return;
+	}
+
+	#ifdef NEW_PROTOCOL_SYSTEM
+		gProtocolSend.SendPositionNew( (BYTE)bestX, (BYTE)bestY );
+	#else
+		SendPosition( (BYTE)bestX, (BYTE)bestY );
+	#endif
+}
+
 void UseSkillWarrior( CHARACTER *c, OBJECT *o)
 {
 	gAPICB.Attack();
@@ -2800,11 +2924,7 @@ void UseSkillWarrior( CHARACTER *c, OBJECT *o)
 					
 					)
 				{	
-					#ifdef NEW_PROTOCOL_SYSTEM
-						gProtocolSend.SendPositionNew( positionX, positionY );
-					#else
-						SendPosition( positionX, positionY );
-					#endif
+					SendMeleeStopPosition( c, positionX, positionY );
 				}
 			}
 		}
@@ -8964,6 +9084,10 @@ void SelectObjects()
 						else if(MouseLButtonPush)
 						{
 							AndroidNoteTappedCharacter(SelectedCharacter);
+							// Remembered for the hold-to-open player popup
+							// (NewUIHotKey.cpp): the pick only holds on this frame.
+							g_TouchTappedPlayer = SelectedCharacter;
+							g_TouchTappedTick = GetTickCount();
 						}
 #endif
 					}

@@ -7785,7 +7785,7 @@ void ItemAngle(OBJECT *o)
 		o->Scale = 0.6f;
 		o->Angle[2] = 90.f;
 	}
-	else if( o->Type >= MODEL_POTION+72 && o->Type <= MODEL_POTION+77 )
+	else if( (o->Type >= MODEL_POTION+72 && o->Type <= MODEL_POTION+77) || o->Type == MODEL_POTION+493 )	// +493 Master Page Scroll (elite scroll model)
 	{
 		o->Scale = 0.5f;
 		o->Angle[2] = 90.f;
@@ -9658,7 +9658,7 @@ void RenderPartObjectBody(BMD *b,OBJECT *o,int Type,float Alpha,int RenderType)
 		b->RenderBody(RENDER_TEXTURE,o->Alpha,o->BlendMesh,o->BlendMeshLight, o->BlendMeshTexCoordU,o->BlendMeshTexCoordV);
 		b->RenderMesh(0, RENDER_CHROME4, o->Alpha, o->BlendMesh, o->BlendMeshLight, o->BlendMeshTexCoordU, o->BlendMeshTexCoordV);
 	}
-	else if( o->Type >= MODEL_POTION+72 && o->Type <= MODEL_POTION+77 )
+	else if( (o->Type >= MODEL_POTION+72 && o->Type <= MODEL_POTION+77) || o->Type == MODEL_POTION+493 )	// +493 Master Page Scroll (elite scroll model)
 	{
 		b->RenderBody(RENDER_TEXTURE,o->Alpha,o->BlendMesh,o->BlendMeshLight, o->BlendMeshTexCoordU,o->BlendMeshTexCoordV,o->HiddenMesh);
 	}

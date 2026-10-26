@@ -12,6 +12,7 @@
 #include "MemScript.h"
 #include "Message.h"
 #include "Notice.h"
+#include "SkillManager.h"
 #include "ServerInfo.h"
 #include "Util.h"
 
@@ -204,4 +205,126 @@ bool CHackSkillCheck::CheckSpeedHack(LPOBJ lpObj,int skill) // OK
 	lpObj->SpeedHackDelay = GetTickCount();
 
 	return 0;
+}
+
+// Rejects casts that arrive faster than the character's attack speed allows.
+// HackSkillCheck.txt ships empty and every Delay in Skill.txt is 0, so nothing
+// else limited how fast cast packets could come in.
+//
+// The minimum gap between two casts is derived the way the client derives its
+// animation speed (ZzzCharacter.cpp SetAttackSpeed: PlaySpeed = base + speed*0.004):
+// SkillRateBaseMS at no speed, scaled by 0.30/(0.30+speed*0.004), then taken at
+// SkillRatePercent of that and never below SkillRateMinMS. It is measured over
+// the last 6 casts rather than per packet so latency bunching and the odd
+// double packet never count against a legitimate player; only a sustained rate
+// above the limit does. The higher of PhysiSpeed/MagicSpeed is used so a class
+// that animates off either one gets the benefit of the doubt.
+bool CHackSkillCheck::CheckSkillRate(LPOBJ lpObj,int skillIndex)
+{
+	if(gServerInfo.m_SkillRateEnable == 0)
+	{
+		return 0;
+	}
+
+	if(lpObj->Type != OBJECT_USER || lpObj->m_OfflineMode != 0 || lpObj->IsFakeOnline != 0)
+	{
+		return 0;
+	}
+
+	if(lpObj->Class < 0 || lpObj->Class > 30 || ((gServerInfo.m_SkillRateClassMask >> lpObj->Class) & 1) == 0)
+	{
+		return 0;
+	}
+
+	SKILL_INFO SkillInfo;
+
+	if(gSkillManager.GetInfo(skillIndex,&SkillInfo) == 0 || (SkillInfo.Range == 0 && SkillInfo.Radio == 0))
+	{
+		return 0;
+	}
+
+	const int window = (int)(sizeof(lpObj->SkillRateTick)/sizeof(lpObj->SkillRateTick[0]));
+
+	DWORD now = GetTickCount();
+
+	if(lpObj->SkillRateLockUntil != 0 && (int)(lpObj->SkillRateLockUntil-now) > 0)
+	{
+		return 1;
+	}
+
+	int speed = ((lpObj->PhysiSpeed > lpObj->MagicSpeed) ? lpObj->PhysiSpeed : lpObj->MagicSpeed);
+
+	speed = ((speed < 0) ? 0 : speed);
+
+	float minMs = ((float)gServerInfo.m_SkillRateBaseMS*0.30f/(0.30f+((float)speed*0.004f)))*((float)gServerInfo.m_SkillRatePercent/100.0f);
+
+	minMs = ((minMs < (float)gServerInfo.m_SkillRateMinMS) ? (float)gServerInfo.m_SkillRateMinMS : minMs);
+
+	bool violation = 0;
+
+	DWORD span = 0;
+
+	if(lpObj->SkillRateFilled >= window)
+	{
+		span = now-lpObj->SkillRateTick[lpObj->SkillRatePos];
+
+		violation = ((float)span < (minMs*(float)(window-1)));
+	}
+
+	lpObj->SkillRateTick[lpObj->SkillRatePos] = now;
+
+	lpObj->SkillRatePos = ((lpObj->SkillRatePos+1)%window);
+
+	lpObj->SkillRateFilled = ((lpObj->SkillRateFilled < window) ? (lpObj->SkillRateFilled+1) : window);
+
+	if(violation == 0)
+	{
+		if(lpObj->SkillRateStrikes > 0 && (now-lpObj->SkillRateStrikeTick) > 10000)
+		{
+			lpObj->SkillRateStrikes = 0;
+		}
+
+		return 0;
+	}
+
+	lpObj->SkillRateStrikes++;
+
+	lpObj->SkillRateStrikeTick = now;
+
+	if((now-lpObj->SkillRateLogTick) > 5000)
+	{
+		lpObj->SkillRateLogTick = now;
+
+		LogAdd(LOG_RED,"[SkillRate][%s][%s] Class: %d Skill: %d Speed: %d Last %d casts in %u ms (min %d ms each) Strikes: %d",lpObj->Account,lpObj->Name,lpObj->Class,skillIndex,speed,window,span,(int)minMs,lpObj->SkillRateStrikes);
+
+		gLog.Output(LOG_HACK,"[SkillRate][%s][%s] Class: %d Skill: %d Speed: %d Last %d casts in %u ms (min %d ms each) Strikes: %d",lpObj->Account,lpObj->Name,lpObj->Class,skillIndex,speed,window,span,(int)minMs,lpObj->SkillRateStrikes);
+	}
+
+	// Same penalty types as SpeedHackSkillType: 0 log only, 1 disconnect,
+	// 2 drop the cast, 3 drop casts for SpeedHackSkillPenalty ms.
+	if(gServerInfo.m_SpeedHackSkillType == 0)
+	{
+		return 0;
+	}
+
+	if(gServerInfo.m_SpeedHackSkillType == 1)
+	{
+		if(lpObj->SkillRateStrikes >= gServerInfo.m_SkillRateKickCount)
+		{
+			gLog.Output(LOG_HACK,"[SkillRate][%s][%s] Disconnected for casting too fast",lpObj->Account,lpObj->Name);
+
+			GCCloseClientSend(lpObj->Index,0);
+		}
+
+		return 1;
+	}
+
+	if(gServerInfo.m_SpeedHackSkillType == 3 && lpObj->SkillRateStrikes >= gServerInfo.m_SkillRateKickCount)
+	{
+		lpObj->SkillRateLockUntil = now+(DWORD)gServerInfo.m_SpeedHackSkillPenalty;
+
+		lpObj->SkillRateStrikes = 0;
+	}
+
+	return 1;
 }

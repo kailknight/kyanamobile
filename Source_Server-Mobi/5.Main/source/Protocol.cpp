@@ -491,6 +491,23 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 		case 0xD3:
 			switch (((lpMsg[0] == 0xC1) ? lpMsg[3] : lpMsg[4]))
 			{
+#if(NEW_MASTER_SKILL_TREE == 1)
+			case 0xC0: //Master pages - page list (MasterPage.h on the GameServer)
+				MasterPagesRecvInfo(lpMsg, size);
+				break;
+			case 0xC2: //Master pages - preview of another page
+				MasterPagesRecvSnapshot(lpMsg, size);
+				break;
+			case 0xC3: //Master pages - result of an activate / rename
+				MasterPagesRecvResult(lpMsg, size);
+				break;
+#endif
+			case 0xC4: //Ranked duel icons of the players around us (C1:D3:C4, DuelRanked.h on the GameServer)
+			{
+				extern void RecvDuelRankView(const BYTE* lpMsg, int size);
+				RecvDuelRankView(lpMsg, size);
+			}
+			break;
 			case 0xF2: //Devil Square time left (C1:D3:F2, WORD seconds)
 				if (size >= 6)
 				{

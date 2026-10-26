@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <map>
 #include "CB_MUHelper.h"
 #include "NewUISystem.h"
 #include "CBInterface.h"
@@ -24,6 +25,15 @@ SpinLock _itemsLock;
 
 CB_MUHelper* gCB_MUHelper = nullptr;
 int CheckKQ = 0;
+// Monsters the helper could not path to, skipped for a few seconds (otherwise it stays locked on one it cannot reach).
+static std::map<int, DWORD> s_HelperUnreachable;
+static bool IsHelperUnreachable(int key)
+{
+	auto it = s_HelperUnreachable.find(key);
+	if (it == s_HelperUnreachable.end()) return false;
+	if (GetTickCount() > it->second) { s_HelperUnreachable.erase(it); return false; }
+	return true;
+}
 CB_MUHelper::CB_MUHelper()
 {
 	CB_MUHelper::ClearData();
@@ -273,6 +283,10 @@ int CB_MUHelper::SimulateSkill(int iSkill, bool bTargetRequired, int iTarget)
 		if (!bHasPath)
 		{
 			DeleteTarget(iTarget);
+			s_HelperUnreachable[iTarget] = GetTickCount() + 5000;
+			m_SelectedCharacter = -1;
+			m_DistanceSelectCharacter = 1.f;
+			SelectedCharacter = -1;
 			CheckKQ = 4;
 			return 0;
 		}
@@ -685,6 +699,11 @@ void CB_MUHelper::GetTarget()
 		CHARACTER* c = &CharactersClient[i];
 		OBJECT* o = &c->Object;
 		if (KIND_MONSTER != o->Kind || !o->Live)
+		{
+			continue;
+		}
+
+		if (IsHelperUnreachable(c->Key))
 		{
 			continue;
 		}
@@ -1268,10 +1287,16 @@ bool PickUpItemName(ITEM * pItem)
 	if ((pItem->Option1 & 63) != 0) text += " Excellent";
 	if (pItem->ExtOption) text += " Ancient";
 
+	std::string lowText = text;
+	for (size_t k = 0; k < lowText.size(); k++) lowText[k] = (char)tolower((unsigned char)lowText[k]);
 	for (int n = 0; n < MAX_HELPER_ITEM; n++)
 	{
 		const char* entry = g_pNewUISystem->Get_pNewUIMuHelper()->DataAutoMu.ItemList[n];
-		if (entry[0] != 0 && strstr(text.c_str(), entry) != NULL)
+		while (*entry == ' ') entry++; // entries saved before the add-box fix carry a leading blank
+		if (entry[0] == 0) continue;
+		std::string lowEntry = entry;
+		for (size_t k = 0; k < lowEntry.size(); k++) lowEntry[k] = (char)tolower((unsigned char)lowEntry[k]);
+		if (lowText.find(lowEntry) != std::string::npos)
 		{
 			return 1;
 		}
@@ -1503,6 +1528,19 @@ bool MUHelperRegenPos()
 			}
 			else
 			{
+				// No progress for 1.5 s (blocked path, nowhere to walk): give the return up and fight,
+				// instead of standing still next to monsters for the full 10 s.
+				static int s_RetX = -1, s_RetY = -1; static DWORD s_RetSince = 0;
+				if (Hero->PositionX != s_RetX || Hero->PositionY != s_RetY || s_RetSince == 0 || (GetTickCount() - s_ReturnStart) < 200)
+				{
+					s_RetX = Hero->PositionX; s_RetY = Hero->PositionY; s_RetSince = GetTickCount();
+				}
+				else if ((GetTickCount() - s_RetSince) > 1500)
+				{
+					s_Returning = false; s_RetSince = 0;
+					d.TimerMove = GetTickCount() + ((DWORD)d.MoveTime * 1000);
+					return 1;
+				}
 				gCB_MUHelper->m_SelectedCharacter = -1;
 				SelectedCharacter = -1;
 				POINT pos;

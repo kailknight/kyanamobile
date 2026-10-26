@@ -58,6 +58,13 @@ void SEASON3B::CNewUIHotKey::Release()
 	}
 }
 
+#if defined(MU_TOUCH_UI)
+extern bool MouseLButton;
+extern int g_TouchTappedPlayer;
+extern DWORD g_TouchTappedTick;
+extern int AndroidFindPlayerAtUi(int uiX, int uiY);
+#endif
+
 bool SEASON3B::CNewUIHotKey::UpdateMouseEvent()
 {
 	extern int SelectedCharacter;
@@ -67,9 +74,74 @@ bool SEASON3B::CNewUIHotKey::UpdateMouseEvent()
 		return true;
 	}
 
+#if defined(MU_TOUCH_UI)
+	{
+		// Phone: there is no Alt key, so holding a finger on another player
+		// (about half a second, without sliding) opens the same popup. The
+		// player is the one under the finger when it went down - the per-frame
+		// pick (SelectedCharacter) is gone again by the time the hold is long.
+		static bool s_prevDown = false;
+		static DWORD s_holdStart = 0;
+		static int s_holdX = 0, s_holdY = 0;
+		static bool s_holdFired = true;
+
+		if(::MouseLButton && !s_prevDown)
+		{
+			s_holdStart = GetTickCount();
+			s_holdX = MouseX;
+			s_holdY = MouseY;
+			s_holdFired = false;
+		}
+		s_prevDown = ::MouseLButton;
+
+		if(::MouseLButton == false)
+		{
+			s_holdFired = true;
+		}
+		else if(s_holdFired == false)
+		{
+			const int dx = MouseX - s_holdX;
+			const int dy = MouseY - s_holdY;
+			if((dx * dx + dy * dy) > (16 * 16))
+			{
+				s_holdFired = true;
+			}
+			else if((GetTickCount() - s_holdStart) >= 500)
+			{
+				s_holdFired = true;
+
+				int iCha = AndroidFindPlayerAtUi(s_holdX, s_holdY);
+				if(iCha < 0 && (GetTickCount() - g_TouchTappedTick) < 2000) iCha = g_TouchTappedPlayer;
+				if(iCha >= 0 && iCha < MAX_CHARACTERS_CLIENT && &CharactersClient[iCha] != Hero
+					&& CharactersClient[iCha].Object.Kind == KIND_PLAYER && CharactersClient[iCha].Object.Live
+					&& gMapManager.InChaosCastle() == false && gMapManager.IsCursedTemple() == false)
+				{
+					const float fPx = CharactersClient[iCha].Object.Position[0] - Hero->Object.Position[0];
+					const float fPy = CharactersClient[iCha].Object.Position[1] - Hero->Object.Position[1];
+					if(sqrtf((fPx * fPx) + (fPy * fPy)) < 300.f)
+					{
+						int px = MouseX + 10;
+						int py = MouseY - 50;
+						if(py < 0) py = 0;
+						g_pQuickCommand->OpenQuickCommand(CharactersClient[iCha].ID, iCha, px, py);
+					}
+					else
+					{
+						g_pChatListBox->AddText("", GlobalText[1388], SEASON3B::TYPE_ERROR_MESSAGE);
+					}
+				}
+			}
+		}
+	}
+#endif
+
 	if(SelectedCharacter >= 0)
 	{
-		if(SEASON3B::IsRepeat(VK_MENU) && SEASON3B::IsRelease(VK_RBUTTON)
+		// PC: Alt + right-click on a player. Phone: there is no Alt key, so
+		// holding a finger on another player (about half a second, without
+		// sliding) opens the same popup.
+		bool bOpenPopup = SEASON3B::IsRepeat(VK_MENU) && SEASON3B::IsRelease(VK_RBUTTON);
+		if(bOpenPopup
 			&& gMapManager.InChaosCastle() == false
 			&& gMapManager.IsCursedTemple() == false
 			)

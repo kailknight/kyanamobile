@@ -782,11 +782,7 @@ void BCustomChoTroi::CGReqItemBuy(PMSG_REQ_MARKET_BUY * lpMsg, int aIndex)
 				{
 					return;
 				}
-				if (this->m_ListDataChoTroi[aIndex][i].Pass != lpMsg->Pass)
-				{
-					gNotice.GCNoticeSend(aIndex, eMessageBox, 0, 0, 0, 0, 0, "SaiPass");//
-					return;
-				}
+				// Listing password no longer required to buy (was: Pass != lpMsg->Pass -> "SaiPass").
 			}
 
 

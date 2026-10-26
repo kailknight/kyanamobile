@@ -778,7 +778,7 @@ bool BCustomItemBank::ClientSendRutOrGui(REQUEST_RUTGUIBANK * lpMsg, int aIndex)
 		}
 		else
 		{
-			if (MaxCount < 10)
+			if (MaxCount < 30)
 			{
 				gNotice.GCNoticeSend(aIndex, eMessageBox, 0, 0, 0, 0, 0, this->GetMessage(6));
 				return 0;
@@ -796,7 +796,7 @@ bool BCustomItemBank::ClientSendRutOrGui(REQUEST_RUTGUIBANK * lpMsg, int aIndex)
 	case eRutAll:
 	{
 		//int MaxCount = gItemManager.GetInventoryItemSpace(lpObj, gObj[aIndex].BankJewelData[n].ItemIndex); //Check O Trong KHa Dung
-		int MaxCount = 10;
+		int MaxCount = gItemManager.GetInventoryItemSpace(lpObj, gObj[aIndex].BankJewelData[n].ItemIndex); if (MaxCount > 10) { MaxCount = 10; } //at most 10, and only what fits in the inventory
 
 		if (MaxCount > gObj[aIndex].BankJewelData[n].ItemCount)
 		{
@@ -1206,7 +1206,7 @@ void BCustomItemBank::ProcAutoPic()
 					continue;
 				}
 
-				if (gMap[lpObj->Map].CheckItemGive(lpObj->Index, index) == 0)
+				if (gMap[lpObj->Map].CheckItemGive(lpObj->Index, index, false) == 0) // false: this scan is not a pickup the player asked for, so no "does not belong to you" notice
 				{
 					continue;
 				}

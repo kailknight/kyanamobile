@@ -491,7 +491,7 @@ bool SEASON3B::CNewUISystem::LoadMainSceneInterface()
 		return false;
 
 	m_pNewDuelWatchWindow = new CNewUIDuelWatchWindow;
-	if( m_pNewDuelWatchWindow->Create(m_pNewUIMng, 640-190, 0) == false )
+	if( m_pNewDuelWatchWindow->Create(m_pNewUIMng, 640-CNewUIDuelWatchWindow::WINDOW_WIDTH, 0) == false )
 		return false;
 
 	m_pNewDuelWatchMainFrameWindow = new CNewUIDuelWatchMainFrameWindow;

@@ -210,6 +210,9 @@ struct DUEL_ARENA_INFO
 	int TickCount;
 	int Gladiator[MAX_DUEL_ARENA_GLADIATOR];
 	int Spectator[MAX_DUEL_ARENA_SPECTATOR];
+	BYTE Ranked; // 1 = a ranked match (DuelRanked.cpp) controls this room
+	BYTE RankedWin; // 1 = the winning score was reached, the ranked code settles it
+	DWORD MatchId;
 };
 
 class CDuel
@@ -241,6 +244,13 @@ public:
 	int GetDuelArenaGladiatorCount(DUEL_ARENA_INFO* lpInfo);
 	int GetDuelArenaSpectatorCount(DUEL_ARENA_INFO* lpInfo);
 	bool CheckDuel(LPOBJ lpObj,LPOBJ lpTarget);
+	// Ranked duels (DuelRanked.cpp): the ranked code owns these rooms.
+	DUEL_ARENA_INFO* GetDuelArenaByIndex(int index);
+	bool IsRankedGladiator(int aIndex);
+	int BeginDuel(LPOBJ lpObj,LPOBJ lpTarget,DWORD matchId);
+	void StartRankedFight(DUEL_ARENA_INFO* lpInfo,LPOBJ lpObj,LPOBJ lpTarget,BYTE scoreA,BYTE scoreB,bool fresh);
+	bool AddRankedSpectator(DUEL_ARENA_INFO* lpInfo,LPOBJ lpObj);
+	void RankedScoreWin(DUEL_ARENA_INFO* lpInfo,LPOBJ lpWinner,LPOBJ lpLoser);
 	void CheckDuelScore(LPOBJ lpObj,LPOBJ lpTarget);
 	void CheckDuelUser();
 	void ResetDuel(LPOBJ lpObj);

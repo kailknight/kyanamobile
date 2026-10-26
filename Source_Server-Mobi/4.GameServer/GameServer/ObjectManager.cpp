@@ -32,6 +32,7 @@
 #include "DoubleGoer.h"
 #include "DSProtocol.h"
 #include "Duel.h"
+#include "DuelRanked.h"
 #include "EffectManager.h"
 #include "EventKillAll.h"
 #include "ESProtocol.h"
@@ -794,6 +795,10 @@ bool CObjectManager::CharacterGameClose(int aIndex) // OK
 		gTrade.GCTradeResultSend(lpObj->TargetNumber,0);
 		gTrade.ResetTrade(aIndex);
 	}
+
+	// Ranked duel: a fighter leaving a live fight pauses it (60 s to come back)
+	// instead of resetting the opponent. Must run before the duel reset block.
+	gDuelRanked.OnCharacterClose(lpObj);
 
 	if(OBJECT_RANGE(lpObj->DuelUserReserved) != 0)
 	{
@@ -4037,8 +4042,10 @@ void CObjectManager::CharacterCalcAttribute(int aIndex) // OK
 
 	if(RightItem != 0 && LeftItem != 0)
 	{
-		lpObj->PhysiSpeed += (Right->m_AttackSpeed+Left->m_AttackSpeed)/2;
-		lpObj->MagicSpeed += (Right->m_AttackSpeed+Left->m_AttackSpeed)/2;
+		// Every class: the right hand gives its full attack speed, the left
+		// hand half of its own - what the tooltips say, nothing is averaged down.
+		lpObj->PhysiSpeed += Right->m_AttackSpeed+(Left->m_AttackSpeed/2);
+		lpObj->MagicSpeed += Right->m_AttackSpeed+(Left->m_AttackSpeed/2);
 	}
 	else if(RightItem != 0)
 	{
@@ -4781,7 +4788,7 @@ bool CObjectManager::CharacterInfoSet(BYTE* aRecv,int aIndex) // OK
 	{
 		result = gGate.GetGate(286,&gate,&map,&x,&y,&dir,&level);
 	}
-	else if(DA_MAP_RANGE(lpObj->Map) != 0)
+	else if(DA_MAP_RANGE(lpObj->Map) != 0 && gDuelRanked.IsPausedFighter(lpObj->Name) == 0) // a paused ranked fighter reconnecting to the host stays on the arena map
 	{
 		result = gGate.GetGate(17,&gate,&map,&x,&y,&dir,&level);
 	}

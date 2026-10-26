@@ -90,6 +90,7 @@
 #include "CB_OffTrade.h"
 #endif
 #include "FriendMailWindow.h"
+#include "CB_DuelRanked.h"
 
 #if (defined(__ANDROID__) || defined(MU_IOS)) && MU_DEV_DIAGNOSTICS
 #include <cstdarg>
@@ -1199,7 +1200,11 @@ BOOL ReceiveJoinMapServer(BYTE *ReceiveBuffer, BOOL bEncrypted)
 	}
 	g_pMasterSkillTreeInterface->SetMasterType(gCharacterManager.GetCharacterClass(CharacterAttribute->Class));
 	g_ConsoleDebug->Write(MCD_RECEIVE, "0x03 [ReceiveJoinMapServer]");
-	
+
+	// Entered a world (first login, or the far side of a server hop that wiped g_DuelMgr): the
+	// ranked queue/match state is rebuilt from a fresh STATUS, asked for once the scene is up.
+	g_DuelMgr.ScheduleRankedStatus(2000);
+
 	return ( TRUE);
 }
 
@@ -6328,8 +6333,10 @@ void ReceiveGetItem( BYTE *ReceiveBuffer )
 			}
 
 			char szItem[64] = { 0, };
-			int level = (Items[ItemKey].Item.Level >> 3) & 15;
-			GetItemName(Items[ItemKey].Item.Type, level, szItem);
+			// Name the item the server just gave us. ItemKey is only the LAST item requested, so with the
+			// helper asking for several drops it named a different one ("Kris obtained").
+			int level = (Data->Item[1] >> 3) & 15;
+			GetItemName(ConvertItemType(Data->Item), level, szItem);
 
 			char szMessage[128];
 			sprintf(szMessage, "%s %s", szItem, GlobalText[918]);
@@ -6516,8 +6523,19 @@ BOOL ReceiveEquipmentItem(BYTE *ReceiveBuffer, BOOL bEncrypted)
 	}
 	if (g_pMyInventory->SlotAutoMove != -1)
 	{
-		g_pMixInventory->DeleteItem(g_pMyInventory->SlotAutoMove);
+		// Only drop the chaos-box copy when THIS reply is the successful move of that
+		// very item into the inventory. A refused/silent right-click used to leave
+		// SlotAutoMove armed, so the next unrelated inventory move deleted the
+		// chaos-box item from the display while the server still held it.
+		if (Data->SubCode != 255
+			&& static_cast<STORAGE_TYPE>(Data->SubCode) == STORAGE_TYPE::INVENTORY
+			&& ConvertItemType(Data->Item) == g_pMyInventory->SlotAutoMoveType
+			&& GetTickCount() - g_pMyInventory->SlotAutoMoveTick < 1500)
+		{
+			g_pMixInventory->DeleteItem(g_pMyInventory->SlotAutoMove);
+		}
 		g_pMyInventory->SlotAutoMove = -1;
+		g_pMyInventory->SlotAutoMoveType = -1;
 	}
 
 
@@ -9287,6 +9305,150 @@ void ReceiveDuelRound(BYTE* ReceiveBuffer)
 	}
 	else if (Data->nFlag == 1)
 	{
+	}
+}
+
+// ---- Ranked duels, AA:10-14 (CB_DuelRanked.h). Every handler checks the received size first: a
+// short or malformed packet is dropped, and an old server never sends these at all.
+
+static void CopyRankedName(char* pszOut, const CHAR* pszIn)
+{
+	memset(pszOut, 0, MAX_ID_SIZE + 1);
+	memcpy(pszOut, pszIn, MAX_ID_SIZE);
+	pszOut[MAX_ID_SIZE] = '\0';
+}
+
+void ReceiveRankedStatus(BYTE* ReceiveBuffer, int Size)
+{
+	if (Size < (int)sizeof(PMSG_RANKED_STATUS_RECV))
+	{
+		return;
+	}
+
+	const PMSG_RANKED_STATUS_RECV* Data = (const PMSG_RANKED_STATUS_RECV*)ReceiveBuffer;
+
+	RANKED_STATUS_INFO info;
+	memset(&info, 0, sizeof(info));
+	info.m_wMmr = Data->Mmr;
+	info.m_byTier = Data->Tier;
+	info.m_byDiv = Data->Div;
+	info.m_wStepLo = Data->StepLo;
+	info.m_wStepNext = Data->StepNext;
+	info.m_wWins = Data->Wins;
+	info.m_wLosses = Data->Losses;
+	info.m_byState = Data->State;
+	info.m_wQueuedSec = Data->QueuedSec;
+	info.m_byAccepting = Data->Accepting;
+
+	g_DuelMgr.SetRankedStatus(info);
+	if (gCB_DuelRanked != NULL)
+	{
+		gCB_DuelRanked->OnStatus();
+	}
+}
+
+void ReceiveRankedPrompt(BYTE* ReceiveBuffer, int Size)
+{
+	if (Size < (int)sizeof(PMSG_RANKED_PROMPT_RECV))
+	{
+		return;
+	}
+
+	const PMSG_RANKED_PROMPT_RECV* Data = (const PMSG_RANKED_PROMPT_RECV*)ReceiveBuffer;
+
+	char szOpp[MAX_ID_SIZE + 1];
+	CopyRankedName(szOpp, Data->Opp);
+
+	g_DuelMgr.SetRankedPrompt(Data->MatchId, szOpp, Data->OppMmr, Data->OppTier, Data->OppDiv, Data->SecLeft);
+	if (gCB_DuelRanked != NULL)
+	{
+		gCB_DuelRanked->OnPrompt();
+	}
+}
+
+void ReceiveRankedList(BYTE* ReceiveBuffer, int Size)
+{
+	if (Size < (int)sizeof(PMSG_RANKED_LIST_RECV))
+	{
+		return;
+	}
+
+	const PMSG_RANKED_LIST_RECV* Data = (const PMSG_RANKED_LIST_RECV*)ReceiveBuffer;
+
+	int count = Data->Count;
+	if (count > MAX_RANKED_FIGHTS)
+	{
+		count = MAX_RANKED_FIGHTS;
+	}
+	if (Size < (int)sizeof(PMSG_RANKED_LIST_RECV) + count * (int)sizeof(PMSG_RANKED_LIST_ENTRY))
+	{
+		return;
+	}
+
+	RANKED_FIGHT_INFO fights[MAX_RANKED_FIGHTS];
+	memset(fights, 0, sizeof(fights));
+
+	for (int i = 0; i < count; ++i)
+	{
+		const PMSG_RANKED_LIST_ENTRY* e = (const PMSG_RANKED_LIST_ENTRY*)(ReceiveBuffer + sizeof(PMSG_RANKED_LIST_RECV) + i * sizeof(PMSG_RANKED_LIST_ENTRY));
+
+		fights[i].m_dwMatchId = e->MatchId;
+		fights[i].m_byRoom = e->Room;
+		CopyRankedName(fights[i].m_szName1, e->N1);
+		CopyRankedName(fights[i].m_szName2, e->N2);
+		fights[i].m_wMmr1 = e->Mmr1;
+		fights[i].m_wMmr2 = e->Mmr2;
+		fights[i].m_byTier1 = e->Tier1;
+		fights[i].m_byDiv1 = e->Div1;
+		fights[i].m_byTier2 = e->Tier2;
+		fights[i].m_byDiv2 = e->Div2;
+		fights[i].m_byScore1 = e->S1;
+		fights[i].m_byScore2 = e->S2;
+		fights[i].m_wRemainSec = e->RemainSec;
+	}
+
+	g_DuelMgr.SetRankedFights(count, fights);
+}
+
+void ReceiveRankedMessage(BYTE* ReceiveBuffer, int Size)
+{
+	if (Size < (int)sizeof(PMSG_RANKED_MSG_RECV))
+	{
+		return;
+	}
+
+	const PMSG_RANKED_MSG_RECV* Data = (const PMSG_RANKED_MSG_RECV*)ReceiveBuffer;
+
+	if (gCB_DuelRanked != NULL)
+	{
+		gCB_DuelRanked->OnMessage(Data->Code, Data->P1);
+	}
+}
+
+void ReceiveRankedResult(BYTE* ReceiveBuffer, int Size)
+{
+	if (Size < (int)sizeof(PMSG_RANKED_RESULT_RECV))
+	{
+		return;
+	}
+
+	const PMSG_RANKED_RESULT_RECV* Data = (const PMSG_RANKED_RESULT_RECV*)ReceiveBuffer;
+
+	RANKED_RESULT_INFO info;
+	memset(&info, 0, sizeof(info));
+	info.m_byOutcome = Data->Outcome;
+	info.m_wOldMmr = Data->OldMmr;
+	info.m_wNewMmr = Data->NewMmr;
+	info.m_sDelta = Data->Delta;
+	info.m_byOldTier = Data->OldTier;
+	info.m_byOldDiv = Data->OldDiv;
+	info.m_byNewTier = Data->NewTier;
+	info.m_byNewDiv = Data->NewDiv;
+
+	g_DuelMgr.SetRankedResult(info);
+	if (gCB_DuelRanked != NULL)
+	{
+		gCB_DuelRanked->OnResult();
 	}
 }
 
@@ -13897,6 +14059,7 @@ void Receive_Master_SkillList(BYTE* ReceiveBuffer)
 	PMSG_MASTER_SKILL_LIST_SEND* lpMsg = (PMSG_MASTER_SKILL_LIST_SEND*)ReceiveBuffer;
 	
 	
+	MasterPagesOnTreeRebuilt();	// the page list belongs to the character this tree describes; the server resends it after
 	g_pMasterSkillTreeInterface->ClearSkillTreeInfo();
     g_pMasterSkillTreeInterface->InitMasterSkillPoint();
 	g_pMasterSkillTreeInterface->SetMasterType(gCharacterManager.GetCharacterClass(CharacterAttribute->Class));
@@ -14743,6 +14906,22 @@ BOOL TranslateProtocol( int HeadCode, BYTE *ReceiveBuffer, int Size, BOOL bEncry
 				break;
 			case 0x0D:
 				ReceiveDuelRound( ReceiveBuffer );
+				break;
+			// Ranked duels (CB_DuelRanked.h); an old server never sends these.
+			case 0x10:
+				ReceiveRankedStatus( ReceiveBuffer, Size );
+				break;
+			case 0x11:
+				ReceiveRankedPrompt( ReceiveBuffer, Size );
+				break;
+			case 0x12:
+				ReceiveRankedList( ReceiveBuffer, Size );
+				break;
+			case 0x13:
+				ReceiveRankedMessage( ReceiveBuffer, Size );
+				break;
+			case 0x14:
+				ReceiveRankedResult( ReceiveBuffer, Size );
 				break;
 			}
 		}

@@ -272,10 +272,34 @@ int CKanturuMonsterMng::GetMayaObjIndex() // OK
 
 int CKanturuMonsterMng::GetAliveMonsterCount() // OK
 {
-	return this->m_AliveMonsterCount;
+	// A monster that died without going through MonsterDie (poison, reflect, a deleted object) stayed
+	// counted for good: the HUD showed Monster : 1 with nothing left to kill and the wave never ended.
+	// Count the live monsters of the list instead of trusting the decrement.
+	int count = 0;
+
+	for(int n=0;n < this->m_KanturuMonster.GetCount();n++)
+	{
+		if(OBJECT_RANGE(this->m_KanturuMonster.m_ObjIndex[n]) == 0)
+		{
+			continue;
+		}
+
+		LPOBJ lpMonster = &gObj[this->m_KanturuMonster.m_ObjIndex[n]];
+
+		if(lpMonster->Connected != OBJECT_ONLINE || lpMonster->Type != OBJECT_MONSTER || lpMonster->Live == 0 || lpMonster->Map != MAP_KANTURU3)
+		{
+			continue;
+		}
+
+		count++;
+	}
+
+	this->m_AliveMonsterCount = count;
+
+	return count;
 }
 
 int CKanturuMonsterMng::IsExistAliveMonster() // OK
 {
-	return ((this->m_AliveMonsterCount<=0)?0:1);
+	return ((this->GetAliveMonsterCount()<=0)?0:1);
 }

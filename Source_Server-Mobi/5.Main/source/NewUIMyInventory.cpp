@@ -53,6 +53,9 @@ CNewUIMyInventory::CNewUIMyInventory()
 	m_pNewUI3DRenderMng = nullptr;
 	m_pNewInventoryCtrl = nullptr;
 	m_Pos.x = m_Pos.y = 0;
+	SlotAutoMove = -1;
+	SlotAutoMoveType = -1;
+	SlotAutoMoveTick = 0;
 
 	memset(&m_EquipmentSlots, 0, sizeof(EQUIPMENT_ITEM) * MAX_EQUIPMENT_INDEX);
 #if(HAISLOTRING)
@@ -2158,6 +2161,7 @@ bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM
 		|| pItem->Type == ITEM_POTION + 133
 		|| pItem->Type == ITEM_POTION + 162
 		|| pItem->Type == ITEM_POTION + 163
+		|| pItem->Type == ITEM_POTION + 493	// Master Page Scroll
 		|| pItem->Type >= ITEM_ETC
 		)
 	{
@@ -2687,6 +2691,20 @@ bool CNewUIMyInventory::HandleInventoryActions(CNewUIInventoryCtrl * targetContr
 										goto LABEL_32;
 									}
 								}
+							}
+						}
+						if (nDstIndex == EQUIPMENT_WEAPON_RIGHT
+							&& gCharacterManager.GetBaseClass(Hero->Class) == CLASS_SUMMONER
+							&& !(pItem->Type >= ITEM_STAFF && pItem->Type <= ITEM_STAFF + MAX_ITEM_INDEX))
+						{
+							// Summoner: right-click puts a second (non-staff) weapon in the
+							// left hand, same as dragging it there (see IsEquipable).
+							nDstIndex = EQUIPMENT_WEAPON_LEFT;
+							pEquipment = &CharacterMachine->Equipment[nDstIndex];
+
+							if (!(pEquipment && pEquipment->Type != -1))
+							{
+								goto LABEL_32;
 							}
 						}
 						else if (nDstIndex == EQUIPMENT_RING_RIGHT)
@@ -3308,6 +3326,8 @@ void SEASON3B::CNewUIMyInventory::BMoveItemNew(int Type)
 			return;
 	if (Type < MOVE_INV_TO_MIX || Type >MOVE_CHAR_TO_INV) { return; }
 	this->SlotAutoMove = -1;
+	this->SlotAutoMoveType = -1;
+	this->SlotAutoMoveTick = 0;
 	////===Draw Test
 	//char m_szTextBuff[128] = { 0 };
 	//sprintf(m_szTextBuff, "BMoveItemNew %d %d %d Slot (%d)",  MouseX, MouseY, Type, m_iPointedSlot);
@@ -3374,7 +3394,12 @@ void SEASON3B::CNewUIMyInventory::BMoveItemNew(int Type)
 			pMsg.Target = 0;
 			pMsg.Source = MAX_EQUIPMENT_INDEX + nSrcIndex;
 		}
-		if (Type == MOVE_MIX_TO_INV) this->SlotAutoMove = pMsg.Source;
+		if (Type == MOVE_MIX_TO_INV)
+		{
+			this->SlotAutoMove = pMsg.Source;
+			this->SlotAutoMoveType = pItemObj->Type;
+			this->SlotAutoMoveTick = GetTickCount();
+		}
 
 
 		::PlayBuffer(SOUND_GET_ITEM01);

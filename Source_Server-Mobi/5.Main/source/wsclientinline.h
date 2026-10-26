@@ -1754,6 +1754,47 @@ __forceinline bool SendRequestMixExit()
 	spe << ( BYTE)( channelid);\
 	spe.Send( TRUE);\
 }
+// Ranked duels (CB_DuelRanked.h). Same shape as the duel senders above: head 0xAA, ENCRYPTED.
+#define SendRankedStatusRequest()\
+{\
+	CStreamPacketEngine spe;\
+	spe.Init( 0xC1, 0xAA);\
+	spe << ( BYTE)0x10;\
+	spe.Send( TRUE);\
+}
+#define SendRankedQueue(on)\
+{\
+	CStreamPacketEngine spe;\
+	spe.Init( 0xC1, 0xAA);\
+	spe << ( BYTE)0x11;\
+	spe << ( BYTE)( on);\
+	spe.Send( TRUE);\
+}
+#define SendRankedAccept(flag, matchid)\
+{\
+	CStreamPacketEngine spe;\
+	spe.Init( 0xC1, 0xAA);\
+	spe << ( BYTE)0x12;\
+	spe << ( BYTE)( flag);\
+	spe << ( DWORD)( matchid);\
+	spe.Send( TRUE);\
+}
+#define SendRankedListRequest()\
+{\
+	CStreamPacketEngine spe;\
+	spe.Init( 0xC1, 0xAA);\
+	spe << ( BYTE)0x13;\
+	spe.Send( TRUE);\
+}
+#define SendRankedWatch(room, matchid)\
+{\
+	CStreamPacketEngine spe;\
+	spe.Init( 0xC1, 0xAA);\
+	spe << ( BYTE)0x14;\
+	spe << ( BYTE)( room);\
+	spe << ( DWORD)( matchid);\
+	spe.Send( TRUE);\
+}
 //#if(HAISLOTRING)
 //#define SendRequestSetSalePrice(offset, money)\
 //{\

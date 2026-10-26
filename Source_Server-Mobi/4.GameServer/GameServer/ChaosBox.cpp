@@ -585,8 +585,12 @@ void CChaosBox::PlusItemLevelMix(LPOBJ lpObj,int type) // OK
 		lpObj->ChaosSuccessRate += gServerInfo.m_AddLuckSuccessRate2[lpObj->AccountLevel];
 	}
 
-	if (lpObj->ChaosLockShowRate != 100) //CB_GETMIXRATE
+	// The talisman bonus goes into the rate even while the window is only
+	// asking for the rate to show (ChaosLockShowRate == 100): it used to be
+	// skipped there, so the number on screen ignored the Talisman of Luck
+	// while the real mix counted it. A refusal only aborts the real mix.
 	{
+		const bool bShowOnly = (lpObj->ChaosLockShowRate == 100);
 		// true: the item-upgrade mix takes a talisman as well as the Regular
 		// Combination - this is the Talisman of Luck's original job, boosting
 		// a +10/+11/+12/+13 attempt. Ordinary items take the Talisman of Luck,
@@ -595,13 +599,13 @@ void CChaosBox::PlusItemLevelMix(LPOBJ lpObj,int type) // OK
 		// The rate arithmetic here was already in the right order: the base
 		// tier rate, SoulSuccessRate and the item's own luck bonus are all
 		// added above, the talisman goes on top, and the clamp to 100 follows.
-		if (lpObj->ChaosBox[ItemSlot].IsPentagramItem() == 0 && this->GetTalismanOfLuckRate(lpObj, &lpObj->ChaosSuccessRate, true) == 0)
+		if (lpObj->ChaosBox[ItemSlot].IsPentagramItem() == 0 && this->GetTalismanOfLuckRate(lpObj, &lpObj->ChaosSuccessRate, true) == 0 && bShowOnly == false)
 		{
 			this->GCChaosMixSend(lpObj->Index,this->m_TalismanMixResult,0);
 			return;
 		}
 
-		if (lpObj->ChaosBox[ItemSlot].IsPentagramItem() != 0 && this->GetElementalTalismanOfLuckRate(lpObj, &lpObj->ChaosSuccessRate, true) == 0)
+		if (lpObj->ChaosBox[ItemSlot].IsPentagramItem() != 0 && this->GetElementalTalismanOfLuckRate(lpObj, &lpObj->ChaosSuccessRate, true) == 0 && bShowOnly == false)
 		{
 			this->GCChaosMixSend(lpObj->Index,this->m_TalismanMixResult,0);
 			return;
@@ -648,9 +652,14 @@ void CChaosBox::PlusItemLevelMix(LPOBJ lpObj,int type) // OK
 
 		item.m_Level++;
 
-		item.m_Durability = (float)gItemManager.GetItemDurability(item.m_Index,item.m_Level,item.IsExcItem(),item.IsSetItem());
+		// A Lucky item's durability is its own lucky-durability, not a
+		// level-based value: leave it exactly as it was.
+		if(item.IsLuckyItem() == 0)
+		{
+			item.m_Durability = (float)gItemManager.GetItemDurability(item.m_Index,item.m_Level,item.IsExcItem(),item.IsSetItem());
 
-		item.m_Durability = (item.m_Durability*lpObj->ChaosBox[ItemSlot].m_Durability)/item.m_BaseDurability;
+			item.m_Durability = (item.m_Durability*lpObj->ChaosBox[ItemSlot].m_Durability)/item.m_BaseDurability;
+		}
 
 		this->ChaosBoxInit(lpObj);
 

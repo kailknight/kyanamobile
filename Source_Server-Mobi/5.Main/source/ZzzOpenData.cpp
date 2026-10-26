@@ -833,6 +833,7 @@ void OpenItems()
 	gLoadData.AccessModel(MODEL_POTION+75, "Data\\Item\\partCharge2\\", "elitescroll_magic");
 	gLoadData.AccessModel(MODEL_POTION+76, "Data\\Item\\partCharge2\\", "elitescroll_strenth");
 	gLoadData.AccessModel(MODEL_POTION+77, "Data\\Item\\partCharge2\\", "elitescroll_mana");
+	gLoadData.AccessModel(MODEL_POTION+493, "Data\\Item\\partCharge2\\", "elitescroll_mana");	// Master Page Scroll: reuses the elite scroll model
 
 	char	szPC6Path[24];
 	sprintf( szPC6Path, "Data\\Item\\partCharge6\\" );
@@ -1685,6 +1686,7 @@ void OpenItemTextures()
 	gLoadData.OpenTexture(MODEL_POTION+75, "Item\\partCharge2\\");
 	gLoadData.OpenTexture(MODEL_POTION+76, "Item\\partCharge2\\");
 	gLoadData.OpenTexture(MODEL_POTION+77, "Item\\partCharge2\\");
+	gLoadData.OpenTexture(MODEL_POTION+493, "Item\\partCharge2\\");
 	gLoadData.OpenTexture(MODEL_TYPE_CHARM_MIXWING+EWS_KNIGHT_1_CHARM, "Item\\partCharge6\\");     
 	gLoadData.OpenTexture(MODEL_TYPE_CHARM_MIXWING+EWS_MAGICIAN_1_CHARM, "Item\\partCharge6\\");       
 	gLoadData.OpenTexture(MODEL_TYPE_CHARM_MIXWING+EWS_ELF_1_CHARM, "Item\\partCharge6\\"); 

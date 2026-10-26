@@ -30,7 +30,7 @@
 #else
 #define MAX_MAP 57
 #endif
-#define MAX_MAP_ITEM 300
+#define MAX_MAP_ITEM 500
 #define MAX_MAP_WIDTH 256
 #define MAX_MAP_HEIGHT 256
 

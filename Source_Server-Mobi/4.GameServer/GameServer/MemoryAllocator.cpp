@@ -142,6 +142,7 @@ void CMemoryAllocator::BindMemoryAllocatorInfo(int index,CMemoryAllocatorInfo Me
 		// check Type != OBJECT_USER first or it null-derefs on the first monster.
 		lpObj->SpinClaim = MemoryAllocatorInfo.m_SpinClaim;
 		lpObj->MasterSkill = MemoryAllocatorInfo.m_MasterSkill;
+		lpObj->MasterPages = MemoryAllocatorInfo.m_MasterPages;
 		lpObj->QuestKillCount = MemoryAllocatorInfo.m_QuestKillCount;
 		lpObj->QuestWorldList = MemoryAllocatorInfo.m_QuestWorldList;
 		lpObj->GensVictimList = MemoryAllocatorInfo.m_GensVictimList;

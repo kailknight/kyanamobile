@@ -73,6 +73,13 @@ struct _MASTER_SKILL_TOOLTIP
 	char Info7[64];
 };
 
+// Master pages (C1:D3:C0..C4, see MasterPage.h on the GameServer). Called from Protocol.cpp;
+// the state lives in NewUIMasterSkillTree.cpp. With no PAGES_INFO (old server) nothing shows.
+void MasterPagesRecvInfo(const BYTE* data, int size);		// D3:C0
+void MasterPagesRecvSnapshot(const BYTE* data, int size);	// D3:C2
+void MasterPagesRecvResult(const BYTE* data, int size);	// D3:C3
+void MasterPagesOnTreeRebuilt();							// F3:53 arrived: forget the page list until D3:C0 comes
+
 namespace SEASON3B
 {
 	//size = 404
@@ -139,6 +146,12 @@ namespace SEASON3B
 		void ClearSkillTreeData();
 		void ClearSkillTooltipData();
 		bool GetXYImgMaster(JCCoord* GetXY,int Skill);
+		// Master pages. The page state is file-static in the .cpp (no data members here:
+		// CheckBtn reads members by raw offset).
+		void RenderPageStrip();
+		bool UpdatePageStrip();
+		void BuildPagePreview();
+		bool IsPagePreview();
 	private:
 		BITMAP_t* pBitMap[2];
 		int PosX;

@@ -129,6 +129,12 @@
     <ClInclude Include="Duel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DuelRanked.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MasterPage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ExperienceTable.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -963,6 +969,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Duel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DuelRanked.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MasterPage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ExperienceTable.cpp">

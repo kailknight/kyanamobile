@@ -48,7 +48,7 @@ void LogAdd(eLogColor color,char* text,...) // OK
 
 	va_list arg;
 	va_start(arg,text);
-	vsprintf_s(temp,text,arg);
+	vsnprintf_s(temp,sizeof(temp),_TRUNCATE,text,arg);
 	va_end(arg);
 
 	char log[1024];

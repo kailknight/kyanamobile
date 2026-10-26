@@ -1,4 +1,9 @@
 // NewUIDuelWatchWindow.h: interface for the CNewUIDuelWatchWindow class.
+//
+// Doorkeeper Titus. Two tabs: RANKED (the ranked matchmaking hub: profile card, Find Match,
+// the live ranked fights with a Watch button) and NORMAL (the four local duel channels, as the
+// window always was). Drawn entirely in code. See CB_DuelRanked.h and
+// Working Project\MD Files\RankedDuel-PLAN.md section 7.
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
@@ -11,40 +16,38 @@
 
 namespace SEASON3B
 {
-	class CNewUIDuelWatchWindow : public CNewUIObj  
+	class CNewUIDuelWatchWindow : public CNewUIObj
 	{
 	public:
-		enum IMAGE_LIST
-		{
-			IMAGE_DUELWATCHWINDOW_BACK = CNewUIMessageBoxMng::IMAGE_MSGBOX_BACK,	// Reference
-			IMAGE_DUELWATCHWINDOW_TOP = CNewUIMyInventory::IMAGE_INVENTORY_BACK_TOP,	
-			IMAGE_DUELWATCHWINDOW_LEFT = CNewUIMyInventory::IMAGE_INVENTORY_BACK_LEFT,
-			IMAGE_DUELWATCHWINDOW_RIGHT = CNewUIMyInventory::IMAGE_INVENTORY_BACK_RIGHT,
-			IMAGE_DUELWATCHWINDOW_BOTTOM = CNewUIMyInventory::IMAGE_INVENTORY_BACK_BOTTOM,
-			IMAGE_DUELWATCHWINDOW_BUTTON = CNewUIMessageBoxMng::IMAGE_MSGBOX_BTN_EMPTY_VERY_SMALL,
-			IMAGE_DUELWATCHWINDOW_LINE = CNewUIMyQuestInfoWindow::IMAGE_MYQUEST_LINE,
-		};
-	private:
 		enum
 		{
-			INVENTORY_WIDTH = 190,
-			INVENTORY_HEIGHT = 429,
+			WINDOW_WIDTH = 264,
+			WINDOW_HEIGHT = 429,	// stays clear of the main frame bar along the bottom
 		};
 
+		enum TAB
+		{
+			TAB_RANKED = 0,
+			TAB_NORMAL = 1,
+		};
+
+	private:
 		CNewUIManager*			m_pNewUIMng;
 		POINT m_Pos;
 
-		CNewUIButton m_BtnChannel[4];
-		BOOL m_bChannelEnable[4];
+		int   m_Tab;
+		DWORD m_dwListTick;		// last AA:13 (ranked fight list) request
+		DWORD m_dwStatusTick;	// last AA:10 (status) request while no status has arrived
+
 	public:
 		CNewUIDuelWatchWindow();
 		virtual ~CNewUIDuelWatchWindow();
 
 		bool Create(CNewUIManager* pNewUIMng, int x, int y);
 		void Release();
-		
+
 		void SetPos(int x, int y);
-		
+
 		bool UpdateMouseEvent();
 		bool UpdateKeyEvent();
 		bool Update();
@@ -56,12 +59,9 @@ namespace SEASON3B
 		float GetLayerDepth();	//. 5.0f
 
 	private:
-		void LoadImages();
-		void UnloadImages();
-
-		void RenderFrame();
-		bool BtnProcess();
-
-		void InitButton(CNewUIButton * pNewUIButton, int iPos_x, int iPos_y, const unicode::t_char * pCaption);
+		void DrawFrame();
+		void DrawTabs();
+		void DrawRankedTab();
+		void DrawNormalTab();
 	};
 }

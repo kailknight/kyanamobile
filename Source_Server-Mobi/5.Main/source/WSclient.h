@@ -1746,6 +1746,130 @@ typedef struct
 	BYTE		nFlag;
 } PMSG_DUEL_ROUNDSTART_BROADCAST, *LPPMSG_DUEL_ROUNDSTART_BROADCAST;
 
+// ---- Ranked duels (cross-server matchmaking): AA:10-14. Byte for byte the GameServer's
+// PMSG_DUELRANKED_* (DuelRanked.h); see CB_DuelRanked.h and
+// Working Project\MD Files\RankedDuel-PLAN.md section 5.3. Names are char[10], zero padded, no NUL.
+// PBMSG_HEADER + SubCode is the same four bytes as the server's PSBMSG_HEAD (C1, size, 0xAA, sub).
+#pragma pack(push, 1)
+
+// Client -> GameServer, sent encrypted like the other 0xAA packets (SendRanked* in wsclientinline.h).
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x10 STATUS_REQ, 0x13 LIST_REQ: header only
+} PMSG_RANKED_REQUEST;
+
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x11
+	BYTE         On;			// 1 join the queue, 0 leave
+} PMSG_RANKED_QUEUE;
+
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x12
+	BYTE         Flag;			// 1 accept, 0 decline
+	DWORD        MatchId;
+} PMSG_RANKED_ACCEPT;
+
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x14
+	BYTE         Room;
+	DWORD        MatchId;
+} PMSG_RANKED_WATCH;
+
+// GameServer -> client.
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x10
+	WORD         Mmr;
+	BYTE         Tier;			// 0..6 Iron, Bronze, Silver, Gold, Platinum, Legend, Duel Master
+	BYTE         Div;			// 3 = III, 2 = II, 1 = I, 0 = none
+	WORD         StepLo;
+	WORD         StepNext;		// 0 at the top rank
+	WORD         Wins;
+	WORD         Losses;
+	BYTE         State;			// 0 none, 1 queued, 2 prompt, 3 staging, 4 fighting, 5 watching
+	WORD         QueuedSec;
+	BYTE         Accepting;
+} PMSG_RANKED_STATUS_RECV;
+
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x11
+	DWORD        MatchId;
+	CHAR         Opp[10];
+	WORD         OppMmr;
+	BYTE         OppTier;
+	BYTE         OppDiv;
+	BYTE         SecLeft;
+} PMSG_RANKED_PROMPT_RECV;
+
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x12, followed by Count PMSG_RANKED_LIST_ENTRY
+	BYTE         Count;
+} PMSG_RANKED_LIST_RECV;
+
+typedef struct
+{
+	DWORD        MatchId;
+	BYTE         Room;
+	CHAR         N1[10];
+	CHAR         N2[10];
+	WORD         Mmr1;
+	WORD         Mmr2;
+	BYTE         Tier1;
+	BYTE         Div1;
+	BYTE         Tier2;
+	BYTE         Div2;
+	BYTE         S1;
+	BYTE         S2;
+	WORD         RemainSec;
+} PMSG_RANKED_LIST_ENTRY;
+
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x13
+	BYTE         Code;			// 1..27, see CB_DuelRanked.cpp (OnMessage)
+	BYTE         P1;
+} PMSG_RANKED_MSG_RECV;
+
+typedef struct
+{
+	PBMSG_HEADER Header;
+	BYTE         SubCode;		// 0x14
+	BYTE         Outcome;		// 0 win, 1 loss, 2 draw, 3 void
+	WORD         OldMmr;
+	WORD         NewMmr;
+	short        Delta;
+	BYTE         OldTier;
+	BYTE         OldDiv;
+	BYTE         NewTier;
+	BYTE         NewDiv;
+} PMSG_RANKED_RESULT_RECV;
+
+#pragma pack(pop)
+
+static_assert(sizeof(PMSG_RANKED_REQUEST) == 4, "PMSG_RANKED_REQUEST must match the GameServer's PSBMSG_HEAD (4)");
+static_assert(sizeof(PMSG_RANKED_QUEUE) == 5, "PMSG_RANKED_QUEUE must match the GameServer's PMSG_DUELRANKED_QUEUE_RECV (5)");
+static_assert(sizeof(PMSG_RANKED_ACCEPT) == 9, "PMSG_RANKED_ACCEPT must match the GameServer's PMSG_DUELRANKED_ACCEPT_RECV (9)");
+static_assert(sizeof(PMSG_RANKED_WATCH) == 9, "PMSG_RANKED_WATCH must match the GameServer's PMSG_DUELRANKED_WATCH_RECV (9)");
+static_assert(sizeof(PMSG_RANKED_STATUS_RECV) == 20, "PMSG_RANKED_STATUS_RECV must match the GameServer's PMSG_DUELRANKED_STATUS_SEND (20)");
+static_assert(sizeof(PMSG_RANKED_PROMPT_RECV) == 23, "PMSG_RANKED_PROMPT_RECV must match the GameServer's PMSG_DUELRANKED_PROMPT_SEND (23)");
+static_assert(sizeof(PMSG_RANKED_LIST_RECV) == 5, "PMSG_RANKED_LIST_RECV must match the GameServer's PMSG_DUELRANKED_LIST_SEND (5)");
+static_assert(sizeof(PMSG_RANKED_LIST_ENTRY) == 37, "PMSG_RANKED_LIST_ENTRY must match the GameServer's PMSG_DUELRANKED_LIST_ENTRY (37)");
+static_assert(sizeof(PMSG_RANKED_MSG_RECV) == 6, "PMSG_RANKED_MSG_RECV must match the GameServer's PMSG_DUELRANKED_MSG_SEND (6)");
+static_assert(sizeof(PMSG_RANKED_RESULT_RECV) == 15, "PMSG_RANKED_RESULT_RECV must match the GameServer's PMSG_DUELRANKED_RESULT_SEND (15)");
+
 typedef struct tagPSHOPTITLE_HEADER {
 	PWMSG_HEADER    Header;
 	BYTE			bySubcode;

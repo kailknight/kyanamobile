@@ -1281,6 +1281,7 @@ void CGChatWhisperRecv(PMSG_CHAT_WHISPER_RECV* lpMsg,int aIndex);
 void CGMainCheckRecv(PMSG_MAIN_CHECK_RECV* lpMsg,int aIndex);
 void CGLiveClientRecv(PMSG_LIVE_CLIENT_RECV* lpMsg,int aIndex);
 void CGPositionRecv(PMSG_POSITION_RECV* lpMsg,int aIndex);
+void CGPositionClientRecv(PMSG_POSITION_RECV* lpMsg,int aIndex);
 void CGActionRecv(PMSG_ACTION_RECV* lpMsg,int aIndex);
 void CGEventRemainTimeRecv(PMSG_EVENT_REMAIN_TIME_RECV* lpMsg,int aIndex);
 void CGPetItemCommandRecv(PMSG_PET_ITEM_COMMAND_RECV* lpMsg,int aIndex);

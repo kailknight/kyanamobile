@@ -403,20 +403,8 @@ void PopUpErrorCheckMsgBox(const char* szErrorMsg, bool bForceDestroy)
 	{
 		//SendMessage(NULL, WM_DESTROY, 0, 0);
 	}
-	std::ofstream outFile("KEN.txt", std::ios::app);
-	if (!outFile.is_open())
-	{
-		outFile.open("KEN.txt");
-	}
-
-	if (outFile.is_open())
-	{
-		outFile << szErrorMsg << std::endl;
-		outFile.close();
-	}
-	else
-	{
-		MessageBox(NULL, "Khong the mo hoac tao file KEN.txt de ghi.", NULL, MB_OK);
-	}
+	// Used to append every message to KEN.txt in the client folder (and pop a
+	// message box if it could not); the normal error log is enough.
+	g_ErrorReport.Write("%s\r\n", szErrorMsg);
 #endif
 }

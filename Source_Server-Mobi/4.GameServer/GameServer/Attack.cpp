@@ -13,6 +13,7 @@
 #include "CustomWing.h"
 #include "DarkSpirit.h"
 #include "Duel.h"
+#include "DuelRanked.h"
 #include "EventKillAll.h"
 #include "EventRunAndCatch.h"
 #include "EventTvT.h"
@@ -2277,6 +2278,15 @@ bool CAttack::CheckPlayerTarget(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	}
 
 	if(lpTarget->Authority == 32)
+	{
+		return 0;
+	}
+
+	// Ranked duel: while staging, paused or in the CLEAN window (DuelUser is -1 then)
+	// the fighters are ordinary players on map 64 (NonPK is 0), so nobody may hit them
+	// and they may not hit anyone, unless the two are in a live duel with each other.
+	// First on purpose: the PvP flag and relationship shortcuts below must not bypass it.
+	if(gDuelRanked.CheckProtectedTarget(lpObj,lpTarget) != 0)
 	{
 		return 0;
 	}

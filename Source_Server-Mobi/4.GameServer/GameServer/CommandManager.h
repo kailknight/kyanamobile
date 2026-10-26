@@ -371,6 +371,7 @@ public:
 	bool CommandSetReset(LPOBJ lpObj, char* arg);
 	bool CommandSetStats(LPOBJ lpObj, char* arg);
 	bool CommandSetMasterLevel(LPOBJ lpObj, char* arg);
+	bool CommandRankedTest(LPOBJ lpObj,char* command,char* arg);
 private:
 	COMMAND_INFO m_CommandInfo[MAX_COMMAND];
 };

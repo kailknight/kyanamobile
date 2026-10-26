@@ -38,6 +38,9 @@
 #else
 #define MAX_VIEWPORT 75
 #endif
+// Ground items one player can have in view at once (own list, separate from players/monsters).
+// A viewport item packet entry is 4+MAX_ITEM_INFO bytes; keep the packet far below the client's 8 KB receive buffer.
+#define MAX_VIEWPORT_ITEM 300
 #define MAX_GUILD_USER 80
 #define MAX_MONEY 2000000000
 #define MAX_CHECKSUM_KEY 1024
@@ -950,6 +953,8 @@ struct OBJECTSTRUCT
 	int QuestKillCountIndex;
 	struct QUEST_KILL_COUNT* QuestKillCount;
 	int LoadMasterLevel;
+	int LoadMasterPages; // 1 once the DataServer has returned this character's master pages (MasterPage.h); saves are skipped while 0
+	struct MASTER_PAGES_DATA* MasterPages; // parked master pages, allocated with the slot (CMemoryAllocatorInfo)
 	int MasterLevel;
 	int MasterPoint;
 	#pragma pack(1)
@@ -1219,6 +1224,15 @@ struct OBJECTSTRUCT
 	int SpeedHackCount;
 	int SpeedHackSkill;
 	int SpeedHackDialog;
+	// Skill cast rate check (CHackSkillCheck::CheckSkillRate): ring of the last
+	// cast times, strike counter, rate-limited log and the type-3 lockout.
+	DWORD SkillRateTick[6];
+	int SkillRatePos;
+	int SkillRateFilled;
+	int SkillRateStrikes;
+	DWORD SkillRateStrikeTick;
+	DWORD SkillRateLogTick;
+	DWORD SkillRateLockUntil;
 
 
 //MC bot

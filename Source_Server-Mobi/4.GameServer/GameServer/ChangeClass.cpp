@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "ChangeClass.h"
 #include "Notice.h"
+#include "MasterPage.h"
 #include "MasterSkillTree.h"
 #include "ObjectManager.h"
 #include "ServerInfo.h"
@@ -131,6 +132,9 @@ void cChangeClass::ChangeClass(LPOBJ lpObj, int Class)
 	{
 		lpObj->MasterSkill[n].Clear();
 	}
+
+	// The new class cannot inherit the old class' parked pages; unlocked count and names stay.
+	gMasterPage.OnFullWipe(lpObj);
 
 	gMasterSkillTree.GCMasterSkillListSend(lpObj->Index);
 	gSkillManager.GCSkillListSend(lpObj, 0);

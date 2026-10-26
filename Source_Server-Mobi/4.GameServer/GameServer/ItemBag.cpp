@@ -542,6 +542,14 @@ bool CItemBag::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 		//LogAdd(LOG_RED,"DEBUG OPt Life %d",Option3);
 	}
 
+	// Option column: the CheckOptionsDrop roll above collapsed every value to 1 (or 0), so a row
+	// written with 7 still dropped +1. A value of 2 or more is the exact option level; 1 keeps
+	// the old 'may have it' roll.
+	if (lpInfo->Option3 >= 2)
+	{
+		Option3 = lpInfo->Option3;
+	}
+
 	if (alwaysSkill)
 	{
 		Option1 = 1;

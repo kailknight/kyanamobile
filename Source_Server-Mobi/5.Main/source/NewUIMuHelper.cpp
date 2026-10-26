@@ -192,7 +192,7 @@ void SEASON3B::CNewUIMuHelper::InitCheckBox()
     InsertCheckBox(BITMAP_OPTION_BEGIN + 5, m_Pos.x + 18, m_Pos.y + 125, 15, 15, 0, GlobalText[3594], 22, 2);//"PVP Counterattack"
 
     RegisterBoxCharacter(0xFF, 0);
-    RegisterBoxCharacter(0xFF, 1);
+    // RegisterBoxCharacter(0xFF, 1); // Long Distance option removed: no class registered, so the box is neither drawn nor clickable
     RegisterBoxCharacter(0xFF, 2);
     RegisterBoxCharacter(0xFF, 3);
     RegisterBoxCharacter(0xFF, 4);
@@ -1274,7 +1274,13 @@ void SEASON3B::CNewUIMuHelper::UpdateBtnData(int NumBtn)
 		{
 			if(strlen(this->DataAutoMu.ItemList[n]) < 1)
 			{
-				::memcpy(this->DataAutoMu.ItemList[n], strdup(szText.c_str()), 16);
+				// The input box starts with a blank in it, so entries came out as " Sign" and never matched "Sign of the Lord".
+				while (!szText.empty() && (szText.back() == ' ' || szText.back() == '	')) szText.pop_back();
+				size_t lead = 0; while (lead < szText.size() && (szText[lead] == ' ' || szText[lead] == '	')) lead++;
+				szText.erase(0, lead);
+				if (szText.empty()) break;
+				::strncpy(this->DataAutoMu.ItemList[n], szText.c_str(), sizeof(this->DataAutoMu.ItemList[n]) - 1);
+				this->DataAutoMu.ItemList[n][sizeof(this->DataAutoMu.ItemList[n]) - 1] = 0;
 				break;
 			}
 		}	
@@ -1805,7 +1811,7 @@ void SEASON3B::CNewUIMuHelper::LoadConfig(BYTE* Data)
 		this->Helper.AutoPotion = lpMsg->OptionFlag & 1;
 		this->Helper.AutoHeal = (lpMsg->OptionFlag >> 1) & 1;
 		this->Helper.AutoDrainLife = (lpMsg->OptionFlag >> 2) & 1;
-		this->Helper.LongDistance = (lpMsg->OptionFlag >> 3) & 1;
+		this->Helper.LongDistance = 0; // Long Distance removed; ignore a value saved earlier
 		this->Helper.OriginalPosition = (lpMsg->OptionFlag >> 4) & 1;
 		this->Helper.Combo = (lpMsg->OptionFlag >> 5) & 1;
 		this->Helper.Party = (lpMsg->OptionFlag >> 6) & 1;

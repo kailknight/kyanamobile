@@ -13509,6 +13509,8 @@ void CreateCharacterPointer(CHARACTER *c,int Type,unsigned char PositionX,unsign
 	c->GuildTeam        = 0;
 	c->Run              = 0;
 	c->GuildMarkIndex         = -1;
+	c->DuelRankTier           = 0;
+	c->DuelRankDiv            = 0;
 	c->PK               = PVP_NEUTRAL;
 	o->Type             = Type;
 	o->Scale            = 0.9f;

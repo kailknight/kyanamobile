@@ -6,6 +6,7 @@
 #include "MasterSkillTree.h"
 #include "GameMain.h"
 #include "ItemManager.h"
+#include "MasterPage.h"
 #include "MemScript.h"
 #include "ObjectManager.h"
 #include "ServerInfo.h"
@@ -1971,6 +1972,40 @@ bool CMasterSkillTree::ReplaceMasterSkill(LPOBJ lpObj,int index,int skill,int le
 	#endif
 }
 
+void CMasterSkillTree::RestoreBaseSkills(LPOBJ lpObj) // OK
+{
+	for(int n=0;n < MAX_SKILL_LIST;n++)
+	{
+		if(lpObj->Skill[n].IsMasterSkill() != 0)
+		{
+			if(lpObj->Skill[n].m_skill >= 300)
+			{
+				lpObj->Skill[n].Clear();
+				continue;
+			}
+
+			lpObj->Skill[n].m_level = 0;
+
+			lpObj->Skill[n].m_skill = lpObj->Skill[n].m_skill;
+
+			lpObj->Skill[n].m_index = lpObj->Skill[n].m_skill;
+
+			lpObj->Skill[n].m_DamageMin = gSkillManager.GetSkillDamage(lpObj->Skill[n].m_skill);
+
+			lpObj->Skill[n].m_DamageMax = lpObj->Skill[n].m_DamageMin+(lpObj->Skill[n].m_DamageMin/2);
+		}
+	}
+
+	#if(GAMESERVER_UPDATE>=602)
+
+	for(int n=0;n < MAX_MASTER_SKILL_LIST;n++)
+	{
+		lpObj->MasterSkill[n].Clear();
+	}
+
+	#endif
+}
+
 void CMasterSkillTree::CGMasterSkillRecv(PMSG_MASTER_SKILL_RECV* lpMsg,int aIndex) // OK
 {
 	#if(GAMESERVER_UPDATE>=602)
@@ -1986,6 +2021,10 @@ void CMasterSkillTree::CGMasterSkillRecv(PMSG_MASTER_SKILL_RECV* lpMsg,int aInde
 	{
 		return;
 	}
+
+	// A master page switch rewrites the skills under this lock: wait for it, so
+	// a point is never spent on a half switched tree.
+	CMasterPageGuard MasterPageGuard;
 
 	MASTER_SKILL_TREE_INFO MasterSkillTreeInfo;
 
@@ -2438,6 +2477,8 @@ void CMasterSkillTree::DGMasterSkillTreeRecv(SDHP_MASTER_SKILL_TREE_RECV* lpMsg)
 
 	#endif
 
+	gMasterPage.OnTreeLoaded(lpObj);
+
 	#endif
 }
 
@@ -2466,6 +2507,9 @@ void CMasterSkillTree::GDMasterSkillTreeSend(int aIndex) // OK
 	memcpy(pMsg.name,gObj[aIndex].Name,sizeof(pMsg.name));
 
 	gDataServerConnection.DataSend((BYTE*)&pMsg,pMsg.header.size);
+
+	// The pages ride along; an old DataServer never answers and pages stay off.
+	gMasterPage.GDPagesLoadSend(aIndex);
 
 	#endif
 }

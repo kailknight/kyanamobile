@@ -12,3 +12,6 @@ LRESULT CALLBACK About(HWND hDlg,UINT message,WPARAM wParam,LPARAM lParam);
 extern int AdvancedLog;
 extern int ShowLogProtocol;
 extern int ShowLogQuery;
+extern int LogVerbose;
+extern int ItemSerialBlock;
+void LoadLogConfig();

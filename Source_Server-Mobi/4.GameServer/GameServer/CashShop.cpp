@@ -14,6 +14,7 @@
 #include "JSProtocol.h"
 #include "Log.h"
 #include "Map.h"
+#include "MasterPage.h"
 #include "MemScript.h"
 #include "Message.h"
 #include "Notice.h"
@@ -1897,7 +1898,7 @@ void CCashShop::DGCashShopItemUseRecv(SDHP_CASH_SHOP_ITEM_USE_RECV* lpMsg) // OK
 	{
 		if(lpProductInfo->ItemDuration == 0)
 		{
-			if(lpProductInfo->ItemIndex == GET_ITEM(14,91) || lpProductInfo->ItemIndex == GET_ITEM(14,97) || lpProductInfo->ItemIndex == GET_ITEM(14,98) || lpProductInfo->ItemIndex == GET_ITEM(14,114) || lpProductInfo->ItemIndex == GET_ITEM(14,117) || lpProductInfo->ItemIndex == GET_ITEM(14,162) || lpProductInfo->ItemIndex == GET_ITEM(14,163) || lpProductInfo->ItemIndex == GET_ITEM(14,169))
+			if(lpProductInfo->ItemIndex == GET_ITEM(14,91) || lpProductInfo->ItemIndex == GET_ITEM(14,97) || lpProductInfo->ItemIndex == GET_ITEM(14,98) || lpProductInfo->ItemIndex == GET_ITEM(14,114) || lpProductInfo->ItemIndex == GET_ITEM(14,117) || lpProductInfo->ItemIndex == GET_ITEM(14,162) || lpProductInfo->ItemIndex == GET_ITEM(14,163) || lpProductInfo->ItemIndex == GET_ITEM(14,169) || lpProductInfo->ItemIndex == GET_ITEM(14,493))
 			{
 				CItem item;
 
@@ -1963,6 +1964,15 @@ void CCashShop::DGCashShopItemUseRecv(SDHP_CASH_SHOP_ITEM_USE_RECV* lpMsg) // OK
 							DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
 							return;
 						}
+						break;
+					case GET_ITEM(14,493): // Master Page Scroll: opens the next master page straight away
+						if(gMasterPage.CheckScroll(lpObj) == 0)
+						{
+							pMsg.result = 1;
+							DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
+							return;
+						}
+						gMasterPage.ApplyScroll(lpObj);
 						break;
 				}
 			}

@@ -2,6 +2,8 @@
 #include "resource.h"
 #include "DSProtocol.h"
 #include "MonthlyCard.h"
+#include "DuelRanked.h"
+#include "MasterPage.h"
 #include "BloodCastle.h"
 #include "CashShop.h"
 #include "CastleSiege.h"
@@ -150,6 +152,17 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 			case 0x50: //Kira Pass (monthly WCoin) - paid / status
 				gMonthlyCard.DGResultRecv((SDHP_MONTHLYCARD_RESULT*)lpMsg);
 				break;
+			case 0x51: //Ranked duel - status / prompt / go / expect / applied / list / msg / cancel (0x5F is DataServer-internal)
+			case 0x52:
+			case 0x53:
+			case 0x54:
+			case 0x55:
+			case 0x56:
+			case 0x57:
+			case 0x58:
+			case 0x59:
+				gDuelRanked.DGRecv(lpMsg,size);
+				break;
 			}
 			break;
 		case 0x05:
@@ -206,6 +219,9 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 					#if(GAMESERVER_UPDATE>=401)
 					gMasterSkillTree.DGMasterSkillTreeRecv((SDHP_MASTER_SKILL_TREE_RECV*)lpMsg);
 					#endif
+					break;
+				case 0x01: //Master skill tree pages - load result (MasterPage.h)
+					gMasterPage.DGPagesRecv((SDHP_MASTER_PAGES_RECV*)lpMsg,size);
 					break;
 			}
 			break;
@@ -2003,7 +2019,7 @@ void DGCreateItemRecv(SDHP_CREATE_ITEM_RECV* lpMsg) // OK
 				gIllusionTemple.SetEventItemSerial(lpMsg->Map,lpMsg->ItemIndex,lpMsg->Serial);
 			}
 #if LAGBOSS
-			gLog.Output(LOG_ITEMBAGDROP, "[OK][ItemDrop] NV[%s] Map ([%d](%d/%d) )Drop Item: [%s], Serial: %08X, level: %d, Skill: %d, Luck %d, Option3: %d, NewOption: %d, SetOption: %d, JOH: %d, OptionEx: %d, SocketOption:%d,%d,%d,%d,%d \n===============================", lpObj->Name, lpMsg->Map, lpMsg->X, lpMsg->Y, gItemManager.GetItemName(lpMsg->ItemIndex), lpMsg->Serial, lpMsg->Level, lpMsg->Option1, lpMsg->Option2,
+			if(gLogItemDropErrorsOnly == 0) gLog.Output(LOG_ITEMBAGDROP, "[OK][ItemDrop] NV[%s] Map ([%d](%d/%d) )Drop Item: [%s], Serial: %08X, level: %d, Skill: %d, Luck %d, Option3: %d, NewOption: %d, SetOption: %d, JOH: %d, OptionEx: %d, SocketOption:%d,%d,%d,%d,%d \n===============================", lpObj->Name, lpMsg->Map, lpMsg->X, lpMsg->Y, gItemManager.GetItemName(lpMsg->ItemIndex), lpMsg->Serial, lpMsg->Level, lpMsg->Option1, lpMsg->Option2,
 				lpMsg->Option3, lpMsg->NewOption, lpMsg->SetOption, lpMsg->JewelOfHarmonyOption, lpMsg->ItemOptionEx, lpMsg->SocketOption[1], lpMsg->SocketOption[2], lpMsg->SocketOption[3], lpMsg->SocketOption[4], lpMsg->SocketOption[5]);
 		}
 		else
@@ -2734,6 +2750,11 @@ void GDCharacterInfoSaveSend(int aIndex) // OK
 	{
 		return;
 	}
+
+	// A master page switch rewrites Skill[]/MasterSkill[]/MasterPoint together;
+	// hold the page lock so this save copies either all of it or none.
+	CMasterPageGuard MasterPageGuard;
+
 #if(JEWELBANKVER2)
 	gBCustomItemBank.GSSendDSSaveDataUser(aIndex);
 #endif
@@ -2830,6 +2851,9 @@ void GDCharacterInfoSaveSend(int aIndex) // OK
 	#if(GAMESERVER_UPDATE>=401)
 
 	gMasterSkillTree.GDMasterSkillTreeSaveSend(aIndex);
+
+	// Only once the pages were read back (LoadMasterPages), see MasterPage.h.
+	gMasterPage.GDPagesSaveSend(aIndex);
 
 	#endif
 

@@ -406,7 +406,14 @@ bool CSkillManager::CheckSkillRange(int index,int x,int y,int tx,int ty) // OK
 		return 0;
 	}
 
-	if(sqrt(pow(((float)x-(float)tx),2) + pow(((float)y-(float)ty),2)) <= SkillInfo.Range)
+	float range = (float)SkillInfo.Range;
+
+	if(SkillInfo.Range <= 4 && gServerInfo.m_SkillMeleeRangeTolerance > 0)
+	{
+		range = (range*(float)(100+gServerInfo.m_SkillMeleeRangeTolerance))/100.0f;
+	}
+
+	if(sqrt(pow(((float)x-(float)tx),2) + pow(((float)y-(float)ty),2)) <= range)
 	{
 		return 1;
 	}
@@ -6501,6 +6508,11 @@ void CSkillManager::CGSkillAttackRecv(PMSG_SKILL_ATTACK_RECV* lpMsg,int aIndex) 
 			return;
 		}
 
+		if(gHackSkillCheck.CheckSkillRate(lpObj,lpSkill->m_index) != 0)
+		{
+			return;
+		}
+
 		if(this->CheckSkillRequireKillPoint(lpObj,lpSkill->m_index) == 0)
 		{
 			return;
@@ -6592,6 +6604,11 @@ void CSkillManager::CGDurationSkillAttackRecv(PMSG_DURATION_SKILL_ATTACK_RECV* l
 		}
 
 		if(this->CheckSkillDelay(lpObj,lpSkill->m_index) == 0)
+		{
+			return;
+		}
+
+		if(gHackSkillCheck.CheckSkillRate(lpObj,lpSkill->m_index) != 0)
 		{
 			return;
 		}

@@ -215,7 +215,12 @@ void CB_ViewCharItem::DrawWindow()
 	float CuaSoW = 190;
 	float CuaSoH = 220;
 	float StartX = 10;
+#if defined(MU_TOUCH_UI)
+	// Phone: first opens just under the HP/MP/EXP bars (top-left HUD) instead of behind them.
+	float StartY = 88;
+#else
 	float StartY = 30;
+#endif
 
 	static bool SetPosCache = false;
 	g_pBCustomMenuInfo->gDrawWindowCustom(&StartX, &StartY, CuaSoW, CuaSoH, eWindowViewItemChar, "[%s]", this->CharViewName.c_str());
@@ -286,7 +291,11 @@ void CB_ViewCharItem::DrawWindow()
 	if (NumberInfo != -1 /*&& !gInterface.Data[eWindowChotroiRaoBan].Hover*/)
 	{
 
+		// Another player's gear: a summary of the options, not the real ones.
+		extern bool g_bItemInfoOptionSummary;
+		g_bItemInfoOptionSummary = true;
 		RenderItemInfo(MouseX + 75, MouseY, &CharItemInfo[NumberInfo], 0, 0, false, false);
+		g_bItemInfoOptionSummary = false;
 	}
 }
 #endif
