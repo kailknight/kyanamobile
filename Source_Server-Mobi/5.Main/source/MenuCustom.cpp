@@ -4,6 +4,9 @@
 #if defined(MU_IOS) && !defined(MU_MACOS)
 #include "Platform/IosPlatform.h"
 #endif
+#if defined(__ANDROID__) || (defined(MU_IOS) && !defined(MU_MACOS))
+extern void MU_MobileOpenURL(const char* url);	// Platform/MobilePlatform.cpp
+#endif
 
 #if defined(MU_IOS) && !defined(MU_MACOS)
 namespace
@@ -53,7 +56,7 @@ namespace
 	const int kDuelMatchSlot = 17;
 
 	// Facebook / Discord: open the link set in GetMainMainInfo.ini (LinkFacbook /
-	// LinkDiscord). PC only - shown when the link starts with http and the
+	// LinkDiscord). Every platform - shown when the link starts with http and the
 	// MenuFacebook / MenuDiscord switch is not off. Kira Pass and Duel Matchmaking
 	// have the same kind of switch (MenuKiraPass / MenuDuelMatchmaking). The four
 	// switches arrive as "hidden" bits in MAIN_FILE_INFO::EnableNapBankButton.
@@ -63,6 +66,17 @@ namespace
 	bool MenuLinkOk(const char* url)
 	{
 		return url != NULL && (_strnicmp(url, "http://", 7) == 0 || _strnicmp(url, "https://", 8) == 0);
+	}
+
+	// PC: default browser. Android / iPhone: the phone's browser or the Discord /
+	// Facebook app, through the platform layer.
+	void MenuOpenLink(const char* url)
+	{
+#if defined(__ANDROID__) || (defined(MU_IOS) && !defined(MU_MACOS))
+		MU_MobileOpenURL(url);
+#else
+		ShellExecuteA(0, "open", url, 0, 0, SW_SHOWNORMAL);
+#endif
 	}
 }
 
@@ -255,7 +269,6 @@ void cCustomMenu::Draw()
 	{
 		enabledSlots[enabledCount++] = kDuelMatchSlot;
 	}
-#if defined(_WIN32)
 	if ((gProtect.m_MainInfo.EnableNapBankButton & 4) == 0 && MenuLinkOk(gProtect.m_MainInfo.LinkFacbook))
 	{
 		enabledSlots[enabledCount++] = kFacebookSlot;
@@ -264,7 +277,6 @@ void cCustomMenu::Draw()
 	{
 		enabledSlots[enabledCount++] = kDiscordSlot;
 	}
-#endif
 #if defined(MU_IOS) && !defined(MU_MACOS)
 	enabledSlots[enabledCount++] = kIosDeleteAccountSlot;
 #endif
@@ -302,12 +314,11 @@ void cCustomMenu::Draw()
 		// to it (GetMainInfo.cpp/MenuName.h) - an empty slot there (not
 		// migrated yet) falls back to the old Text_Button/Text_<lang>.ini
 		// label, so nothing changes for a server that hasn't set this up.
-#if defined(_WIN32)
 		if (i == kFacebookSlot)
 		{
 			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Facebook", BtnW))
 			{
-				ShellExecuteA(0, "open", gProtect.m_MainInfo.LinkFacbook, 0, 0, SW_SHOWNORMAL);
+				MenuOpenLink(gProtect.m_MainInfo.LinkFacbook);
 			}
 		}
 		else
@@ -315,11 +326,10 @@ void cCustomMenu::Draw()
 		{
 			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Discord", BtnW))
 			{
-				ShellExecuteA(0, "open", gProtect.m_MainInfo.LinkZalo, 0, 0, SW_SHOWNORMAL);
+				MenuOpenLink(gProtect.m_MainInfo.LinkZalo);
 			}
 		}
 		else
-#endif
 		if (i == kDuelMatchSlot)
 		{
 			if (g_pBCustomMenuInfo->DrawButton(BtStartX + (cX * KhoangCachX), BtStartY + (cY * KhoangCachY), 170, 12, (char*)"Duel Matchmaking", BtnW))

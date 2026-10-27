@@ -661,15 +661,9 @@ int CDuelRanked::CheckOrigin(LPOBJ lpObj,int mode,BYTE* p1) // OK
 
 	#endif
 
-	if(mode == 0 || mode == 1)
-	{
-		// The Titus window (INTERFACE_COMMON) has to be open to queue or to pick a fight.
-		if(lpObj->Interface.use == 0 || lpObj->Interface.type != INTERFACE_COMMON)
-		{
-			return DUELRANKED_MSG_OPEN_TITUS_FIRST;
-		}
-	}
-	else if(mode >= 3 && lpObj->Interface.use != 0)
+	// JOIN and WATCH work from anywhere (the menu button opens the ranked window
+	// without talking to Titus); the checks above and the GO check below still apply.
+	if(mode >= 3 && lpObj->Interface.use != 0)
 	{
 		// The order to move: the Titus window and the plain NPC windows are simply
 		// closed (HandleGo). A window with items in flight (trade, shop, chaos box,
@@ -1276,7 +1270,7 @@ void CDuelRanked::ForwardMsg(SDHP_DUELRANKED_MSG* p) // OK
 	{
 		// Told here as a plain notice (the client has no text for this code), and
 		// the coin display is refreshed: the DataServer already added the coins.
-		gNotice.GCNoticeSend(p->aIndex,1,0,0,0,0,0,"Ranked: new rank reached! Your rank-up reward was added to your account.");
+		gNotice.GCNoticeSend(p->aIndex,1,0,0,0,0,0,"Ranked: new rank reached! Your rank-up reward was sent (items: check your mailbox).");
 		gCashShop.CGCashShopPointRecv(p->aIndex);
 		return;
 	}

@@ -135,6 +135,8 @@ bool CQuestReward::CheckQuestRewardRequisite(LPOBJ lpObj,QUEST_REWARD_INFO* lpIn
 
 void CQuestReward::InsertQuestReward(LPOBJ lpObj,int QuestIndex) // OK
 {
+	LogAdd(LOG_BLACK,"[QuestReward][%s][%s] quest %d reward check (class %d, ChangeUp %d, level %d)",lpObj->Account,lpObj->Name,QuestIndex,lpObj->Class,lpObj->ChangeUp,lpObj->Level);
+
 	for(int n=0;n < this->m_count;n++)
 	{
 		QUEST_REWARD_INFO* lpInfo = this->GetInfo(n);
@@ -151,6 +153,8 @@ void CQuestReward::InsertQuestReward(LPOBJ lpObj,int QuestIndex) // OK
 
 		if(this->CheckQuestRewardRequisite(lpObj,lpInfo) == 0)
 		{
+			// Why a row of this quest was not given (class flag too high for ChangeUp, or the quest was not in the state the row wants).
+			LogAdd(LOG_RED,"[QuestReward][%s][%s] quest %d: reward type %d value %d NOT given (class %d, ChangeUp %d, need state %d, class flag %d)",lpObj->Account,lpObj->Name,QuestIndex,lpInfo->Type,lpInfo->Value,lpObj->Class,lpObj->ChangeUp,lpInfo->RequireState,lpInfo->RequireClass[lpObj->Class]);
 			continue;
 		}
 
@@ -162,6 +166,7 @@ void CQuestReward::InsertQuestReward(LPOBJ lpObj,int QuestIndex) // OK
 		if(lpInfo->Type == QUEST_REWARD_POINT)
 		{
 			lpObj->LevelUpPoint += lpInfo->Value;
+			LogAdd(LOG_BLUE,"[QuestReward][%s][%s] quest %d paid %d stat point(s), points now %d",lpObj->Account,lpObj->Name,QuestIndex,lpInfo->Value,lpObj->LevelUpPoint);
 			gQuest.GCQuestRewardSend(lpObj->Index,lpInfo->Index,lpInfo->Value);
 			continue;
 		}
@@ -192,6 +197,13 @@ void CQuestReward::InsertQuestReward(LPOBJ lpObj,int QuestIndex) // OK
 			}
 
 			int AddPoint = ((lpObj->Level>220)?(lpObj->Level-220):0)*gServerInfo.m_PlusStatPoint;
+
+			// A character that has reset keeps its stats (ResetNoLevelUpPoint): doing the quest again
+			// after a reset must not pay the level above 220 a second time.
+			if(gServerInfo.m_ResetNoLevelUpPoint != 0 && lpObj->Reset > 0)
+			{
+				AddPoint = 0;
+			}
 
 			lpObj->LevelUpPoint += AddPoint;
 

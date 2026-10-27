@@ -609,7 +609,9 @@ void CB_DuelRanked::AddToast(const char* text, DWORD rgba)
 static bool ActionAllowed(DWORD& last)
 {
 	const DWORD now = GetTickCount();
-	if ((int)(now - last) < 400)
+	// Unsigned: with last == 0 and an uptime past ~24.8 days, (int)(now - last) is
+	// negative and every tap was dropped forever.
+	if (last != 0 && (DWORD)(now - last) < 400)
 	{
 		return false;
 	}
@@ -626,6 +628,9 @@ void CB_DuelRanked::StartSearch()
 
 	PlayBuffer(SOUND_CLICK01);
 	SendRankedQueue(1);
+
+	// The tap registered and the request is on its way; the server's answer follows (also in chat).
+	if (g_pChatListBox) g_pChatListBox->AddText("", "Ranked: looking for a match...", SEASON3B::TYPE_SYSTEM_MESSAGE);
 }
 
 void CB_DuelRanked::CancelSearch()
@@ -858,6 +863,9 @@ void CB_DuelRanked::OnMessage(BYTE code, BYTE p1)
 
 	AddToast(text, color);
 
+	// The toast is easy to miss: the same line goes to the chat box.
+	if (g_pChatListBox) g_pChatListBox->AddText("", text, SEASON3B::TYPE_SYSTEM_MESSAGE);
+
 	if (refresh)
 	{
 		g_DuelMgr.ScheduleRankedStatus(700);
@@ -869,7 +877,7 @@ void CB_DuelRanked::OnMessage(BYTE code, BYTE p1)
 void CB_DuelRanked::DrawToasts(DWORD now)
 {
 	// Drop the expired ones (they expire in order).
-	while (m_ToastCount > 0 && (int)(now - m_Toast[0].tick) > (int)kToastMs)
+	while (m_ToastCount > 0 && (DWORD)(now - m_Toast[0].tick) > (DWORD)kToastMs)
 	{
 		for (int i = 1; i < m_ToastCount; ++i)
 		{
@@ -1107,7 +1115,7 @@ void CB_DuelRanked::DrawWindow()
 
 	// A search outlives a DataServer restart (the queue is memory-only there) and a lost packet,
 	// so while queued the state is re-read now and then instead of trusting the chip forever.
-	if (inWorld && g_DuelMgr.IsRankedQueued() && (int)(now - m_PollTick) >= (int)kQueuedPollMs)
+	if (inWorld && g_DuelMgr.IsRankedQueued() && (DWORD)(now - m_PollTick) >= (DWORD)kQueuedPollMs)
 	{
 		m_PollTick = now;
 		SendRankedStatusRequest();

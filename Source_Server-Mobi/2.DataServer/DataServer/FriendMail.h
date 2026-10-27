@@ -36,6 +36,8 @@ public:
 	// any label, into toName's mailbox, expiring after expireDays (0 = never).
 	// False when it could not be written (full mailbox) - nothing was stored.
 	bool MailCoins(const char* toName,const char* fromLabel,const char* subject,const char* memoText,int coinType,int amount,int expireDays);
+	// A server letter with up to FRIENDMAIL_MAX_ITEMS items (16-byte DB format). Returns how many were stored.
+	int MailItems(const char* toName,const char* fromLabel,const char* subject,const char* memoText,const BYTE items[][FRIENDMAIL_ITEM_BYTES],int count,int expireDays);
 
 private:
 	DWORD GetGuid(const char* name);

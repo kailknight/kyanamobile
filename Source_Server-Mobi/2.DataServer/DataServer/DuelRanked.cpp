@@ -16,6 +16,7 @@
 #include <algorithm>
 #include "DuelRanked.h"
 #include "DataServerProtocol.h"
+#include "FriendMail.h"
 #include "CharacterManager.h"
 #include "QueryManager.h"
 #include "ServerManager.h"
@@ -208,6 +209,8 @@ void CDuelRanked::DefaultConfig(DR_CONFIG* cfg)
 	cfg->MaxWindow = 400;
 	cfg->AnyOpponentAfterSec = 120;
 	cfg->RematchCooldownSec = 300;
+	cfg->SameDeviceLimit = 3;
+	cfg->SameDeviceDays = 7;
 	cfg->DeclineCooldownSec = 30;
 	cfg->NoShowCooldownSec = 60;
 	cfg->UnavailableDropSec = 60;
@@ -375,6 +378,36 @@ int CDuelRanked::ReadConfig(DR_CONFIG* cfg,char* error,int errorSize)
 		cfg->RewardWCoinC[n] = (c > 0) ? c : 0;
 		cfg->RewardWCoinP[n] = (p > 0) ? p : 0;
 		cfg->RewardGoblin[n] = (g > 0) ? g : 0;
+
+		// [RewardItems] TierN_ItemK=Section,Index,Level,Durability,Skill,Luck,Option,Excellent
+		cfg->RewardItemCount[n] = 0;
+
+		for(int k = 1; k <= DUELRANKED_MAX_REWARD_ITEMS; k++)
+		{
+			_snprintf_s(key,sizeof(key),_TRUNCATE,"Tier%d_Item%d",n,k);
+
+			if(GetPrivateProfileStringA("RewardItems",key,"",value,sizeof(value),file) == 0)
+				continue;
+
+			int v[8] = {-1,-1,0,1,0,0,0,0};
+			sscanf_s(value,"%d,%d,%d,%d,%d,%d,%d,%d",&v[0],&v[1],&v[2],&v[3],&v[4],&v[5],&v[6],&v[7]);
+
+			if(v[0] < 0 || v[0] > 15 || v[1] < 0 || v[1] > 511)
+			{
+				LogAdd(LOG_RED,"[DuelRanked] [RewardItems] %s=%s ignored: section 0..15, index 0..511",key,value);
+				continue;
+			}
+
+			BYTE* it = cfg->RewardItem[n][cfg->RewardItemCount[n]++];
+			it[0] = (BYTE)v[0];
+			it[1] = (BYTE)(v[1] & 0xFF);
+			it[2] = (BYTE)(v[1] >> 8);
+			it[3] = (BYTE)((v[2] < 0) ? 0 : ((v[2] > 15) ? 15 : v[2]));		// level
+			it[4] = (BYTE)((v[3] < 1) ? 1 : ((v[3] > 255) ? 255 : v[3]));		// durability / stack
+			it[5] = (BYTE)(((v[4] != 0) ? 1 : 0) | ((v[5] != 0) ? 2 : 0));		// skill | luck
+			it[6] = (BYTE)((v[6] < 0) ? 0 : ((v[6] > 7) ? 7 : v[6]));			// option (+4 steps)
+			it[7] = (BYTE)(v[7] & 63);											// excellent bits
+		}
 	}
 
 	cfg->Enabled = (int)GetPrivateProfileIntA("Match","Enabled",cfg->Enabled,file);
@@ -388,6 +421,8 @@ int CDuelRanked::ReadConfig(DR_CONFIG* cfg,char* error,int errorSize)
 	cfg->MaxWindow = (int)GetPrivateProfileIntA("Match","MaxWindow",cfg->MaxWindow,file);
 	cfg->AnyOpponentAfterSec = (int)GetPrivateProfileIntA("Match","AnyOpponentAfterSec",cfg->AnyOpponentAfterSec,file);
 	cfg->RematchCooldownSec = (int)GetPrivateProfileIntA("Match","RematchCooldownSec",cfg->RematchCooldownSec,file);
+	cfg->SameDeviceLimit = (int)GetPrivateProfileIntA("Match","SameDeviceLimit",cfg->SameDeviceLimit,file);
+	cfg->SameDeviceDays = (int)GetPrivateProfileIntA("Match","SameDeviceDays",cfg->SameDeviceDays,file);
 	cfg->DeclineCooldownSec = (int)GetPrivateProfileIntA("Match","DeclineCooldownSec",cfg->DeclineCooldownSec,file);
 	cfg->NoShowCooldownSec = (int)GetPrivateProfileIntA("Match","NoShowCooldownSec",cfg->NoShowCooldownSec,file);
 	cfg->UnavailableDropSec = (int)GetPrivateProfileIntA("Match","UnavailableDropSec",cfg->UnavailableDropSec,file);
@@ -414,6 +449,9 @@ int CDuelRanked::ReadConfig(DR_CONFIG* cfg,char* error,int errorSize)
 	if(cfg->MaxWindow < cfg->BaseWindow) cfg->MaxWindow = cfg->BaseWindow;
 	if(cfg->AnyOpponentAfterSec < 0) cfg->AnyOpponentAfterSec = 0;
 	if(cfg->RematchCooldownSec < 0) cfg->RematchCooldownSec = 0;
+	if(cfg->SameDeviceLimit < 0) cfg->SameDeviceLimit = 0;
+	if(cfg->SameDeviceDays < 1) cfg->SameDeviceDays = 1;
+	if(cfg->SameDeviceDays > 365) cfg->SameDeviceDays = 365;
 	if(cfg->DeclineCooldownSec < 0) cfg->DeclineCooldownSec = 0;
 	if(cfg->NoShowCooldownSec < 0) cfg->NoShowCooldownSec = 0;
 	if(cfg->UnavailableDropSec < 0) cfg->UnavailableDropSec = 0;
@@ -521,8 +559,13 @@ void CDuelRanked::GrantRankRewards(const char* name,int oldMmr,int newMmr)
 
 	int wcoinC = 0, wcoinP = 0, goblin = 0;
 
+	// Only a NEW RANK pays (Gold -> Platinum), not a new division inside a rank
+	// (Gold III -> Gold II): a step pays when its tier differs from the step below it.
 	for(int s = best + 1; s <= newStep; s++)
 	{
+		if(s <= 0 || this->m_Cfg.StepTier[s] == this->m_Cfg.StepTier[s - 1])
+			continue;
+
 		const int tier = this->m_Cfg.StepTier[s];
 		wcoinC += this->m_Cfg.RewardWCoinC[tier];
 		wcoinP += this->m_Cfg.RewardWCoinP[tier];
@@ -533,8 +576,72 @@ void CDuelRanked::GrantRankRewards(const char* name,int oldMmr,int newMmr)
 	gQueryManager.ExecQuery("UPDATE DuelRankedBest SET BestStep=%d WHERE Name=?",newStep);
 	gQueryManager.Close();
 
+	// [RewardItems]: one letter per division reached, claimed from the mailbox.
+	bool mailed = false;
+
+	for(int s = best + 1; s <= newStep; s++)
+	{
+		if(s <= 0 || this->m_Cfg.StepTier[s] == this->m_Cfg.StepTier[s - 1])
+			continue;
+
+		const int tier = this->m_Cfg.StepTier[s];
+		const int count = this->m_Cfg.RewardItemCount[tier];
+
+		if(count <= 0)
+			continue;
+
+		BYTE items[DUELRANKED_MAX_REWARD_ITEMS][FRIENDMAIL_ITEM_BYTES];
+
+		for(int k = 0; k < count; k++)
+		{
+			const BYTE* c = this->m_Cfg.RewardItem[tier][k];
+			const int idx = (c[0] * 512) + (c[1] | (c[2] << 8));
+			const DWORD serial = (DWORD)GetNewItemSerial();
+			BYTE* b = items[k];
+
+			// CItemManager::DBItemByteConvert layout.
+			memset(b,0xFF,FRIENDMAIL_ITEM_BYTES);
+			b[0] = (BYTE)(idx & 0xFF);
+			b[1] = (BYTE)((c[3] * 8) | ((c[5] & 1) ? 128 : 0) | ((c[5] & 2) ? 4 : 0) | (c[6] & 3));
+			b[2] = c[4];
+			b[3] = (BYTE)(serial >> 24);
+			b[4] = (BYTE)(serial >> 16);
+			b[5] = (BYTE)(serial >> 8);
+			b[6] = (BYTE)(serial);
+			b[7] = (BYTE)(((idx & 256) >> 1) | ((c[6] > 3) ? 64 : 0) | (c[7] & 63));
+			b[8] = 0;
+			b[9] = (BYTE)((idx & (15 * 512)) >> 5);
+			b[10] = 0;
+		}
+
+		char subject[33];
+		char memo[160];
+		_snprintf_s(subject,sizeof(subject),_TRUNCATE,"Ranked reward: %s",this->m_Cfg.TierName[tier]);
+		_snprintf_s(memo,sizeof(memo),_TRUNCATE,"Congratulations! You reached %s in ranked duels. Your reward is attached.",this->m_Cfg.TierName[tier]);
+
+		const int stored = gFriendMail.MailItems(nm,"Ranked",subject,memo,items,count,0);
+
+		if(stored > 0)
+			mailed = true;
+
+		if(stored != count)
+		{
+			// Usually no mailbox yet (T_FriendMain is made at the first friend-list load).
+			LogAdd(LOG_RED,"[DuelRanked] rank reward items for %s, step %d: %d of %d mailed - give the rest by hand",nm,s,stored,count);
+		}
+		else
+		{
+			LogAdd(LOG_GREEN,"[DuelRanked] rank reward: %s reached step %d - %d item(s) mailed",nm,s,stored);
+		}
+	}
+
 	if(wcoinC == 0 && wcoinP == 0 && goblin == 0)
+	{
+		if(mailed)
+			this->SendMsgToName(nm,0,DUELRANKED_MSG_RANK_REWARD,(BYTE)this->m_Cfg.StepTier[newStep]);
+
 		return;
+	}
 
 	char account[11] = {0};
 
@@ -839,6 +946,92 @@ bool CDuelRanked::RematchBlocked(const char* a,const char* b)
 	}
 
 	return true;
+}
+
+// Two accounts "share a device" when their HardwareLog rows seen in the last
+// SameDeviceDays days have the same hardware id or the same IP. Such a pair (win trading,
+// alts) is paired only while each of them has had fewer than SameDeviceLimit matches today
+// against opponents that share their device. Cached for 30 s per pair; any database
+// failure lets the pair through (and is logged once).
+bool CDuelRanked::SameDeviceBlocked(const char* nameA,const char* accountA,const char* nameB,const char* accountB)
+{
+	if(this->m_Cfg.SameDeviceLimit <= 0)
+		return false;
+
+	const DWORD now = GetTickCount();
+	const std::string key = PairKey(nameA,nameB);
+
+	std::map<std::string,std::pair<DWORD,bool> >::iterator hit = this->m_DeviceCache.find(key);
+
+	if(hit != this->m_DeviceCache.end())
+	{
+		if((int)(hit->second.first - now) > 0)
+			return hit->second.second;
+
+		this->m_DeviceCache.erase(hit);
+	}
+
+	static bool warned = false;
+	bool blocked = false;
+	char na[11],nb[11],aa[11],ab[11];
+	CopyText(na,sizeof(na),nameA,10);
+	CopyText(nb,sizeof(nb),nameB,10);
+	CopyText(aa,sizeof(aa),accountA,10);
+	CopyText(ab,sizeof(ab),accountB,10);
+
+	const int days = this->m_Cfg.SameDeviceDays;
+
+	// 1. Do they share a device at all?
+	int shared = 0;
+
+	gQueryManager.BindParameterAsString(1,aa,sizeof(aa));
+	gQueryManager.BindParameterAsString(2,ab,sizeof(ab));
+
+	if(gQueryManager.ExecQuery("SELECT COUNT(*) FROM HardwareLog ha JOIN HardwareLog hb ON ((ha.HardwareId<>'' AND ha.HardwareId=hb.HardwareId) OR (ha.IpAddress<>'' AND ha.IpAddress=hb.IpAddress)) WHERE ha.AccountID=? AND hb.AccountID=? AND ha.LastSeen>=DATEADD(DAY,-%d,GETDATE()) AND hb.LastSeen>=DATEADD(DAY,-%d,GETDATE())",days,days) != 0 && SQL_SUCCEEDED(gQueryManager.Fetch()))
+	{
+		shared = gQueryManager.GetResult(0);
+	}
+	else if(warned == false)
+	{
+		warned = true;
+		LogAdd(LOG_RED,"[DuelRanked] same-device limit skipped: HardwareLog is not readable (run DeviceLog_Schema.sql)");
+	}
+
+	gQueryManager.Close();
+
+	if(shared > 0)
+	{
+		// 2. Today's matches of each of them against opponents that share their device.
+		const char* names[2] = {na,nb};
+		const char* accounts[2] = {aa,ab};
+
+		for(int s = 0; s < 2 && blocked == false; s++)
+		{
+			int today = 0;
+
+			gQueryManager.BindParameterAsString(1,(void*)names[s],11);
+			gQueryManager.BindParameterAsString(2,(void*)names[s],11);
+			gQueryManager.BindParameterAsString(3,(void*)names[s],11);
+			gQueryManager.BindParameterAsString(4,(void*)accounts[s],11);
+
+			if(gQueryManager.ExecQuery("SELECT COUNT(*) FROM DuelRankedMatch m JOIN DuelRanked r ON r.Name=(CASE WHEN m.NameA=? THEN m.NameB ELSE m.NameA END) WHERE m.CreatedAt>=CAST(GETDATE() AS DATE) AND m.Status<>3 AND (m.NameA=? OR m.NameB=?) AND EXISTS (SELECT 1 FROM HardwareLog ha JOIN HardwareLog hb ON ((ha.HardwareId<>'' AND ha.HardwareId=hb.HardwareId) OR (ha.IpAddress<>'' AND ha.IpAddress=hb.IpAddress)) WHERE ha.AccountID=? AND hb.AccountID=r.Account AND ha.LastSeen>=DATEADD(DAY,-%d,GETDATE()) AND hb.LastSeen>=DATEADD(DAY,-%d,GETDATE()))",days,days) != 0 && SQL_SUCCEEDED(gQueryManager.Fetch()))
+			{
+				today = gQueryManager.GetResult(0);
+			}
+
+			gQueryManager.Close();
+
+			if(today >= this->m_Cfg.SameDeviceLimit)
+			{
+				blocked = true;
+				LogAdd(LOG_BLACK,"[DuelRanked] %s and %s share an IP or hardware id: %s already has %d such match(es) today, not paired",na,nb,names[s],today);
+			}
+		}
+	}
+
+	this->m_DeviceCache[key] = std::make_pair(After(now,30),blocked);
+
+	return blocked;
 }
 
 void CDuelRanked::SetRematch(const char* a,const char* b)
@@ -2161,6 +2354,9 @@ void CDuelRanked::TryPair()
 			if(this->RematchBlocked(list[i].p->Name,list[j].p->Name))
 				continue;
 
+			if(this->SameDeviceBlocked(list[i].p->Name,list[i].p->Account,list[j].p->Name,list[j].p->Account))
+				continue;
+
 			// Closest rating wins; on a tie the longer waiter (earlier in the list).
 			if(best == -1 || diff < bestDiff)
 			{
@@ -2639,6 +2835,14 @@ void CDuelRanked::Housekeeping(DWORD now)
 	{
 		if(Past(it->second,now))
 			it = this->m_Rematch.erase(it);
+		else
+			it++;
+	}
+
+	for(std::map<std::string,std::pair<DWORD,bool> >::iterator it = this->m_DeviceCache.begin(); it != this->m_DeviceCache.end();)
+	{
+		if(Past(it->second.first,now))
+			it = this->m_DeviceCache.erase(it);
 		else
 			it++;
 	}

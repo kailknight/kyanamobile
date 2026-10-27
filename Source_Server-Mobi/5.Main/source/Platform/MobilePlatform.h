@@ -104,5 +104,8 @@ void MU_MobileRequestMicPermission();
 // After a language change: shows the "restart now?" dialog (Android). "Restart" ends the process and
 // starts the game again; nothing happens on iOS, where the new language shows at the next launch.
 void MU_MobileAskRestartForLanguage(bool vietnamese);
+// Opens an http(s) link in the phone's browser / matching app (Android: Intent.ACTION_VIEW over JNI,
+// iOS: MU_IosOpenURL). Used by the Menu window's Facebook and Discord buttons.
+void MU_MobileOpenURL(const char* url);
 
 #endif // defined(__ANDROID__) || defined(MU_IOS)

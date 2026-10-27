@@ -10624,6 +10624,17 @@ void ReceiveQuestPrize ( BYTE* ReceiveBuffer )
             if ( c==Hero )
             {
                 CharacterAttribute->LevelUpPoint += Data->m_byNumber;
+				// The character window shows PrintPlayer.ViewPoint, which only packets that carry it update.
+				// The server sends the new total at offset 8 of this packet (12 bytes: the server struct pads the byte after QuestAmount);
+				// without it, add the reward to what is shown.
+				if ( ReceiveBuffer[0]==0xC1 && ReceiveBuffer[1]>=12 )
+				{
+					CharacterAttribute->PrintPlayer.ViewPoint = *(DWORD*)(ReceiveBuffer+8);
+				}
+				else
+				{
+					CharacterAttribute->PrintPlayer.ViewPoint += Data->m_byNumber;
+				}
             }
 			
 			OBJECT *o = &c->Object;
@@ -10681,6 +10692,17 @@ void ReceiveQuestPrize ( BYTE* ReceiveBuffer )
             if ( Hero==c )
             {
                 CharacterAttribute->LevelUpPoint += Data->m_byNumber;
+				// The character window shows PrintPlayer.ViewPoint, which only packets that carry it update.
+				// The server sends the new total at offset 8 of this packet (12 bytes: the server struct pads the byte after QuestAmount);
+				// without it, add the reward to what is shown.
+				if ( ReceiveBuffer[0]==0xC1 && ReceiveBuffer[1]>=12 )
+				{
+					CharacterAttribute->PrintPlayer.ViewPoint = *(DWORD*)(ReceiveBuffer+8);
+				}
+				else
+				{
+					CharacterAttribute->PrintPlayer.ViewPoint += Data->m_byNumber;
+				}
             }
 			
             VectorCopy ( o->Position, Position );

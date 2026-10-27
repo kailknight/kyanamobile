@@ -995,6 +995,7 @@ void GDCharacterCreateRecv(SDHP_CHARACTER_CREATE_RECV* lpMsg,int index);
 void GDCharacterDeleteRecv(SDHP_CHARACTER_DELETE_RECV* lpMsg,int index);
 void GDCharacterInfoRecv(SDHP_CHARACTER_INFO_RECV* lpMsg,int index);
 void GDCreateItemRecv(SDHP_CREATE_ITEM_RECV* lpMsg,int index);
+int GetNewItemSerial();
 void GDOptionDataRecv(SDHP_OPTION_DATA_RECV* lpMsg,int index);
 void GDPetItemInfoRecv(SDHP_PET_ITEM_INFO_RECV* lpMsg,int index);
 void GDCharacterNameCheckRecv(SDHP_CHARACTER_NAME_CHECK_RECV* lpMsg,int index);

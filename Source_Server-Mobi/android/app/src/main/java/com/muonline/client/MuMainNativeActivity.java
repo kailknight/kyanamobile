@@ -330,6 +330,30 @@ public class MuMainNativeActivity extends NativeActivity {
     // The language data is read once at startup, so the change only shows after a restart. A system
     // dialog, shown in the language just chosen; "Restart" ends this process and starts the game again
     // through MuRestartActivity, "Later" keeps the saved choice for the next start.
+    // Opens a web link (community Discord / Facebook page) in the phone's browser or the
+    // matching app. Only http(s) links are accepted. Returns at once; runs on the UI thread.
+    public static void openUrlFromNative(final String url) {
+        final MuMainNativeActivity activity = instance;
+        if (activity == null || url == null) {
+            return;
+        }
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            return;
+        }
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Intent view = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                    view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    activity.startActivity(view);
+                } catch (Exception e) {
+                    Log.w(TAG, "open url failed", e);
+                }
+            }
+        });
+    }
+
     public static void askRestartForLanguageFromNative(final boolean vietnamese) {
         final MuMainNativeActivity activity = instance;
         if (activity == null) {

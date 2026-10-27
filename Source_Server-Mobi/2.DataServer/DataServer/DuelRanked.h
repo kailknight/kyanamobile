@@ -21,6 +21,7 @@
 #include "DuelRankedProtocol.h"
 
 #define DUELRANKED_MAX_TIERS 16
+#define DUELRANKED_MAX_REWARD_ITEMS 5	// = FRIENDMAIL_MAX_ITEMS, one letter per division
 #define DUELRANKED_MAX_STEPS 64
 
 // Internal only: the DataServer posts this to itself (0xD9 / 0x5F, every second
@@ -57,6 +58,10 @@ struct DR_CONFIG
 	int RewardWCoinC[DUELRANKED_MAX_TIERS];
 	int RewardWCoinP[DUELRANKED_MAX_TIERS];
 	int RewardGoblin[DUELRANKED_MAX_TIERS];
+	// [RewardItems] TierN_ItemK=Section,Index,Level,Durability,Skill,Luck,Option,Excellent
+	// (K = 1..5) - mailed with the same rule, one letter per division reached.
+	int RewardItemCount[DUELRANKED_MAX_TIERS];
+	BYTE RewardItem[DUELRANKED_MAX_TIERS][DUELRANKED_MAX_REWARD_ITEMS][8];
 	// [Match]
 	int Enabled;
 	int HostServer;
@@ -69,6 +74,10 @@ struct DR_CONFIG
 	int MaxWindow;
 	int AnyOpponentAfterSec;
 	int RematchCooldownSec;
+	// Accounts that share an IP or a hardware id (HardwareLog) may be paired at most
+	// SameDeviceLimit times a day (rated matches started today); 0 = no limit.
+	int SameDeviceLimit;
+	int SameDeviceDays;			// how recent a HardwareLog row must be to count as "the same device"
 	int DeclineCooldownSec;
 	int NoShowCooldownSec;
 	int UnavailableDropSec;
@@ -209,6 +218,7 @@ private:
 	int CooldownLeft(const char* name);
 	void SetCooldown(const char* name,int seconds);
 	bool RematchBlocked(const char* a,const char* b);
+	bool SameDeviceBlocked(const char* nameA,const char* accountA,const char* nameB,const char* accountB);
 	void SetRematch(const char* a,const char* b);
 	int CountSpectators(DWORD matchId);
 	DWORD NextToken();
@@ -275,6 +285,7 @@ private:
 	std::map<DWORD,DR_MATCH> m_Matches;				// prompt tokens and real matches
 	std::map<std::string,DWORD> m_Cooldown;			// name -> until
 	std::map<std::string,DWORD> m_Rematch;			// "a|b" -> until
+	std::map<std::string,std::pair<DWORD,bool> > m_DeviceCache;	// "a|b" -> (until, blocked): SameDeviceBlocked answers for 30 s
 	DWORD m_NextToken;
 	DWORD m_PairHold;			// 0 = none. No pairing until then (the database failed)
 

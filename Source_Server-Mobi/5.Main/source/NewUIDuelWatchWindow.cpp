@@ -307,13 +307,13 @@ bool CNewUIDuelWatchWindow::Update()
 
 	// The fight list is polled while the ranked tab is up; the status only until the first one
 	// arrives (after that the server's own messages keep it fresh).
-	if(m_Tab == TAB_RANKED && (int)(now - m_dwListTick) >= (int)kPollMs)
+	if(m_Tab == TAB_RANKED && (DWORD)(now - m_dwListTick) >= (DWORD)kPollMs)
 	{
 		m_dwListTick = now;
 		SendRankedListRequest();
 	}
 
-	if(g_DuelMgr.GetRankedStatus().m_bValid == FALSE && (int)(now - m_dwStatusTick) >= (int)kPollMs)
+	if(g_DuelMgr.GetRankedStatus().m_bValid == FALSE && (DWORD)(now - m_dwStatusTick) >= (DWORD)kPollMs)
 	{
 		m_dwStatusTick = now;
 		SendRankedStatusRequest();

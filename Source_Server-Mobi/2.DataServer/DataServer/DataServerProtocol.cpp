@@ -1595,7 +1595,7 @@ void GDCharacterInfoRecv(SDHP_CHARACTER_INFO_RECV* lpMsg,int index) // OK
 static int gSerialNext = 0;
 static int gSerialLast = 0; // inclusive; next > last = pool empty
 
-static int GetNewItemSerial()
+int GetNewItemSerial() // queue thread only (also used by the ranked rank-up item mail)
 {
 	if(gSerialNext > 0 && gSerialNext <= gSerialLast)
 	{

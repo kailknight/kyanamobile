@@ -799,3 +799,87 @@ bool CFriendMail::MailCoins(const char* toName,const char* fromLabel,const char*
 
 	return 1;
 }
+
+int CFriendMail::MailItems(const char* toName,const char* fromLabel,const char* subject,const char* memoText,const BYTE items[][FRIENDMAIL_ITEM_BYTES],int count,int expireDays)
+{
+	if(count <= 0)
+	{
+		return 0;
+	}
+
+	if(count > FRIENDMAIL_MAX_ITEMS)
+	{
+		count = FRIENDMAIL_MAX_ITEMS;
+	}
+
+	char recipient[11];
+	char from[11];
+	char title[33];
+	CopyName(recipient,sizeof(recipient),toName,10);
+	CopyName(from,sizeof(from),fromLabel,10);
+	CopyName(title,sizeof(title),subject,32);
+
+	// Same letter as MailCoins: WZ_WriteMail gives the MemoIndex and the GUID.
+	gQueryManager.BindParameterAsString(1,from,sizeof(from));
+	gQueryManager.BindParameterAsString(2,recipient,sizeof(recipient));
+	gQueryManager.BindParameterAsString(3,title,sizeof(title));
+	gQueryManager.ExecQuery("EXEC WZ_WriteMail ?,?,?,0,0");
+	gQueryManager.Fetch();
+	DWORD memoIndex = gQueryManager.GetResult(0);
+	DWORD guid = gQueryManager.GetResult(1);
+	gQueryManager.Close();
+
+	if(memoIndex <= 10 || guid == 0)
+	{
+		return 0;
+	}
+
+	BYTE memo[FRIENDMAIL_MEMO_MAX];
+	memset(memo,0,sizeof(memo));
+	_snprintf_s((char*)memo,sizeof(memo),_TRUNCATE,"%s",memoText);
+
+	BYTE photo[18];
+	memset(photo,0,sizeof(photo));
+
+	gQueryManager.BindParameterAsBinary(1,memo,sizeof(memo));
+	gQueryManager.BindParameterAsBinary(2,photo,sizeof(photo));
+	gQueryManager.ExecQuery("UPDATE T_FriendMail SET Memo=?,Photo=? WHERE MemoIndex=%d AND GUID=%d",memoIndex,guid);
+	gQueryManager.Close();
+
+	int stored = 0;
+
+	for(int n = 0; n < count; n++)
+	{
+		BYTE data[FRIENDMAIL_ITEM_BYTES];
+		memcpy(data,items[n],sizeof(data));
+
+		gQueryManager.BindParameterAsString(1,from,sizeof(from));
+		gQueryManager.BindParameterAsBinary(2,data,sizeof(data));
+
+		int ok = 0;
+
+		if(gQueryManager.ExecQuery("EXEC WZ_MailItem_Add %d,%d,?,?,%d",guid,memoIndex,expireDays) != 0 && gQueryManager.Fetch() != SQL_NO_DATA)
+		{
+			ok = gQueryManager.GetAsInteger("Result");
+		}
+
+		gQueryManager.Close();
+
+		if(ok == 1)
+		{
+			stored++;
+		}
+	}
+
+	if(stored == 0)
+	{
+		// A letter that promises items it doesn't hold: take it back out.
+		gQueryManager.ExecQuery("DELETE FROM T_FriendMail WHERE MemoIndex=%d AND GUID=%d",memoIndex,guid);
+		gQueryManager.Close();
+		return 0;
+	}
+
+	this->NotifyRecipient(recipient,memoIndex,guid);
+
+	return stored;
+}

@@ -430,6 +430,48 @@ void MU_MobileRequestMicPermission()
 #endif
 }
 
+void MU_MobileOpenURL(const char* url)
+{
+    if (url == nullptr || url[0] == ' ')
+    {
+        return;
+    }
+#if defined(__ANDROID__)
+    JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    if (env == nullptr || g_keyboardBridgeClass == nullptr)
+    {
+        return;
+    }
+
+    jmethodID method =
+        env->GetStaticMethodID(g_keyboardBridgeClass, "openUrlFromNative", "(Ljava/lang/String;)V");
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+        return;
+    }
+    if (method == nullptr)
+    {
+        return;
+    }
+
+    jstring jurl = env->NewStringUTF(url);
+    if (jurl == nullptr)
+    {
+        env->ExceptionClear();
+        return;
+    }
+    env->CallStaticVoidMethod(g_keyboardBridgeClass, method, jurl);
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+    }
+    env->DeleteLocalRef(jurl);
+#elif defined(MU_IOS)
+    MU_IosOpenURL(url);
+#endif
+}
+
 void MU_MobileAskRestartForLanguage(bool vietnamese)
 {
 #if defined(__ANDROID__)
