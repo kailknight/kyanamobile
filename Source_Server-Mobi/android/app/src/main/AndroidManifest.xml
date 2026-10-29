@@ -18,6 +18,7 @@
 
     <!-- Keep screen on during gameplay -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Proximity voice chat. Declaring it is not enough on its own: from
          Android 6 the player must also grant it at runtime, and until they do

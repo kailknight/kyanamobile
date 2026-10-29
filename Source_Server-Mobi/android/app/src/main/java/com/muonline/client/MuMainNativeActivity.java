@@ -945,6 +945,7 @@ public class MuMainNativeActivity extends NativeActivity {
         nativeSetKeyboardBridge();
         nativeSetDeviceId(deviceId());
         installImeBridge();
+        MuHaptics.init(this);
     }
 
     @Override

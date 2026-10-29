@@ -268,6 +268,7 @@ namespace
 {
     JavaVM*  g_androidJavaVm = nullptr;
     jclass   g_muAudioClass = nullptr;
+    jclass   g_muHapticsClass = nullptr;
 
     JNIEnv* AndroidAudioEnv()
     {
@@ -343,6 +344,41 @@ extern "C" void AndroidAudioAttachJni(JNIEnv* env)
     }
     g_muAudioClass = static_cast<jclass>(env->NewGlobalRef(local));
     env->DeleteLocalRef(local);
+
+    // Same reason as above: FindClass from the game thread would use the
+    // system loader and miss the app class, so the reference is taken here.
+    jclass haptics = env->FindClass("com/muonline/client/MuHaptics");
+    if (haptics == nullptr)
+    {
+        env->ExceptionClear();
+        return;
+    }
+    g_muHapticsClass = static_cast<jclass>(env->NewGlobalRef(haptics));
+    env->DeleteLocalRef(haptics);
+}
+
+// One short vibration pulse. Safe to call from the game thread; a missing
+// class or vibrator makes it a no-op.
+extern "C" void AndroidHapticPulse(int ms)
+{
+    JNIEnv* env = AndroidAudioEnv();
+    if (env == nullptr || g_muHapticsClass == nullptr)
+    {
+        return;
+    }
+
+    jmethodID id = env->GetStaticMethodID(g_muHapticsClass, "pulse", "(I)V");
+    if (id == nullptr)
+    {
+        env->ExceptionClear();
+        return;
+    }
+
+    env->CallStaticVoidMethod(g_muHapticsClass, id, static_cast<jint>(ms));
+    if (env->ExceptionCheck())
+    {
+        env->ExceptionClear();
+    }
 }
 
 // ---------------------------------------------------------------------------

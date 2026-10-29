@@ -984,6 +984,9 @@ float g_AndroidBatteryIconX = 0.0f;
 float g_AndroidBatteryIconY = 0.0f;
 float g_AndroidBatteryIconW = 18.0f;
 
+// Short vibration pulse, defined in android_link_stubs.cpp (JNI to MuHaptics).
+extern "C" void AndroidHapticPulse(int ms);
+
 namespace
 {
 constexpr bool kUseLegacyMainHud = true;
@@ -2685,9 +2688,33 @@ struct AndroidGroundAim
     // MouseX/MouseY on an earlier frame. So the aim point is parked in
     // MouseX/MouseY and the pick waits for a render to turn it into a ray.
     int settleFrames = 0;
+
+    // Press-and-drag cast. A drag that starts on the skill's wheel slot aims
+    // with the finger and casts on release; the finger's position stands in
+    // for the tap above (uiX/uiY follow it while dragging, then the release
+    // queues pendingCast like a tap would). A plain tap on the slot never
+    // reaches this - the arm-then-tap flow above is unchanged.
+    bool dragging = false;
+    SDL_FingerID dragFinger = static_cast<SDL_FingerID>(-1);
+    float dragOriginX = 0.0f;   // where the press began (the slot button)
+    float dragOriginY = 0.0f;
+
+    // The queued cast came from a drag release. Unlike a tap-cast, an
+    // out-of-range or failed one disarms instead of leaving the ring up,
+    // since the player never chose to arm anything.
+    bool fromDrag = false;
+
+    // Haptics: whether the aim point was a valid cast tile at the last check,
+    // so a pulse fires only when it turns valid, not continuously.
+    bool aimValid = false;
+    int validCheckFrame = 0;
 };
 
 AndroidGroundAim g_androidGroundAim{};
+
+// A drag must end at least this far (UI units) from where it began to cast;
+// releasing nearer - or dragging back onto the button - cancels.
+constexpr float kGroundAimDragCastMinUi = 40.0f;
 
 // Why the last ground cast did or did not happen. On screen rather than in the
 // log, because logcat does not come through on these devices.
@@ -4739,6 +4766,13 @@ bool HandleVirtualJoystickFingerDown(const SDL_TouchFingerEvent& touch)
     // (outside it, a no-op) so the player can try again without re-arming.
     if (g_androidGroundAim.armed)
     {
+        // Another finger landing mid-drag must not replace the aim point the
+        // dragging finger owns.
+        if (g_androidGroundAim.dragging)
+        {
+            return true;
+        }
+
         g_androidGroundAim.uiX = uiX;
         g_androidGroundAim.uiY = uiY;
         g_androidGroundAim.pendingCast = true;
@@ -10290,7 +10324,95 @@ void CancelAndroidGroundAim(const char* reason)
 // Runs from the scene phase, straight after MoveHero, because it needs the same
 // camera matrices MoveHero's own terrain pick relies on. Doing this from the
 // touch handler would run it before the frame set those up.
+void UpdateAndroidGroundAimCastResolve();
+
+// While a teleport drag is in progress, pulse the phone each time the aim
+// point moves from an invalid tile to a valid one (in range, walkable, not a
+// safe zone) - the same tests the cast itself applies. Same pick as the cast,
+// so it also needs MouseX/MouseY parked and a render in between; checked every
+// few frames to keep the terrain pick cheap.
+void UpdateAndroidGroundAimDragHaptics()
+{
+    constexpr int kCheckEveryFrames = 3;
+
+    if (Hero == nullptr || CharacterAttribute == nullptr || !IsValidSkillIndex(g_androidGroundAim.skillIndex))
+    {
+        return;
+    }
+
+    MouseX = static_cast<int>(g_androidGroundAim.uiX);
+    MouseY = static_cast<int>(g_androidGroundAim.uiY);
+
+    if (++g_androidGroundAim.validCheckFrame < kCheckEveryFrames)
+    {
+        return;
+    }
+    g_androidGroundAim.validCheckFrame = 0;
+
+    bool valid = false;
+    const int skillType = CharacterAttribute->Skill[g_androidGroundAim.skillIndex];
+
+    RenderTerrain(true);
+    if (skillType > 0
+        && !Hero->SafeZone
+        && RenderTerrainTile(SelectXF, SelectYF, (int)SelectXF, (int)SelectYF, 1.f, 1, true))
+    {
+        const int tileX = static_cast<int>(CollisionPosition[0] / TERRAIN_SCALE);
+        const int tileY = static_cast<int>(CollisionPosition[1] / TERRAIN_SCALE);
+
+        if (tileX >= 0 && tileX < 256 && tileY >= 0 && tileY < 256)
+        {
+            int wall = TerrainWall[TERRAIN_INDEX_REPEAT(tileX, tileY)];
+            if ((wall & TW_ACTION) == TW_ACTION) wall -= TW_ACTION;
+            if ((wall & TW_HEIGHT) == TW_HEIGHT) wall -= TW_HEIGHT;
+
+            // CheckTile reads TargetX/TargetY, as in the cast path.
+            TargetX = tileX;
+            TargetY = tileY;
+            valid = wall == 0
+                && CheckTile(Hero, &Hero->Object, gSkillManager.GetSkillDistance(skillType, Hero));
+        }
+    }
+
+    // Too close to the button counts as a cancel zone, never valid.
+    const float dx = g_androidGroundAim.uiX - g_androidGroundAim.dragOriginX;
+    const float dy = g_androidGroundAim.uiY - g_androidGroundAim.dragOriginY;
+    if (((dx * dx) + (dy * dy)) < (kGroundAimDragCastMinUi * kGroundAimDragCastMinUi))
+    {
+        valid = false;
+    }
+
+    if (valid && !g_androidGroundAim.aimValid)
+    {
+        AndroidHapticPulse(15);
+    }
+    g_androidGroundAim.aimValid = valid;
+}
+
 void UpdateAndroidGroundAimCast()
+{
+    if (g_androidGroundAim.dragging)
+    {
+        UpdateAndroidGroundAimDragHaptics();
+        return;
+    }
+
+    // The cast resolves on the call that finishes settling (pendingCast drops
+    // to false). A drag-release cast then disarms whatever the outcome was,
+    // since the aim was never armed by a deliberate tap.
+    const bool resolvingDrag = g_androidGroundAim.pendingCast
+        && g_androidGroundAim.fromDrag
+        && g_androidGroundAim.settleFrames <= 0;
+
+    UpdateAndroidGroundAimCastResolve();
+
+    if (resolvingDrag)
+    {
+        g_androidGroundAim = AndroidGroundAim{};
+    }
+}
+
+void UpdateAndroidGroundAimCastResolve()
 {
     if (!g_androidGroundAim.pendingCast)
     {
@@ -10486,6 +10608,13 @@ void UpdateAndroidGroundAimCast()
 
             const bool sent = AndroidTriggerHotKeySkillTapInternal(skillIndex);
             g_androidGroundCastResult = sent ? kGroundCastOk : kGroundCastRefused;
+
+            // A distinct, longer pulse than the aim-valid tick: the drag
+            // release actually went out.
+            if (sent && g_androidGroundAim.fromDrag)
+            {
+                AndroidHapticPulse(40);
+            }
 
             // CheckSkillDelay is the last silent return before AttackWizard's
             // switch, and it fails for two reasons that nothing reports: the
@@ -15920,6 +16049,13 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // A teleport drag in progress: the finger is the aim point.
+    if (g_androidGroundAim.dragging && g_androidGroundAim.dragFinger == touch.fingerId)
+    {
+        TouchToVirtualUi(touch, g_androidGroundAim.uiX, g_androidGroundAim.uiY);
+        return true;
+    }
+
     // Sliding off a hotkey slot abandons the press, so a stray drag across the
     // consumable row cannot drink anything.
     if (g_androidHotKeyPress.slot >= 0 && g_androidHotKeyPress.fingerId == touch.fingerId)
@@ -15947,6 +16083,31 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         const float dy = moveY - g_androidSkillSlotPress.downY;
         if (((dx * dx) + (dy * dy)) > (kSkillSlotPressMoveCancelUi * kSkillSlotPressMoveCancelUi))
         {
+            // Dragging off a ground-targeted skill (Teleport) turns the press
+            // into an aim drag: the finger steers a destination marker and
+            // releasing casts there. Any other skill just abandons the press
+            // as before.
+            const int dragSkillIndex = GetVirtualOverlayHotKeySkillIndex(g_androidSkillSlotPress.slot);
+            if (IsGroundTargetedSkillIndex(dragSkillIndex)
+                && IsVirtualPadAvailable()
+                && Hero != nullptr
+                && !Hero->SafeZone)
+            {
+                g_androidGroundAim = AndroidGroundAim{};
+                g_androidGroundAim.armed = true;
+                g_androidGroundAim.skillIndex = dragSkillIndex;
+                g_androidGroundAim.dragging = true;
+                g_androidGroundAim.dragFinger = touch.fingerId;
+                g_androidGroundAim.dragOriginX = g_androidSkillSlotPress.downX;
+                g_androidGroundAim.dragOriginY = g_androidSkillSlotPress.downY;
+                g_androidGroundAim.uiX = moveX;
+                g_androidGroundAim.uiY = moveY;
+
+                // Selecting it here keeps the wheel highlight on the skill
+                // being aimed, as the tap flow does.
+                g_virtualSelectedSkillSlot = g_androidSkillSlotPress.slot;
+            }
+
             g_androidSkillSlotPress = AndroidSkillSlotPressState{};
         }
         return true;
@@ -16161,6 +16322,34 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         else
         {
             UseVirtualMirrorHotKeySlot(slot);
+        }
+        return true;
+    }
+
+    // Release of a teleport aim drag: far enough from the button casts at the
+    // finger's tile, near/back on the button cancels with no cast.
+    if (g_androidGroundAim.dragging && g_androidGroundAim.dragFinger == touch.fingerId)
+    {
+        float upX = g_androidGroundAim.uiX;
+        float upY = g_androidGroundAim.uiY;
+        TouchToVirtualUi(touch, upX, upY);
+
+        const float dx = upX - g_androidGroundAim.dragOriginX;
+        const float dy = upY - g_androidGroundAim.dragOriginY;
+
+        if (((dx * dx) + (dy * dy)) < (kGroundAimDragCastMinUi * kGroundAimDragCastMinUi))
+        {
+            CancelAndroidGroundAim("drag released near button");
+        }
+        else
+        {
+            g_androidGroundAim.dragging = false;
+            g_androidGroundAim.dragFinger = static_cast<SDL_FingerID>(-1);
+            g_androidGroundAim.uiX = upX;
+            g_androidGroundAim.uiY = upY;
+            g_androidGroundAim.pendingCast = true;
+            g_androidGroundAim.fromDrag = true;
+            g_androidGroundAim.settleFrames = 2;
         }
         return true;
     }
@@ -17987,13 +18176,24 @@ void RenderAndroidTeleportRangeRing()
 // UpdateAndroidGroundAimCast. Drawn at the tapped point itself.
 void RenderAndroidGroundAim()
 {
-    if (!g_androidGroundAim.pendingCast || !IsVirtualPadAvailable())
+    if ((!g_androidGroundAim.pendingCast && !g_androidGroundAim.dragging) || !IsVirtualPadAvailable())
     {
         return;
     }
 
     const float cx = g_androidGroundAim.uiX;
     const float cy = g_androidGroundAim.uiY;
+
+    // While dragging, the label says what releasing here will do.
+    const char* label = "casting...";
+    if (g_androidGroundAim.dragging)
+    {
+        const float ddx = cx - g_androidGroundAim.dragOriginX;
+        const float ddy = cy - g_androidGroundAim.dragOriginY;
+        label = (((ddx * ddx) + (ddy * ddy)) < (kGroundAimDragCastMinUi * kGroundAimDragCastMinUi))
+            ? "cancel"
+            : "release to cast";
+    }
 
     BeginBitmap();
     DisableTexture();
@@ -18016,7 +18216,7 @@ void RenderAndroidGroundAim()
              static_cast<int>(cx - 40.0f),
              static_cast<int>(cy + 24.0f),
              0xFFFFFFFF, 0x0, 80, 0, 3,
-             "%s", "casting...");
+             "%s", label);
 
     EndBitmap();
 }
