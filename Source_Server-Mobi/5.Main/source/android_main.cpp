@@ -2516,6 +2516,7 @@ struct AndroidHotKeyPressState
     uint32_t downMs = 0;
     float downX = 0.0f;
     float downY = 0.0f;
+    bool holdReady = false;   // the hold has lasted long enough: buzzed once, release now does the hold action
 };
 AndroidHotKeyPressState g_androidHotKeyPress{};
 
@@ -2534,6 +2535,7 @@ struct AndroidSkillSlotPressState
     uint32_t downMs = 0;
     float downX = 0.0f;
     float downY = 0.0f;
+    bool holdReady = false;
 };
 AndroidSkillSlotPressState g_androidSkillSlotPress{};
 
@@ -2659,6 +2661,7 @@ struct AndroidComboTogglePressState
     uint32_t downMs = 0;
     float downX = 0.0f;
     float downY = 0.0f;
+    bool holdReady = false;
 };
 AndroidComboTogglePressState g_androidComboTogglePress{};
 // The AutoPots button press, resolved on finger-up the same way.
@@ -17849,8 +17852,46 @@ bool IsVirtualButtonPressed(int button)
     return false;
 }
 
+// A short buzz the moment a hold becomes long enough to act on - the wheel skill slot
+// (opens the picker), a Q/W/E/R slot (rebinds it), the combo toggle and AutoPots (open
+// their settings). Without it the player has to guess when it is safe to let go.
+// The actions themselves are still decided on release.
+void UpdateAndroidHoldFeedback()
+{
+    const uint32_t nowMs = MU_MobileGetTicks();
+
+    if (g_androidSkillSlotPress.slot >= 0 && !g_androidSkillSlotPress.holdReady
+        && (nowMs - g_androidSkillSlotPress.downMs) >= kSkillSlotRebindHoldMs)
+    {
+        g_androidSkillSlotPress.holdReady = true;
+        AndroidHapticPulse(30);
+    }
+
+    if (g_androidHotKeyPress.slot >= 0 && !g_androidHotKeyPress.holdReady
+        && (nowMs - g_androidHotKeyPress.downMs) >= kHotKeyRebindHoldMs)
+    {
+        g_androidHotKeyPress.holdReady = true;
+        AndroidHapticPulse(30);
+    }
+
+    if (g_androidComboTogglePress.fingerId != static_cast<SDL_FingerID>(-1) && !g_androidComboTogglePress.holdReady
+        && (nowMs - g_androidComboTogglePress.downMs) >= kComboSettingsLongPressMs)
+    {
+        g_androidComboTogglePress.holdReady = true;
+        AndroidHapticPulse(30);
+    }
+
+    if (g_androidAutoPotsPress.fingerId != static_cast<SDL_FingerID>(-1) && !g_androidAutoPotsPress.holdReady
+        && (nowMs - g_androidAutoPotsPress.downMs) >= kComboSettingsLongPressMs)
+    {
+        g_androidAutoPotsPress.holdReady = true;
+        AndroidHapticPulse(30);
+    }
+}
+
 void UpdateVirtualPadHolds()
 {
+    UpdateAndroidHoldFeedback();
     UpdateAndroidLongPressRightClick();
     UpdateAndroidBagHold();
     UpdateAndroidEquipHold();
