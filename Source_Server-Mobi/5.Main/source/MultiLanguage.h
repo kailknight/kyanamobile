@@ -11,6 +11,17 @@
 // works. Anything unknown is English.
 // ---------------------------------------------------------------------------
 bool IsVietnameseLanguage();
+bool IsSpanishLanguage();
+
+// True for any language with a translation pack (Vietnamese or Spanish), i.e. not English.
+// Code that falls back to English files / skips English-only data uses this.
+bool IsTranslatedLanguage();
+
+// Language as a small index, for the language buttons: 0 English, 1 Vietnamese, 2 Spanish.
+enum { LANG_INDEX_ENGLISH = 0, LANG_INDEX_VIETNAMESE = 1, LANG_INDEX_SPANISH = 2, LANG_INDEX_COUNT = 3 };
+int GetLanguageIndex();
+int LanguageIndexFromCode(const char* pszIn);
+const char* LanguageCodeFromIndex(int iIndex);	// "Eng" / "Vtm" / "Spn"
 
 // Writes the canonical code ("Eng" / "Vtm") into pszOut (needs >= 4 bytes).
 void NormalizeLanguageCode(const char* pszIn, char* pszOut);

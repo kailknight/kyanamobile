@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "ItemTracker.h"
 #include "resource.h"
 #include "DSProtocol.h"
 #include "MonthlyCard.h"
@@ -1855,6 +1856,24 @@ void DGCreateItemRecv(SDHP_CREATE_ITEM_RECV* lpMsg) // OK
 	if(lpMsg->Map != 0xFF && lpMsg->Map != 0xFE && lpMsg->Map != 0xED && lpMsg->Map != 0xEC && lpMsg->Map != 0xEB && MAP_RANGE(lpMsg->Map) == 0)
 	{
 		return;
+	}
+
+	// Item Tracker: every item the DataServer gives a serial to passes through here.
+	{
+		const char* trackSource = "Monster / box drop";
+		const char* trackAction = "Drop";
+
+		switch(lpMsg->Map)
+		{
+			case 0xFF:	trackSource = "Chaos Machine";		trackAction = "Created";	break;
+			case 0xFE:	trackSource = "Trainer";			trackAction = "Created";	break;
+			case 0xEB:	trackSource = "Reward / Shop";		trackAction = "Created";	break;
+			case 0xEC:	trackSource = "Event inventory";	trackAction = "Created";	break;
+			case 0xED:	trackSource = "Muun";				trackAction = "Created";	break;
+		}
+
+		// A chaos machine result is logged as MixSuccess by ChaosBox, which also knows the mix.
+		if(lpMsg->Map != 0xFF) gItemTracker.LogFields(trackAction,lpMsg->index,lpMsg->ItemIndex,lpMsg->Serial,lpMsg->Level,lpMsg->Option1,lpMsg->Option2,lpMsg->Option3,lpMsg->NewOption,lpMsg->SetOption,lpMsg->JewelOfHarmonyOption,lpMsg->ItemOptionEx,trackSource);
 	}
 
 	if(lpMsg->Map == 0xFE || lpMsg->Map == 0xFF)
@@ -5065,6 +5084,10 @@ void GDSetCoinSend(int aIndex, int value1, int value2, int value3, char* LogName
 	LogWCoinChange(lpObj, LogName, value1, oldCoin1, lpObj->Coin1, "WC", 100);
 	LogWCoinChange(lpObj, LogName, value2, oldCoin2, lpObj->Coin2, "WP", 1);
 	LogWCoinChange(lpObj, LogName, value3, oldCoin3, lpObj->Coin3, "WG", 1);
+
+	if(value1 != 0) gItemTracker.LogCoin(aIndex,"WCoin (C)",value1,lpObj->Coin1,LogName);
+	if(value2 != 0) gItemTracker.LogCoin(aIndex,"WCoin (P)",value2,lpObj->Coin2,LogName);
+	if(value3 != 0) gItemTracker.LogCoin(aIndex,"Goblin Points",value3,lpObj->Coin3,LogName);
 
 #if (GAMESERVER_UPDATE <= 402)
 	gPcPoint.GDPcPointPointSend(lpObj->Index);

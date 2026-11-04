@@ -883,3 +883,31 @@ int CFriendMail::MailItems(const char* toName,const char* fromLabel,const char* 
 
 	return stored;
 }
+
+// 0x47 - a flea market payout from the GameServer: the seller is paid by mail instead of straight into the wallet / jewel bank.
+void CFriendMail::OnPayoutRequest(SDHP_FRIENDMAIL_PAYOUT_REQ* lpMsg)
+{
+	char name[11];
+	char subject[33];
+	char memo[201];
+
+	CopyName(name,sizeof(name),lpMsg->Name,10);
+	CopyName(subject,sizeof(subject),lpMsg->Subject,32);
+	CopyName(memo,sizeof(memo),lpMsg->Memo,200);
+
+	if(lpMsg->CoinType < FRIENDMAIL_COIN_WCOINC || lpMsg->CoinType > FRIENDMAIL_COIN_CHAOS || lpMsg->CoinAmount == 0 || lpMsg->CoinAmount > 1000000000)
+	{
+		LogAdd(LOG_RED,"[FriendMail] Flea market payout refused for %s: coin type %d amount %u",name,(int)lpMsg->CoinType,lpMsg->CoinAmount);
+		return;
+	}
+
+	// expireDays 0: a sale payout never goes back to anyone.
+	if(this->MailCoins(name,"Market",subject,memo,(int)lpMsg->CoinType,(int)lpMsg->CoinAmount,0) == 0)
+	{
+		// The sold row is already gone, so say exactly what is owed.
+		LogAdd(LOG_RED,"[FriendMail] FLEA MARKET PAYOUT NOT DELIVERED to %s: coin type %d amount %u (mailbox full or no such character)",name,(int)lpMsg->CoinType,lpMsg->CoinAmount);
+		return;
+	}
+
+	LogAdd(LOG_BLACK,"[FriendMail] Flea market payout mailed to %s: coin type %d x %u",name,(int)lpMsg->CoinType,lpMsg->CoinAmount);
+}

@@ -83,6 +83,7 @@ namespace SEASON3B
 		int GetVolumeLevel();
 		void SetRenderLevel(int iRender);
 		int GetRenderLevel();
+		int GetOpacityPercent() { return m_iOpacity; }
 		//===
 		bool OnOffGrap[eEndOnOffGrap];
 
@@ -90,14 +91,39 @@ namespace SEASON3B
 		void LoadImages();
 		void UnloadImages();
 
-		void RenderFrame();
-		void RenderContents();
-		void RenderCustomFrame();
-		void RenderButtons();
+		void RenderModern();
+		void ToggleMusic();
+		void ToggleSound();
+		int GetWantedLanguage();
+		void ChooseLanguage(int iLang);
+		bool HandleModernClick();
+		void AddHit(float x, float y, float w, float h, int id, int arg);
+		void DrawToggleRow(float x, float y, float w, const char* label, bool on, int id, int arg);
+		void DrawDropRow(float x, float y, float w, const char* label, const char* value, int dd);
+		void BuildDropOptions(int dd);
+		void ApplyDropOption(int dd, int idx);
+		bool IsPresetOn(int preset);
+		void TogglePreset(int preset);
 
-		// Microphone settings, bottom-left of the window. Kept out of
-		// RenderCustomFrame because that panel has no room for a full-width row.
-		void RenderVoiceMicRows();
+		// Clickable areas recorded while drawing, resolved by UpdateMouseEvent.
+		enum { MODERN_MAX_HITS = 64 };
+		enum { MH_CLOSE = 1, MH_AUTOATTACK, MH_WHISPER, MH_SLIDEHELP, MH_MUSIC, MH_SOUND, MH_GRAPH, MH_RENDERLEVEL, MH_HPBAR, MH_NAME,
+			MH_MINIMAP, MH_TITLE, MH_ITEMNAMES, MH_VOICE, MH_MUTE, MH_NOISEGATE, MH_MIC, MH_BOOST, MH_TALK, MH_CHANNEL, MH_TEXTSIZE,
+			MH_PRESET, MH_DROP, MH_DROPOPT, MH_MARKETMSG };
+		enum { MODERN_MAX_DROP = 12 };
+		struct ModernHit { float x, y, w, h; int id, arg; };
+		ModernHit m_Hits[MODERN_MAX_HITS];
+		int m_nHits;
+		int m_iOpenDrop;		// id of the open drop-down, 0 = none
+		float m_dropX, m_dropY, m_dropW;
+		int m_nDropOpts;
+		int m_dropCur;
+		char m_dropLabels[MODERN_MAX_DROP][32];
+		int m_dropValues[MODERN_MAX_DROP];
+		int m_iFontWanted;		// PC text size bonus chosen in the window (applies at the next start)
+		DWORD m_dwOpenTick;		// when the window opened, so the click that opened it cannot also close it
+		int m_iOpacity;			// window opacity in percent (30..100)
+		int m_iLangWanted;
 
 	private:
 		CNewUIManager*				m_pNewUIMng;

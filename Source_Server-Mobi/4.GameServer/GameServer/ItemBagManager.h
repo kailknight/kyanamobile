@@ -98,6 +98,7 @@ public:
 	bool GetItemByMonsterClass(int MonsterClass,LPOBJ lpObj,CItem* lpItem);
 	bool GetItemBySpecialValue(int SpecialValue,LPOBJ lpObj,CItem* lpItem);
 	int DropItemByItemIndex(int ItemIndex,int ItemLevel,LPOBJ lpObj,int map,int x,int y);
+	int DropItemByItemIndexInner(int ItemIndex,int ItemLevel,LPOBJ lpObj,int map,int x,int y);
 	bool DropItemByMonsterClass(int MonsterClass,LPOBJ lpObj,int map,int x,int y);
 	bool DropItemBySpecialValue(int SpecialValue,LPOBJ lpObj,int map,int x,int y);
 	bool DropItemByIndexItemBag(int IndexItemBag, LPOBJ lpObj);

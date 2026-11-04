@@ -22,6 +22,7 @@
 #include "MapServerManager.h"
 //#include "BankUpgrade.h"
 #include "BCustomItemBank.h"
+#include "FriendMailProtocol.h"
 
 #if(CUSTOM_BCHOTROI)
 BCustomChoTroi gBCustomChoTroi;
@@ -965,61 +966,31 @@ void BCustomChoTroi::DGAnsItemStatus(CBCUSTOM_LOAD_COUNT * lpMsg)
 		int CoinAfterTax = lpInfo->PriceValue - ((lpInfo->PriceValue * RateTax) / 100);
 
 
-		//===Cong Coin
-		if (ItemPriceType == eMarketPriceWC)
+		// The payout goes to the seller's mailbox as a coin attachment instead of straight to the wallet / jewel bank:
+		// the DataServer writes the letter (WCoin C/P, Goblin Points and the three bank jewels are all coin types there).
 		{
-			GDSetCoinSend(lpUser->Index, +CoinAfterTax, 0, 0, "ChoTroi + WCoinC");
-			gCashShop.CGCashShopPointRecv(lpUser->Index);
-		}
-		else if (ItemPriceType == eMarketPriceWP)
-		{
-			GDSetCoinSend(lpUser->Index, 0, +CoinAfterTax, 0, "ChoTroi + WCoinP");
-			gCashShop.CGCashShopPointRecv(lpUser->Index);
-		}
-		else if (ItemPriceType == eMarketPriceGP)
-		{
-			GDSetCoinSend(lpUser->Index, 0, 0, +CoinAfterTax, "ChoTroi + GobinP");
-			gCashShop.CGCashShopPointRecv(lpUser->Index);
+			SDHP_FRIENDMAIL_PAYOUT_REQ pay;
+			memset(&pay,0,sizeof(pay));
+			pay.header.set(0xD9,0x57,sizeof(pay));
+			memcpy(pay.Name,lpUser->Name,sizeof(pay.Name)-1);
+			switch(ItemPriceType)
+			{
+				case eMarketPriceWC: pay.CoinType = FRIENDMAIL_COIN_WCOINC; break;
+				case eMarketPriceWP: pay.CoinType = FRIENDMAIL_COIN_WCOINP; break;
+				case eMarketPriceGP: pay.CoinType = FRIENDMAIL_COIN_GOBLIN; break;
+				case eMarketPriceB: pay.CoinType = FRIENDMAIL_COIN_BLESS; break;
+				case eMarketPriceS: pay.CoinType = FRIENDMAIL_COIN_SOUL; break;
+				case eMarketPriceC: pay.CoinType = FRIENDMAIL_COIN_CHAOS; break;
+			}
+			pay.CoinAmount = (CoinAfterTax > 0) ? (DWORD)CoinAfterTax : 0;
+			strcpy_s(pay.Subject,"Flea Market - item sold");
+			sprintf_s(pay.Memo,"Sold: %s +%d\nPrice: %d %s\nTax: %d%%\nPayout: %d %s (claim it from this mail)",gItemLevel.GetItemName(item.m_Index,item.m_Level),item.m_Level,ItemPrice,TypeCoin[ItemPriceType],RateTax,CoinAfterTax,TypeCoin[ItemPriceType]);
+			if(pay.CoinType != FRIENDMAIL_COIN_NONE && pay.CoinAmount > 0)
+			{
+				gDataServerConnection.DataSend((BYTE*)&pay,pay.header.size);
+			}
 		}
 
-		else if (ItemPriceType == eMarketPriceB)
-		{
-			int GetSlotItemBank = gBCustomItemBank.CheckInfoListItemBank(7181, 0);
-			if (GetSlotItemBank != -1)
-			{
-				gBCustomItemBank.CongTruBank(lpUser->Index, 7181, 0, +(CoinAfterTax));
-			}
-			//gCustomJewelBank.GDCustomJewelBankAddJewel(lpUser,0,CoinAfterTax);
-			//GDSetCoinSend(lpUser->Index, 0, 0, +CoinAfterTax, "ChoTroi + GobinP");
-			//gCashShop.CGCashShopPointRecv(lpUser->Index);
-		}
-		else if (ItemPriceType == eMarketPriceS)
-		{
-			int GetSlotItemBank = gBCustomItemBank.CheckInfoListItemBank(7182, 0);
-			if (GetSlotItemBank != -1)
-			{
-				gBCustomItemBank.CongTruBank(lpUser->Index, 7182, 0, +(CoinAfterTax));
-			}
-			//gCustomJewelBank.GDCustomJewelBankAddJewel(lpUser,1,CoinAfterTax);
-			//GDSetCoinSend(lpUser->Index, 0, 0, +CoinAfterTax, "ChoTroi + GobinP");
-			//gCashShop.CGCashShopPointRecv(lpUser->Index);
-		}
-		else if (ItemPriceType == eMarketPriceC)
-		{
-			int GetSlotItemBank = gBCustomItemBank.CheckInfoListItemBank(6159, 0);
-			if (GetSlotItemBank != -1)
-			{
-				gBCustomItemBank.CongTruBank(lpUser->Index, 6159, 0, +(CoinAfterTax));
-			}
-			//gCustomJewelBank.GDCustomJewelBankAddJewel(lpUser,7,CoinAfterTax);
-			//GDSetCoinSend(lpUser->Index, 0, 0, +CoinAfterTax, "ChoTroi + GobinP");
-			//gCashShop.CGCashShopPointRecv(lpUser->Index);
-		}
-		//===
-
-		this->GuiThuThongBao(lpUser, this->GetMessage(10), "=====[Successfully Sold]===== \n► TAX %d%% (%s) += %d \n► %s (Price: %d [%s]) \n* Level: %02d\n* Serial:%08X\n* Skill: %01d\n* Luck: %01d\n* Opt: %01d\n* ExcOpt: %03d\n* JewelOfHarmonyOption: %03d\n* ItemOptionEx: %03d\n* SocketOption: %03d, %03d, %03d, %03d, %03d",
-			RateTax, TypeCoin[ItemPriceType], CoinAfterTax, gItemLevel.GetItemName(item.m_Index, item.m_Level), ItemPrice, TypeCoin[ItemPriceType],
-			item.m_Level, item.m_Serial, item.m_Option1, item.m_Option2, item.m_Option3, item.m_NewOption, item.m_JewelOfHarmonyOption, item.m_ItemOptionEx, item.m_SocketOption[0], item.m_SocketOption[1], item.m_SocketOption[2], item.m_SocketOption[3], item.m_SocketOption[4]);
 
 		LogAddCat(LOG_CAT_MARKET, LOG_GREEN, "[Market] %s sold %s +%d for %d %s (tax %d%%, net %d)",
 			lpUser->Name,

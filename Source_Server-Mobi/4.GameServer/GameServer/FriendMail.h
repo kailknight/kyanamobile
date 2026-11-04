@@ -82,6 +82,7 @@ struct PMSG_FRIENDMAIL_ITEMS_SEND	// C1:D3:E2
 	BYTE Count;
 	BYTE Items[FRIENDMAIL_MAX_ITEMS][MAX_ITEM_INFO];
 	DWORD Coins[3];		// waiting WCoinC, WCoinP, Goblin Points (eFriendMailCoin - 1)
+	DWORD Jewels[3];	// waiting Bless, Soul, Chaos jewel bank (eFriendMailCoin - 4); appended, so an older client just ignores them
 };
 
 struct PMSG_FRIENDMAIL_CLAIM_SEND	// C1:D3:E3

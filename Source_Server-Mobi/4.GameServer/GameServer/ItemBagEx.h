@@ -8,6 +8,10 @@
 #include "Item.h"
 #include "User.h"
 
+// Right-click box class filter (defined in ItemBag.cpp).
+extern bool g_ItemBagClassFilter;
+bool ItemBagClassOk(LPOBJ lpObj,int itemIndex);
+
 struct ITEM_BAG_EX_ITEM_INFO
 {
 	int Index;
@@ -48,6 +52,7 @@ public:
 	void Load(char* path);
 	bool GetItem(LPOBJ lpObj,CItem* lpItem);
 	bool DropItem(LPOBJ lpObj,int map,int x,int y);
+	ITEM_BAG_EX_ITEM_INFO* PickBagItem(LPOBJ lpObj,std::vector<ITEM_BAG_EX_ITEM_INFO>* lpList);
 	bool CheckDropClass(LPOBJ lpObj,int type,int RequireClass[MAX_CLASS]);
 	bool GetRandomItemDropLocation(int map,int* ox,int* oy,int tx,int ty,int count);
 public:

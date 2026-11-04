@@ -42,6 +42,7 @@
 #include "RedeemCode.h"
 #include "PlayBilling.h"
 #include "DeviceLog.h"
+#include "ItemTracker.h"
 #include "FriendMail.h"
 #include "MonthlyCard.h"
 #include "DuelRanked.h"
@@ -976,6 +977,9 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 			case 0x48: //==Hardware ban / unban record
 				gDeviceLog.OnBan((SDHP_DEVICE_BAN_RECV*)lpMsg);
 				break;
+			case 0x56: //==Item Tracker row (ItemTracker.h)
+				gItemTracker.OnItem((SDHP_ITEMTRACK_RECV*)lpMsg,size);
+				break;
 			case 0x40: //==Friend mail - friend details
 				gFriendMail.OnDetailRequest((SDHP_FRIENDMAIL_NAME_REQ*)lpMsg, index);
 				break;
@@ -996,6 +1000,9 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x46: //==Friend mail - attachment counts (+ expiry sweep)
 				gFriendMail.OnCountsRequest((SDHP_FRIENDMAIL_NAME_REQ*)lpMsg, index);
+				break;
+			case 0x57: //==Friend mail - flea market payout
+				gFriendMail.OnPayoutRequest((SDHP_FRIENDMAIL_PAYOUT_REQ*)lpMsg);
 				break;
 			case 0x50: //==Kira Pass (monthly WCoin) - pay on login / status
 				gMonthlyCard.OnRequest((SDHP_MONTHLYCARD_REQ*)lpMsg, index);
@@ -3573,7 +3580,37 @@ void GDCustomRankingRecv(SDHP_CUSTOM_RANKING_RECV* lpMsg,int index) // OK
 
 	CUSTOM_RANKING_DATA info;
 
-	if (gQueryManager.ExecQuery("EXEC WZ_CustomRanking %d", lpMsg->type) != 0)
+	if (lpMsg->type == gDuelRanked.LeaderboardType())
+	{
+		// The duel ladder: best 30 by rating, only characters that have played a rated match.
+		if (gQueryManager.ExecQuery("SELECT TOP 30 Name, MMR, CONVERT(varchar(8),LastMatchAt,108)+' - ('+CONVERT(varchar(10),LastMatchAt,103)+')' AS LastPlayed FROM DuelRanked WHERE Wins+Losses+Draws > 0 ORDER BY MMR DESC, Wins DESC, Name") != 0)
+		{
+			while (gQueryManager.Fetch() != SQL_NO_DATA)
+			{
+				char rank[24];
+
+				memset(&info,0,sizeof(info));
+
+				gQueryManager.GetAsString("Name", info.szName, sizeof(info.szName));
+
+				int mmr = gQueryManager.GetAsInteger("MMR");
+
+				gDuelRanked.RankText(mmr,rank,sizeof(rank));
+
+				_snprintf_s(info.value2,sizeof(info.value2),_TRUNCATE,"%s - %d",rank,mmr);
+
+				gQueryManager.GetAsString("LastPlayed", info.value3, sizeof(info.value3));
+#if(CUSTOM_BRANKINGNEW)
+				info.CheckOnline = gCharacterManager.CheckCharacterOnline(info.szName);
+#endif
+				memcpy(&send[size], &info, sizeof(info));
+				size += sizeof(info);
+
+				pMsg.count++;
+			}
+		}
+	}
+	else if (gQueryManager.ExecQuery("EXEC WZ_CustomRanking %d", lpMsg->type) != 0)
 	{
 		while (gQueryManager.Fetch() != SQL_NO_DATA)
 		{

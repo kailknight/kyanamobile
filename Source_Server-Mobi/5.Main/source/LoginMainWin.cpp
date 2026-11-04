@@ -22,9 +22,9 @@
 
 extern void SetSelectedLanguage(const char* pszLanguage);
 #if !defined(__ANDROID__) && !defined(MU_IOS)
-extern bool AskRestartForLanguage(bool bWantVi);	// Winmain.cpp
+extern bool AskRestartForLanguage(int iWantLang);	// Winmain.cpp
 #elif defined(__ANDROID__) || defined(MU_IOS)
-extern void MU_MobileAskRestartForLanguage(bool vietnamese);	// Platform/MobilePlatform.cpp
+extern void MU_MobileAskRestartForLanguage(int iWantLang);	// Platform/MobilePlatform.cpp
 #endif
 
 #ifdef MOVIE_DIRECTSHOW
@@ -38,7 +38,8 @@ extern char* g_lpszMp3[NUM_MUSIC];
 
 CLoginMainWin::CLoginMainWin()
 {
-	m_bLangChanged = false;
+	m_iLangWanted = -1;
+	m_bLangOpen = false;
 }
 
 CLoginMainWin::~CLoginMainWin()
@@ -53,13 +54,15 @@ void CLoginMainWin::Create()
 
 	// Language switch: the same plain text button the system menu uses (SysMenuWin.cpp).
 	m_aBtn[LMW_BTN_LANG].Create(108, 30, BITMAP_TEXT_BTN, 4, 2, 1);
+	for (int i = 0; i < LANG_INDEX_COUNT; ++i)
+		m_aBtn[LMW_BTN_OPT0 + i].Create(108, LMW_DROP_ROW_H, BITMAP_TEXT_BTN, 4, 2, 1);
 	RefreshLanguageButton();
 #ifdef MOVIE_DIRECTSHOW
 	m_aBtn[LMW_BTN_MOVIE].Create(54, 30, BITMAP_LOG_IN+15, 3, 2, 1);
 #endif	// MOVIE_DIRECTSHOW
 
 	CWin::Create(CInput::Instance().GetScreenWidth() - 30 * 2,
-		m_aBtn[0].GetHeight() + LMW_LANG_ROW_H, -2);
+		m_aBtn[0].GetHeight() + LMW_LANG_ROW_H + LMW_DROP_H, -2);
 
 	for (int i = 0; i < LMW_BTN_MAX; ++i)
 		CWin::RegisterButton(&m_aBtn[i]);
@@ -75,22 +78,42 @@ void CLoginMainWin::PreRelease()
 void CLoginMainWin::RefreshLanguageButton()
 {
 	static DWORD s_adwClr[4] = { CLRDW_BR_GRAY, CLRDW_BR_GRAY, CLRDW_WHITE, 0 };
-	const bool bVi = IsVietnameseLanguage();
+	const int iStarted = GetLanguageIndex();
 #if defined(MU_IOS)
 	// Both language controls share the persisted choice, not separate toggle flags.
-	m_bLangChanged = (GameConfig::GetInstance().GetLanguageSelection() == L"Vtm") != bVi;
+	{
+		const std::wstring sel = GameConfig::GetInstance().GetLanguageSelection();
+		m_iLangWanted = (sel == L"Spn") ? LANG_INDEX_SPANISH : (sel == L"Vtm") ? LANG_INDEX_VIETNAMESE : LANG_INDEX_ENGLISH;
+	}
 #endif
-	const char* pszLabel;
-	if (!m_bLangChanged)
+	if (m_iLangWanted < 0)
 	{
-		pszLabel = bVi ? "English" : "Ti\xE1\xBA\xBFng Vi\xE1\xBB\x87t";
+		m_iLangWanted = iStarted;
 	}
-	else
+
+	// The button cycles English -> Tieng Viet -> Espanol and shows the language the next click picks.
+	// The language this run started in is only replaced after a restart.
+	static const char* const s_apszNames[LANG_INDEX_COUNT] = {
+		"English",
+		"Ti\xE1\xBA\xBFng Vi\xE1\xBB\x87t",
+		"Espa\xC3\xB1ol"
+	};
+	m_aBtn[LMW_BTN_LANG].SetText(s_apszNames[m_iLangWanted], s_adwClr);
+
+	// Drop-down items; the language in use after the next start is marked with a dot.
+	static char s_szOpt[LANG_INDEX_COUNT][48];
+	for (int i = 0; i < LANG_INDEX_COUNT; ++i)
 	{
-		// bVi is still the language this run STARTED in. The saved choice is the other one.
-		pszLabel = bVi ? "Restart game" : "Kh\xE1\xBB\x9Fi \xC4\x91\xE1\xBB\x99ng l\xE1\xBA\xA1i";
+		sprintf(s_szOpt[i], i == m_iLangWanted ? "• %s" : "%s", s_apszNames[i]);
+		m_aBtn[LMW_BTN_OPT0 + i].SetText(s_szOpt[i], s_adwClr);
 	}
-	m_aBtn[LMW_BTN_LANG].SetText(pszLabel, s_adwClr);
+}
+
+void CLoginMainWin::ShowLanguageList(bool bOpen)
+{
+	m_bLangOpen = bOpen;
+	for (int i = 0; i < LANG_INDEX_COUNT; ++i)
+		m_aBtn[LMW_BTN_OPT0 + i].Show(bOpen && CWin::m_bShow);
 }
 
 void CLoginMainWin::SetPosition(int nXCoord, int nYCoord)
@@ -99,8 +122,12 @@ void CLoginMainWin::SetPosition(int nXCoord, int nYCoord)
 
 	// Menu and Credit sit on the bottom row of the (taller) window; the language button is on
 	// the row above Menu, flush left.
-	const int nRowY = nYCoord + LMW_LANG_ROW_H;
-	m_aBtn[LMW_BTN_LANG].SetPosition(nXCoord, nYCoord);
+	const int nLangY = nYCoord + LMW_DROP_H;
+	const int nRowY = nLangY + LMW_LANG_ROW_H;
+	m_aBtn[LMW_BTN_LANG].SetPosition(nXCoord, nLangY);
+	// The list sits right above the language button, first language on top.
+	for (int i = 0; i < LANG_INDEX_COUNT; ++i)
+		m_aBtn[LMW_BTN_OPT0 + i].SetPosition(nXCoord, nYCoord + i * LMW_DROP_ROW_H);
 	m_aBtn[LMW_BTN_MENU].SetPosition(nXCoord, nRowY);
 	m_aBtn[LMW_BTN_CREDIT].SetPosition(
 		nXCoord + CWin::GetWidth() - m_aBtn[LMW_BTN_CREDIT].GetWidth(),
@@ -121,8 +148,10 @@ void CLoginMainWin::Show(bool bShow)
 #endif
 	CWin::Show(bShow);
 
-	for (int i = 0; i < LMW_BTN_MAX; ++i)
+	for (int i = 0; i < LMW_BTN_OPT0; ++i)
 		m_aBtn[i].Show(bShow);
+	m_bLangOpen = false;	// the list always starts closed
+	ShowLanguageList(false);
 	m_sprDeco.Show(bShow);
 }
 
@@ -150,26 +179,38 @@ void CLoginMainWin::UpdateWhileActive(double dDeltaTick)
 	}
 	else if (m_aBtn[LMW_BTN_LANG].IsClick())
 	{
-		// Saved at once; read at the next start (the language data files load once at startup).
-		// Clicking again before restarting switches back.
-		const bool bStartedVi = IsVietnameseLanguage();
-#if defined(MU_IOS)
+		// Opens / closes the drop-down list.
 		RefreshLanguageButton();
-#endif
-		m_bLangChanged = !m_bLangChanged;
-		const bool bWantVi = m_bLangChanged ? !bStartedVi : bStartedVi;
-		SetSelectedLanguage(bWantVi ? "Vtm" : "Eng");
+		ShowLanguageList(!m_bLangOpen);
+	}
+	else if (m_bLangOpen && (m_aBtn[LMW_BTN_OPT0].IsClick() || m_aBtn[LMW_BTN_OPT0 + 1].IsClick() || m_aBtn[LMW_BTN_OPT0 + 2].IsClick()))
+	{
+		// A language was picked. Saved at once; read at the next start (the language data files load
+		// once at startup). Picking the language this run started in again is silent.
+		const int iStarted = GetLanguageIndex();
+		RefreshLanguageButton();	// brings m_iLangWanted up to date
+		int iPick = LANG_INDEX_ENGLISH;
+		for (int i = 0; i < LANG_INDEX_COUNT; ++i)
+		{
+			if (m_aBtn[LMW_BTN_OPT0 + i].IsClick())
+				iPick = i;
+		}
+		ShowLanguageList(false);
+		if (iPick == m_iLangWanted)
+			return;
+		m_iLangWanted = iPick;
+		SetSelectedLanguage(LanguageCodeFromIndex(m_iLangWanted));
 		RefreshLanguageButton();
 #if !defined(__ANDROID__) && !defined(MU_IOS)
 		// Only when it differs from the language this run started in; going back is silent.
-		if (m_bLangChanged)
+		if (m_iLangWanted != iStarted)
 		{
-			AskRestartForLanguage(bWantVi);
+			AskRestartForLanguage(m_iLangWanted);
 		}
 #elif defined(__ANDROID__) || defined(MU_IOS)
-		if (m_bLangChanged)
+		if (m_iLangWanted != iStarted)
 		{
-			MU_MobileAskRestartForLanguage(bWantVi);
+			MU_MobileAskRestartForLanguage(m_iLangWanted);
 		}
 #endif
 	}

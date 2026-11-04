@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "ItemTracker.h"
 #include "ItemManager.h"
 #include "BloodCastle.h"
 #include "CashShop.h"
@@ -3401,6 +3402,8 @@ void CItemManager::CGItemGetRecv(PMSG_ITEM_GET_RECV* lpMsg,int aIndex) // OK
 
 	if(this->InventoryInsertItemStack(lpObj,&item) != 0)
 	{
+		gItemTracker.Log("Pickup",aIndex,&item,"Ground");
+
 		gMap[lpObj->Map].ItemGive(aIndex,index);
 
 		pMsg.result = 0xFD;
@@ -3415,6 +3418,8 @@ void CItemManager::CGItemGetRecv(PMSG_ITEM_GET_RECV* lpMsg,int aIndex) // OK
 		DataSend(aIndex,(BYTE*)&pMsg,pMsg.header.size);
 		return;
 	}
+
+	gItemTracker.Log("Pickup",aIndex,&item,"Ground");
 
 	gMap[lpObj->Map].ItemGive(aIndex,index);
 
@@ -3644,6 +3649,8 @@ void CItemManager::CGItemDropRecv(PMSG_ITEM_DROP_RECV* lpMsg,int aIndex) // OK
 			return;
 		}
 
+		gItemTracker.Log("Drop",aIndex,lpItem,"Player");
+
 		this->InventoryDelItem(aIndex,lpMsg->slot);
 	}
 
@@ -3773,6 +3780,8 @@ bool CItemManager::CGPkDrop(PMSG_ITEM_DROP_RECV* lpMsg,int aIndex) // OK
 		{
 			return 0;
 		}
+		gItemTracker.Log("Drop",aIndex,lpItem,"PK drop");
+
 		this->InventoryDelItem(aIndex,lpMsg->slot);
 	}
 
@@ -4595,6 +4604,8 @@ void CItemManager::CGItemBuyRecv(PMSG_ITEM_BUY_RECV* lpMsg,int aIndex,int ok) //
 		gCastleSiegeSync.AddTributeMoney(tax);
 	}
 
+	gItemTracker.Log("Buy",aIndex,&item,"NPC shop");
+
 	this->ItemByteConvert(pMsg.ItemInfo,item);
 
 	gShop.GCItemValueSend(aIndex);
@@ -4757,6 +4768,8 @@ void CItemManager::CGItemSellRecv(PMSG_ITEM_SELL_RECV* lpMsg,int aIndex) // OK
 	gPentagramSystem.DelAllPentagramJewelInfo(lpObj,lpItem,PENTAGRAM_JEWEL_TYPE_INVENTORY);
 
 	#endif
+
+	gItemTracker.Log("Sell",aIndex,lpItem,"NPC shop");
 
 	this->InventoryDelItem(aIndex,lpMsg->slot);
 

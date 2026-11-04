@@ -1478,7 +1478,10 @@ int OfflineMode::PickUP(int aIndex)
 			OldY = lpObj->Y;
 			// "Pick up all items nearby". It was received but never read here,
 			// so with only that box ticked the AFK helper picked up nothing.
-			if (lpObj->ObtainPickNear == 1)
+			// "Selected" wins when both are set (the two are mutually exclusive in
+			// the helper window, so both set = a stale saved setting): otherwise
+			// the stale "all" flag made the AFK helper loot everything.
+			if (lpObj->ObtainPickNear == 1 && lpObj->ObtainPickSelected == 0)
 			{
 				PickItem = true;
 				AnimationMove(lpObj->Index, lpMapItem->m_X, lpMapItem->m_Y);

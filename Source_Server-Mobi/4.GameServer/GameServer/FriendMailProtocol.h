@@ -31,6 +31,10 @@ enum eFriendMailCoin
 	FRIENDMAIL_COIN_WCOINC		= 1,	// CoinAmount WCoin (C)  - lpObj->Coin1
 	FRIENDMAIL_COIN_WCOINP		= 2,	// CoinAmount WCoin (P)  - lpObj->Coin2
 	FRIENDMAIL_COIN_GOBLIN		= 3,	// CoinAmount Goblin Points - lpObj->Coin3
+	// Jewel bank balances (BCustomItemBank). Only the server writes these - the flea market pays its sales out this way.
+	FRIENDMAIL_COIN_BLESS		= 4,	// Jewel of Bless  (7181)
+	FRIENDMAIL_COIN_SOUL		= 5,	// Jewel of Soul   (7182)
+	FRIENDMAIL_COIN_CHAOS		= 6,	// Jewel of Chaos  (6159)
 };
 
 // Results of 0x41 / 0x42.
@@ -178,4 +182,15 @@ struct SDHP_FRIENDMAIL_COUNTS_RECV
 	char Account[11];
 	BYTE Count;
 	FRIENDMAIL_COUNT List[FRIENDMAIL_MAX_COUNTS];
+};
+
+// 0x57 GameServer -> DataServer: put a flea market payout in the seller's mailbox as a coin attachment. No reply.
+struct SDHP_FRIENDMAIL_PAYOUT_REQ
+{
+	PSBMSG_HEAD header;
+	char Name[11];
+	BYTE CoinType;		// eFriendMailCoin
+	DWORD CoinAmount;
+	char Subject[32];
+	char Memo[200];
 };

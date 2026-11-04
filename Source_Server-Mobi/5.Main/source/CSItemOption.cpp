@@ -1367,11 +1367,32 @@ int CSItemOption::CollectSetMemberTypes(const ITEM* ip, int* pOutTypes, int iMax
 	return iCount;
 }
 
-bool CSItemOption::IsSetPartEquipped(int iType)
+// A worn item only counts toward a set if its own ancient option (ExtOption % 4
+// picks byOption[0]/[1]) is that set. Several sets share base items - Chrono's
+// and Semeden's use the same Red Winged pieces - so matching on type alone let
+// a worn Semeden's helm light up Chrono's tooltip.
+bool CSItemOption::IsPieceOfSet(const ITEM* p, BYTE bySetOption)
+{
+	if (p == NULL || p->Type == -1 || p->Type < 0 || p->Type >= MAX_ITEM)
+	{
+		return false;
+	}
+
+	int iSlot = (p->ExtOption % 0x04);
+
+	if (iSlot <= 0)
+	{
+		return false;
+	}
+
+	return (m_ItemSetType[p->Type].byOption[iSlot - 1] == bySetOption);
+}
+
+bool CSItemOption::IsSetPartEquipped(int iType, BYTE bySetOption)
 {
 	for (int i = 0; i < MAX_EQUIPMENT_INDEX; ++i)
 	{
-		if (CharacterMachine->Equipment[i].Type == iType)
+		if (CharacterMachine->Equipment[i].Type == iType && IsPieceOfSet(&CharacterMachine->Equipment[i], bySetOption))
 		{
 			return true;
 		}
@@ -1395,6 +1416,8 @@ int CSItemOption::CountEquippedSetPieces(const ITEM* ip)
 		return 0;
 	}
 
+	BYTE bySetOption = m_ItemSetType[ip->Type].byOption[(ip->ExtOption % 0x04) - 1];
+
 	int iSeen[MAX_EQUIPMENT];
 	int iSeenCount = 0;
 	int iEquipped = 0;
@@ -1403,7 +1426,7 @@ int CSItemOption::CountEquippedSetPieces(const ITEM* ip)
 	{
 		ITEM* p = &CharacterMachine->Equipment[i];
 
-		if (p->Type == -1)
+		if (p->Type == -1 || !IsPieceOfSet(p, bySetOption))
 		{
 			continue;
 		}
@@ -1485,7 +1508,7 @@ int CSItemOption::BuildSetPartsList(const ITEM* ip, int TextNum)
 
 		sprintf(TextList[TNum], "%s%s", szSetName, part->second.name);
 
-		TextListColor[TNum] = (IsSetPartEquipped(Types[n]) ? TEXT_COLOR_GREEN : TEXT_COLOR_GRAY);
+		TextListColor[TNum] = (IsSetPartEquipped(Types[n], m_ItemSetType[ip->Type].byOption[(ip->ExtOption % 0x04) - 1]) ? TEXT_COLOR_GREEN : TEXT_COLOR_GRAY);
 		TextBold[TNum] = false;
 		TNum++;
 	}

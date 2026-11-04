@@ -206,7 +206,8 @@ public:
 	// --- set item tooltip: parts list + tiered option panel ---
 	int     CollectSetMemberTypes(const ITEM* ip, int* pOutTypes, int iMaxOut);
 	int     CountEquippedSetPieces(const ITEM* ip);
-	bool    IsSetPartEquipped(int iType);
+	bool    IsSetPartEquipped(int iType, BYTE bySetOption);
+	bool    IsPieceOfSet(const ITEM* p, BYTE bySetOption);
 	int     BuildSetOptionLines(const ITEM* ip, int TNum, bool bWithTitle);
 	int     BuildSetPartsList(const ITEM* ip, int TextNum);
 	void    RenderSetInfoPanel(const ITEM* ip);

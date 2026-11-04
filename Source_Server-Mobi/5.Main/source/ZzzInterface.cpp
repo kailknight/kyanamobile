@@ -914,6 +914,43 @@ static void RenderDuelRankIcon(const CHAT* c, float x, float lineY, int lineHeig
 	RankedUi::DrawRankBadge(x, lineY + ((float)lineHeight - h) * 0.5f, tier, c->Owner->DuelRankDiv);
 }
 
+// VIP level tag (C1:D3:C5): "V1".."V3" right of the Gens mark, or where the mark would be for a player without Gens.
+static void RenderVipTag(const CHAT* c, int x, int top, int boxCx, int bottom, int lineH)
+{
+	const int lv = c->Owner->VipLevel;
+	if (lv <= 0 || lv > 9)
+	{
+		return;
+	}
+	const bool hasGensMark = (c->Owner->m_byGensInfluence == 1 || c->Owner->m_byGensInfluence == 2);
+	if (lv <= 3 && Bitmaps.FindTexture(BITMAP_VIP_BADGES) != NULL)
+	{
+		// About the size of the Gens mark art on a name plate (its 33x44 art at 60%), right of it.
+		const float iw = 20.0f;
+		const float ih = 27.5f;
+		const float ix = (float)(x + boxCx + (hasGensMark ? 31 : 6));
+		const float iy = (float)top + ((float)(bottom - top) - ih) * 0.5f;
+		DisableTexture(false);
+		::EnableAlphaTest();
+		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+		RenderBitmap(BITMAP_VIP_BADGES, ix, iy, iw, ih, (float)((lv - 1) * 128) / 512.0f, 0.0f, 128.0f / 512.0f, 176.0f / 256.0f);
+		return;
+	}
+	char tag[8];
+	sprintf(tag, "V%d", lv);
+	BYTE r = 150, g = 205, b = 255;
+	if (lv == 2) { r = 255; g = 215; b = 0; }
+	else if (lv >= 3) { r = 255; g = 100; b = 100; }
+	const bool hasGens = (c->Owner->m_byGensInfluence == 1 || c->Owner->m_byGensInfluence == 2);
+	const int tx = x + boxCx + (hasGens ? 34 : 4);
+	const int ty = top + ((bottom - top) - lineH) / 2;
+	g_pRenderText->SetFont(g_hFontBold);
+	g_pRenderText->SetBgColor(0, 0, 0, 0);
+	g_pRenderText->SetTextColor(r, g, b, 255);
+	g_pRenderText->RenderText(tx, ty, tag, 0, lineH, RT3_SORT_LEFT);
+	g_pRenderText->SetFont(g_hFont);
+}
+
 void SetBooleanPosition(CHAT* c)
 {
 	BOOL bResult[5];
@@ -989,6 +1026,22 @@ void SetPlayerColor(BYTE PK)
 extern float g_fScreenRate_x;	// ��
 extern float g_fScreenRate_y;
 const int ciSystemColor = 240;
+// Whether the hero's party gets a frame round this name plate (see RenderPartyNameFrame).
+static bool HasPartyNameFrame(const CHAT* ci)
+{
+	if (PartyNumber <= 0 || ci->Owner == NULL || ci->Owner->Object.Kind != KIND_PLAYER || ci->Owner->Object.Type != MODEL_PLAYER)
+	{
+		return false;
+	}
+
+	if (ci->Owner != Hero && g_pPartyManager->IsPartyMemberChar(ci->Owner) == false)
+	{
+		return false;
+	}
+
+	return !(gMapManager.InChaosCastle() == true || g_isCharacterBuff((&ci->Owner->Object), eBuff_CrywolfNPCHide));
+}
+
 #if(ShadowText)
 void RenderBoolean(int x, int y, CHAT* c)
 {
@@ -1186,6 +1239,11 @@ void RenderBoolean(int x, int y, CHAT* c)
 		dwTextColor[0] = RGBA(230, 220, 200, byAlpha[0]);
 		dwTextColor[1] = RGBA(230, 220, 200, byAlpha[1]);
 	}
+	// Party members have the frame round the plate: drop the chat text a little below it.
+	if (HasPartyNameFrame(c))
+	{
+		RenderPos.y += 3;
+	}
 	g_pRenderText->SetFont(g_hFont);
 	if (c->LifeTime[1] > 0)
 	{
@@ -1214,6 +1272,7 @@ void RenderBoolean(int x, int y, CHAT* c)
 			g_pNewUIGensRanking->RanderMark(x + RenderBoxSize.cx + 30, y, c->Owner->m_byGensInfluence, c->Owner->m_byRankIndex, SEASON3B::CNewUIGensRanking::MARK_BOOLEAN, (float)RenderPos.y);
 		else if (2 == c->Owner->m_byGensInfluence)
 			g_pNewUIGensRanking->RanderMark(x + RenderBoxSize.cx + 30, y, c->Owner->m_byGensInfluence, c->Owner->m_byRankIndex, SEASON3B::CNewUIGensRanking::MARK_BOOLEAN, (float)RenderPos.y);
+		RenderVipTag(c, x, y, RenderBoxSize.cx, RenderPos.y, iLineHeight);
 #if(ShowLogoGuild)
 		//===Show GUILD LOGO
 		if (gProtect.m_MainInfo.PlayerShowGuildLogo)
@@ -1456,6 +1515,7 @@ void RenderBoolean(int x, int y, CHAT* c)
 			g_pNewUIGensRanking->RanderMark(x + RenderBoxSize.cx + 30, y, c->Owner->m_byGensInfluence, c->Owner->m_byRankIndex, SEASON3B::CNewUIGensRanking::MARK_BOOLEAN, (float)RenderPos.y);
 		else if (2 == c->Owner->m_byGensInfluence)
 			g_pNewUIGensRanking->RanderMark(x + RenderBoxSize.cx + 30, y, c->Owner->m_byGensInfluence, c->Owner->m_byRankIndex, SEASON3B::CNewUIGensRanking::MARK_BOOLEAN, (float)RenderPos.y);
+		RenderVipTag(c, x, y, RenderBoxSize.cx, RenderPos.y, iLineHeight);
 #if(ShowLogoGuild)
 		//===Show GUILD LOGO
 		if (gProtect.m_MainInfo.PlayerShowGuildLogo)
@@ -10010,7 +10070,80 @@ void RenderHPBar()
 	DisableAlphaBlend();
 	glColor3f(1.f, 1.f, 1.f);
 	g_pRenderText->SetFont(g_hFont);
-}void RenderBooleans()
+}
+
+// Green frame round the name plate of everyone in the hero's party (the hero too), so
+// party members stand out in a crowd - castle siege above all.
+static void RenderPartyNameFrame(const CHAT* ci)
+{
+	if (HasPartyNameFrame(ci) == false)
+	{
+		return;
+	}
+
+	const float pad = 3.0f;
+	const float t = 1.0f;
+	const float x = (float)ci->x - pad;
+	const float y = (float)ci->y;
+	const float w = (float)ci->Width + pad * 2.0f;
+	// Only the plate itself: union, guild and name lines. ci->Height also counts the empty
+	// chat / union lines (and the chat bubble), which would drag the frame over the head and bars.
+	int lines = 1 + ((ci->Union[0] != 0) ? 1 : 0) + ((ci->Guild[0] != 0) ? 1 : 0);
+	int fontH = (FontHeight > 32) ? 32 : FontHeight;
+	const float lineH = (float)((int)(fontH / g_fScreenRate_y));
+	const float h = lineH * lines + 1.0f;
+
+	EnableAlphaTest();
+	glColor4f(0.1f, 1.0f, 0.2f, 1.0f);
+	RenderColor(x, y, w, t);
+	RenderColor(x, y + h - t, w, t);
+	RenderColor(x, y, t, h);
+	RenderColor(x + w - t, y, t, h);
+	EndRenderColor();
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+#if defined(__ANDROID__) || defined(MU_IOS)
+extern int AndroidGetAimLockedCharacterIndex();
+#endif
+
+// Red plate behind and round the name of the player AIM is locked on (phone only).
+static void RenderAimLockFrame(const CHAT* ci)
+{
+#if defined(__ANDROID__) || defined(MU_IOS)
+	if (ci->Owner == NULL)
+	{
+		return;
+	}
+	const int locked = AndroidGetAimLockedCharacterIndex();
+	if (locked < 0 || ci->Owner != &CharactersClient[locked])
+	{
+		return;
+	}
+	const float pad = 3.0f;
+	const float t = 2.0f;
+	const float x = (float)ci->x - pad;
+	const float y = (float)ci->y;
+	const float w = (float)ci->Width + pad * 2.0f;
+	int lines = 1 + ((ci->Union[0] != 0) ? 1 : 0) + ((ci->Guild[0] != 0) ? 1 : 0);
+	int fontH = (FontHeight > 32) ? 32 : FontHeight;
+	const float lineH = (float)((int)(fontH / g_fScreenRate_y));
+	const float h = lineH * lines + 1.0f;
+
+	EnableAlphaTest();
+	glColor4f(0.9f, 0.05f, 0.05f, 0.40f);
+	RenderColor(x, y, w, h);
+	glColor4f(1.0f, 0.1f, 0.1f, 1.0f);
+	RenderColor(x, y, w, t);
+	RenderColor(x, y + h - t, w, t);
+	RenderColor(x, y, t, h);
+	RenderColor(x + w - t, y, t, h);
+	EndRenderColor();
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+#endif
+}
+
+void RenderBooleans()
 {
 	g_pRenderText->SetFont(g_hFont);
 	
@@ -10101,6 +10234,8 @@ void RenderHPBar()
 			if(ci->y < 0) ci->y = 0;
 			if(ci->y >= (int)WindowHeight-ci->Height) ci->y = WindowHeight-ci->Height;	
 			RenderBoolean(ci->x,ci->y,ci);
+			RenderPartyNameFrame(ci);
+			RenderAimLockFrame(ci);
 		}
 	}
 }

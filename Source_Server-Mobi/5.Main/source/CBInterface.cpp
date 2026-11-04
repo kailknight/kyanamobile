@@ -916,6 +916,8 @@ void Interface::BLoadImage()
 	// Rank badges on the name plates (RankedUi::DrawRankBadge). A missing file just leaves the
 	// code-drawn shield in place.
 	LoadBitmap("Custom\\Interface\\DuelRankBadges.tga", BITMAP_DUELRANK_BADGES, GL_LINEAR, GL_CLAMP_TO_EDGE);
+	// VIP level badges beside the Gens mark. A missing file leaves the V1-V3 text tag.
+	LoadBitmap("Custom\\Interface\\VipBadges.tga", BITMAP_VIP_BADGES, GL_LINEAR, GL_CLAMP_TO_EDGE);
 
 	gCBCTCMini.LoadImg();
 }

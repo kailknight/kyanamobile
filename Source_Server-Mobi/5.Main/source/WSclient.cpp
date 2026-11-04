@@ -1814,6 +1814,11 @@ void ReceiveChatKey( BYTE *ReceiveBuffer )
 void ReceiveNotice( BYTE *ReceiveBuffer )
 {
 	LPPRECEIVE_NOTICE Data = (LPPRECEIVE_NOTICE)ReceiveBuffer;
+	// Options > Hide Market notices: the "[Market] ... Just Listed ... For Sale" broadcasts.
+	if (mHideMarketNotice != 0 && Data->Result == 0 && strncmp((const char*)Data->Notice, "[Market]", 8) == 0)
+	{
+		return;
+	}
 	if(Data->Result==0)
 	{
 		CreateNotice((char *)Data->Notice,0);
@@ -2407,7 +2412,7 @@ void ReceiveCreatePlayerViewport(BYTE *ReceiveBuffer,int Size)
 		{
 			int Index;
 			short BackUpGuildMarkIndex = -1; 
-			BYTE BackUpGuildStatus = 0;
+			BYTE BackUpGuildStatus = G_NONE;
 			BYTE BackUpGuildType = 0;
 			BYTE BackUpGuildRelationShip = 0;
 			BYTE BackUpGuildMasterKillCount = 0;

@@ -22,6 +22,7 @@ public:
 	void OnClaimRequest(SDHP_FRIENDMAIL_MEMO_REQ* lpMsg,int index);
 	void OnUnclaimRequest(SDHP_FRIENDMAIL_UNCLAIM_REQ* lpMsg);
 	void OnCountsRequest(SDHP_FRIENDMAIL_NAME_REQ* lpMsg,int index);
+	void OnPayoutRequest(SDHP_FRIENDMAIL_PAYOUT_REQ* lpMsg);
 
 	// Called by the legacy letter delete (CSProtocol.cpp): a letter that still
 	// holds unclaimed items may not be deleted, or the items would be lost.

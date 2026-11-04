@@ -16,11 +16,52 @@ bool IsVietnameseLanguage()
 		|| _stricmp(g_strSelectedML.c_str(), "Vn") == 0;
 }
 
+bool IsSpanishLanguage()
+{
+	return _stricmp(g_strSelectedML.c_str(), "Spn") == 0
+		|| _stricmp(g_strSelectedML.c_str(), "Spa") == 0
+		|| _stricmp(g_strSelectedML.c_str(), "Es") == 0;
+}
+
+bool IsTranslatedLanguage()
+{
+	return IsVietnameseLanguage() || IsSpanishLanguage();
+}
+
+int LanguageIndexFromCode(const char* pszIn)
+{
+	if (pszIn != NULL)
+	{
+		if (_stricmp(pszIn, "Vtm") == 0 || _stricmp(pszIn, "Vie") == 0 || _stricmp(pszIn, "Vn") == 0)
+		{
+			return LANG_INDEX_VIETNAMESE;
+		}
+		if (_stricmp(pszIn, "Spn") == 0 || _stricmp(pszIn, "Spa") == 0 || _stricmp(pszIn, "Es") == 0)
+		{
+			return LANG_INDEX_SPANISH;
+		}
+	}
+	return LANG_INDEX_ENGLISH;
+}
+
+const char* LanguageCodeFromIndex(int iIndex)
+{
+	switch (iIndex)
+	{
+	case LANG_INDEX_VIETNAMESE: return "Vtm";
+	case LANG_INDEX_SPANISH:    return "Spn";
+	default:                    return "Eng";
+	}
+}
+
+int GetLanguageIndex()
+{
+	return LanguageIndexFromCode(g_strSelectedML.c_str());
+}
+
 void NormalizeLanguageCode(const char* pszIn, char* pszOut)
 {
-	const bool vi = pszIn != NULL
-		&& (_stricmp(pszIn, "Vtm") == 0 || _stricmp(pszIn, "Vie") == 0 || _stricmp(pszIn, "Vn") == 0);
-	strcpy(pszOut, vi ? "Vtm" : "Eng");
+	strcpy(pszOut, LanguageCodeFromIndex(LanguageIndexFromCode(pszIn)));
 }
 
 const char* LocalLanguageFile(char* pszOut, size_t cbOut, const char* pszTemplate)
@@ -32,7 +73,7 @@ const char* LocalLanguageFile(char* pszOut, size_t cbOut, const char* pszTemplat
 	snprintf(pszOut, cbOut, pszTemplate, ml, ml, ml, ml);
 	pszOut[cbOut - 1] = 0;
 
-	if (!IsVietnameseLanguage())
+	if (!IsTranslatedLanguage())
 	{
 		return pszOut;
 	}
@@ -46,7 +87,7 @@ const char* LocalLanguageFile(char* pszOut, size_t cbOut, const char* pszTemplat
 	return pszOut;
 }
 
-// Data\Custom\Lang_Vtm.txt: one "English<TAB>Vietnamese" pair per line, UTF-8.
+// Data\Custom\Lang_<code>.txt (Lang_Vtm.txt or Lang_Spn.txt): one "English<TAB>translation" pair per line, UTF-8.
 // Keys are the English format string exactly as the source writes it (with its %d / %s).
 // A Vietnamese value must keep the same placeholders in the same order, or it is ignored.
 // Loaded once, on first use. Only used when the selected language is Vietnamese.
@@ -57,7 +98,9 @@ static std::map<std::string, std::string>& VietnameseTemplates()
 	if (!s_loaded)
 	{
 		s_loaded = true;
-		FILE* fp = fopen("Data\\Custom\\Lang_Vtm.txt", "rb");
+		char szLangFile[MAX_PATH];
+		sprintf(szLangFile, "Data\\Custom\\Lang_%s.txt", LanguageCodeFromIndex(GetLanguageIndex()));
+		FILE* fp = fopen(szLangFile, "rb");
 		if (fp != NULL)
 		{
 			std::string text;
@@ -138,7 +181,7 @@ void TranslateTemplate(const char* pszEnglish, char* pszOut, size_t cbOut)
 	strncpy(pszOut, pszEnglish, cbOut - 1);
 	pszOut[cbOut - 1] = '\0';
 
-	if (!IsVietnameseLanguage())
+	if (!IsTranslatedLanguage())
 	{
 		return;
 	}
@@ -411,7 +454,7 @@ bool TranslateDrawnText(const char* pszText, char* pszOut, size_t cbOut)
 		{
 			return false;
 		}
-		s_vi = IsVietnameseLanguage() ? 1 : 0;
+		s_vi = IsTranslatedLanguage() ? 1 : 0;
 	}
 	if (s_vi == 0 || pszText == NULL || pszText[0] == '\0' || cbOut < 2)
 	{
@@ -484,7 +527,9 @@ CMultiLanguage::CMultiLanguage(std::string strSelectedML)
 	}
 	else if(_stricmp(strSelectedML.c_str(), "SPN") == 0)
 	{
-		byLanguage = 2;
+		// Spanish. Data is UTF-8 (accents are 2 bytes). The byte sent to the server in the character
+		// list request is the English value (0): the server ignores it.
+		byLanguage = 0;
 		iCodePage = 1252;
 		iNumByteForOneCharUTF8 = 2;
 	}

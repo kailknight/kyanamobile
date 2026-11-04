@@ -493,8 +493,16 @@ void GameConfig::Load()
     SetVoiceMicBoost(MobileSettingsGetInt("Voice.MicBoost", m_voiceMicBoost));
     m_voiceNoiseGate  = MobileSettingsGetInt("Voice.NoiseGate", m_voiceNoiseGate ? 1 : 0) != 0;
     SetVoiceTalkMode(MobileSettingsGetInt("Voice.TalkMode", m_voiceTalkMode));
-    // Language: 1 = Vietnamese ("Vtm"), anything else English. The startup code reads it right after this.
-    m_languageSelection = (MobileSettingsGetInt("Language.Vi", 0) != 0) ? L"Vtm" : L"Eng";
+    // Language: Language.Idx 0 English, 1 Vietnamese ("Vtm"), 2 Spanish ("Spn"). Older installs only wrote
+    // Language.Vi (1 = Vietnamese), used when Language.Idx was never saved. The startup code reads it right after this.
+    {
+        int langIdx = MobileSettingsGetInt("Language.Idx", -1);
+        if (langIdx < 0)
+        {
+            langIdx = (MobileSettingsGetInt("Language.Vi", 0) != 0) ? 1 : 0;
+        }
+        m_languageSelection = (langIdx == 2) ? L"Spn" : (langIdx == 1) ? L"Vtm" : L"Eng";
+    }
 }
 
 void GameConfig::Save()
@@ -531,15 +539,17 @@ void GameConfig::SetLanguageSelection(const std::wstring& lang) { m_languageSele
 
 void NormalizeLanguageCode(const char* pszIn, char* pszOut);	// MultiLanguage.cpp
 
-// Saves the language the player picked ("Eng" or "Vtm") for the next start, like the PC build does
+// Saves the language the player picked ("Eng", "Vtm" or "Spn") for the next start, like the PC build does
 // in Winmain.cpp. The language data files are read once at startup.
 void SetSelectedLanguage(const char* pszLanguage)
 {
     char szCode[8];
     NormalizeLanguageCode(pszLanguage, szCode);
     const bool vi = (strcmp(szCode, "Vtm") == 0);
+    const bool es = (strcmp(szCode, "Spn") == 0);
     MobileSettingsSetInt("Language.Vi", vi ? 1 : 0);
-    GameConfig::GetInstance().SetLanguageSelection(vi ? L"Vtm" : L"Eng");
+    MobileSettingsSetInt("Language.Idx", es ? 2 : (vi ? 1 : 0));
+    GameConfig::GetInstance().SetLanguageSelection(es ? L"Spn" : (vi ? L"Vtm" : L"Eng"));
 }
 void GameConfig::SetEncryptedUsername(const std::wstring& u)    { m_encryptedUsername = u; }
 void GameConfig::SetEncryptedPassword(const std::wstring& p)    { m_encryptedPassword = p; }

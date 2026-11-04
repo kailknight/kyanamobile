@@ -545,6 +545,9 @@ namespace
 			case 1: return "WCoin (C)";
 			case 2: return "WCoin (P)";
 			case 3: return "Goblin Points";
+			case 4: return "Jewel of Bless";
+			case 5: return "Jewel of Soul";
+			case 6: return "Jewel of Chaos";
 		}
 
 		return "";
@@ -625,7 +628,14 @@ DWORD CFriendMailWindow::ReadCoinAmount() const
 
 int CFriendMailWindow::ReadCoinCount() const
 {
-	return (this->m_ReadCoins[0] > 0 ? 1 : 0) + (this->m_ReadCoins[1] > 0 ? 1 : 0) + (this->m_ReadCoins[2] > 0 ? 1 : 0);
+	int kinds = 0;
+
+	for(int c = 0; c < 6; c++)
+	{
+		kinds += (this->m_ReadCoins[c] > 0) ? 1 : 0;
+	}
+
+	return kinds;
 }
 
 // -----------------------------------------------------------------------------
@@ -1256,7 +1266,7 @@ void CFriendMailWindow::RenderRead(float x,float y,float w,float h)
 		float coinX = x + 70.0f + this->m_ReadItemCount * (tile + 6.0f) + 4.0f;
 		int line = 0;
 
-		for(int c = 0; c < 3; c++)
+		for(int c = 0; c < 6; c++)
 		{
 			if(this->m_ReadCoins[c] == 0)
 			{
@@ -1830,6 +1840,8 @@ void CFriendMailWindow::RecvItems(PMSG_FRIENDMAIL_ITEMS_RECV* lpMsg)
 	for(int c = 0; c < 3; c++)
 	{
 		this->m_ReadCoins[c] = lpMsg->Coins[c];
+		// Jewel bank amounts ride after the coins; an older server sends a shorter packet without them.
+		this->m_ReadCoins[3 + c] = (lpMsg->header.size >= sizeof(PMSG_FRIENDMAIL_ITEMS_RECV)) ? lpMsg->Jewels[c] : 0;
 	}
 }
 

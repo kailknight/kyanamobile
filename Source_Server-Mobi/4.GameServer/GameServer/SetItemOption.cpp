@@ -8,6 +8,7 @@
 #include "MemScript.h"
 #include "SetItemType.h"
 #include "Util.h"
+#include "LuckyItem.h"
 
 CSetItemOption gSetItemOption;
 //////////////////////////////////////////////////////////////////////
@@ -218,7 +219,10 @@ void CSetItemOption::CalcSetItemStat(LPOBJ lpObj) // OK
 {
 	for(int n=0;n < INVENTORY_WEAR_SIZE;n++)
 	{
-		if(lpObj->Inventory[n].IsItem() == 0 || lpObj->Inventory[n].IsSetItem() == 0)
+		// A Lucky item has the stat bonus without an ancient tier (see CItemOptionRate::MakeSetOption).
+		bool luckyStat = (lpObj->Inventory[n].IsItem() != 0 && ((lpObj->Inventory[n].m_SetOption >> 2) & 3) != 0 && gLuckyItem.IsLuckyItemIndex(lpObj->Inventory[n].m_Index) != 0);
+
+		if(lpObj->Inventory[n].IsItem() == 0 || (lpObj->Inventory[n].IsSetItem() == 0 && luckyStat == 0))
 		{
 			continue;
 		}

@@ -26,6 +26,7 @@
 #include "Message.h"
 #include "MapServerManager.h"
 #include "ItemManager.h"
+#include "ItemTracker.h"
 
 CChaosBox gChaosBox;
 //////////////////////////////////////////////////////////////////////
@@ -5594,6 +5595,8 @@ void CChaosBox::CGChaosMixRecv(PMSG_CHAOS_MIX_RECV* lpMsg, int aIndex) // OK
 
 	int HeadCodetype = MAKE_NUMBERW(lpMsg->type[0], lpMsg->type[1]);
 
+	gItemTracker.MixBegin(aIndex,HeadCodetype);
+
 	// OutputNoMirror, not Output: this is a per-slot forensic dump of the whole
 	// chaos box on every mix press - 2 framing lines plus up to CHAOS_BOX_SIZE
 	// item lines. Valuable on disk as an item-dupe trail, but it would turn the
@@ -5865,6 +5868,8 @@ void CChaosBox::GCChaosBoxSend(LPOBJ lpObj,BYTE type) // OK
 
 void CChaosBox::GCChaosMixSend(int aIndex,BYTE result,CItem* lpItem) // OK
 {
+	gItemTracker.MixEnd(aIndex,result,lpItem);
+
 	PMSG_CHAOS_MIX_SEND pMsg;
 
 	pMsg.header.set(0x86,sizeof(pMsg));

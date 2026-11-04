@@ -1769,7 +1769,7 @@ static void LoadVietnameseItemNames()
 		return;
 	}
 	s_bVietnameseItemNamesLoaded = true;
-	if (!IsVietnameseLanguage())
+	if (!IsTranslatedLanguage())
 	{
 		return;
 	}

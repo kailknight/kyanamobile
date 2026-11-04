@@ -837,6 +837,9 @@ void CViewport::GCViewportPlayerSend(int aIndex) // OK
 
 		// Ranked duel icons of the players just sent (and of this client itself).
 		gDuelRanked.SendRanksToViewer(aIndex);
+
+		// VIP level tags of the players just sent.
+		this->GCViewportVipSend(aIndex);
 	}
 }
 
@@ -1848,6 +1851,9 @@ void CViewport::GCViewportSimplePlayerSend(LPOBJ lpObj) // OK
 
 	// Ranked duel icon of this player, for itself and for the players that see it.
 	gDuelRanked.SendRankToAll(lpObj->Index);
+
+	// VIP level tag of this player, for the players that see it.
+	this->GCViewportSimpleVipSend(lpObj);
 }
 
 void CViewport::GCViewportSimpleMonsterSend(LPOBJ lpObj) // OK
@@ -2319,6 +2325,121 @@ void CViewport::GCViewportSimpleGensSystemSend(LPOBJ lpObj) // OK
 
 	DataSend(lpObj->Index,send,size);
 	MsgSendV2(lpObj,send,size);
+}
+
+static int GetViewportVipLevel(LPOBJ lpObj)
+{
+	if(lpObj->Type != OBJECT_USER)
+	{
+		return 0;
+	}
+
+	const int level = lpObj->AccountLevel;
+
+	return (level < 0) ? 0 : ((level >= MAX_ACCOUNT_LEVEL) ? (MAX_ACCOUNT_LEVEL-1) : level);
+}
+
+// C1:D3:C5 - [head 4][count 1] then count * { WORD index (little endian), BYTE level }. Level 0 clears the tag.
+static void VipListSend(int aIndex,const BYTE* list,int count)
+{
+	BYTE send[5+40*3];
+
+	const int size = 5+count*3;
+
+	send[0] = 0xC1;
+	send[1] = (BYTE)size;
+	send[2] = 0xD3;
+	send[3] = 0xC5;
+	send[4] = (BYTE)count;
+
+	memcpy(&send[5],list,count*3);
+
+	DataSend(aIndex,send,size);
+}
+
+// The VIP players among the ones just sent to aIndex, plus aIndex itself.
+void CViewport::GCViewportVipSend(int aIndex) // OK
+{
+	if(OBJECT_RANGE(aIndex) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[aIndex];
+
+	BYTE list[40*3];
+
+	int count = 0;
+
+	for(int n=-1;n < MAX_VIEWPORT;n++)
+	{
+		int target = aIndex;
+
+		if(n >= 0)
+		{
+			if(lpObj->VpPlayer[n].state != VIEWPORT_SEND || lpObj->VpPlayer[n].type != OBJECT_USER)
+			{
+				continue;
+			}
+
+			target = lpObj->VpPlayer[n].index;
+
+			if(OBJECT_RANGE(target) == 0)
+			{
+				continue;
+			}
+		}
+
+		const int level = GetViewportVipLevel(&gObj[target]);
+
+		if(level == 0)
+		{
+			continue;
+		}
+
+		list[count*3+0] = LOBYTE(target);
+		list[count*3+1] = HIBYTE(target);
+		list[count*3+2] = (BYTE)level;
+
+		count++;
+
+		if(count >= 40)
+		{
+			VipListSend(aIndex,list,count);
+
+			count = 0;
+		}
+	}
+
+	if(count > 0)
+	{
+		VipListSend(aIndex,list,count);
+	}
+}
+
+// One player's VIP level, to itself and to the players around it. force sends level 0 too (VIP ended).
+void CViewport::GCViewportSimpleVipSend(LPOBJ lpObj,bool force) // OK
+{
+	const int level = GetViewportVipLevel(lpObj);
+
+	if(level == 0 && force == 0)
+	{
+		return;
+	}
+
+	BYTE send[8];
+
+	send[0] = 0xC1;
+	send[1] = 8;
+	send[2] = 0xD3;
+	send[3] = 0xC5;
+	send[4] = 1;
+	send[5] = LOBYTE(lpObj->Index);
+	send[6] = HIBYTE(lpObj->Index);
+	send[7] = (BYTE)level;
+
+	DataSend(lpObj->Index,send,8);
+	MsgSendV2(lpObj,send,8);
 }
 
 bool CViewport::CheckCustomEventPkViewport(LPOBJ lpObj, LPOBJ lpTarget)

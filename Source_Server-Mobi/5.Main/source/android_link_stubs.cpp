@@ -66,6 +66,7 @@ int mShowName = 1;
 int mShowHPBar = 1;
 int mShowMiniMap = 1;
 int mShowDanhHieu = 1;
+int mHideMarketNotice = 0;
 float g_androidZoomOverride = 0.0f;
 HFONT g_hFontMini = NULL;
 

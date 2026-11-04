@@ -258,7 +258,12 @@ void CItem::Convert(int index, BYTE Option1, BYTE Option2, BYTE Option3, BYTE Ne
 		NewOption = 0;
 	}
 
-	if (((SetOption & 3) != 1 && (SetOption & 3) != 2) || (((SetOption >> 2) & 3) != 1 && ((SetOption >> 2) & 3) != 2))
+	if ((SetOption & 3) == 0 && ((SetOption >> 2) & 3) != 0 && gLuckyItem.IsLuckyItemIndex(this->m_Index) != 0)
+	{
+		// Lucky item: stat bonus only, no ancient tier.
+		this->m_SetOption = SetOption & 15;
+	}
+	else if (((SetOption & 3) != 1 && (SetOption & 3) != 2) || (((SetOption >> 2) & 3) != 1 && ((SetOption >> 2) & 3) != 2))
 	{
 		this->m_SetOption = 0;
 	}

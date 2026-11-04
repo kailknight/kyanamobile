@@ -209,6 +209,7 @@ public:
 	short       GuildMarkIndex;
 	BYTE        DuelRankTier;	// ranked duel icon (C1:D3:C4): tier + 1, 0 = none
 	BYTE        DuelRankDiv;	// 3 = III, 2 = II, 1 = I, 0 = no division
+	BYTE        VipLevel;	// VIP level 1-3 (C1:D3:C5), 0 = none
 	SHORT       Key;
 	short   	TargetCharacter;
 

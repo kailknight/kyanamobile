@@ -222,6 +222,8 @@ void CDuelRanked::DefaultConfig(DR_CONFIG* cfg)
 	cfg->ReconnectGraceSec = 60;
 	cfg->WatchdogExtraSec = 120;
 	cfg->HostSilentSec = 15;
+
+	cfg->LeaderboardType = -1;
 }
 
 // 0 = valid, 1 = no file, 2 = the rank table (or a number the table needs) is wrong.
@@ -409,6 +411,8 @@ int CDuelRanked::ReadConfig(DR_CONFIG* cfg,char* error,int errorSize)
 			it[7] = (BYTE)(v[7] & 63);											// excellent bits
 		}
 	}
+
+	cfg->LeaderboardType = (int)GetPrivateProfileIntA("Leaderboard","RankingType",cfg->LeaderboardType,file);
 
 	cfg->Enabled = (int)GetPrivateProfileIntA("Match","Enabled",cfg->Enabled,file);
 	cfg->HostServer = (int)GetPrivateProfileIntA("Match","HostServer",cfg->HostServer,file);
@@ -693,6 +697,22 @@ void CDuelRanked::RankOf(int mmr,BYTE* tier,BYTE* div,WORD* stepLo,WORD* stepNex
 	if(div != 0) *div = (BYTE)this->m_Cfg.StepDiv[step];
 	if(stepLo != 0) *stepLo = ClampWord(this->m_Cfg.Step[step]);
 	if(stepNext != 0) *stepNext = (step + 1 < this->m_Cfg.StepCount) ? ClampWord(this->m_Cfg.Step[step + 1]) : 0;
+}
+
+// "Gold II": the tier name and, for a tier with several divisions, III / II / I.
+void CDuelRanked::RankText(int mmr,char* out,int outSize)
+{
+	BYTE tier = 0;
+	BYTE div = 0;
+
+	this->RankOf(mmr,&tier,&div,0,0);
+
+	static const char* const kDivName[4] = { "","I","II","III" };
+
+	if(div >= 1 && div <= 3)
+		_snprintf_s(out,outSize,_TRUNCATE,"%s %s",this->m_Cfg.TierName[tier],kDivName[div]);
+	else
+		_snprintf_s(out,outSize,_TRUNCATE,"%s",this->m_Cfg.TierName[tier]);
 }
 
 //////////////////////////////////////////////////////////////////////

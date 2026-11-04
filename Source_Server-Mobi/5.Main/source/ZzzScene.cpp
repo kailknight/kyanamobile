@@ -1813,6 +1813,9 @@ void LoadingScene(HDC hDC)
 }
 
 float CameraDistanceTarget = 1000.f;
+// Phone: set while the player has tilted the camera with a two-finger swipe, so the per-frame
+// reset below leaves Camera3DPosY/Z alone. Cleared by the camera reset button.
+bool g_androidCameraTiltActive = false;
 float CameraDistance = CameraDistanceTarget;
 extern float g_androidZoomOverride;
 
@@ -1847,8 +1850,11 @@ bool MoveMainCamera()
 		{
 			CameraFOV = 35.f;
 		}
-		Camera3DPosY = 0.f;
-		Camera3DPosZ = 0.f;
+		if (!g_androidCameraTiltActive)
+		{
+			Camera3DPosY = 0.f;
+			Camera3DPosZ = 0.f;
+		}
 	}
 	else 
 	{
@@ -2165,6 +2171,20 @@ bool MoveMainCamera()
 		{
 			CameraPosition[2] = g_fSpecialHeight = 1200.f+1;
 		}            
+		if (g_androidCameraTiltActive)
+		{
+			// Phone tilt: the pitch is Camera3DPosY degrees, and the camera height is worked out so
+			// the view keeps pointing at the same spot round the character at any pitch. (The PC
+			// 3D camera moves the height by a fixed step per degree, which swings the view down to
+			// the ground as it tilts.) The default view, pitch 48.5, is the reference: it gives the
+			// same height as before.
+			const float deg = 3.14159265f / 180.0f;
+			const float pitch0 = 48.5f * deg;
+			const float pitch1 = fabsf(-48.5f + Camera3DPosY) * deg;
+			const float aim = (CameraDistance - 150.f - CameraDistance * sinf(pitch0)) / tanf(pitch0);
+			const float height = CameraDistance * sinf(pitch1) + aim * tanf(pitch1);
+			Camera3DPosZ = CameraDistance - 150.f - height;
+		}
 		CameraPosition[2] += CameraDistance-(150.f+ Camera3DPosZ);//700 //Camera3D
 		//CameraPosition[0] += PosZ;
 		//CameraPosition[2] += BonusTest;  //Goc Nhin Cao Thap

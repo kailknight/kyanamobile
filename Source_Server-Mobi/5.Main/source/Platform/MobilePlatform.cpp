@@ -472,7 +472,7 @@ void MU_MobileOpenURL(const char* url)
 #endif
 }
 
-void MU_MobileAskRestartForLanguage(bool vietnamese)
+void MU_MobileAskRestartForLanguage(int iWantLang)
 {
 #if defined(__ANDROID__)
     JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
@@ -482,7 +482,7 @@ void MU_MobileAskRestartForLanguage(bool vietnamese)
     }
 
     jmethodID method =
-        env->GetStaticMethodID(g_keyboardBridgeClass, "askRestartForLanguageFromNative", "(Z)V");
+        env->GetStaticMethodID(g_keyboardBridgeClass, "askRestartForLanguageFromNative", "(I)V");
     if (env->ExceptionCheck())
     {
         env->ExceptionClear();
@@ -494,13 +494,13 @@ void MU_MobileAskRestartForLanguage(bool vietnamese)
     }
 
     // Returns at once: the dialog is answered on the UI thread.
-    env->CallStaticVoidMethod(g_keyboardBridgeClass, method, vietnamese ? JNI_TRUE : JNI_FALSE);
+    env->CallStaticVoidMethod(g_keyboardBridgeClass, method, static_cast<jint>(iWantLang));
     if (env->ExceptionCheck())
     {
         env->ExceptionClear();
     }
 #elif defined(MU_IOS)
-    MU_IosAskRestartForLanguage(vietnamese);
+    MU_IosAskRestartForLanguage(iWantLang == 1);
 #endif
 }
 

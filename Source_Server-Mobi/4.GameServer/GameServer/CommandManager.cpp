@@ -3743,6 +3743,20 @@ void CCommandManager::DGCommandRenameRecv(SDHP_COMMAND_RENAME_RECV* lpMsg) // OK
 
 		this->RemoveRequisites(lpObj,38);
 
+		// Renamed with the Character Renaming Service item: it is used up now.
+		if(this->m_RenameItemSlot[lpMsg->index] != 0)
+		{
+			int slot = this->m_RenameItemSlot[lpMsg->index]-1;
+
+			if(INVENTORY_FULL_RANGE(slot) != 0 && lpObj->Inventory[slot].IsItem() != 0 && lpObj->Inventory[slot].m_Index == GET_ITEM(14,117) && lpObj->Inventory[slot].m_Serial == this->m_RenameItemSerial[lpMsg->index])
+			{
+				gItemManager.InventoryDelItem(lpMsg->index,slot);
+				gItemManager.GCItemDeleteSend(lpMsg->index,slot,1);
+			}
+
+			this->m_RenameItemSlot[lpMsg->index] = 0;
+		}
+
 		lpObj->RenameTime = GetTickCount();
 
 		memcpy(lpObj->Name,lpMsg->newname,sizeof(lpObj->Name));
@@ -3759,6 +3773,8 @@ void CCommandManager::DGCommandRenameRecv(SDHP_COMMAND_RENAME_RECV* lpMsg) // OK
 
 	if (lpMsg->result == 1)
 	{
+		this->m_RenameItemSlot[lpMsg->index] = 0;
+		lpObj->RenameActive = 0;
 		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,gMessage.GetMessage(654));
 		LogAddCat(LOG_CAT_COMMAND,LOG_BLACK,"[CommandRename][%s][%s] - Name exists (NewName: %s)",lpObj->Account,lpObj->Name,lpMsg->newname);
 		return;
@@ -3766,6 +3782,8 @@ void CCommandManager::DGCommandRenameRecv(SDHP_COMMAND_RENAME_RECV* lpMsg) // OK
 
 	if (lpMsg->result == 2)
 	{
+		this->m_RenameItemSlot[lpMsg->index] = 0;
+		lpObj->RenameActive = 0;
 		gNotice.GCNoticeSend(lpObj->Index,1,0,0,0,0,0,gMessage.GetMessage(656));
 		LogAddCat(LOG_CAT_COMMAND,LOG_RED,"[CommandRename][%s][%s] - Error (NewName: %s)",lpObj->Account,lpObj->Name,lpMsg->newname);
 		return;
@@ -3775,6 +3793,73 @@ void CCommandManager::DGCommandRenameRecv(SDHP_COMMAND_RENAME_RECV* lpMsg) // OK
 
 
 }
+// Right-click on the Character Renaming Service item: the client shows a box for the
+// new name and sends it here with the item's slot. The same checks and the same
+// DataServer call as /rename; the item is only used up when that succeeds.
+void CCommandManager::CGRenameItemRecv(PMSG_RENAME_ITEM_RECV* lpMsg,int aIndex)
+{
+#if (GAMESERVER_CLIENTE_UPDATE >= 2)
+
+	if(gObjIsConnectedGP(aIndex) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[aIndex];
+
+	if(lpObj->RenameActive != 0)
+	{
+		return;
+	}
+
+	int slot = lpMsg->Slot;
+
+	if(INVENTORY_FULL_RANGE(slot) == 0 || INVENTORY_WEAR_RANGE(slot) != 0 || lpObj->Inventory[slot].IsItem() == 0 || lpObj->Inventory[slot].m_Index != GET_ITEM(14,117))
+	{
+		return;
+	}
+
+	char name[11] = {0};
+	memcpy(name,lpMsg->Name,10);
+
+	// Letters and digits only, 4 to 10 of them (the client checks too; this is the real check).
+	int length = (int)strlen(name);
+	bool valid = (length >= 4 && length <= 10);
+
+	for(int n = 0; valid && n < length; n++)
+	{
+		char c = name[n];
+
+		if((c >= 'A' && c <= 'Z') == 0 && (c >= 'a' && c <= 'z') == 0 && (c >= '0' && c <= '9') == 0)
+		{
+			valid = false;
+		}
+	}
+
+	if(valid == false)
+	{
+		gNotice.GCNoticeSend(aIndex,1,0,0,0,0,0,"Invalid name. Use 4 to 10 letters or numbers, no spaces or symbols.");
+		return;
+	}
+
+	// The item stands in for the rename ticket, for this one call only - a failed
+	// rename must not leave /rename open without it.
+	bool ticket = lpObj->RenameEnable;
+	lpObj->RenameEnable = 1;
+
+	this->CommandRename(lpObj,name);
+
+	lpObj->RenameEnable = ticket;
+
+	if(lpObj->RenameActive != 0)
+	{
+		this->m_RenameItemSlot[aIndex] = slot+1;
+		this->m_RenameItemSerial[aIndex] = lpObj->Inventory[slot].m_Serial;
+	}
+
+#endif
+}
+
 bool CCommandManager::CommandInfo(LPOBJ lpObj,char* arg) // OK
 {
 #if (GAMESERVER_CLIENTE_UPDATE >= 2) 

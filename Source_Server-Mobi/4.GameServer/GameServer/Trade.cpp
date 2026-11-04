@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
+#include "ItemTracker.h"
 #include "Trade.h"
 #include "DSProtocol.h"
 #include "EventHideAndSeek.h"
@@ -121,6 +122,12 @@ void CTrade::ExchangeTradeItemLog(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	{
 		if(lpObj->Trade[n].IsItem() != 0)
 		{
+			{
+				char trackDetails[56];
+				sprintf_s(trackDetails,"Given to %s",lpTarget->Name);
+				gItemTracker.Log("Trade",lpObj->Index,&lpObj->Trade[n],"Player trade",trackDetails);
+			}
+
 			gLog.Output(LOG_TRADE, "Giao Dịch từ %s | %s đến %s | %s,Index: %04d:, Item %s+%d, Skill: %d, Luck: %d, Tính năng: %d, Hoàn hảo: %d, Thần: %d, Hamorny: %03d, Item 380: %03d, Socket: %03d, %03d, %03d, %03d, %03d, Serial: %08X)"
 				, lpObj->Account
 				, lpObj->Name

@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "ItemTracker.h"
 #include "BCustomItemBank.h"
 #include "user.h"
 #include "Message.h"
@@ -935,6 +936,8 @@ bool BCustomItemBank::CongTruBank(int aIndex, int ItemIndex, int ItemLevel, int 
 				gLog.Output(LOG_BANK_JEWEL, "[BankJewel][MAP: %s] [%s][%s] - Delete [%d] [%s] /[Total: %d]", gMapManager.GetMapName(lpObj->Map), lpObj->Account, lpObj->Name, Vaule, gItemLevel.GetItemName(ItemIndex, ItemLevel), gObj[aIndex].BankJewelData[n].ItemCount);
 
 			}
+
+			gItemTracker.LogBank(aIndex,ItemIndex,ItemLevel,Vaule);
 
 			this->UserSendClientInfo(aIndex);
 			return 1;

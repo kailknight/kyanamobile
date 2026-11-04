@@ -84,6 +84,7 @@ struct PMSG_FRIENDMAIL_ITEMS_RECV		// C1:D3:E2
 	BYTE Count;
 	BYTE Items[FRIENDMAIL_MAX_ITEMS][PACKET_ITEM_LENGTH];
 	DWORD Coins[3];				// waiting WCoinC, WCoinP, Goblin Points
+	DWORD Jewels[3];			// waiting Bless, Soul, Chaos jewel bank (flea market payouts); absent from an older server
 };
 
 struct PMSG_FRIENDMAIL_CLAIM_RECV		// C1:D3:E3
@@ -250,7 +251,7 @@ private:
 	ITEM* m_ReadItems[FRIENDMAIL_MAX_ITEMS];
 	int m_ReadItemCount;
 	bool m_ClaimPending;
-	DWORD m_ReadCoins[3];
+	DWORD m_ReadCoins[6];
 
 	// Compose view.
 	ATTACHMENT m_Attach[FRIENDMAIL_MAX_ITEMS];

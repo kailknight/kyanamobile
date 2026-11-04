@@ -200,7 +200,12 @@ bool CItemBagEx::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 				return 0;
 			}
 
-			ITEM_BAG_EX_ITEM_INFO* lpItemBagItemInfo = &ItemInfo->second[GetLargeRand()%ItemInfo->second.size()];
+			ITEM_BAG_EX_ITEM_INFO* lpItemBagItemInfo = this->PickBagItem(lpObj,&ItemInfo->second);
+
+			if(lpItemBagItemInfo == 0)
+			{
+				return 0;
+			}
 
 			WORD ItemIndex = lpItemBagItemInfo->Index;
 			BYTE ItemLevel = lpItemBagItemInfo->Level;
@@ -302,7 +307,12 @@ bool CItemBagEx::DropItem(LPOBJ lpObj,int map,int x,int y) // OK
 				continue;
 			}
 
-			ITEM_BAG_EX_ITEM_INFO* lpItemBagItemInfo = &ItemInfo->second[GetLargeRand()%ItemInfo->second.size()];
+			ITEM_BAG_EX_ITEM_INFO* lpItemBagItemInfo = this->PickBagItem(lpObj,&ItemInfo->second);
+
+			if(lpItemBagItemInfo == 0)
+			{
+				continue;
+			}
 
 			WORD ItemIndex = lpItemBagItemInfo->Index;
 			BYTE ItemLevel = lpItemBagItemInfo->Level;
@@ -351,6 +361,26 @@ bool CItemBagEx::DropItem(LPOBJ lpObj,int map,int x,int y) // OK
 	}
 
 	return 1;
+}
+
+ITEM_BAG_EX_ITEM_INFO* CItemBagEx::PickBagItem(LPOBJ lpObj,std::vector<ITEM_BAG_EX_ITEM_INFO>* lpList) // OK
+{
+	if(g_ItemBagClassFilter == 0)
+	{
+		return &(*lpList)[GetLargeRand()%lpList->size()];
+	}
+
+	std::vector<ITEM_BAG_EX_ITEM_INFO*> fit;
+
+	for(size_t n=0;n < lpList->size();n++)
+	{
+		if(ItemBagClassOk(lpObj,(*lpList)[n].Index) != 0)
+		{
+			fit.push_back(&(*lpList)[n]);
+		}
+	}
+
+	return ((fit.empty() != 0) ? 0 : fit[GetLargeRand()%fit.size()]);
 }
 
 bool CItemBagEx::CheckDropClass(LPOBJ lpObj,int type,int RequireClass[MAX_CLASS]) // OK

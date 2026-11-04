@@ -158,6 +158,7 @@
 #include "FakeOnline.h"
 #include "FriendMail.h"
 #include "DeviceBan.h"
+#include "ItemTracker.h"
 
 CServerInfo gServerInfo;
 
@@ -467,6 +468,8 @@ void CServerInfo::ReadCustomInfo() // OK
 	gCustomMarlon.Load(gPath.GetFullPath("Custom\\CustomMarlonTeleport.txt"));
 
 	gDeviceBan.Load(gPath.GetFullPath("Custom\\DeviceBan.txt"));
+
+	gItemTracker.Load();
 
 	gPKFree.Load(gPath.GetFullPath("Custom\\CustomZonaPK.txt"));
 
@@ -4999,6 +5002,35 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	// back - separate from CommboEffectEnable's stun-effect display roll.
 	// 100 = guaranteed push back.
 	this->m_DarkHorsePushBackChance = GetPrivateProfileInt(section, "DarkHorsePushBackChance", 0, path);
+
+	// Excellent option weights for monster drops on the map (CustomConfig.ini): MapExcWeightEnable 1 = use them; one weight per
+	// excellent option 0-5, 0 = that option never drops. Armour, weapons and rings/pendants separately.
+	this->m_MapExcWeightEnable = GetPrivateProfileInt(section, "MapExcWeightEnable", 0, path);
+
+	// Same layout as the drop box keys (ExlOption_xx / WeaponExlOption_xx / AccessoryExlOption_xx), with a Map prefix:
+	// MapExlOption_xx, MapWeaponExlOption_xx, MapAccessoryExlOption_xx. The older MapExcArmor/Weapon/Accessory_xx names still work.
+	for(int n=0;n < 6;n++)
+	{
+		char key[64];
+		char old[64];
+
+		wsprintf(old,"MapExcArmor_%02d",n);
+		wsprintf(key,"MapExlOption_%02d",n);
+		this->m_MapExcArmor[n] = (BYTE)GetPrivateProfileInt(section,key,GetPrivateProfileInt(section,old,100,path),path);
+
+		wsprintf(old,"MapExcWeapon_%02d",n);
+		wsprintf(key,"MapWeaponExlOption_%02d",n);
+		this->m_MapExcWeapon[n] = (BYTE)GetPrivateProfileInt(section,key,GetPrivateProfileInt(section,old,100,path),path);
+
+		wsprintf(old,"MapExcAccessory_%02d",n);
+		wsprintf(key,"MapAccessoryExlOption_%02d",n);
+		this->m_MapExcAccessory[n] = (BYTE)GetPrivateProfileInt(section,key,GetPrivateProfileInt(section,old,100,path),path);
+	}
+
+	// Chance (0-100) that a map drop has Skill / Luck / Option (+4..). -1 = not set: ItemOptionRate.txt sections 1-3 decide as before.
+	this->m_MapOptionPecent = GetPrivateProfileInt(section,"MapOptionPecent",-1,path);
+	this->m_MapSkillPecent = GetPrivateProfileInt(section,"MapSkillPecent",-1,path);
+	this->m_MapLuckPecent = GetPrivateProfileInt(section,"MapLuckPecent",-1,path);
 
 	// CustomComboDistance / CustomDarkHorsePushDistance (CustomConfig.ini):
 	// how many tiles the guaranteed pushes above knock the target back.

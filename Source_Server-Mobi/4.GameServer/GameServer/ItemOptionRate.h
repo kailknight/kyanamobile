@@ -68,6 +68,7 @@ public:
 	bool GetItemOption5(int index,BYTE* option);
 	bool GetItemOption6(int index,BYTE* option);
 	bool MakeNewOption(int ItemIndex,int value,BYTE* option);
+	bool MakeNewOptionWeighted(int ItemIndex,int value,BYTE* option);
 	bool MakeSetOption(int ItemIndex,int value,BYTE* option);
 	bool MakeSocketOption(int ItemIndex,int value,BYTE* option);
 	ITEM_OPTION0_RATE_INFO* GetRawOption0(int index);

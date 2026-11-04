@@ -101,6 +101,7 @@ extern int mShowName;
 extern int mShowHPBar;
 extern int mShowMiniMap;
 extern int mShowDanhHieu;
+extern int mHideMarketNotice;	// 1 = hide the server's "[Market] ... Just Listed" notices
 extern bool g_bWzAudioCreated;
 extern bool g_bDirectSoundCreated;
 

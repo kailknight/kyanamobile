@@ -508,6 +508,24 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				RecvDuelRankView(lpMsg, size);
 			}
 			break;
+			case 0xC5: //VIP level of the players around us (C1:D3:C5): [head 4][count 1] then count * { WORD key, BYTE level }
+			{
+				if (size >= 5 && lpMsg[0] == 0xC1)
+				{
+					int vipCount = lpMsg[4];
+					if (vipCount > (size - 5) / 3) vipCount = (size - 5) / 3;
+					for (int vi = 0; vi < vipCount; ++vi)
+					{
+						const BYTE* ve = lpMsg + 5 + vi * 3;
+						const int vci = FindCharacterIndex((int)(ve[0] | (ve[1] << 8)));
+						if (vci >= 0 && vci < MAX_CHARACTERS_CLIENT)
+						{
+							CharactersClient[vci].VipLevel = (ve[2] <= 9) ? ve[2] : 0;
+						}
+					}
+				}
+			}
+			break;
 			case 0xF2: //Devil Square time left (C1:D3:F2, WORD seconds)
 				if (size >= 6)
 				{
@@ -556,7 +574,7 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				if (gFriendMailWindow && size >= (int)sizeof(PMSG_FRIENDMAIL_RESULT_RECV)) gFriendMailWindow->RecvSendResult((PMSG_FRIENDMAIL_RESULT_RECV*)lpMsg);
 				break;
 			case 0xE2: // Friends window - a letter's waiting items
-				if (gFriendMailWindow && size >= (int)sizeof(PMSG_FRIENDMAIL_ITEMS_RECV)) gFriendMailWindow->RecvItems((PMSG_FRIENDMAIL_ITEMS_RECV*)lpMsg);
+				if (gFriendMailWindow && size >= (int)(sizeof(PMSG_FRIENDMAIL_ITEMS_RECV) - sizeof(((PMSG_FRIENDMAIL_ITEMS_RECV*)0)->Jewels))) gFriendMailWindow->RecvItems((PMSG_FRIENDMAIL_ITEMS_RECV*)lpMsg);
 				break;
 			case 0xE3: // Friends window - claim result
 				if (gFriendMailWindow && size >= (int)sizeof(PMSG_FRIENDMAIL_CLAIM_RECV)) gFriendMailWindow->RecvClaimResult((PMSG_FRIENDMAIL_CLAIM_RECV*)lpMsg);

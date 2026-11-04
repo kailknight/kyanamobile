@@ -371,6 +371,21 @@ bool SEASON3B::CNewUICommandWindow::Render()
 
 void SEASON3B::CNewUICommandWindow::RenderBaseWindow( )
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// Phone: plain black panel instead of the classic textured frame, like the other pop-up menus.
+	EnableAlphaTest();
+	RenderColor(m_Pos.x, m_Pos.y, float(COMMAND_WINDOW_WIDTH), float(COMMAND_WINDOW_HEIGHT), 0.92f, 1);
+	glColor4f(0.12f, 0.12f, 0.13f, 0.95f);
+	RenderColor(m_Pos.x + 3.f, m_Pos.y + 3.f, float(COMMAND_WINDOW_WIDTH) - 6.f, 36.f);
+	glColor4f(0.40f, 0.40f, 0.43f, 1.f);
+	RenderColor(m_Pos.x, m_Pos.y, float(COMMAND_WINDOW_WIDTH), 1.f);
+	RenderColor(m_Pos.x, m_Pos.y + float(COMMAND_WINDOW_HEIGHT) - 1.f, float(COMMAND_WINDOW_WIDTH), 1.f);
+	RenderColor(m_Pos.x, m_Pos.y, 1.f, float(COMMAND_WINDOW_HEIGHT));
+	RenderColor(m_Pos.x + float(COMMAND_WINDOW_WIDTH) - 1.f, m_Pos.y, 1.f, float(COMMAND_WINDOW_HEIGHT));
+	EndRenderColor();
+	glColor4f(1.f, 1.f, 1.f, 1.f);
+	return;
+#endif
 	RenderImage(IMAGE_COMMAND_BASE_WINDOW_BACK, m_Pos.x, m_Pos.y, float(COMMAND_WINDOW_WIDTH), float(COMMAND_WINDOW_HEIGHT));
 	RenderImage(IMAGE_COMMAND_BASE_WINDOW_TOP, m_Pos.x, m_Pos.y, float(COMMAND_WINDOW_WIDTH), 64.f);
 	RenderImage(IMAGE_COMMAND_BASE_WINDOW_LEFT, m_Pos.x, m_Pos.y+64.f, 21.f, float(COMMAND_WINDOW_HEIGHT)-64.f-45.f);

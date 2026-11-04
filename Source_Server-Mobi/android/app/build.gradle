@@ -527,8 +527,8 @@ android {
         // level instead of sitting at 99%. (40 was built the same day, not released.)
         // 48 (2026-10-27): ranked duel + master skill pages, flea market buy confirm and
         // class filter, chaos box / jewel bank / helper fixes, Discord + Facebook buttons.
-        versionCode 48
-        versionName "1.0.48"
+        versionCode 49
+        versionName "1.0.49"
 
         // A diagnostics build can be CPU-profiled with simpleperf without
         // being debuggable (which would change its performance).

@@ -291,12 +291,13 @@ BOOL GetFileNameOfFilePath( char *lpszFile, char *lpszPath)
 
 	if ( strchr( lpszPath, iFind))
 	{
-		strcpy( lpszFile, lpOld + 1);
+		strncpy( lpszFile, lpOld + 1, MAX_PATH - 1);
 	}
 	else
 	{
-		strcpy( lpszFile, lpOld);
+		strncpy( lpszFile, lpOld, MAX_PATH - 1);
 	}
+	lpszFile[MAX_PATH - 1] = '\0';
 
 	BOOL bCheck = TRUE;
 	for ( char *lpTemp = lpszFile; bCheck; ++lpTemp)
@@ -450,6 +451,7 @@ void DestroyWindow()
 	WritePrivateProfileStringA("Custom", "ShowHPBar", itoa(mShowHPBar, string, 10), "./config.ini");
 	WritePrivateProfileStringA("Custom", "ShowMiniMap", itoa(mShowMiniMap, string, 10), "./config.ini");
 	WritePrivateProfileStringA("Custom", "ShowDanhHieu", itoa(mShowDanhHieu, string, 10), "./config.ini");
+	WritePrivateProfileStringA("Custom", "HideMarketNotice", itoa(mHideMarketNotice, string, 10), "./config.ini");
 	// Music/Sound/Resolution live in the registry instead (see OpenInitFile),
 	// and are written the moment they change rather than only on a clean
 	// exit - SaveConfigDword(), called from the Config System window.
@@ -1193,6 +1195,7 @@ int mShowName;
 int mShowHPBar;
 int mShowMiniMap;
 int mShowDanhHieu;
+int mHideMarketNotice;
 
 // wzAudioCreate is gated on m_MusicOnOff at startup (below), which reads as
 // false on every run - nothing in this codebase ever writes the "MusicOnOff"
@@ -1300,12 +1303,20 @@ static void LaunchGameAfterDelay()
 // just chosen, whether to restart the game now. The data files are read once at startup, so the
 // change only shows after a restart. Returns true when the game is closing to restart; false when the
 // player said no (the choice stays saved for the next start).
-bool AskRestartForLanguage(bool bWantVi)
+bool AskRestartForLanguage(int iWantLang)
 {
-	const wchar_t* pszTitle = bWantVi ? L"Ngôn ngữ" : L"Language";
-	const wchar_t* pszText = bWantVi
-		? L"Đã đổi ngôn ngữ sang Tiếng Việt.\nKhởi động lại game ngay bây giờ?"
-		: L"Language changed to English.\nRestart the game now?";
+	const wchar_t* pszTitle = L"Language";
+	const wchar_t* pszText = L"Language changed to English.\nRestart the game now?";
+	if (iWantLang == LANG_INDEX_VIETNAMESE)
+	{
+		pszTitle = L"Ngôn ngữ";
+		pszText = L"Đã đổi ngôn ngữ sang Tiếng Việt.\nKhởi động lại game ngay bây giờ?";
+	}
+	else if (iWantLang == LANG_INDEX_SPANISH)
+	{
+		pszTitle = L"Idioma";
+		pszText = L"Idioma cambiado a Español.\n¿Reiniciar el juego ahora?";
+	}
 
 	// The game hides the system cursor (ShowCursor(false) on every WM_SETCURSOR, so the counter is far
 	// below zero) and may clip it to its window: bring the cursor back for the box, then put the counter
@@ -1418,6 +1429,7 @@ BOOL OpenInitFile()
 	mShowHPBar = GetPrivateProfileInt("Custom", "ShowHPBar", 0, szIniFilePath);
 	mShowMiniMap = GetPrivateProfileInt("Custom", "ShowMiniMap", 0, szIniFilePath);
 	mShowDanhHieu = GetPrivateProfileInt("Custom", "ShowDanhHieu", 0, szIniFilePath);
+	mHideMarketNotice = GetPrivateProfileInt("Custom", "HideMarketNotice", 0, szIniFilePath);
 
 
 

@@ -699,6 +699,10 @@ void CFriendMail::DGItemsRecv(SDHP_FRIENDMAIL_ITEMS_RECV* lpMsg)
 				{
 					pMsg.Coins[row.CoinType - 1] += row.CoinAmount;
 				}
+				else if(row.CoinType <= FRIENDMAIL_COIN_CHAOS)
+				{
+					pMsg.Jewels[row.CoinType - FRIENDMAIL_COIN_BLESS] += row.CoinAmount;
+				}
 
 				continue;
 			}
@@ -803,6 +807,27 @@ void CFriendMail::DGClaimRecv(SDHP_FRIENDMAIL_ITEMS_RECV* lpMsg)
 	for(int n = 0; n < count; n++)
 	{
 		FRIENDMAIL_ITEM& row = lpMsg->Items[n];
+
+		if(row.CoinType >= FRIENDMAIL_COIN_BLESS && row.CoinType <= FRIENDMAIL_COIN_CHAOS)
+		{
+			// Jewel bank payout (flea market sale): into the bank, or back in the mailbox if it cannot take it (bank full).
+			static const int bankItem[3] = { 7181, 7182, 6159 };
+			const int item = bankItem[row.CoinType - FRIENDMAIL_COIN_BLESS];
+
+			if(row.CoinAmount == 0 || row.CoinAmount > 1000000000
+				|| gBCustomItemBank.CheckInfoListItemBank(item,0) == -1
+				|| gBCustomItemBank.CanAddBank(aIndex,item,0,(int)row.CoinAmount) == 0
+				|| gBCustomItemBank.CongTruBank(aIndex,item,0,(int)row.CoinAmount) == 0)
+			{
+				undo.ItemID[undo.Count++] = row.ItemID;
+				continue;
+			}
+
+			LogAdd(LOG_BLACK,"[FriendMail] %s claimed jewel bank %d x %u from letter %d",lpObj->Name,item,row.CoinAmount,(int)lpMsg->MemoIndex);
+
+			placed++;
+			continue;
+		}
 
 		if(row.CoinType != FRIENDMAIL_COIN_NONE)
 		{

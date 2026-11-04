@@ -120,6 +120,19 @@ bool CLuckyItem::IsLuckyItem(CItem* lpItem) // OK
 	#endif
 }
 
+bool CLuckyItem::IsLuckyItemIndex(int index) // OK
+{
+	#if(GAMESERVER_UPDATE>=602)
+
+	return (this->m_LuckyItemInfo.find(index) != this->m_LuckyItemInfo.end());
+
+	#else
+
+	return 0;
+
+	#endif
+}
+
 bool CLuckyItem::GetLuckyItemIndex(LPOBJ lpObj,int section,int group,WORD* index) // OK
 {
 	#if(GAMESERVER_UPDATE>=602)

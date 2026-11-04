@@ -9,6 +9,8 @@
 #include "MemScript.h"
 #include "PentagramSystem.h"
 #include "RandomManager.h"
+#include "LuckyItem.h"
+#include "ServerInfo.h"
 #include "SetItemType.h"
 #include "SocketItemType.h"
 #include "Util.h"
@@ -425,8 +427,60 @@ bool CItemOptionRate::MakeNewOption(int ItemIndex,int value,BYTE* option) // OK
 	return 1;
 }
 
+// Map drops with the CustomConfig.ini exc weights (MapExcArmor_xx / MapExcWeapon_xx / MapExcAccessory_xx, one weight per
+// excellent option 0-5, 0 = that option never drops), chosen by the item's slot. Anything else (wings, pets, items without a slot) keeps the plain random MakeNewOption.
+bool CItemOptionRate::MakeNewOptionWeighted(int ItemIndex,int value,BYTE* option)
+{
+	const BYTE* weight = 0;
+
+	int slot = gItemManager.GetItemSlotByIndex(ItemIndex);
+
+	if(slot >= 2 && slot <= 6){weight = gServerInfo.m_MapExcArmor;}
+	else if(slot >= 0 && slot <= 1){weight = gServerInfo.m_MapExcWeapon;}
+	else if(slot >= 9 && slot <= 10){weight = gServerInfo.m_MapExcAccessory;}
+
+	if(gServerInfo.m_MapExcWeightEnable == 0 || weight == 0)
+	{
+		return this->MakeNewOption(ItemIndex,value,option);
+	}
+
+	(*option) = 0;
+
+	for(int count=0;count < value && count < MAX_EXC_OPTION;count++)
+	{
+		CRandomManager RandomManager;
+
+		for(int n=0;n < MAX_EXC_OPTION;n++)
+		{
+			if(weight[n] > 0 && ((*option) & (1 << n)) == 0)
+			{
+				RandomManager.AddElement(1 << n,weight[n]);
+			}
+		}
+
+		int bit = 0;
+
+		if(RandomManager.GetRandomElement(&bit) == 0)
+		{
+			break;
+		}
+
+		(*option) |= (BYTE)bit;
+	}
+
+	return 1;
+}
+
 bool CItemOptionRate::MakeSetOption(int ItemIndex,int value,BYTE* option) // OK
 {
+	// A Lucky item is not an ancient: no tier, so no ancient name or set bonus. Its set option is the stat bonus alone
+	// (value 1 = +5, 2 = +10, 3 = +15 of the stat the item's SetItemType row names, e.g. Stamina +10).
+	if(value > 0 && gLuckyItem.IsLuckyItemIndex(ItemIndex) != 0 && gSetItemType.CheckSetItemType(ItemIndex) != 0)
+	{
+		(*option) = (BYTE)(4*((value > 3) ? 3 : value));
+		return 1;
+	}
+
 	if(gSetItemType.CheckSetItemType(ItemIndex) == 0 || value == 0)
 	{
 		(*option) = 0;
@@ -440,6 +494,20 @@ bool CItemOptionRate::MakeSetOption(int ItemIndex,int value,BYTE* option) // OK
 		if(gSetItemType.GetSetItemOptionIndex(ItemIndex,n) > 0 && n == (value-1))
 		{
 			(*option) = (((*option)==0)?(n+1):(((GetLargeRand()%2)==0)?(n+1):(*option)));
+		}
+	}
+
+	// The item has no tier for this value (e.g. value 2 = tier 2 on an item that only has tier 1): use the tier it does have, so the
+	// +5 / +10 stat option asked for (4*value) still spawns instead of the item coming out with no ancient option at all.
+	if((*option) == 0)
+	{
+		for(int n=0;n < MAX_SET_ITEM_OPTION_INDEX;n++)
+		{
+			if(gSetItemType.GetSetItemOptionIndex(ItemIndex,n) > 0)
+			{
+				(*option) = (BYTE)(n+1);
+				break;
+			}
 		}
 	}
 

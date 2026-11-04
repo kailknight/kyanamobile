@@ -18,6 +18,7 @@
 #include "CB_DangKyInGame.h"
 #include "QuickToggles.h"
 #include "GMBattleCastle.h"
+#include "PartyManager.h"
 #ifdef min
 #undef min
 #endif
@@ -836,6 +837,9 @@ extern float CameraDistance;
 extern float CameraDistanceTarget;
 extern float g_androidZoomOverride;   // defined in CameraUtility.cpp
 extern float CameraAngle[3];
+extern float Camera3DPosY;
+extern float Camera3DPosZ;
+extern bool g_androidCameraTiltActive;   // ZzzScene.cpp
 
 // TEMP: per-render-pass mesh draw counts, defined in ZzzBMD.cpp. Says which
 // pass supplies the bulk of the skinned draws before any collapse is designed.
@@ -986,6 +990,9 @@ float g_AndroidBatteryIconW = 18.0f;
 
 // Short vibration pulse, defined in android_link_stubs.cpp (JNI to MuHaptics).
 extern "C" void AndroidHapticPulse(int ms);
+
+// CB_BXHTopDmg.cpp: true while the server-driven boss bar is up for this monster class.
+bool BossHpBarShownFor(int MonsterClass);
 
 namespace
 {
@@ -1522,8 +1529,8 @@ constexpr float kSkillPickerListIconSize = 22.0f;
 constexpr uint32_t kTargetPickerRefreshMs = 200;
 
 // AIM button (target lock) - outside the skill ring, upper right of ATK.
-constexpr float kTargetSelectButtonCx = 606.0f;
-constexpr float kTargetSelectButtonCy = 400.0f;
+constexpr float kTargetSelectButtonCx = 543.0f;
+constexpr float kTargetSelectButtonCy = 257.0f;
 constexpr float kTargetSelectButtonRadius = 17.0f;
 
 // Page switch for the skill wheel - two pages of four slots each, eight
@@ -2133,7 +2140,7 @@ constexpr float kVirtualHudChatBoxW = 281.0f;
 constexpr float kVirtualHudChatBoxH = 47.0f;
 
 // 鑺掗垾婵冨亾鑺掗垾婵冨亾 Zoom +/- buttons: top-center beside the level badge 鑺掗垾婵冨亾鑺掗垾婵冨亾
-constexpr float kZoomMin  = 800.0f;
+constexpr float kZoomMin  = 320.0f;
 constexpr float kZoomMax  = 1600.0f;
 constexpr float kZoomDefault = 1200.0f;
 
@@ -2544,6 +2551,13 @@ struct AndroidPinchZoomState
     bool  active = false;
     float startGap = 0.0f;
     float startZoom = 0.0f;
+    // 0 = undecided, 1 = zoom (the gap changed), 2 = swipe (both fingers moved together:
+    // down/up tilts the camera, left/right turns it).
+    bool  zoomOn = false;     // the gap changed enough: zoom follows the fingers
+    bool  swipeOn = false;    // the pair moved together: pan / tilt follow the centre
+    float accX = 0.0f, accY = 0.0f;   // how far the centre has travelled on each axis, for the axis lock
+    float startCx = 0.0f, startCy = 0.0f;
+    float lastCx = 0.0f, lastCy = 0.0f;
 };
 AndroidPinchZoomState g_androidPinch{};
 // Which arc slot is armed, or -1 for a plain weapon attack. Tapping a skill
@@ -4679,7 +4693,8 @@ bool HitTestVirtualJoystick(float uiX, float uiY)
 int SnapVirtualJoystickOctant(float pxX, float pxY, int previousOctant)
 {
     const float screenAngle = CreateAngle(0.0f, 0.0f, pxX, pxY);
-    const float worldAngle = std::fmod((225.0f - screenAngle) + 720.0f, 360.0f);
+    // 225 - screen is the default yaw (-45); a swiped camera shifts it by the same amount.
+    const float worldAngle = std::fmod((270.0f - screenAngle + CameraAngle[2]) + 720.0f, 360.0f);
     const int snapped = static_cast<int>(std::lround(worldAngle / 45.0f)) & 7;
 
     if (previousOctant < 0 || snapped == previousOctant)
@@ -5486,6 +5501,13 @@ int HitTestVirtualAttackButton(float uiX, float uiY);
 int HitTestVirtualSkillButton(float uiX, float uiY);
 bool HitTestVoicePttButton(float uiX, float uiY);
 bool HitTestVoiceChannelButton(float uiX, float uiY);
+bool HitTestCameraResetButton(float uiX, float uiY);
+
+// Defined further down with the AIM drag-to-lock code. Needed here so dragging out of
+// the AIM button can never be taken for a pinch-zoom.
+bool IsAndroidAimDragActive();
+bool IsAndroidAimAvailable();
+AndroidUiRect GetTargetSelectButtonRect();
 
 bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
 {
@@ -5525,7 +5547,18 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
         // The mic button toggles on finger-down: a tap on it with a thumb
         // already on the joystick must toggle, not start a pinch.
         || HitTestVoicePttButton(bUiX, bUiY)
-        || HitTestVoiceChannelButton(bUiX, bUiY);
+        || HitTestVoiceChannelButton(bUiX, bUiY)
+        || HitTestCameraResetButton(bUiX, bUiY)
+        // Pressing AIM with another finger down (the joystick, usually) starts the
+        // drag-to-lock, not a pinch.
+        || (IsAndroidAimAvailable() && HitTestAndroidUiRect(bUiX, bUiY, GetTargetSelectButtonRect()));
+
+    // While a finger is dragging out of the AIM button, another one landing
+    // (the joystick) must not turn the pair into a pinch and zoom the camera.
+    if (IsAndroidAimDragActive())
+    {
+        return false;
+    }
 
     if (g_androidPinch.fingerB == static_cast<SDL_FingerID>(-1)
         && touch.fingerId != g_androidPinch.fingerA
@@ -5537,6 +5570,12 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
         g_androidPinch.startGap = GetPinchGap();
         g_androidPinch.startZoom = GetCurrentAndroidZoom();
         g_androidPinch.active = true;
+        g_androidPinch.zoomOn = false;
+        g_androidPinch.swipeOn = false;
+        g_androidPinch.accX = 0.0f;
+        g_androidPinch.accY = 0.0f;
+        g_androidPinch.startCx = g_androidPinch.lastCx = (g_androidPinch.ax + g_androidPinch.bx) * 0.5f;
+        g_androidPinch.startCy = g_androidPinch.lastCy = (g_androidPinch.ay + g_androidPinch.by) * 0.5f;
 
         // The first finger was almost certainly already driving the joystick,
         // and the character should not keep running through a pinch.
@@ -5545,6 +5584,54 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
     }
 
     return false;
+}
+
+// ---- Camera: two-finger swipe, and the reset button ------------------------
+// The default view is yaw -45, no tilt, no pinch zoom (see ZzzScene.cpp). The same
+// Camera3DPosY/Z pair the PC "3D camera" uses carries the tilt: PosY is degrees on
+// the pitch, PosZ the matching camera height (-44/2.42 per degree).
+constexpr float kCameraSwipeActivatePx = 28.0f;
+// A swipe across the whole width turns the camera 200 degrees; one down the whole height
+// covers 1.3x the tilt range. Per screen, not per pixel, so every phone feels the same.
+constexpr float kCameraYawPerScreenWidth = 200.0f;
+constexpr float kCameraTiltPerScreenHeight = 43.0f;
+constexpr float kCameraTiltMin = -30.0f;
+constexpr float kCameraTiltMax = 32.0f;
+constexpr float kCameraDefaultYaw = -45.0f;
+
+void ApplyAndroidCameraSwipe(float dxPx, float dyPx)
+{
+    const float screenW = std::max(static_cast<float>(WindowWidth), 1.0f);
+    const float screenH = std::max(static_cast<float>(WindowHeight), 1.0f);
+    float yaw = CameraAngle[2] + (dxPx * (kCameraYawPerScreenWidth / screenW));
+    while (yaw > 135.0f)
+    {
+        yaw -= 360.0f;
+    }
+    while (yaw < -225.0f)
+    {
+        yaw += 360.0f;
+    }
+    CameraAngle[2] = yaw;
+
+    Camera3DPosY = std::clamp(Camera3DPosY + (dyPx * (kCameraTiltPerScreenHeight / screenH)), kCameraTiltMin, kCameraTiltMax);
+    Camera3DPosZ = -Camera3DPosY * (44.0f / 2.42f);
+    g_androidCameraTiltActive = true;
+}
+
+bool IsAndroidCameraNonDefault()
+{
+    const float yawOff = std::fabs(std::fmod((CameraAngle[2] - kCameraDefaultYaw) + 540.0f, 360.0f) - 180.0f);
+    return yawOff > 1.0f || std::fabs(Camera3DPosY) > 0.05f || g_androidZoomOverride > 0.0f;
+}
+
+void ResetAndroidCamera()
+{
+    CameraAngle[2] = kCameraDefaultYaw;
+    Camera3DPosY = 0.0f;
+    Camera3DPosZ = 0.0f;
+    g_androidCameraTiltActive = false;
+    g_androidZoomOverride = 0.0f;   // the scene picks its own default distance again
 }
 
 bool HandleAndroidPinchFingerMotion(const SDL_TouchFingerEvent& touch)
@@ -5578,7 +5665,49 @@ bool HandleAndroidPinchFingerMotion(const SDL_TouchFingerEvent& touch)
     {
         return true;
     }
-    if (std::fabs(gap - g_androidPinch.startGap) < kPinchActivateSlopPx)
+
+    const float centreX = (g_androidPinch.ax + g_androidPinch.bx) * 0.5f;
+    const float centreY = (g_androidPinch.ay + g_androidPinch.by) * 0.5f;
+
+    const float gapChange = std::fabs(gap - g_androidPinch.startGap);
+    const float travelX = centreX - g_androidPinch.startCx;
+    const float travelY = centreY - g_androidPinch.startCy;
+    const float travel = std::sqrt((travelX * travelX) + (travelY * travelY));
+
+    // Pan/tilt (the centre of the two fingers moving) and zoom (the gap changing) are
+    // separate: each switches on once its own movement is clear of the slop, and
+    // neither is mistaken for the other - a pinch drifts its centre a little, a swipe
+    // changes the gap a little. Both can run at once, like a PTZ camera.
+    if (!g_androidPinch.zoomOn && gapChange >= kPinchActivateSlopPx && gapChange >= travel)
+    {
+        g_androidPinch.zoomOn = true;
+    }
+    if (!g_androidPinch.swipeOn && travel >= kCameraSwipeActivatePx && travel >= gapChange * 0.75f)
+    {
+        g_androidPinch.swipeOn = true;
+        g_androidPinch.accX = std::fabs(travelX);
+        g_androidPinch.accY = std::fabs(travelY);
+        g_androidPinch.lastCx = centreX;
+        g_androidPinch.lastCy = centreY;
+    }
+
+    if (g_androidPinch.swipeOn)
+    {
+        const float dx = centreX - g_androidPinch.lastCx;
+        const float dy = centreY - g_androidPinch.lastCy;
+        g_androidPinch.lastCx = centreX;
+        g_androidPinch.lastCy = centreY;
+        g_androidPinch.accX += std::fabs(dx);
+        g_androidPinch.accY += std::fabs(dy);
+
+        // Axis lock: a mostly sideways swipe only turns, a mostly vertical one only tilts,
+        // and a diagonal one does both - so a slightly crooked swipe does not wobble the other axis.
+        const bool sideways = g_androidPinch.accX > g_androidPinch.accY * 1.6f;
+        const bool vertical = g_androidPinch.accY > g_androidPinch.accX * 1.6f;
+        ApplyAndroidCameraSwipe(vertical ? 0.0f : dx, sideways ? 0.0f : dy);
+    }
+
+    if (!g_androidPinch.zoomOn)
     {
         return true;
     }
@@ -6173,6 +6302,8 @@ void SetAndroidTargetLock(int characterIndex)
     g_androidTargetLock.key = target->Key;
     g_androidTargetLock.cachedIndex = characterIndex;
 
+    AndroidHapticPulse(40);   // the player feels the lock land
+
     memcpy(g_androidTargetLock.id, target->ID, MAX_ID_SIZE);
     g_androidTargetLock.id[MAX_ID_SIZE] = '\0';
 
@@ -6446,6 +6577,9 @@ void ClampAndroidTargetPickerScroll()
     g_androidTargetPicker.scrollOffset = std::clamp(g_androidTargetPicker.scrollOffset, 0, maxOffset);
 }
 
+bool IsAndroidSiegeAutoAim();
+static bool IsSiegeOpposingPlayer(int characterIndex);
+
 bool IsAndroidTargetPickerCandidate(int characterIndex)
 {
     if (!IsValidAutoCombatTarget(characterIndex) || Hero == nullptr)
@@ -6467,6 +6601,12 @@ bool IsAndroidTargetPickerCandidate(int characterIndex)
 
     // Locking one would be dropped straight away (UpdateAndroidPkTargetState).
     if (IsCharacterInSafeZone(characterIndex))
+    {
+        return false;
+    }
+
+    // Siege war: only the opposing side is listed, never a guild mate or party member.
+    if (IsAndroidSiegeAutoAim() && !IsSiegeOpposingPlayer(characterIndex))
     {
         return false;
     }
@@ -6554,9 +6694,159 @@ void ShowAndroidTargetPicker()
     RefreshAndroidTargetPickerEntries(true);
 }
 
+// ---- Aim mode (the PK button's popup) --------------------------------------
+// PVE    mobs, bosses first.            PVP   nearest player.
+// Party  everything but party members.  Guild everything but guild/union mates
+//        and party members. In Party and Guild, buff skills go to party first.
+// AutoCtrlPK stays the "players may be attacked" gate CheckAttack reads: on in
+// every mode but PVE. The mode is the source of truth; a toggle made elsewhere
+// (Ctrl x3) is folded back in by SyncAndroidAimMode.
+enum AndroidAimMode
+{
+    kAimModePve = 0,
+    kAimModePvp,
+    kAimModeParty,
+    kAimModeGuild,
+    kAimModeCount
+};
+
+constexpr const char* kAndroidAimModeKey = "Combat.AimMode";
+int  g_androidAimMode = kAimModePve;
+bool g_androidAimModeLoaded = false;
+bool g_androidAimMenuVisible = false;
+
+void ClearAndroidPkStickyTarget(const char* reason);
+
+int GetAndroidAimMode()
+{
+    if (g_pBCustomMenuInfo == nullptr)
+    {
+        return g_androidAimMode;
+    }
+
+    if (!g_androidAimModeLoaded)
+    {
+        g_androidAimModeLoaded = true;
+        g_androidAimMode = std::clamp(MobileSettingsGetInt(kAndroidAimModeKey, kAimModePve), 0, static_cast<int>(kAimModeCount) - 1);
+        g_pBCustomMenuInfo->AutoCtrlPK = (g_androidAimMode != kAimModePve);
+    }
+    else if ((g_pBCustomMenuInfo->AutoCtrlPK != 0) != (g_androidAimMode != kAimModePve))
+    {
+        g_androidAimMode = g_pBCustomMenuInfo->AutoCtrlPK ? kAimModePvp : kAimModePve;
+    }
+
+    return g_androidAimMode;
+}
+
+void SetAndroidAimMode(int mode)
+{
+    GetAndroidAimMode();
+    g_androidAimMode = std::clamp(mode, 0, static_cast<int>(kAimModeCount) - 1);
+    if (g_pBCustomMenuInfo != nullptr)
+    {
+        g_pBCustomMenuInfo->AutoCtrlPK = (g_androidAimMode != kAimModePve);
+    }
+    MobileSettingsSetInt(kAndroidAimModeKey, g_androidAimMode);
+    ClearAndroidPkStickyTarget("aim-mode");
+}
+
+bool HandleAndroidAimMenuFingerDown(float uiX, float uiY);
+void RenderAndroidAimMenu();
+
+void ToggleAndroidAimMenu()
+{
+    g_androidAimMenuVisible = !g_androidAimMenuVisible;
+    PlayBuffer(SOUND_CLICK01);
+}
+
+// Same guild name, or a union (alliance) member of the hero's guild.
+static bool IsGuildOrUnionMate(int characterIndex)
+{
+    const CHARACTER* c = &CharactersClient[characterIndex];
+    if (c->GuildRelationShip == GR_UNION || c->GuildRelationShip == GR_UNIONMASTER)
+    {
+        return true;
+    }
+
+    return c->GuildMarkIndex >= 0 && Hero->GuildMarkIndex >= 0
+        && strcmp(GuildMark[Hero->GuildMarkIndex].GuildName, GuildMark[c->GuildMarkIndex].GuildName) == 0;
+}
+
+// Party and Guild modes never target the people they are named for.
+static bool IsPlayerExcludedByAimMode(int characterIndex)
+{
+    const int mode = GetAndroidAimMode();
+    if (mode != kAimModeParty && mode != kAimModeGuild)
+    {
+        return false;
+    }
+
+    if (g_pPartyManager->IsPartyMember(characterIndex))
+    {
+        return true;
+    }
+
+    return mode == kAimModeGuild && IsGuildOrUnionMate(characterIndex);
+}
+
+bool IsAndroidSiegeAutoAim();
+
+static bool IsSiegeAttackerMark(int etcPart)
+{
+    return etcPart == PARTS_ATTACK_KING_TEAM_MARK || etcPart == PARTS_ATTACK_TEAM_MARK
+        || etcPart == PARTS_ATTACK_KING_TEAM_MARK2 || etcPart == PARTS_ATTACK_TEAM_MARK2
+        || etcPart == PARTS_ATTACK_KING_TEAM_MARK3 || etcPart == PARTS_ATTACK_TEAM_MARK3;
+}
+
+static bool IsSiegeDefenderMark(int etcPart)
+{
+    return etcPart == PARTS_DEFENSE_KING_TEAM_MARK || etcPart == PARTS_DEFENSE_TEAM_MARK;
+}
+
+// During a siege war a player is a legitimate auto-target only when they wear
+// the other side's mark. CheckAttack answers yes for same-side players once
+// auto PK is on (its siege branch only matches opposing marks, then falls
+// through to the generic PK rules), so guild mates, party members and the other
+// attacking guilds of the alliance are rejected here, ahead of it.
+static bool IsSiegeOpposingPlayer(int characterIndex)
+{
+    const CHARACTER* c = &CharactersClient[characterIndex];
+    if (c == Hero)
+    {
+        return false;
+    }
+
+    const bool heroAttacks = IsSiegeAttackerMark(Hero->EtcPart);
+    const bool opposing = heroAttacks ? IsSiegeDefenderMark(c->EtcPart) : IsSiegeAttackerMark(c->EtcPart);
+    if (!opposing)
+    {
+        return false;
+    }
+
+    if (g_pPartyManager->IsPartyMember(characterIndex))
+    {
+        return false;
+    }
+
+    // A guild mate whatever mark they wear (a stale or swapped mark must not
+    // make one targetable), or a union ally.
+    return !IsGuildOrUnionMate(characterIndex);
+}
+
 bool IsTargetAttackable(int characterIndex)
 {
     if (!IsValidAutoCombatTarget(characterIndex))
+    {
+        return false;
+    }
+
+    if (IsAndroidSiegeAutoAim() && CharactersClient[characterIndex].Object.Kind == KIND_PLAYER
+        && !IsSiegeOpposingPlayer(characterIndex))
+    {
+        return false;
+    }
+
+    if (CharactersClient[characterIndex].Object.Kind == KIND_PLAYER && IsPlayerExcludedByAimMode(characterIndex))
     {
         return false;
     }
@@ -6607,7 +6897,9 @@ int GetAndroidTileDistance2(int characterIndex)
 
 bool IsVirtualPkTargetingEnabled()
 {
-    if (g_pBCustomMenuInfo != nullptr && g_pBCustomMenuInfo->AutoCtrlPK)
+    // Only PVP mode aims at players first. Party and Guild mode pick from mobs
+    // and players together (FindAndroidMixedTarget).
+    if (GetAndroidAimMode() == kAimModePvp)
     {
         return true;
     }
@@ -6727,6 +7019,142 @@ int FindNearestTargetByKind(int objectKind, bool requireAttackable, bool require
 int FindNearestAttackablePlayerTarget(bool limitToAcquireRange)
 {
     return FindNearestTargetByKind(KIND_PLAYER, true, false, limitToAcquireRange);
+}
+
+// The server's top-damage boss bar is the one boss signal the client has, so a
+// monster counts as a boss while its bar is up; the classic world bosses are
+// recognised by class on top of that, before the first hit puts the bar up.
+static bool IsAndroidBossMonster(const CHARACTER* c)
+{
+    const int monsterClass = static_cast<int>(c->MonsterIndex);
+    if (monsterClass > 0 && BossHpBarShownFor(monsterClass))
+    {
+        return true;
+    }
+
+    switch (monsterClass)
+    {
+    case 275: // Kundun
+    case 459: // Selupan
+    case 561: // Medusa
+    case 361: // Nightmare
+    case 349: // Balgass
+        return true;
+    default:
+        return false;
+    }
+}
+
+// PVE mode: the nearest attackable, visible boss inside auto-acquire range, so
+// it outranks the mobs around it.
+int FindAndroidBossTarget()
+{
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return -1;
+    }
+
+    int bestIndex = -1;
+    int bestDist2 = 0;
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        const CHARACTER* c = &CharactersClient[i];
+        if (!IsValidAutoCombatTarget(i) || c->Object.Kind != KIND_MONSTER || !c->Object.Visible
+            || !IsAndroidBossMonster(c) || !IsWithinVirtualAutoAcquireRange(i) || !IsTargetAttackable(i))
+        {
+            continue;
+        }
+
+        const int dist2 = GetAndroidTileDistance2(i);
+        if (bestIndex < 0 || dist2 < bestDist2)
+        {
+            bestIndex = i;
+            bestDist2 = dist2;
+        }
+    }
+
+    return bestIndex;
+}
+
+// Party and Guild mode: the nearest attackable thing, mob or player. The player
+// exclusions (party, guild, union) live in IsTargetAttackable. A target already
+// held (by key) is kept while it stays attackable and in range, so equal
+// distances do not flick the aim between two targets every frame.
+int FindAndroidMixedTarget()
+{
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return -1;
+    }
+
+    static SHORT s_heldKey = -1;
+
+    int bestIndex = -1;
+    int bestDist2 = 0;
+    int heldIndex = -1;
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        const CHARACTER* c = &CharactersClient[i];
+        if (!IsValidAutoCombatTarget(i) || !c->Object.Visible || i == GetHeroCharacterIndex()
+            || !IsWithinVirtualAutoAcquireRange(i) || !IsTargetAttackable(i))
+        {
+            continue;
+        }
+
+        if (c->Object.Kind == KIND_PLAYER && IsCharacterInSafeZone(i))
+        {
+            continue;
+        }
+
+        if (s_heldKey != -1 && c->Key == s_heldKey)
+        {
+            heldIndex = i;
+        }
+
+        const int dist2 = GetAndroidTileDistance2(i);
+        if (bestIndex < 0 || dist2 < bestDist2)
+        {
+            bestIndex = i;
+            bestDist2 = dist2;
+        }
+    }
+
+    const int picked = heldIndex >= 0 ? heldIndex : bestIndex;
+    s_heldKey = picked >= 0 ? CharactersClient[picked].Key : static_cast<SHORT>(-1);
+    return picked;
+}
+
+// The mode-specific part of the offensive pick, run ahead of the generic chain
+// in EnsureOffensiveSkillTarget / EnsureNormalAttackTarget. Returns true when it
+// set SelectedCharacter. A siege war keeps its own rules (PVP path).
+bool ApplyAndroidAimModePick()
+{
+    if (IsAndroidSiegeAutoAim())
+    {
+        return false;
+    }
+
+    int picked = -1;
+    switch (GetAndroidAimMode())
+    {
+    case kAimModePve:
+        picked = FindAndroidBossTarget();
+        break;
+    case kAimModeParty:
+    case kAimModeGuild:
+        picked = FindAndroidMixedTarget();
+        break;
+    default:
+        break;
+    }
+
+    if (picked < 0)
+    {
+        return false;
+    }
+
+    SelectedCharacter = picked;
+    return true;
 }
 
 int FindNearestVisiblePlayerTarget(bool requireAttackable)
@@ -7242,6 +7670,11 @@ void EnsureOffensiveSkillTarget()
         return;
     }
 
+    if (ApplyAndroidAimModePick())
+    {
+        return;
+    }
+
     // PK mode aims at players first - ahead of the keep-current check below, or
     // a monster left over in SelectedCharacter would outrank them. An area
     // spell cast at the player still hits monsters around them.
@@ -7375,6 +7808,34 @@ void EnsureSupportSkillTarget()
         return;
     }
 
+    // Party and Guild mode: the buff goes to the nearest party member first.
+    const int aimMode = GetAndroidAimMode();
+    if ((aimMode == kAimModeParty || aimMode == kAimModeGuild) && Hero != nullptr)
+    {
+        int bestParty = -1;
+        int bestDist2 = 0;
+        for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+        {
+            if (!IsAndroidBuffableTarget(i, heroIdx) || !g_pPartyManager->IsPartyMember(i))
+            {
+                continue;
+            }
+
+            const int dist2 = GetAndroidTileDistance2(i);
+            if (bestParty < 0 || dist2 < bestDist2)
+            {
+                bestParty = i;
+                bestDist2 = dist2;
+            }
+        }
+
+        if (bestParty >= 0)
+        {
+            SelectedCharacter = bestParty;
+            return;
+        }
+    }
+
     if (IsAndroidBuffableTarget(SelectedCharacter, heroIdx))
     {
         return;
@@ -7413,6 +7874,11 @@ void EnsureNormalAttackTarget()
     if (IsAndroidAimHolding())
     {
         SelectedCharacter = -1;
+        return;
+    }
+
+    if (ApplyAndroidAimModePick())
+    {
         return;
     }
 
@@ -7610,6 +8076,9 @@ void DrawVirtualRectFilled(float uiX, float uiY, float uiW, float uiH, float red
 void DrawVirtualRectOutline(float uiX, float uiY, float uiW, float uiH, float red, float green, float blue, float alpha, float lineWidth);
 void DrawVirtualCircle(float uiX, float uiY, float uiRadius, float red, float green, float blue, float alpha, bool filled);
 void DrawVirtualRightPanelButtonBox(const AndroidUiRect& rect, bool active);
+void DrawAimCrosshair(float cx, float cy, bool locked);
+// Black scheme shared by the pop-up menus (item drop, AIM, skill list, target list, trade list).
+void DrawVirtualBlackPanel(float x, float y, float w, float h, float headerH);
 
 // ---------------------------------------------------------------------------
 // Dropped item menu. Tapping an item opens this instead of interacting with the
@@ -8276,11 +8745,7 @@ void DrawItemMenuBox(ITEM item, float menuX, float menuY, int page, int count, b
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    DrawVirtualRectFilled(boxX - 3.0f, boxY - 3.0f, boxW + 6.0f, boxH + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
-    DrawVirtualRectFilled(boxX, boxY, boxW, boxH, 0.10f, 0.04f, 0.05f, 0.78f);
-    DrawVirtualRectFilled(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
-    DrawVirtualRectOutline(boxX, boxY, boxW, boxH, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
-    DrawVirtualRectOutline(boxX + 2.0f, boxY + 2.0f, boxW - 4.0f, boxH - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
+    DrawVirtualBlackPanel(boxX, boxY, boxW, boxH, 0.0f);
 
     // Collapse toggle, drawn here rather than after the rows below. Every other
     // primitive in this function is drawn before its TextDraw - the button
@@ -8293,9 +8758,9 @@ void DrawItemMenuBox(ITEM item, float menuX, float menuY, int page, int count, b
     {
         const AndroidUiRect toggleRect = GetItemMenuToggleRectAt(menuX, menuY);
         DrawVirtualRectFilled(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
-                              0.16f, 0.06f, 0.07f, 0.92f);
+                              0.10f, 0.10f, 0.11f, 0.92f);
         DrawVirtualRectOutline(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
-                               0.98f, 0.82f, 0.34f, 0.98f, 1.6f);
+                               0.55f, 0.55f, 0.58f, 0.98f, 1.6f);
         DrawVirtualRectFilled(toggleRect.x + 3.0f,
                               toggleRect.y + (toggleRect.h * 0.5f) - 1.5f,
                               toggleRect.w - 6.0f, 3.0f,
@@ -8740,10 +9205,10 @@ void AndroidRegisterOverlayRender()
     // Same layered shadow/fill/border treatment as the item menu and pickers.
     DrawVirtualRectFilled(kRegPanelX - 4.0f, panelY - 4.0f, kRegPanelW + 8.0f, panelH + 8.0f,
                           0.0f, 0.0f, 0.0f, 0.55f);
-    DrawVirtualRectFilled(kRegPanelX, panelY, kRegPanelW, panelH, 0.10f, 0.04f, 0.05f, 0.92f);
+    DrawVirtualRectFilled(kRegPanelX, panelY, kRegPanelW, panelH, 0.02f, 0.02f, 0.03f, 0.92f);
     DrawVirtualRectFilled(kRegPanelX + 2.0f, panelY + 2.0f, kRegPanelW - 4.0f, panelH - 4.0f,
-                          0.22f, 0.09f, 0.10f, 0.80f);
-    DrawVirtualRectOutline(kRegPanelX, panelY, kRegPanelW, panelH, 0.86f, 0.34f, 0.34f, 0.96f, 2.0f);
+                          0.08f, 0.08f, 0.09f, 0.80f);
+    DrawVirtualRectOutline(kRegPanelX, panelY, kRegPanelW, panelH, 0.40f, 0.40f, 0.43f, 0.96f, 2.0f);
 
     // Field boxes and the caret first, while texturing is still off - TextDraw
     // leaves it enabled, and an untextured rect drawn after one renders nothing
@@ -9253,8 +9718,7 @@ void AndroidRenderNpcPickerImpl()
 
     DrawVirtualRectFilled(panelX - 3.0f, panelY - 3.0f, kNpcPickerW + 6.0f, panelH + 6.0f,
                           0.0f, 0.0f, 0.0f, 0.42f);
-    DrawVirtualRectFilled(panelX, panelY, kNpcPickerW, panelH, 0.10f, 0.04f, 0.05f, 0.80f);
-    DrawVirtualRectOutline(panelX, panelY, kNpcPickerW, panelH, 0.86f, 0.34f, 0.34f, 0.94f, 1.6f);
+    DrawVirtualBlackPanel(panelX, panelY, kNpcPickerW, panelH, 0.0f);
 
     if (!g_androidNpcPicker.minimized)
     {
@@ -9269,7 +9733,7 @@ void AndroidRenderNpcPickerImpl()
     {
         const AndroidUiRect toggleRect = GetAndroidNpcPickerToggleRect();
         DrawVirtualRectFilled(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
-                              0.16f, 0.06f, 0.07f, 0.92f);
+                              0.10f, 0.10f, 0.11f, 0.92f);
         DrawVirtualRectOutline(toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h,
                                0.98f, 0.82f, 0.34f, 0.98f, 1.4f);
         DrawVirtualRectFilled(toggleRect.x + 3.0f, toggleRect.y + (toggleRect.h * 0.5f) - 1.5f,
@@ -9336,12 +9800,7 @@ void RenderItemMenu()
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        DrawVirtualRectFilled(g_itemMenuX - 3.0f, g_itemMenuY - 3.0f,
-                              kItemMenuWidth + 6.0f, barH + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
-        DrawVirtualRectFilled(g_itemMenuX, g_itemMenuY, kItemMenuWidth, barH,
-                              0.10f, 0.04f, 0.05f, 0.78f);
-        DrawVirtualRectOutline(g_itemMenuX, g_itemMenuY, kItemMenuWidth, barH,
-                               0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
+        DrawVirtualBlackPanel(g_itemMenuX, g_itemMenuY, kItemMenuWidth, barH, 0.0f);
 
         char szBar[24];
         std::snprintf(szBar, sizeof(szBar), "Items (%d)", g_itemMenuCount);
@@ -10306,6 +10765,67 @@ void RenderVoiceChannelButton()
     {
         person(cx, cy + (3.5f * u), 1.15f);
     }
+
+    EndBitmap();
+}
+
+// Reset camera: under the mic button. Lit while the camera is anywhere but the default view.
+AndroidUiRect GetCameraResetButtonRect()
+{
+    const AndroidUiRect mic = GetVoiceMicButtonRect();
+
+    return { mic.x, mic.y + mic.h + kTopBarButtonGap, mic.w, mic.h };
+}
+
+bool HitTestCameraResetButton(float uiX, float uiY)
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return false;
+    }
+
+    const AndroidUiRect rect = GetCameraResetButtonRect();
+    const float pad = 4.0f;
+
+    return (uiX >= (rect.x - pad) && uiX <= (rect.x + rect.w + pad)
+         && uiY >= (rect.y - pad) && uiY <= (rect.y + rect.h + pad));
+}
+
+void RenderCameraResetButton()
+{
+    if (!IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const AndroidUiRect rect = GetCameraResetButtonRect();
+    const bool moved = IsAndroidCameraNonDefault();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
+                          moved ? 0.46f : 0.0f, moved ? 0.30f : 0.0f, moved ? 0.04f : 0.0f, moved ? 0.88f : 0.45f);
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                           moved ? 1.00f : 0.85f, moved ? 0.78f : 0.85f, moved ? 0.25f : 0.90f, moved ? 0.98f : 0.35f, moved ? 1.6f : 1.0f);
+
+    // A camera: body, lens and the circular arrow of "back to start" around it is too small
+    // to read here, so it is the lens ring with an open top and an arrowhead.
+    const float cx = rect.x + (rect.w * 0.5f);
+    const float cy = rect.y + (rect.h * 0.5f);
+    const float u = rect.h / 34.0f;
+    const float ir = moved ? 1.0f : 0.80f;
+    const float ig = moved ? 0.90f : 0.85f;
+    const float ib = moved ? 0.45f : 0.95f;
+
+    DrawVirtualCircle(cx, cy, 8.0f * u, ir, ig, ib, 0.95f, false);
+    DrawVirtualCircle(cx, cy, 2.4f * u, ir, ig, ib, 0.95f, true);
+    DrawVirtualRectFilled(cx - 3.0f * u, cy - 9.5f * u, 6.0f * u, 3.0f * u, 0.0f, 0.0f, 0.0f, 0.85f);
+    DrawVirtualRectFilled(cx + 1.0f * u, cy - 12.0f * u, 4.0f * u, 1.6f * u, ir, ig, ib, 0.95f);
+    DrawVirtualRectFilled(cx + 3.6f * u, cy - 13.2f * u, 1.6f * u, 4.0f * u, ir, ig, ib, 0.95f);
 
     EndBitmap();
 }
@@ -11406,11 +11926,7 @@ void TriggerVirtualRightPanelUtilityAction(int button)
     switch (button)
     {
     case kVirtualRightPanelUtilityActionPk:
-        if (g_pBCustomMenuInfo != nullptr)
-        {
-            g_pBCustomMenuInfo->AutoCtrlPK ^= 1;
-            PlayBuffer(SOUND_CLICK01);
-        }
+        ToggleAndroidAimMenu();
         break;
 
     case kVirtualRightPanelUtilityActionChat:
@@ -12841,6 +13357,175 @@ bool HandleAndroidTargetPickerFingerUp(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    return true;
+}
+
+// ---- AIM drag-to-lock ------------------------------------------------------
+// Press the AIM button, drag onto a player, let go: that player is locked. A
+// plain tap (no drag) keeps the old behaviour - it opens the list.
+bool ProjectWorldPointWithSnapshot(const vec3_t position, float& outUiX, float& outUiY);
+
+struct AndroidAimDragState
+{
+    bool active = false;
+    bool moved = false;
+    bool wasLocked = false;
+    SDL_FingerID finger = static_cast<SDL_FingerID>(-1);
+    float startX = 0.0f;
+    float startY = 0.0f;
+    float curX = 0.0f;
+    float curY = 0.0f;
+    int lastCandidate = -1;
+};
+AndroidAimDragState g_androidAimDrag{};
+constexpr float kAimDragMoveThresholdUi = 10.0f;
+constexpr float kAimDragSnapRadiusUi = 46.0f;
+
+// The player the point is on or nearest to (within the snap radius), among the
+// ones the AIM list would offer. -1 when none.
+int FindAndroidAimDragTarget(float uiX, float uiY)
+{
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return -1;
+    }
+
+    int best = -1;
+    float bestDist2 = kAimDragSnapRadiusUi * kAimDragSnapRadiusUi;
+
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        if (!IsAndroidTargetPickerCandidate(i))
+        {
+            continue;
+        }
+
+        const OBJECT* o = &CharactersClient[i].Object;
+        vec3_t body;
+        Vector(o->Position[0], o->Position[1], o->Position[2] + 90.0f, body);
+
+        float sx = 0.0f;
+        float sy = 0.0f;
+        if (!ProjectWorldPointWithSnapshot(body, sx, sy))
+        {
+            continue;
+        }
+
+        const float dx = uiX - sx;
+        const float dy = uiY - sy;
+        const float d2 = (dx * dx) + (dy * dy);
+        if (d2 < bestDist2)
+        {
+            bestDist2 = d2;
+            best = i;
+        }
+    }
+
+    return best;
+}
+
+bool HandleTargetSelectButtonTap();
+
+// Finger down on the AIM button. A lock that is held is let go right away (the
+// same "second tap is let go" as before) but the finger can still carry on and
+// drag onto a new target.
+bool BeginAndroidAimDrag(const SDL_TouchFingerEvent& touch, float uiX, float uiY)
+{
+    if (g_androidTargetPicker.visible)
+    {
+        return HandleTargetSelectButtonTap();
+    }
+
+    const bool wasLocked = IsAndroidTargetLockActive();
+    if (wasLocked)
+    {
+        ClearAndroidTargetLock("button-toggle");
+        ClearAndroidPkStickyTarget("button-toggle");
+        PlayBuffer(SOUND_CLICK01);
+    }
+
+    g_androidAimDrag = AndroidAimDragState{};
+    g_androidAimDrag.active = true;
+    g_androidAimDrag.wasLocked = wasLocked;
+    g_androidAimDrag.finger = touch.fingerId;
+    g_androidAimDrag.startX = g_androidAimDrag.curX = uiX;
+    g_androidAimDrag.startY = g_androidAimDrag.curY = uiY;
+    return true;
+}
+
+bool IsAndroidAimDragActive()
+{
+    return g_androidAimDrag.active;
+}
+
+bool HandleAndroidAimDragMotion(const SDL_TouchFingerEvent& touch)
+{
+    if (!g_androidAimDrag.active || touch.fingerId != g_androidAimDrag.finger)
+    {
+        return false;
+    }
+
+    float uiX = 0.0f;
+    float uiY = 0.0f;
+    TouchToVirtualUi(touch, uiX, uiY);
+    g_androidAimDrag.curX = uiX;
+    g_androidAimDrag.curY = uiY;
+
+    const float dx = uiX - g_androidAimDrag.startX;
+    const float dy = uiY - g_androidAimDrag.startY;
+    if ((dx * dx) + (dy * dy) > kAimDragMoveThresholdUi * kAimDragMoveThresholdUi)
+    {
+        g_androidAimDrag.moved = true;
+    }
+
+    // A short tick each time the ring lands on a different player.
+    if (g_androidAimDrag.moved)
+    {
+        const int candidate = FindAndroidAimDragTarget(uiX, uiY);
+        if (candidate != g_androidAimDrag.lastCandidate)
+        {
+            g_androidAimDrag.lastCandidate = candidate;
+            if (candidate >= 0)
+            {
+                AndroidHapticPulse(12);
+            }
+        }
+    }
+    return true;
+}
+
+bool HandleAndroidAimDragUp(const SDL_TouchFingerEvent& touch)
+{
+    if (!g_androidAimDrag.active || touch.fingerId != g_androidAimDrag.finger)
+    {
+        return false;
+    }
+
+    const AndroidAimDragState drag = g_androidAimDrag;
+    g_androidAimDrag = AndroidAimDragState{};
+
+    if (!drag.moved)
+    {
+        // A tap: open the list, unless it was only letting go of a lock.
+        if (!drag.wasLocked && IsAndroidAimAvailable())
+        {
+            ShowAndroidTargetPicker();
+            PlayBuffer(SOUND_CLICK01);
+        }
+        return true;
+    }
+
+    if (!IsAndroidAimAvailable())
+    {
+        return true;
+    }
+
+    const int target = FindAndroidAimDragTarget(drag.curX, drag.curY);
+    if (target >= 0)
+    {
+        SetAndroidTargetLock(target);
+        PlayBuffer(SOUND_CLICK01);
+    }
     return true;
 }
 
@@ -14456,10 +15141,9 @@ void RenderAndroidTutorialAimButtonPreview(bool locked, const char* lockedName)
                            locked ? 0.30f : 0.86f,
                            0.94f, 2.0f);
 
+    DrawAimCrosshair(kTargetSelectButtonCx, kTargetSelectButtonCy, locked);
+
     HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
-    TextDraw(font, static_cast<int>(rect.x), static_cast<int>(rect.y + rect.h * 0.5f - 5.0f),
-             locked ? 0xFFB0B0FF : 0xFFFFFFFF, 0x0,
-             static_cast<int>(rect.w), 0, 3, "%s", locked ? "LOCK" : "AIM");
 
     if (locked && lockedName != nullptr)
     {
@@ -14516,11 +15200,11 @@ void RenderAndroidTutorialTargetPickerExample()
                           1.0f, 0.86f, 0.20f, 0.55f);
 
     DrawVirtualRectFilled(rect.x - 3.0f, rect.y - 3.0f, rect.w + 6.0f, rect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
-    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.10f, 0.04f, 0.05f, 0.78f);
-    DrawVirtualRectFilled(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
-    DrawVirtualRectFilled(rect.x + 3.0f, rect.y + 3.0f, rect.w - 6.0f, kTargetPickerHeaderH - 6.0f, 0.62f, 0.24f, 0.24f, 0.36f);
-    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
-    DrawVirtualRectOutline(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
+    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.02f, 0.02f, 0.03f, 0.78f);
+    DrawVirtualRectFilled(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.08f, 0.08f, 0.09f, 0.64f);
+    DrawVirtualRectFilled(rect.x + 3.0f, rect.y + 3.0f, rect.w - 6.0f, kTargetPickerHeaderH - 6.0f, 0.12f, 0.12f, 0.13f, 0.36f);
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.40f, 0.40f, 0.43f, 0.94f, 2.0f);
+    DrawVirtualRectOutline(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, rect.h - 4.0f, 0.40f, 0.40f, 0.43f, 0.94f, 1.0f);
 
     for (int row = 0; row < kAndroidTutorialAimRowCount; ++row)
     {
@@ -15536,6 +16220,11 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         }
     }
 
+    if (g_androidAimMenuVisible && HandleAndroidAimMenuFingerDown(uiX, uiY))
+    {
+        return true;
+    }
+
     if (g_androidTradePicker.visible && HandleAndroidTradePickerFingerDown(touch, uiX, uiY))
     {
         return true;
@@ -15842,11 +16531,24 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // Reset camera: acts on finger-down like the mic and channel buttons, and the release
+    // is swallowed the same way.
+    if (HitTestCameraResetButton(uiX, uiY))
+    {
+        g_voicePttFingerId = touch.fingerId;
+
+        ResetAndroidCamera();
+
+        AndroidHapticPulse(20);
+        PlayBuffer(SOUND_CLICK01);
+        return true;
+    }
+
     // Ahead of the attack button: GetVirtualButtonHitRadius pads that circle by
     // 8, so testing it first would let it claim taps meant for this one.
     if (IsAndroidAimAvailable() && HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
     {
-        return HandleTargetSelectButtonTap();
+        return BeginAndroidAimDrag(touch, uiX, uiY);
     }
 
     if (HitTestSkillPageButton(uiX, uiY))
@@ -15877,11 +16579,7 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
 
     if (HitTestVirtualPkToggle(uiX, uiY))
     {
-        if (g_pBCustomMenuInfo != nullptr)
-        {
-            g_pBCustomMenuInfo->AutoCtrlPK ^= 1;
-            PlayBuffer(SOUND_CLICK01);
-        }
+        ToggleAndroidAimMenu();
         return true;
     }
 
@@ -16004,6 +16702,12 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
     // Keeps both tracked finger positions current, and owns the motion outright
     // once the pinch is running so the joystick cannot also act on it.
     if (HandleAndroidPinchFingerMotion(touch))
+    {
+        return true;
+    }
+
+    // Dragging out of the AIM button onto a player.
+    if (HandleAndroidAimDragMotion(touch))
     {
         return true;
     }
@@ -16222,6 +16926,11 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         ReleaseVirtualPadFinger(touch.fingerId);
         FinishAndroidBagHoldFingerUp(touch.fingerId);
         FinishAndroidEquipHoldFingerUp(touch.fingerId);
+        return true;
+    }
+
+    if (HandleAndroidAimDragUp(touch))
+    {
         return true;
     }
 
@@ -17238,6 +17947,11 @@ void DrawVirtualCircle(float uiX, float uiY, float uiRadius, float red, float gr
 
 void DrawVirtualCombatButtonFrame(float uiX, float uiY, float uiRadius, bool pressed, bool assignGlow)
 {
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    TextureEnable = false;
+    AlphaBlendType = -1;
     const float scale = pressed ? 0.94f : 1.0f;
     const float radius = uiRadius * scale;
     const float glowAlpha = assignGlow ? 0.28f : 0.0f;
@@ -17247,10 +17961,10 @@ void DrawVirtualCombatButtonFrame(float uiX, float uiY, float uiRadius, bool pre
         DrawVirtualCircle(uiX, uiY, radius + 4.0f, 0.74f, 0.92f, 1.0f, glowAlpha, true);
     }
 
-    DrawVirtualCircle(uiX, uiY, radius, 0.26f, 0.46f, 0.86f, pressed ? 0.92f : 0.78f, true);
-    DrawVirtualCircle(uiX, uiY, radius * 0.76f, 0.10f, 0.18f, 0.34f, pressed ? 0.92f : 0.80f, true);
-    glLineWidth(2.2f);
-    DrawVirtualCircle(uiX, uiY, radius, 0.88f, 0.96f, 1.0f, pressed ? 1.0f : 0.84f, false);
+    DrawVirtualCircle(uiX, uiY, radius, 0.04f, 0.06f, 0.08f, pressed ? 0.96f : 0.82f, true);
+    DrawVirtualCircle(uiX, uiY, radius * 0.84f, 0.14f, 0.16f, 0.18f, pressed ? 0.92f : 0.60f, true);
+    glLineWidth(1.0f);
+    DrawVirtualCircle(uiX, uiY, radius, 0.78f, 0.65f, 0.41f, pressed ? 1.0f : 0.65f, false);
     glLineWidth(1.0f);
 }
 
@@ -17380,7 +18094,7 @@ void DrawVirtualBarHFlushBorders()
         return;
     }
 
-    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glColor4f(0.38f, 0.43f, 0.49f, 0.65f);
     glBegin(GL_LINES);
     for (const PendingBarBorder& b : s_pendingBarBorders)
     {
@@ -17742,39 +18456,21 @@ static void DrawIconButtonUv(float uiX, float uiY, float uiW, float uiH,
 // that ambient state instead of pushing/popping it again per slot.
 static void DrawVirtualSkillBoxFrame(float uiX, float uiY, float uiRadius, bool pressed, bool assignGlow)
 {
-    EnsureUITextures();
-
-    const float scale = pressed ? 0.94f : 1.0f;
-    const float radius = uiRadius * scale;
-
-    if (assignGlow)
-    {
-        DrawVirtualCircle(uiX, uiY, radius + 4.0f, 0.74f, 0.92f, 1.0f, 0.28f, true);
-    }
-
-    DrawIconButtonUv(
-        uiX - radius, uiY - radius, radius * 2.0f, radius * 2.0f,
-        g_uiTex_skillbox,
-        kSkillBoxU, kSkillBoxV, kSkillBoxUW, kSkillBoxVH,
-        pressed ? 0.85f : 1.0f);
+    // Shared with Q/W/E/R: one quiet frame instead of ornate, mismatched art.
+    DrawVirtualCombatButtonFrame(uiX, uiY, uiRadius, pressed, assignGlow);
 }
 
-// skillline.png border drawn around a skill button to mark it as the
-// currently-armed slot, replacing the old gold GL glow+double-ring. Drawn
-// bigger than the button itself (same footprint the old glow covered, out to
-// roughly radius+6.5) so the ornate ring reads as a border around the icon
-// rather than covering it. Same no-Begin/End reasoning as
-// DrawVirtualSkillBoxFrame above.
+// A thin outer gold ring marks the armed slot without covering its icon.
+// Called inside the skill pass's existing bitmap projection.
 static void DrawVirtualSkillSelectedBorder(float uiX, float uiY, float uiRadius, float alpha = 1.0f)
 {
-    EnsureUITextures();
-
-    const float borderRadius = uiRadius + 7.0f;
-    DrawIconButtonUv(
-        uiX - borderRadius, uiY - borderRadius, borderRadius * 2.0f, borderRadius * 2.0f,
-        g_uiTex_skillline,
-        kSkillLineU, kSkillLineV, kSkillLineUW, kSkillLineVH,
-        alpha);
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    TextureEnable = false;
+    AlphaBlendType = -1;
+    glLineWidth(1.0f);
+    DrawVirtualCircle(uiX, uiY, uiRadius + 2.0f, 0.88f, 0.73f, 0.45f, alpha, false);
 }
 
 static void DrawVirtualTopRightTextButton(const AndroidUiRect& rect, const TCHAR* label, bool active)
@@ -18042,19 +18738,45 @@ void RenderVirtualRightPanelModeButtonLabel(const AndroidUiRect& rect)
 
 void DrawVirtualRightPanelButtonBox(const AndroidUiRect& rect, bool active)
 {
-    const float borderR = active ? 0.98f : 0.16f;
-    const float borderG = active ? 0.82f : 0.28f;
-    const float borderB = active ? 0.34f : 0.56f;
-    const float fillR = active ? 0.16f : 0.06f;
-    const float fillG = active ? 0.22f : 0.12f;
-    const float fillB = active ? 0.34f : 0.22f;
-
-    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.01f, 0.03f, 0.08f, 0.92f);
-    DrawVirtualRectFilled(rect.x + 1.0f, rect.y + 1.0f, rect.w - 2.0f, rect.h - 2.0f, fillR, fillG, fillB, active ? 0.92f : 0.84f);
-    DrawVirtualRectFilled(rect.x + 2.0f, rect.y + 2.0f, rect.w - 4.0f, 3.0f, 0.76f, 0.88f, 1.0f, active ? 0.22f : 0.14f);
-    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, borderR, borderG, borderB, active ? 0.98f : 0.86f, 1.8f);
-    DrawVirtualRectOutline(rect.x + 1.0f, rect.y + 1.0f, rect.w - 2.0f, rect.h - 2.0f, 0.03f, 0.05f, 0.12f, 0.96f, 1.0f);
+    DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
+                          active ? 0.14f : 0.04f, active ? 0.13f : 0.06f,
+                          active ? 0.10f : 0.08f, 0.88f);
+    if (active)
+    {
+        DrawVirtualRectFilled(rect.x + 3.0f, rect.y + rect.h - 2.0f,
+                              rect.w - 6.0f, 1.0f, 0.88f, 0.73f, 0.45f, 1.0f);
+    }
+    DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
+                           active ? 0.78f : 0.35f, active ? 0.65f : 0.40f,
+                           active ? 0.41f : 0.46f, active ? 0.85f : 0.50f, 1.0f);
 }
+
+// Crosshair icon of the AIM button: a ring, four ticks and a centre dot. Red once locked.
+void DrawAimCrosshair(float cx, float cy, bool locked)
+{
+    const float r = locked ? 1.00f : 0.92f;
+    const float g = locked ? 0.22f : 0.92f;
+    const float b = locked ? 0.22f : 0.95f;
+
+    DrawVirtualCircle(cx, cy, 8.0f, r, g, b, 0.95f, false);
+    DrawVirtualRectFilled(cx - 13.0f, cy - 0.75f, 9.0f, 1.5f, r, g, b, 0.95f);
+    DrawVirtualRectFilled(cx + 4.0f, cy - 0.75f, 9.0f, 1.5f, r, g, b, 0.95f);
+    DrawVirtualRectFilled(cx - 0.75f, cy - 13.0f, 1.5f, 9.0f, r, g, b, 0.95f);
+    DrawVirtualRectFilled(cx - 0.75f, cy + 4.0f, 1.5f, 9.0f, r, g, b, 0.95f);
+    DrawVirtualCircle(cx, cy, 1.7f, r, g, b, 1.0f, true);
+}
+
+void DrawVirtualBlackPanel(float x, float y, float w, float h, float headerH)
+{
+    DrawVirtualRectFilled(x - 3.0f, y - 3.0f, w + 6.0f, h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
+    DrawVirtualRectFilled(x, y, w, h, 0.02f, 0.02f, 0.03f, 0.90f);
+    if (headerH > 0.0f)
+    {
+        DrawVirtualRectFilled(x + 3.0f, y + 3.0f, w - 6.0f, headerH - 6.0f, 0.12f, 0.12f, 0.13f, 0.90f);
+    }
+    DrawVirtualRectOutline(x, y, w, h, 0.40f, 0.40f, 0.43f, 0.95f, 1.5f);
+}
+
 
 // Projection() but reading the snapshot AndroidCaptureWorldCamera() took while
 // the world camera was still live, instead of the globals - which by overlay
@@ -18379,16 +19101,12 @@ void RenderAndroidChatTabs()
         const bool active = IsChatTabActive(tab);
 
         DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
-                              active ? 1.00f : 0.10f,
-                              active ? 0.82f : 0.09f,
-                              active ? 0.10f : 0.08f,
-                              active ? 1.00f : 0.75f);
-        DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
-                               active ? 1.00f : 0.35f,
-                               active ? 0.92f : 0.30f,
-                               active ? 0.40f : 0.22f,
-                               active ? 1.00f : 0.85f,
-                               active ? 1.5f : 1.0f);
+                              0.04f, 0.06f, 0.08f, active ? 0.92f : 0.70f);
+        if (active)
+        {
+            DrawVirtualRectFilled(rect.x + 2.0f, rect.y + rect.h - 2.0f,
+                                  rect.w - 4.0f, 1.0f, 0.88f, 0.73f, 0.45f, 1.0f);
+        }
 
         TextDraw(font,
                  static_cast<int>(rect.x),
@@ -18724,6 +19442,150 @@ void RenderComboToggle()
     EndBitmap();
 }
 
+// ---- Aim mode popup, opened by the PK button --------------------------------
+constexpr float kAimMenuW = 118.0f;
+constexpr float kAimMenuRowH = 24.0f;
+
+constexpr const char* kAimModeNames[kAimModeCount] = { "PVE Mode", "PVP Mode", "Party Mode", "Guild Mode" };
+constexpr const char* kAimModeShortNames[kAimModeCount] = { "PVE", "PVP", "PARTY", "GUILD" };
+// Marker colours (r, g, b) - green, red, blue, yellow.
+constexpr float kAimModeColors[kAimModeCount][3] = {
+    { 0.20f, 0.85f, 0.25f }, { 0.90f, 0.20f, 0.20f }, { 0.25f, 0.50f, 0.95f }, { 0.95f, 0.78f, 0.15f } };
+
+// Opens above the PK button, right edges aligned.
+AndroidUiRect GetAimMenuRect()
+{
+    const AndroidUiRect pk = GetPkToggleRect();
+    const float h = kAimMenuRowH * kAimModeCount + 6.0f;
+    return { pk.x + pk.w - kAimMenuW, pk.y - h - 6.0f, kAimMenuW, h };
+}
+
+AndroidUiRect GetAimMenuRowRect(int row)
+{
+    const AndroidUiRect box = GetAimMenuRect();
+    return { box.x + 3.0f, box.y + 3.0f + kAimMenuRowH * row, box.w - 6.0f, kAimMenuRowH };
+}
+
+// While open it owns every touch: a row picks that mode, anything else closes it.
+bool HandleAndroidAimMenuFingerDown(float uiX, float uiY)
+{
+    if (!g_androidAimMenuVisible)
+    {
+        return false;
+    }
+
+    for (int row = 0; row < kAimModeCount; ++row)
+    {
+        if (HitTestAndroidUiRect(uiX, uiY, GetAimMenuRowRect(row)))
+        {
+            SetAndroidAimMode(row);
+            g_androidAimMenuVisible = false;
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+    }
+
+    g_androidAimMenuVisible = false;
+    return true;
+}
+
+// The line from the AIM button to the finger while dragging, a ring on the finger
+// and a red ring on the player it would lock.
+void RenderAndroidAimDrag()
+{
+    if (!g_androidAimDrag.active || !g_androidAimDrag.moved)
+    {
+        return;
+    }
+
+    const AndroidUiRect button = GetTargetSelectButtonRect();
+    const float bx = button.x + (button.w * 0.5f);
+    const float by = button.y + (button.h * 0.5f);
+    const float fx = g_androidAimDrag.curX;
+    const float fy = g_androidAimDrag.curY;
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    const float dx = fx - bx;
+    const float dy = fy - by;
+    const float len = std::sqrt((dx * dx) + (dy * dy));
+    const int dots = std::min(60, static_cast<int>(len / 7.0f));
+    for (int i = 1; i < dots; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(dots);
+        DrawVirtualCircle(bx + (dx * t), by + (dy * t), 1.6f, 1.0f, 0.25f, 0.25f, 0.85f, true);
+    }
+
+    const int target = FindAndroidAimDragTarget(fx, fy);
+    if (target >= 0)
+    {
+        const OBJECT* o = &CharactersClient[target].Object;
+        vec3_t body;
+        Vector(o->Position[0], o->Position[1], o->Position[2] + 90.0f, body);
+        float sx = 0.0f;
+        float sy = 0.0f;
+        if (ProjectWorldPointWithSnapshot(body, sx, sy))
+        {
+            DrawVirtualCircle(sx, sy, 22.0f, 1.0f, 0.1f, 0.1f, 0.35f, true);
+            DrawVirtualCircle(sx, sy, 22.0f, 1.0f, 0.1f, 0.1f, 1.0f, false);
+        }
+    }
+
+    DrawVirtualCircle(fx, fy, 12.0f, 1.0f, 1.0f, 1.0f, 0.9f, false);
+
+    EndBitmap();
+}
+
+void RenderAndroidAimMenu()
+{
+    if (!g_androidAimMenuVisible || !IsVirtualPadAvailable())
+    {
+        return;
+    }
+
+    const AndroidUiRect box = GetAimMenuRect();
+    const int current = GetAndroidAimMode();
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualBlackPanel(box.x, box.y, box.w, box.h, 0.0f);
+
+    for (int row = 0; row < kAimModeCount; ++row)
+    {
+        const AndroidUiRect r = GetAimMenuRowRect(row);
+        if (row == current)
+        {
+            DrawVirtualRectFilled(r.x, r.y, r.w, r.h, 0.16f, 0.16f, 0.17f, 0.95f);
+        }
+        DrawVirtualRectFilled(r.x + 6.0f, r.y + (r.h * 0.5f) - 4.0f, 8.0f, 8.0f,
+                              kAimModeColors[row][0], kAimModeColors[row][1], kAimModeColors[row][2], 1.0f);
+    }
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    for (int row = 0; row < kAimModeCount; ++row)
+    {
+        const AndroidUiRect r = GetAimMenuRowRect(row);
+        TextDraw(font,
+                 static_cast<int>(r.x + 20.0f),
+                 static_cast<int>(r.y + 7.0f),
+                 row == current ? 0xFFFFFFFF : 0xFFC8CCD6,
+                 0x0,
+                 static_cast<int>(r.w - 22.0f),
+                 0, 1,
+                 "%s", kAimModeNames[row]);
+    }
+
+    EndBitmap();
+}
+
 // PK (auto-attack-PK) toggle, every class. Paired with HitTestVirtualPkToggle.
 void RenderPkToggle()
 {
@@ -18733,6 +19595,7 @@ void RenderPkToggle()
     }
 
     const bool pkActive = g_pBCustomMenuInfo != nullptr && g_pBCustomMenuInfo->AutoCtrlPK;
+    const int aimMode = GetAndroidAimMode();
     const AndroidUiRect rect = GetPkToggleRect();
 
     BeginBitmap();
@@ -18751,7 +19614,7 @@ void RenderPkToggle()
              0x0,
              static_cast<int>(rect.w),
              0, 3,
-             "%s", pkActive ? "PK ON" : "PK");
+             "%s", kAimModeShortNames[aimMode]);
 
     EndBitmap();
 }
@@ -18911,14 +19774,9 @@ void RenderTargetSelectButton()
                            locked ? 0.30f : 0.86f,
                            0.94f, 2.0f);
 
+    DrawAimCrosshair(kTargetSelectButtonCx, kTargetSelectButtonCy, locked);
+
     HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
-    TextDraw(font,
-             static_cast<int>(rect.x),
-             static_cast<int>(rect.y + rect.h * 0.5f - 5.0f),
-             locked ? 0xFFB0B0FF : 0xFFFFFFFF,
-             0x0,
-             static_cast<int>(rect.w),
-             0, 3, "%s", locked ? "LOCK" : "AIM");
 
     if (locked)
     {
@@ -19019,12 +19877,7 @@ void RenderAndroidSkillPickerList()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, 0.30f);
-    DrawVirtualRectFilled(pickerRect.x - 3.0f, pickerRect.y - 3.0f, pickerRect.w + 6.0f, pickerRect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
-    DrawVirtualRectFilled(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.05f, 0.08f, 0.14f, 0.82f);
-    DrawVirtualRectFilled(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.10f, 0.14f, 0.24f, 0.66f);
-    DrawVirtualRectFilled(pickerRect.x + 3.0f, pickerRect.y + 3.0f, pickerRect.w - 6.0f, kSkillPickerListHeaderH - 6.0f, 0.24f, 0.34f, 0.62f, 0.40f);
-    DrawVirtualRectOutline(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.34f, 0.52f, 0.90f, 0.94f, 2.0f);
-    DrawVirtualRectOutline(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.08f, 0.12f, 0.22f, 0.94f, 1.0f);
+    DrawVirtualBlackPanel(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, kSkillPickerListHeaderH);
 
     HFONT titleFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
     HFONT nameFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
@@ -19062,9 +19915,9 @@ void RenderAndroidSkillPickerList()
             const bool isCurrent = (Hero != nullptr && Hero->CurrentSkill == skillIndex);
 
             DrawVirtualRectFilled(rowRect.x, rowRect.y, rowRect.w, rowRect.h,
+                                  isCurrent ? 0.20f : 0.0f,
+                                  isCurrent ? 0.20f : 0.0f,
                                   isCurrent ? 0.22f : 0.0f,
-                                  isCurrent ? 0.32f : 0.0f,
-                                  isCurrent ? 0.52f : 0.0f,
                                   isCurrent ? 0.55f : 0.20f);
 
             ConfigureVirtualSkillIconNoBlendState();
@@ -19164,12 +20017,7 @@ void RenderAndroidTargetPicker()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, 0.24f);
-    DrawVirtualRectFilled(pickerRect.x - 3.0f, pickerRect.y - 3.0f, pickerRect.w + 6.0f, pickerRect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
-    DrawVirtualRectFilled(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.10f, 0.04f, 0.05f, 0.78f);
-    DrawVirtualRectFilled(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.22f, 0.09f, 0.10f, 0.64f);
-    DrawVirtualRectFilled(pickerRect.x + 3.0f, pickerRect.y + 3.0f, pickerRect.w - 6.0f, kTargetPickerHeaderH - 6.0f, 0.62f, 0.24f, 0.24f, 0.36f);
-    DrawVirtualRectOutline(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.86f, 0.34f, 0.34f, 0.94f, 2.0f);
-    DrawVirtualRectOutline(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.20f, 0.06f, 0.08f, 0.94f, 1.0f);
+    DrawVirtualBlackPanel(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, kTargetPickerHeaderH);
 
     for (int row = 0; row < GetAndroidTargetPickerRowCount(); ++row)
     {
@@ -19269,12 +20117,7 @@ void RenderAndroidTradePicker()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, 0.24f);
-    DrawVirtualRectFilled(pickerRect.x - 3.0f, pickerRect.y - 3.0f, pickerRect.w + 6.0f, pickerRect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
-    DrawVirtualRectFilled(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.04f, 0.08f, 0.14f, 0.76f);
-    DrawVirtualRectFilled(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.09f, 0.17f, 0.30f, 0.62f);
-    DrawVirtualRectFilled(pickerRect.x + 3.0f, pickerRect.y + 3.0f, pickerRect.w - 6.0f, kAndroidTradePickerHeaderH - 6.0f, 0.24f, 0.38f, 0.68f, 0.34f);
-    DrawVirtualRectOutline(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, 0.36f, 0.58f, 0.96f, 0.94f, 2.0f);
-    DrawVirtualRectOutline(pickerRect.x + 2.0f, pickerRect.y + 2.0f, pickerRect.w - 4.0f, pickerRect.h - 4.0f, 0.05f, 0.12f, 0.24f, 0.94f, 1.0f);
+    DrawVirtualBlackPanel(pickerRect.x, pickerRect.y, pickerRect.w, pickerRect.h, kAndroidTradePickerHeaderH);
 
     for (int row = 0; row < GetAndroidTradePickerRowCount(); ++row)
     {
@@ -19563,12 +20406,8 @@ void RenderVirtualTopBar()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Plain semi-transparent black plate, drawn inline rather than through
-    // DrawVirtualRightPanelButtonBox - that one is shared with the utility grid,
-    // the target picker and the item menu, which all still want the decorated
-    // blue style. Now that the icons carry the meaning, these only need to hold
-    // the art clear of the world behind them. Active slots go more opaque, which
-    // is the whole state cue left once the labels are gone.
+    // Charcoal plates keep the icon art readable over terrain. Active slots
+    // gain a gold underline; fills and outlines stay in separate batch passes.
     // TEMP profiling: this whole function measured ~7ms/frame. Split its three
     // per-slot loops (rects / icons / text) to find which primitive is costing.
     const Uint64 tbT0 = static_cast<Uint64>(MU_MobilePerfNow());
@@ -19588,7 +20427,12 @@ void RenderVirtualTopBar()
         const AndroidUiRect rect = GetTopBarButtonRect(slot);
         const bool active = IsTopBarSlotActive(slot);
         DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h,
-                              0.0f, 0.0f, 0.0f, (active ? 0.78f : 0.45f) * slotAlpha);
+                              0.04f, 0.06f, 0.08f, (active ? 0.94f : 0.78f) * slotAlpha);
+        if (active)
+        {
+            DrawVirtualRectFilled(rect.x + 3.0f, rect.y + rect.h - 2.0f,
+                                  rect.w - 6.0f, 1.0f, 0.88f, 0.73f, 0.45f, slotAlpha);
+        }
     }
     // Outlines in a SECOND pass rather than interleaved with the fills above.
     // Fills are triangles and outlines are lines, so alternating them changed
@@ -19610,13 +20454,14 @@ void RenderVirtualTopBar()
         const AndroidUiRect rect = GetTopBarButtonRect(slot);
         const bool active = IsTopBarSlotActive(slot);
         DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h,
-                               0.85f, 0.85f, 0.90f, (active ? 0.85f : 0.35f) * slotAlpha, 1.0f);
+                               active ? 0.78f : 0.35f, active ? 0.65f : 0.40f,
+                               active ? 0.41f : 0.46f, (active ? 0.85f : 0.40f) * slotAlpha, 1.0f);
     }
     g_ProfTopBarPartTicks[0] = static_cast<Uint64>(MU_MobilePerfNow()) - tbT0;
 
     const AndroidUiRect locRect = GetTopBarLocationChipRect();
-    DrawVirtualRectFilled(locRect.x, locRect.y, locRect.w, locRect.h, 0.05f, 0.05f, 0.08f, 0.62f);
-    DrawVirtualRectOutline(locRect.x, locRect.y, locRect.w, locRect.h, 0.22f, 0.36f, 0.62f, 0.90f, 1.0f);
+    DrawVirtualRectFilled(locRect.x, locRect.y, locRect.w, locRect.h, 0.04f, 0.06f, 0.08f, 0.88f);
+    DrawVirtualRectOutline(locRect.x, locRect.y, locRect.w, locRect.h, 0.50f, 0.45f, 0.34f, 0.65f, 1.0f);
 
     HFONT chipFont = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
 
@@ -20198,32 +21043,32 @@ void RenderVirtualPortraitHud()
         kPortraitPanelTop,
         kPortraitPanelW,
         kPortraitPanelH,
-        0.03f, 0.03f, 0.05f, 0.92f);
+        0.04f, 0.06f, 0.08f, 0.92f);
 
     DrawVirtualBarH(kPortraitBarLeft, yHP, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curHP) / static_cast<float>(maxHP),
-                    0.85f, 0.16f, 0.16f, 0.16f, 0.05f, 0.05f);
+                    0.68f, 0.20f, 0.26f, 0.14f, 0.07f, 0.09f);
 
     DrawVirtualBarH(kPortraitBarLeft, yMP, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curMP) / static_cast<float>(maxMP),
-                    0.20f, 0.45f, 0.90f, 0.05f, 0.07f, 0.16f);
+                    0.20f, 0.42f, 0.66f, 0.05f, 0.09f, 0.15f);
 
     DrawVirtualBarH(kPortraitBarLeft, ySD, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curSD) / static_cast<float>(maxSD),
-                    0.90f, 0.85f, 0.20f, 0.16f, 0.15f, 0.04f);
+                    0.66f, 0.55f, 0.30f, 0.13f, 0.11f, 0.06f);
 
     // AG. The legacy frame had a gauge for this and removing the frame took it
     // with it - which matters because skills check it and refuse silently when
     // it runs dry, leaving no way to tell why a cast did nothing.
     DrawVirtualBarH(kPortraitBarLeft, yAG, kPortraitBarW, kPortraitBarH,
                     static_cast<float>(curAG) / static_cast<float>(maxAG),
-                    0.62f, 0.28f, 0.85f, 0.11f, 0.05f, 0.16f);
+                    0.47f, 0.34f, 0.64f, 0.10f, 0.07f, 0.14f);
 
     // Experience, in the strip under the panel. Light green, so it does not
     // read as another resource gauge alongside the four above it.
     DrawVirtualBarH(kExpBarX, kStatRowY, kExpBarW, kStatRowH,
                     GetAndroidExperienceRatio(),
-                    0.55f, 0.92f, 0.45f, 0.10f, 0.20f, 0.10f);
+                    0.28f, 0.58f, 0.48f, 0.05f, 0.12f, 0.10f);
 
     // All five bars' bodies are down; emit their borders as one line block.
     DrawVirtualBarHFlushBorders();
@@ -20321,13 +21166,13 @@ void RenderVirtualPortraitHud()
     // Align 3 centres the string in textW, the same call shape the trade picker
     // and the utility labels use.
     TextDraw(barFont, textX, static_cast<int>(yHP + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
-             "%d/%d", curHP, maxHP);
+             "HP %d/%d", curHP, maxHP);
     TextDraw(barFont, textX, static_cast<int>(yMP + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
-             "%d/%d", curMP, maxMP);
+             "MP %d/%d", curMP, maxMP);
     TextDraw(barFont, textX, static_cast<int>(ySD + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
-             "%d/%d", curSD, maxSD);
+             "SD %d/%d", curSD, maxSD);
     TextDraw(barFont, textX, static_cast<int>(yAG + 1.0f), 0xFFFFFFFF, 0x0, textW, 0, 3,
-             "%d/%d", curAG, maxAG);
+             "AG %d/%d", curAG, maxAG);
 
     // Percentage over the experience bar, and the level pair beside it. ML is
     // only meaningful once the class has a master level, so it is left off
@@ -20653,11 +21498,8 @@ void RenderVirtualPad()
                 DrawVirtualCircle(button.cx, button.cy, button.radius + 4.0f, 1.0f, 1.0f, 1.0f, 0.95f, true);
             }
 
-            // skillbox.png background instead of the attack button's plain blue
-            // GL frame - only the skill row and the Q/W/E/R potion slots switch
-            // to the textured frame (DrawVirtualSkillBoxFrame), the attack button
-            // keeps DrawVirtualCombatButtonFrame's original look. assignGlow is
-            // the same "available to assign" ring the frame already supports.
+            // Shared charcoal/gold frame for combat and consumable slots.
+            // Keep the existing assignment glow and pressed-state feedback.
             DrawVirtualSkillBoxFrame(
                 button.cx,
                 button.cy,
@@ -20674,8 +21516,7 @@ void RenderVirtualPad()
             // "this one's active" language across the touch UI.
             if (selected || selectorOpen)
             {
-                // skillline.png ornate ring border instead of the old gold GL
-                // glow+double-ring, marking the armed slot / open picker.
+                // Persistent gold outline marks the armed slot / open picker.
                 DrawVirtualSkillSelectedBorder(button.cx, button.cy, button.radius);
             }
 
@@ -20768,6 +21609,7 @@ void RenderVirtualPad()
     ReleaseVoicePttIfFingerGone();
     RenderVoicePttButton();
     RenderVoiceChannelButton();
+    RenderCameraResetButton();
     RenderAndroidTeleportRangeRing();
     RenderAndroidGroundAim();
     RenderAndroidTradePicker();
@@ -20775,6 +21617,8 @@ void RenderVirtualPad()
     // Last, so the panel and its dimming layer sit over every other control.
     RenderAndroidTargetPicker();
     RenderAndroidSkillPickerList();
+    RenderAndroidAimMenu();
+    RenderAndroidAimDrag();
     RenderComboSettingsPanel();
 
     // Last of all, so it sits over every other control including the
@@ -21148,6 +21992,14 @@ bool AndroidIsVirtualPadAvailable()
 {
     return IsVirtualPadAvailable();
 }
+
+// The character AIM is locked on, as an index into CharactersClient, or -1 while none
+// is locked or it is out of sight. ZzzInterface.cpp paints its name plate red.
+int AndroidGetAimLockedCharacterIndex()
+{
+    return ResolveAndroidLockedTargetIndex();
+}
+
 
 // SelectObjects (ZzzInterface.cpp) reports a tap on a player through this, for
 // the same anonymous-namespace reason.
@@ -22855,6 +23707,8 @@ static int ComputeAndroidUiFontSize()
     return fontSize;
 }
 
+void SetAndroidTextSizePercent(int next);
+
 // The Options window's text size row: one step bigger, wrapping round to the
 // smallest. Applied at once by resizing the existing font handles in place,
 // since copies of them are held all over the UI. Chat lines already wrapped
@@ -22866,6 +23720,24 @@ void CycleAndroidTextSize()
     {
         next = kAndroidTextSizeMinPercent;
     }
+    SetAndroidTextSizePercent(next);
+}
+
+// Every text size the Options drop-down offers, smallest first. Returns how many were written.
+int GetAndroidTextSizeOptions(int* out, int maxCount)
+{
+    int n = 0;
+    for (int p = kAndroidTextSizeMinPercent; p <= kAndroidTextSizeMaxPercent && n < maxCount; p += kAndroidTextSizeStepPercent)
+    {
+        out[n++] = p;
+    }
+    return n;
+}
+
+// Sets one text size and applies it at once (the body CycleAndroidTextSize used to have).
+void SetAndroidTextSizePercent(int next)
+{
+    next = std::clamp(next, kAndroidTextSizeMinPercent, kAndroidTextSizeMaxPercent);
     MobileSettingsSetInt(kAndroidTextSizeKey, next);
 
     const int fontSize = ComputeAndroidUiFontSize();

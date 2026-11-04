@@ -354,7 +354,8 @@ public class MuMainNativeActivity extends NativeActivity {
         });
     }
 
-    public static void askRestartForLanguageFromNative(final boolean vietnamese) {
+    // iWantLang: 0 English, 1 Vietnamese, 2 Spanish (MultiLanguage.h).
+    public static void askRestartForLanguageFromNative(final int iWantLang) {
         final MuMainNativeActivity activity = instance;
         if (activity == null) {
             return;
@@ -363,12 +364,26 @@ public class MuMainNativeActivity extends NativeActivity {
             @Override
             public void run() {
                 try {
-                    String title = vietnamese ? "Ngôn ngữ" : "Language";
-                    String message = vietnamese
-                        ? "Đã đổi ngôn ngữ sang Tiếng Việt.\nKhởi động lại game ngay bây giờ?"
-                        : "Language changed to English.\nRestart the game now?";
-                    String restart = vietnamese ? "Khởi động lại" : "Restart";
-                    String later = vietnamese ? "Để sau" : "Later";
+                    String title;
+                    String message;
+                    String restart;
+                    String later;
+                    if (iWantLang == 1) {
+                        title = "Ngôn ngữ";
+                        message = "Đã đổi ngôn ngữ sang Tiếng Việt.\nKhởi động lại game ngay bây giờ?";
+                        restart = "Khởi động lại";
+                        later = "Để sau";
+                    } else if (iWantLang == 2) {
+                        title = "Idioma";
+                        message = "Idioma cambiado a Español.\n¿Reiniciar el juego ahora?";
+                        restart = "Reiniciar";
+                        later = "Más tarde";
+                    } else {
+                        title = "Language";
+                        message = "Language changed to English.\nRestart the game now?";
+                        restart = "Restart";
+                        later = "Later";
+                    }
                     showModernDialog(activity, title, message, restart, later);
                 } catch (Exception e) {
                     Log.w(TAG, "language restart dialog failed", e);

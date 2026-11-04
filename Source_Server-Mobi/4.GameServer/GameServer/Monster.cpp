@@ -223,6 +223,13 @@ void gObjMonsterDieGiveItem(LPOBJ lpObj,LPOBJ lpTarget) // OK
 
 			gItemOptionRate.GetItemOption3(((ExcItemDrop==0)?0:1),&ItemOption3);
 
+			// CustomConfig.ini MapSkillPecent / MapLuckPecent / MapOptionPecent (-1 = leave the ItemOptionRate.txt roll)
+			if(gServerInfo.m_MapSkillPecent >= 0){ItemOption1 = ((int)(GetLargeRand()%100) < gServerInfo.m_MapSkillPecent) ? 1 : 0;}
+
+			if(gServerInfo.m_MapLuckPecent >= 0){ItemOption2 = ((int)(GetLargeRand()%100) < gServerInfo.m_MapLuckPecent) ? 1 : 0;}
+
+			if(gServerInfo.m_MapOptionPecent >= 0){ItemOption3 = ((int)(GetLargeRand()%100) < gServerInfo.m_MapOptionPecent) ? ((ItemOption3 != 0) ? ItemOption3 : (BYTE)(1+GetLargeRand()%4)) : 0;}
+
 			gItemOptionRate.GetItemOption4(((ExcItemDrop==0)?0:1),&ItemNewOption);
 
 			gItemOptionRate.GetItemOption5(((ExcItemDrop==0)?0:1),&ItemSetOption);
@@ -237,7 +244,7 @@ void gObjMonsterDieGiveItem(LPOBJ lpObj,LPOBJ lpTarget) // OK
 
 			ItemNewOption = ((ItemIndex>=GET_ITEM(12,0))?0:ItemNewOption);
 
-			gItemOptionRate.MakeNewOption(ItemIndex,ItemNewOption,&ItemNewOption);
+			gItemOptionRate.MakeNewOptionWeighted(ItemIndex,ItemNewOption,&ItemNewOption);
 
 			gItemOptionRate.MakeSetOption(ItemIndex,ItemSetOption,&ItemSetOption);
 

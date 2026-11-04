@@ -21,6 +21,39 @@
 
 
 
+// Set around right-click box opens (CItemBagManager::DropItemByItemIndex): the box then
+// hands out only gear the opener's class can wear. Items with no class restriction
+// (jewels, potions, pets) are unaffected. Game logic runs on one thread, so a plain flag is enough.
+bool g_ItemBagClassFilter = 0;
+
+bool ItemBagClassOk(LPOBJ lpObj,int itemIndex)
+{
+	ITEM_INFO ItemInfo;
+
+	if(gItemManager.GetInfo(itemIndex,&ItemInfo) == 0)
+	{
+		return 1;
+	}
+
+	bool restricted = 0;
+
+	for(int n=0;n < MAX_CLASS;n++)
+	{
+		if(ItemInfo.RequireClass[n] != 0)
+		{
+			restricted = 1;
+			break;
+		}
+	}
+
+	if(restricted == 0)
+	{
+		return 1;
+	}
+
+	return (CHECK_RANGE(lpObj->Class,MAX_CLASS) != 0 && ItemInfo.RequireClass[lpObj->Class] != 0);
+}
+
 CItemBag::CItemBag() // OK
 {
 	this->Init();
@@ -416,7 +449,7 @@ bool CItemBag::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 	CRandomManager RandomManager;
 	for (int i = 0; i < this->m_count; i++)
 	{
-		if (this->m_BagInfo[i].RateDrop > 0)
+		if (this->m_BagInfo[i].RateDrop > 0 && (g_ItemBagClassFilter == 0 || ItemBagClassOk(lpObj, this->m_BagInfo[i].Index) != 0))
 		{
 			RandomManager.AddElement((int)(&(this->m_BagInfo[i])), this->m_BagInfo[i].RateDrop);
 		}
@@ -428,7 +461,33 @@ bool CItemBag::GetItem(LPOBJ lpObj,CItem* lpItem) // OK
 	}
 	//LogAdd(LOG_RED, "GetItem Rate %d", lpInfo->RateDrop);
 #else
-	ITEM_BAG_INFO* lpInfo = this->GetInfo(GetLargeRand() % this->m_count);
+	ITEM_BAG_INFO* lpInfo = 0;
+
+	if (g_ItemBagClassFilter == 0)
+	{
+		lpInfo = this->GetInfo(GetLargeRand() % this->m_count);
+	}
+	else
+	{
+		// Only rows this character's class can use (see ItemBagClassOk).
+		int fit[MAX_BAG_ITEM];
+		int fitCount = 0;
+
+		for (int i = 0; i < this->m_count; i++)
+		{
+			if (ItemBagClassOk(lpObj, this->m_BagInfo[i].Index) != 0)
+			{
+				fit[fitCount++] = i;
+			}
+		}
+
+		if (fitCount == 0)
+		{
+			return 0;
+		}
+
+		lpInfo = this->GetInfo(fit[GetLargeRand() % fitCount]);
+	}
 #endif
 
 	if(lpInfo == 0)

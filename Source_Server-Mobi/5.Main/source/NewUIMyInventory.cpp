@@ -2125,6 +2125,102 @@ bool CNewUIMyInventory::TryStackItems(CNewUIInventoryCtrl * targetControl, ITEM 
 	return false;
 }
 
+// Character Renaming Service (14,117): right-click asks for the new name in a box,
+// then sends it with the item's slot. The server checks everything again and uses
+// the item up only when the rename goes through.
+#pragma pack(push,1)
+struct PMSG_RENAME_ITEM_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:C6
+	BYTE Slot;
+	char Name[11];
+};
+#pragma pack(pop)
+
+namespace SEASON3B
+{
+	class CRenameItemMsgBoxLayout : public TMsgBoxLayout<CNewUITextInputMsgBox>
+	{
+	public:
+		bool SetLayout()
+		{
+			CNewUITextInputMsgBox* pMsgBox = GetMsgBox();
+			if (0 == pMsgBox)
+				return false;
+
+			if (false == pMsgBox->Create(MSGBOX_COMMON_TYPE_OKCANCEL, INPUTBOX_TYPE_TEXT, 120, INPUTBOX_HEIGHT + 2, 10))
+				return false;
+
+			pMsgBox->SetInputBoxOption(UIOPTION_PAINTBACK | UIOPTION_NOLOCALIZEDCHARACTERS);
+			pMsgBox->AddMsg("Enter your new character name", RGBA(255, 255, 255, 255), MSGBOX_FONT_BOLD);
+			pMsgBox->AddMsg("4-10 letters or numbers, no spaces or symbols", RGBA(255, 220, 0, 255));
+			pMsgBox->AddCallbackFunc(CRenameItemMsgBoxLayout::ReturnDown, MSGBOX_EVENT_PRESSKEY_RETURN);
+			pMsgBox->AddCallbackFunc(CRenameItemMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
+			pMsgBox->AddCallbackFunc(CRenameItemMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
+
+			return true;
+		}
+
+		static CALLBACK_RESULT ProcessOk(class CNewUIMessageBoxBase* pOwner)
+		{
+			CNewUITextInputMsgBox* pMsgBox = dynamic_cast<CNewUITextInputMsgBox*>(pOwner);
+			unicode::t_char strText[MAX_TEXT_LENGTH] = { 0, };
+			pMsgBox->GetInputBoxText(strText);
+
+			const int length = (int)strlen(strText);
+			bool valid = (length >= 4 && length <= 10);
+
+			for (int i = 0; valid && i < length; ++i)
+			{
+				const char c = strText[i];
+				valid = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+			}
+
+			if (!valid)
+			{
+				g_pChatListBox->AddText("", "Invalid name. Use 4 to 10 letters or numbers, no spaces or symbols.", TYPE_ERROR_MESSAGE);
+				return CALLBACK_CONTINUE;
+			}
+
+			const int slot = g_pMyInventory->GetStandbyItemIndex();
+
+			if (slot >= 0 && slot <= 255)
+			{
+				PMSG_RENAME_ITEM_SEND pMsg;
+				memset(&pMsg, 0, sizeof(pMsg));
+				pMsg.header.set(0xD3, 0xC6, sizeof(pMsg));
+				pMsg.Slot = (BYTE)slot;
+				memcpy(pMsg.Name, strText, length);
+				DataSend((LPBYTE)&pMsg, pMsg.header.size);
+			}
+
+			PlayBuffer(SOUND_CLICK01);
+			g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+			return CALLBACK_BREAK;
+		}
+
+		static CALLBACK_RESULT ReturnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+		{
+			return ProcessOk(pOwner);
+		}
+
+		static CALLBACK_RESULT OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+		{
+			return ProcessOk(pOwner);
+		}
+
+		static CALLBACK_RESULT CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+		{
+			PlayBuffer(SOUND_CLICK01);
+			g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+			return CALLBACK_BREAK;
+		}
+	};
+}
+
+
 bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM * pItem, const int iIndex)
 {
 	if (pItem == nullptr)
@@ -2139,6 +2235,19 @@ bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM
 			SendRequestUse(iIndex, 0);
 			return true;
 		}
+	}
+
+	if (pItem->Type == ITEM_POTION + 117) // Character Renaming Service
+	{
+		if (!IsCanUseItem())
+		{
+			g_pChatListBox->AddText("", GlobalText[474], TYPE_ERROR_MESSAGE);
+			return false;
+		}
+
+		g_pMyInventory->SetStandbyItemKey(pItem->Key);
+		CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CRenameItemMsgBoxLayout));
+		return true;
 	}
 
 	const auto isApple = pItem->Type == ITEM_POTION + 0;

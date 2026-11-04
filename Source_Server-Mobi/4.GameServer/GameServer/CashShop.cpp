@@ -11,6 +11,7 @@
 #include "EffectManager.h"
 #include "GameMain.h"
 #include "ItemManager.h"
+#include "ItemTracker.h"
 #include "JSProtocol.h"
 #include "Log.h"
 #include "Map.h"
@@ -2056,6 +2057,8 @@ void CCashShop::DGCashShopItemUseRecv(SDHP_CASH_SHOP_ITEM_USE_RECV* lpMsg) // OK
 
 		gEffectManager.AddEffect(lpObj,1,lpInfo->Index,(int)(time(0)+lpProductInfo->ItemDuration),0,0,0,0);
 	}
+
+	gItemTracker.LogShop("CashShopUse",lpObj->Index,lpProductInfo->ItemIndex,lpProductInfo->ItemLevel,lpProductInfo->ItemQuantity,0);
 
 	gLog.Output(LOG_CASH_SHOP,"[CashShopItemUse][ProductInfo][%s][%s] - (BaseIndex: %d, MainIndex: %d, CoinValue: %d, ItemIndex: %d, ItemLevel: %d, ItemOption1: %d, ItemOption2: %d, ItemOption3: %d, ItemNewOption: %d, ItemSetOption: %d, ItemHarmonyOption: %d, ItemOptionEx: %d, ItemSocketOption: %d, %d, %d, %d, %d, ItemQuantity: %d, ItemDuration: %d)",lpObj->Account,lpObj->Name,lpProductInfo->BaseIndex,lpProductInfo->MainIndex,lpProductInfo->CoinValue,lpProductInfo->ItemIndex,lpProductInfo->ItemLevel,lpProductInfo->ItemOption1,lpProductInfo->ItemOption2,lpProductInfo->ItemOption3,lpProductInfo->ItemNewOption,lpProductInfo->ItemSetOption,lpProductInfo->ItemHarmonyOption,lpProductInfo->ItemOptionEx,lpProductInfo->ItemSocketOption1,lpProductInfo->ItemSocketOption2,lpProductInfo->ItemSocketOption3,lpProductInfo->ItemSocketOption4,lpProductInfo->ItemSocketOption5,lpProductInfo->ItemQuantity,lpProductInfo->ItemDuration);
 

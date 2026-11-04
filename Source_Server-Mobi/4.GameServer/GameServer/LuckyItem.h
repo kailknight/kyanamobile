@@ -83,6 +83,7 @@ public:
 	virtual ~CLuckyItem();
 	void Load(char* path);
 	bool IsLuckyItem(CItem* lpItem);
+	bool IsLuckyItemIndex(int index);
 	bool GetLuckyItemIndex(LPOBJ lpObj,int section,int group,WORD* index);
 	bool GetLuckyItemDecay(int index,int* decay);
 	bool GetLuckyItemOption0(int index,BYTE* option);

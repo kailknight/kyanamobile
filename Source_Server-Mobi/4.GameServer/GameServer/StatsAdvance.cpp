@@ -45,15 +45,20 @@ void CStatsAdvance::Send(LPOBJ lpObj)
 		pMsg.StatInfo.TotalDamageReflect = reflect;
 	}
 	pMsg.StatInfo.FullDamageReflectRate = lpObj->FullDamageReflectRate;
-	pMsg.StatInfo.CriticalDamageRate = lpObj->CriticalDamageRate;
+	// Items plus the buff, as CAttack rolls them (Scroll of Battle / Strength add through
+	// EffectOption, so showing the item part alone hid the scroll).
+	const int criticalRate = lpObj->CriticalDamageRate+lpObj->EffectOption.AddCriticalDamageRate;
+	const int excellentRate = lpObj->ExcellentDamageRate+lpObj->EffectOption.AddExcellentDamageRate;
+
+	pMsg.StatInfo.CriticalDamageRate = criticalRate;
 	//--
-	pMsg.StatInfo.CriticalDamagePVM = lpObj->CriticalDamageRate * gServerInfo.m_DamageRatePvM[lpObj->Class];
-	pMsg.StatInfo.CriticalDamagePVP = lpObj->CriticalDamageRate * gServerInfo.m_DamageRatePvP[lpObj->Class];
+	pMsg.StatInfo.CriticalDamagePVM = criticalRate * gServerInfo.m_DamageRatePvM[lpObj->Class];
+	pMsg.StatInfo.CriticalDamagePVP = criticalRate * gServerInfo.m_DamageRatePvP[lpObj->Class];
 	//--
-	pMsg.StatInfo.ExellentDamageRate = lpObj->ExcellentDamageRate;
+	pMsg.StatInfo.ExellentDamageRate = excellentRate;
 	//--
-	pMsg.StatInfo.ExellentDamagePVM = lpObj->ExcellentDamageRate * gServerInfo.m_DamageRatePvM[lpObj->Class];
-	pMsg.StatInfo.ExellentDamagePVP = lpObj->ExcellentDamageRate * gServerInfo.m_DamageRatePvP[lpObj->Class];
+	pMsg.StatInfo.ExellentDamagePVM = excellentRate * gServerInfo.m_DamageRatePvM[lpObj->Class];
+	pMsg.StatInfo.ExellentDamagePVP = excellentRate * gServerInfo.m_DamageRatePvP[lpObj->Class];
 	//--
 	pMsg.StatInfo.DoubleDamageRate = lpObj->DoubleDamageRate;
 	pMsg.StatInfo.TripleDamageRate = lpObj->TripleDamageRate;

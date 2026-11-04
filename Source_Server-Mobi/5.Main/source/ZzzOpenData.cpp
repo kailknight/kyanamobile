@@ -5581,6 +5581,10 @@ void OpenBasicData(HDC hDC)
 
 #ifdef ASG_ADD_GENS_SYSTEM
 	std::string strFileName = "Local\\" + g_strSelectedML + "\\ImgsMapName\\MapNameAddStrife.tga";
+	if (IsTranslatedLanguage() && GetFileAttributesA(("Data\\" + strFileName).c_str()) == INVALID_FILE_ATTRIBUTES)
+	{
+		strFileName = "Local\\Eng\\ImgsMapName\\MapNameAddStrife.tga";
+	}
 	::LoadBitmap(strFileName.c_str(), BITMAP_INTERFACE_EX+47);
 #endif	// ASG_ADD_GENS_SYSTEM
 

@@ -18,6 +18,7 @@
 #include "ServerDisplayer.h"
 #include "SocketManager.h"
 #include "Util.h"
+#include "ItemTracker.h"
 #if(JEWELBANKVER2)
 #include "BCustomItemBank.h"
 #endif
@@ -1446,6 +1447,8 @@ void CSlotMachine::CGSpinRecv(int aIndex,BYTE* lpRecv) // OK
 		// currency machine and an item machine use the same thresholds.
 		this->AnnounceWin(lpObj,wonAmount,stake.Name);
 
+		gItemTracker.LogNote("SlotWin",aIndex,stake.Name,"Slot machine",((stake.Kind == SLOT_STAKE_ITEM)?"Item win, goes to reward box":"Paid out directly"),wonAmount);
+
 		if(stake.Kind == SLOT_STAKE_ITEM)
 		{
 			this->PushClaim(aIndex,stake.ItemIndex,stake.Level,wonAmount);
@@ -1469,9 +1472,16 @@ void CSlotMachine::CGSpinRecv(int aIndex,BYTE* lpRecv) // OK
 	{
 		if(this->PushClaim(aIndex,this->m_Bonus.ScatterItemIndex,this->m_Bonus.ScatterLevel,this->m_Bonus.ScatterCount) != 0)
 		{
+			gItemTracker.LogNote("SlotBonus",aIndex,gItemManager.GetItemName(this->m_Bonus.ScatterItemIndex),"Slot machine","Scatter bonus",this->m_Bonus.ScatterCount);
 			LogAddCat(LOG_CAT_SLOTMACHINE,LOG_GREEN,"[SlotMachine] %s/%s scatter bonus: %d x %s",
 				lpObj->Account,lpObj->Name,this->m_Bonus.ScatterCount,gItemManager.GetItemName(this->m_Bonus.ScatterItemIndex));
 		}
+	}
+
+	{
+		char trackDetails[56];
+		sprintf_s(trackDetails,"%s bet %d, won %d, %d lines, %d scatter",((freeSpin != false)?"free":"paid"),betCount,(totalPay * stake.Amount),lineCount,scatterCount);
+		gItemTracker.LogNote("SlotSpin",aIndex,stake.Name,"Slot machine",trackDetails,1);
 	}
 
 	// Logged whether it won or lost. Once the packet is sent the grid exists
@@ -1795,6 +1805,8 @@ BYTE CSlotMachine::ClaimRow(int aIndex,int slot) // OK
 	{
 		GDCreateItemSend(aIndex,0xEB,0,0,itemIndex,(BYTE)level,0,0,0,0,-1,0,0,0,0,0,0xFF,0);
 	}
+
+	gItemTracker.LogNote("SlotClaim",aIndex,gItemManager.GetItemName(itemIndex),"Slot machine","Claimed from reward box",(toInventory + toBank));
 
 	const int left = (count - taken);
 

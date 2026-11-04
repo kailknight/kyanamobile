@@ -3638,6 +3638,7 @@ void gObjSecondProc()
 				{
 					lpObj->SentAutoPotionState = autoPotionState;
 					GCAccountLevelSend(lpObj->Index);
+					gViewport.GCViewportSimpleVipSend(lpObj,true);
 				}
 
 				// Master skill tree recommendations for this player's class: sent

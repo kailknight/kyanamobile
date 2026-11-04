@@ -1249,6 +1249,13 @@ public:
 	BYTE NewVKDrop[6];
 	BYTE NewPhuKienDrop[6];
 	BYTE m_CheckOptionsDrop;
+	BYTE m_MapExcWeightEnable;
+	BYTE m_MapExcArmor[6];
+	BYTE m_MapExcWeapon[6];
+	BYTE m_MapExcAccessory[6];
+	int m_MapOptionPecent;
+	int m_MapSkillPecent;
+	int m_MapLuckPecent;
 	BYTE m_OptionPecent;
 	BYTE m_SkillPecent;
 	BYTE m_LuckPecent;

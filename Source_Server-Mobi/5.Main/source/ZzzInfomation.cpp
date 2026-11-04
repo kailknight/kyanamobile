@@ -424,6 +424,57 @@ void set_item_tooltip()
 	}
 }
 
+// The level table only has +0..+3 for Bolt and Arrow, and the next rows belong to other items,
+// so an Arrow at +4 read the rows of Horn of Fenrir (name and whole tooltip). Each of them gets a
+// private block of 16 rows (+0..+15), +4 and up copied from +3 with the level in the name.
+static void extend_arrow_level_tooltips()
+{
+	const int types[2] = { ITEM_BOW + 7, ITEM_BOW + 15 };
+	int newBase = 20000;
+
+	for (int t = 0; t < 2; ++t)
+	{
+		auto item = m_ItemToolTipData.find(types[t]);
+		if (item == m_ItemToolTipData.end() || item->second.ItemLevelToolTipIndex == -1)
+			continue;
+
+		const int oldBase = item->second.ItemLevelToolTipIndex;
+		auto last = m_ItemLevelToolTipData.find(oldBase + 3);
+		if (last == m_ItemLevelToolTipData.end())
+			continue;
+
+		for (int lv = 0; lv < 16; ++lv)
+		{
+			auto src = m_ItemLevelToolTipData.find(oldBase + lv);
+			if (lv >= 4 || src == m_ItemLevelToolTipData.end())
+				src = last;
+
+			_ITEM_LEVEL_TOOLTIP row = src->second;
+			row.index = (WORD)(newBase + lv);
+
+			if (lv >= 4)
+			{
+				char* plus = strrchr(row.name, '+');
+				if (plus != NULL)
+				{
+					snprintf(plus, sizeof(row.name) - (plus - row.name) - 1, "+%d", lv);
+				}
+				else
+				{
+					size_t len = strlen(row.name);
+					snprintf(row.name + len, sizeof(row.name) - len - 1, " +%d", lv);
+				}
+				row.name[sizeof(row.name) - 1] = 0;
+			}
+
+			m_ItemLevelToolTipData[row.index] = row;
+		}
+
+		item->second.ItemLevelToolTipIndex = (__int16)newBase;
+		newBase += 16;
+	}
+}
+
 void set_item_level_tooltip()
 {
 	m_ItemLevelToolTipData.clear();
@@ -435,6 +486,8 @@ void set_item_level_tooltip()
 
 		m_ItemLevelToolTipData.insert(std::pair<int, _ITEM_LEVEL_TOOLTIP>(tooltip_level_data[i].index, tooltip_level_data[i]));
 	}
+
+	extend_arrow_level_tooltips();
 }
 
 void set_item_text_tooltip()

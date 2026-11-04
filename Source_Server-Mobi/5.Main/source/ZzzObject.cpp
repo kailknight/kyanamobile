@@ -12844,7 +12844,8 @@ void RenderPartObjectEffect(OBJECT *o,int Type,vec3_t Light,float Alpha,int Item
 			const bool bChromeFuseEligible = IsChromeFuseEligibleArmorType(Type) && !b->HideSkin;
 			auto SetupChromeFuse = [&](int chromeRenderFlag)
 			{
-				if (!bChromeFuseEligible) return;
+				// Not fusing: clear the count too, or a stale count from an earlier fused draw makes the caller skip its own chrome pass (no +7 to +9 glow on icons).
+				if (!bChromeFuseEligible) { g_PendingChromeConsumedCount = 0; return; }
 				g_PendingChromeActive = true;
 				g_PendingChromeRenderFlag = chromeRenderFlag;
 				g_PendingChromeAlpha = Alpha;
@@ -12856,7 +12857,7 @@ void RenderPartObjectEffect(OBJECT *o,int Type,vec3_t Light,float Alpha,int Item
 			// mesh passes (base + chrome + metal) down to one.
 			auto SetupOverlay2Fuse = [&](int overlayRenderFlag)
 			{
-				if (!bChromeFuseEligible) return;
+				if (!bChromeFuseEligible) { g_PendingOverlay2ConsumedCount = 0; return; }
 				g_PendingOverlay2Active = true;
 				g_PendingOverlay2RenderFlag = overlayRenderFlag;
 				g_PendingOverlay2Alpha = Alpha;

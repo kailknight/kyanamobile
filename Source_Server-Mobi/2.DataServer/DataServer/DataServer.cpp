@@ -5,6 +5,7 @@
 #include "BadSyntax.h"
 #include "DuelRanked.h"
 #include "GuildManager.h"
+#include "ItemTracker.h"
 #include "MiniDump.h"
 #include "Protect.h"
 #include "QueryManager.h"
@@ -54,6 +55,8 @@ void LoadLogConfig()
 	if(ItemSerialBlock < 1){ItemSerialBlock = 1;}
 
 	if(ItemSerialBlock > 100000){ItemSerialBlock = 100000;}
+
+	gItemTracker.Load();
 }
 
 int APIENTRY WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,LPSTR lpCmdLine,int nCmdShow) // OK

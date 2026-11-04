@@ -364,7 +364,7 @@ void cCustomMenu::Draw()
 		// The server's MenuName table names each slot in English. In Vietnamese mode the
 		// Vietnamese Text_Button label is used instead (Data\Custom\Text_Vtm.ini); English
 		// players keep the server label as before.
-		char* label = (!IsVietnameseLanguage() && gProtect.m_MainInfo.MenuName[i][0] != '\0')
+		char* label = (!IsTranslatedLanguage() && gProtect.m_MainInfo.MenuName[i][0] != '\0')
 			? gProtect.m_MainInfo.MenuName[i]
 			: gOther.Text_Button[i];
 

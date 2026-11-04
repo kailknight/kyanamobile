@@ -219,6 +219,8 @@ public:
 	void GCViewportSimpleGuildSend(LPOBJ lpObj);
 	void GCViewportSimpleUnionSend(LPOBJ lpObj);
 	void GCViewportSimpleGensSystemSend(LPOBJ lpObj);
+	void GCViewportVipSend(int aIndex);
+	void GCViewportSimpleVipSend(LPOBJ lpObj,bool force=false);
 	bool CheckCustomEventPkViewport(LPOBJ lpObj, LPOBJ lpTarget);
 //--------------------- cosas de pet
 	void GCViewportNewPetSend(int aIndex);

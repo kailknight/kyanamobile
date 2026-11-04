@@ -279,6 +279,17 @@ struct COMMAND_INFO
 	char label[32];
 };
 
+#pragma pack(push,1)
+struct PMSG_RENAME_ITEM_RECV
+{
+	PSBMSG_HEAD header; // C1:D3:C6 - the name typed after right-clicking the Character Renaming Service item
+	BYTE Slot; // inventory slot of that item
+	char Name[11];
+};
+#pragma pack(pop)
+
+static_assert(sizeof(PMSG_RENAME_ITEM_RECV) == 4 + 1 + 11, "PMSG_RENAME_ITEM_RECV must match the client's copy");
+
 class CCommandManager
 {
 public:
@@ -332,6 +343,7 @@ public:
     bool CommandReload(LPOBJ lpObj,char* arg);
 	bool CommandRename(LPOBJ lpObj,char* arg);
 	void DGCommandRenameRecv(SDHP_COMMAND_RENAME_RECV* lpMsg);
+	void CGRenameItemRecv(PMSG_RENAME_ITEM_RECV* lpMsg,int aIndex);
 	bool CommandInfo(LPOBJ lpObj,char* arg);
     bool CommandBlocAcc(LPOBJ lpObj,char* arg);
 	bool CommandDeviceBan(LPOBJ lpObj,char* command,char* arg);
@@ -374,6 +386,9 @@ public:
 	bool CommandRankedTest(LPOBJ lpObj,char* command,char* arg);
 private:
 	COMMAND_INFO m_CommandInfo[MAX_COMMAND];
+	// Rename by item: the slot (+1, 0 = none) and serial of the item to use up once the DataServer says yes.
+	int m_RenameItemSlot[MAX_OBJECT];
+	DWORD m_RenameItemSerial[MAX_OBJECT];
 };
 
 extern CCommandManager gCommandManager;

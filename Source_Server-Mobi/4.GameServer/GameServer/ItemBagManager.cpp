@@ -169,7 +169,19 @@ bool CItemBagManager::GetItemBySpecialValue(int SpecialValue,LPOBJ lpObj,CItem* 
 	return 0;
 }
 
-int CItemBagManager::DropItemByItemIndex(int ItemIndex,int ItemLevel,LPOBJ lpObj,int map,int x,int y) // OK
+// DropInventory column: bit 1 = straight into the inventory, bit 2 = only gear the opener's class can wear (ItemBagClassOk).
+int CItemBagManager::DropItemByItemIndex(int ItemIndex,int ItemLevel,LPOBJ lpObj,int map,int x,int y)
+{
+	g_ItemBagClassFilter = 0;
+
+	int result = this->DropItemByItemIndexInner(ItemIndex,ItemLevel,lpObj,map,x,y);
+
+	g_ItemBagClassFilter = 0;
+
+	return result;
+}
+
+int CItemBagManager::DropItemByItemIndexInner(int ItemIndex,int ItemLevel,LPOBJ lpObj,int map,int x,int y) // OK
 {
 	if(gDropReward.DropRewardByItemIndex(ItemIndex,lpObj))
 	{
@@ -180,7 +192,8 @@ int CItemBagManager::DropItemByItemIndex(int ItemIndex,int ItemLevel,LPOBJ lpObj
 	{
 		if(it->second.ItemIndex != -1 && it->second.ItemIndex == ItemIndex && (it->second.ItemLevel == -1 || it->second.ItemLevel == ItemLevel))
 		{
-			if( it->second.DropType == 1 )
+			g_ItemBagClassFilter = ((it->second.DropType & 2) != 0) ? 1 : 0;
+			if( (it->second.DropType & 1) == 1 )
 			{
 				return ( it->second.ItemBag.DropInventoryItem(lpObj, map, x, y) ) ? 1 : 2;
 			}
@@ -215,7 +228,7 @@ bool CItemBagManager::DropItemBySpecialValue(int SpecialValue,LPOBJ lpObj,int ma
 		if(it->second.SpecialValue != -1 && it->second.SpecialValue == SpecialValue)
 		{
 
-			if( it->second.DropType == 1 )
+			if( (it->second.DropType & 1) == 1 )
 			{
 				return ( it->second.ItemBag.DropInventoryItem(lpObj, map, x, y) ) ? 1 : 2;
 
@@ -235,7 +248,7 @@ bool CItemBagManager::DropItemByIndexItemBag(int IndexItemBag, LPOBJ lpObj) // O
 	{
 		if (it->second.Index != -1 && it->second.Index == IndexItemBag)
 		{
-			if (it->second.DropType == 1)
+			if ((it->second.DropType & 1) == 1)
 			{
 				return (it->second.ItemBag.DropInventoryItem(lpObj, lpObj->Map, lpObj->X, lpObj->Y)) ? 1 : 2;
 

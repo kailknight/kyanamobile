@@ -89,6 +89,8 @@ struct DR_CONFIG
 	int ReconnectGraceSec;
 	int WatchdogExtraSec;
 	int HostSilentSec;
+	// [Leaderboard] RankingType = the CustomRanking.txt row (F8 window tab) that shows the duel ladder; -1 = none.
+	int LeaderboardType;
 };
 
 enum eDuelRankedPhase
@@ -199,6 +201,11 @@ public:
 
 	// IOCP thread (CServerManager::DelServer): memory only.
 	void OnServerDown(WORD serverCode);
+
+	// Queue thread: the F8 leaderboard. LeaderboardType() is the tab that shows the
+	// duel ladder (-1 = none); RankText writes "Gold II" for a rating.
+	int LeaderboardType() const { return this->m_Cfg.LeaderboardType; }
+	void RankText(int mmr,char* out,int outSize);
 
 private:
 	// config / rank
