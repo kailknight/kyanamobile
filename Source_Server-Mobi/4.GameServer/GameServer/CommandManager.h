@@ -290,6 +290,26 @@ struct PMSG_RENAME_ITEM_RECV
 
 static_assert(sizeof(PMSG_RENAME_ITEM_RECV) == 4 + 1 + 11, "PMSG_RENAME_ITEM_RECV must match the client's copy");
 
+// Confirm menu for chat commands. A command listed with 1 in Data\Custom\CommandConfirm.txt
+// is not run when typed: the player gets C1:D3:C8 (the command text), the client shows a
+// Yes/No box and answers with C1:D3:C9. Only a Yes within 30 seconds runs the held command.
+#pragma pack(push,1)
+struct PMSG_COMMAND_CONFIRM_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:C8
+	char Text[64];
+};
+
+struct PMSG_COMMAND_CONFIRM_RECV
+{
+	PSBMSG_HEAD header; // C1:D3:C9
+	BYTE Answer; // 1 = yes, 0 = no
+};
+#pragma pack(pop)
+
+static_assert(sizeof(PMSG_COMMAND_CONFIRM_SEND) == 4 + 64,"PMSG_COMMAND_CONFIRM_SEND must match the client's copy");
+static_assert(sizeof(PMSG_COMMAND_CONFIRM_RECV) == 4 + 1,"PMSG_COMMAND_CONFIRM_RECV must match the client's copy");
+
 class CCommandManager
 {
 public:
@@ -344,6 +364,13 @@ public:
 	bool CommandRename(LPOBJ lpObj,char* arg);
 	void DGCommandRenameRecv(SDHP_COMMAND_RENAME_RECV* lpMsg);
 	void CGRenameItemRecv(PMSG_RENAME_ITEM_RECV* lpMsg,int aIndex);
+	void LoadConfirm(char* path);
+	bool CheckConfirm(LPOBJ lpObj,char* message);
+	void CGConfirmRecv(PMSG_COMMAND_CONFIRM_RECV* lpMsg,int aIndex);
+	std::map<std::string,int> m_ConfirmList;
+	char m_ConfirmText[MAX_OBJECT][100];
+	char m_ConfirmName[MAX_OBJECT][11];
+	DWORD m_ConfirmTick[MAX_OBJECT];
 	bool CommandInfo(LPOBJ lpObj,char* arg);
     bool CommandBlocAcc(LPOBJ lpObj,char* arg);
 	bool CommandDeviceBan(LPOBJ lpObj,char* command,char* arg);

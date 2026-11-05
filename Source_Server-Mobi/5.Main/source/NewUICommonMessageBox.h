@@ -622,6 +622,16 @@ namespace SEASON3B
 		static CALLBACK_RESULT OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
 	};
 
+	// "Do you want to proceed with this command?" - sent by the GameServer for the commands listed
+	// in CommandConfirm.txt (C1:D3:C8); OK sends Yes, Cancel / Esc sends No (C1:D3:C9).
+	class CCommandConfirmMsgBoxLayout : public TMsgBoxLayout<CNewUICommonMessageBox>
+	{
+	public:
+		bool SetLayout();
+		static CALLBACK_RESULT OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+		static CALLBACK_RESULT CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+	};
+
 	class CGuildBreakMsgBoxLayout : public TMsgBoxLayout<CNewUICommonMessageBox>
 	{
 	public:

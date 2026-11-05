@@ -526,6 +526,12 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				}
 			}
 			break;
+			case 0xC8: //Command confirm menu (C1:D3:C8): ask Yes / No before a listed command runs
+			{
+				extern void RecvCommandConfirm(const BYTE* lpMsg, int size);
+				RecvCommandConfirm(lpMsg, size);
+			}
+			break;
 			case 0xF2: //Devil Square time left (C1:D3:F2, WORD seconds)
 				if (size >= 6)
 				{

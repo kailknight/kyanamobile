@@ -1624,6 +1624,9 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			case 0xC7: //Fenrir pieces - merge every piece of that kind into full stacks (right-click / long-press)
 				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_ITEM_MERGE_RECV)) { gItemManager.CGItemMergeStackRecv((PMSG_ITEM_MERGE_RECV*)lpMsg, aIndex); }
 				break;
+			case 0xC9: //Command confirm menu - the player's Yes / No
+				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_COMMAND_CONFIRM_RECV)) { gCommandManager.CGConfirmRecv((PMSG_COMMAND_CONFIRM_RECV*)lpMsg, aIndex); }
+				break;
 			case 0x8A: //Nhan Thuong
 			{
 				XULY_CGPACKET_SOLAN* mlpMsg = (XULY_CGPACKET_SOLAN*)lpMsg;
@@ -2105,6 +2108,12 @@ void CGChatRecv(PMSG_CHAT_RECV* lpMsg,int aIndex) // OK
 
 	if(lpMsg->message[0] == '/')
 	{
+
+		// Commands listed in CommandConfirm.txt are held until the player answers Yes.
+		if(gCommandManager.CheckConfirm(&gObj[aIndex],lpMsg->message) != 0)
+		{
+			return;
+		}
 
 		if(gCommandManager.ManagementCore(&gObj[aIndex],lpMsg->message,-1) == 1)
 		{

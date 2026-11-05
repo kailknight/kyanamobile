@@ -502,6 +502,7 @@ void CServerInfo::ReadCustomInfo() // OK
 	gCustomNpcMove.Load(gPath.GetFullPath("Custom\\CustomNpcMove.txt"));
 
 	gCustomNpcCommand.Load(gPath.GetFullPath("Custom\\CustomNpcCommand.txt"));
+	gCommandManager.LoadConfirm(gPath.GetFullPath("Custom\\CommandConfirm.txt"));
 
 	gItemValueTrade.Load(gPath.GetFullPath("Item\\ItemValueTrade.txt"));
 

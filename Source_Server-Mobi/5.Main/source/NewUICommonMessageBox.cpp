@@ -3072,6 +3072,77 @@ CALLBACK_RESULT SEASON3B::CGuildOutPerson::OkBtnDown(class CNewUIMessageBoxBase*
 	return CALLBACK_BREAK;
 }
 
+static char g_CommandConfirmText[65] = { 0 };
+
+#pragma pack(push,1)
+struct PMSG_COMMAND_CONFIRM_ANSWER_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:C9
+	BYTE Answer;
+};
+#pragma pack(pop)
+
+static void SendCommandConfirmAnswer(BYTE answer)
+{
+	PMSG_COMMAND_CONFIRM_ANSWER_SEND pMsg;
+	memset(&pMsg, 0, sizeof(pMsg));
+	pMsg.header.set(0xD3, 0xC9, sizeof(pMsg));
+	pMsg.Answer = answer;
+	DataSend((LPBYTE)&pMsg, pMsg.header.size);
+}
+
+// C1:D3:C8 from the GameServer: [head 4][char Text[64]] - the command that is waiting for a Yes.
+void RecvCommandConfirm(const BYTE* lpMsg, int size)
+{
+	if (lpMsg == NULL || size < 4 + 64 || lpMsg[0] != 0xC1)
+	{
+		return;
+	}
+
+	memcpy(g_CommandConfirmText, lpMsg + 4, 64);
+	g_CommandConfirmText[64] = 0;
+
+	SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CCommandConfirmMsgBoxLayout));
+}
+
+bool SEASON3B::CCommandConfirmMsgBoxLayout::SetLayout()
+{
+	CNewUICommonMessageBox* pMsgBox = GetMsgBox();
+	if (0 == pMsgBox)
+		return false;
+	if (false == pMsgBox->Create(MSGBOX_COMMON_TYPE_OKCANCEL))
+		return false;
+
+	pMsgBox->AddMsg("Do you want to proceed with this command?", RGBA(255, 255, 255, 255), MSGBOX_FONT_BOLD);
+	pMsgBox->AddMsg(g_CommandConfirmText, RGBA(255, 220, 90, 255), MSGBOX_FONT_BOLD);
+	pMsgBox->AddMsg("OK = Yes      Cancel = No", RGBA(200, 200, 200, 255), MSGBOX_FONT_NORMAL);
+
+	pMsgBox->AddCallbackFunc(CCommandConfirmMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
+	pMsgBox->AddCallbackFunc(CCommandConfirmMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
+	pMsgBox->AddCallbackFunc(CCommandConfirmMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_PRESSKEY_ESC);
+	return true;
+}
+
+CALLBACK_RESULT SEASON3B::CCommandConfirmMsgBoxLayout::OkBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+	SendCommandConfirmAnswer(1);
+
+	PlayBuffer(SOUND_CLICK01);
+	g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+	return CALLBACK_BREAK;
+}
+
+CALLBACK_RESULT SEASON3B::CCommandConfirmMsgBoxLayout::CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+	SendCommandConfirmAnswer(0);
+
+	PlayBuffer(SOUND_CLICK01);
+	g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+	return CALLBACK_BREAK;
+}
+
 bool SEASON3B::CGuildBreakMsgBoxLayout::SetLayout()
 {
 	CNewUICommonMessageBox* pMsgBox = GetMsgBox();

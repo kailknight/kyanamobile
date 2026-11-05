@@ -10,6 +10,7 @@
 #include "CashShop.h"
 #include "ChaosCastle.h"
 #include "Command.h"
+#include "MemScript.h"
 #include "CustomArena.h"
 #include "CustomAttack.h"
 #include "CustomEventDrop.h"
@@ -197,6 +198,139 @@ long CCommandManager::GetCommandCode(char* label) // OK
 	}
 
 	return 0;
+}
+
+void CCommandManager::LoadConfirm(char* path)
+{
+	this->m_ConfirmList.clear();
+
+	memset(this->m_ConfirmTick,0,sizeof(this->m_ConfirmTick));
+
+	// The file is optional: without it no command asks for a confirmation.
+	if(GetFileAttributes(path) == INVALID_FILE_ATTRIBUTES)
+	{
+		return;
+	}
+
+	CMemScript* lpMemScript = new CMemScript;
+
+	if(lpMemScript == 0)
+	{
+		ErrorMessageBox(MEM_SCRIPT_ALLOC_ERROR,path);
+		return;
+	}
+
+	if(lpMemScript->SetBuffer(path) == 0)
+	{
+		ErrorMessageBox(lpMemScript->GetLastError());
+		delete lpMemScript;
+		return;
+	}
+
+	try
+	{
+		while(true)
+		{
+			if(lpMemScript->GetToken() == TOKEN_END)
+			{
+				break;
+			}
+
+			if(strcmp("end",lpMemScript->GetString()) == 0)
+			{
+				break;
+			}
+
+			char label[32] = {0};
+
+			strcpy_s(label,lpMemScript->GetString());
+
+			_strlwr_s(label);
+
+			this->m_ConfirmList[label] = lpMemScript->GetAsNumber();
+		}
+	}
+	catch(...)
+	{
+		ErrorMessageBox(lpMemScript->GetLastError());
+	}
+
+	delete lpMemScript;
+}
+
+// Called for a command typed in chat. True = the command is held and the player was asked.
+bool CCommandManager::CheckConfirm(LPOBJ lpObj,char* message)
+{
+	if(this->m_ConfirmList.empty() != 0)
+	{
+		return 0;
+	}
+
+	char command[32] = {0};
+
+	this->GetString(message,command,sizeof(command),0);
+
+	_strlwr_s(command);
+
+	std::map<std::string,int>::iterator it = this->m_ConfirmList.find(command);
+
+	if(it == this->m_ConfirmList.end() || it->second == 0)
+	{
+		return 0;
+	}
+
+	// Only a command this player could really run gets the question.
+	COMMAND_LIST CommandData;
+
+	if(gCommand.GetInfoByName(command,&CommandData) == 0 || CommandData.Enable[lpObj->AccountLevel] == 0)
+	{
+		return 0;
+	}
+
+	strncpy_s(this->m_ConfirmText[lpObj->Index],sizeof(this->m_ConfirmText[lpObj->Index]),message,_TRUNCATE);
+
+	strncpy_s(this->m_ConfirmName[lpObj->Index],sizeof(this->m_ConfirmName[lpObj->Index]),lpObj->Name,_TRUNCATE);
+
+	this->m_ConfirmTick[lpObj->Index] = GetTickCount();
+
+	PMSG_COMMAND_CONFIRM_SEND pMsg;
+
+	pMsg.header.set(0xD3,0xC8,sizeof(pMsg));
+
+	memset(pMsg.Text,0,sizeof(pMsg.Text));
+
+	strncpy_s(pMsg.Text,sizeof(pMsg.Text),message,_TRUNCATE);
+
+	DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
+
+	return 1;
+}
+
+void CCommandManager::CGConfirmRecv(PMSG_COMMAND_CONFIRM_RECV* lpMsg,int aIndex)
+{
+	if(gObjIsConnectedGP(aIndex) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[aIndex];
+
+	const DWORD tick = this->m_ConfirmTick[aIndex];
+
+	this->m_ConfirmTick[aIndex] = 0;
+
+	if(lpMsg->Answer != 1 || tick == 0 || (GetTickCount()-tick) > 30000 || strcmp(this->m_ConfirmName[aIndex],lpObj->Name) != 0)
+	{
+		return;
+	}
+
+	char text[100] = {0};
+
+	strncpy_s(text,sizeof(text),this->m_ConfirmText[aIndex],_TRUNCATE);
+
+	gLog.Output(LOG_COMMAND,"[Confirm][%s][%s] - (Command: %s)",lpObj->Account,lpObj->Name,text);
+
+	this->ManagementCore(lpObj,text,-1);
 }
 
 bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
