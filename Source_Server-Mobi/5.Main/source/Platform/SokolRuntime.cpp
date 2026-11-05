@@ -39,6 +39,28 @@
 #define AKEYCODE_BACK (-0x7FFFFFFF)
 #endif
 
+#if defined(__ANDROID__)
+// sokol_app's Android backend ends _sapp_android_on_destroy (the activity being destroyed - the
+// player backing out, swiping the app away, a language restart) with exit(0). exit() runs every
+// static destructor in this library, in an order the game was never written for: CNewUISystem
+// tears its windows down, a text box looks itself up in the edit-control table, and that table has
+// already been destroyed - a SIGSEGV in unordered_map::find on EVERY normal quit. The same
+// teardown ran with other threads (and half-destroyed models, lists and text caches) still alive,
+// which is where the rest of the Play Console crash list comes from (BMD::Animation, RenderText,
+// CPList::RemoveAt...). Everything worth saving was written by the cleanup callback before this
+// point, so leave the way the OS does when it ends the process: no destructors.
+#include <stdlib.h>
+#include <cstdlib>
+#include <stdio.h>
+#include <unistd.h>
+static inline void MuFastExit(int code)
+{
+    fflush(nullptr);
+    _exit(code);
+}
+#define exit(code) MuFastExit(code)
+#endif
+
 #include <sokol_app.h>
 
 const void* MU_MobileGetNativeWindow()

@@ -866,8 +866,11 @@ struct AndroidStubEditControl
 
 inline std::unordered_map<HWND, AndroidStubEditControl>& AndroidEditControls()
 {
-    static std::unordered_map<HWND, AndroidStubEditControl> controls;
-    return controls;
+    // Never destroyed: UI objects look themselves up here from their own destructors, which can run
+    // after a normal static would already be gone (exit() teardown) - that was a crash on every quit.
+    static std::unordered_map<HWND, AndroidStubEditControl>* controls =
+        new std::unordered_map<HWND, AndroidStubEditControl>();
+    return *controls;
 }
 
 inline HWND& AndroidFocusedWindow()
