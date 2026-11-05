@@ -2113,6 +2113,14 @@ void CCashShop::DGCashShopPeriodicItemRecv(SDHP_CASH_SHOP_PERIODIC_ITEM_RECV* lp
 			continue;
 		}
 
+		// The DataServer answers 0 when it has no expiry stored for this serial. 0 would read as
+		// "expired long ago" and delete the item on the next check, so leave it alone instead.
+		if(lpInfo->time <= 0)
+		{
+			LogAdd(LOG_RED,"[PeriodicItem] [%s][%s] no expiry stored for item %d serial %08X - the item is kept",lpObj->Account,lpObj->Name,lpObj->Inventory[lpInfo->slot].m_Index,lpObj->Inventory[lpInfo->slot].m_Serial);
+			continue;
+		}
+
 		lpObj->Inventory[lpInfo->slot].m_LoadPeriodicItem = 1;
 
 		lpObj->Inventory[lpInfo->slot].m_PeriodicItemTime = lpInfo->time;
@@ -2457,6 +2465,35 @@ void CCashShop::GDCashShopPeriodicItemSaveSend(int aIndex) // OK
 		size += sizeof(info);
 
 		pMsg.count++;
+	}
+
+	// An expiring item kept in the vault needs its expiry stored too. Only the inventory was saved,
+	// so an item that went into the vault before its expiry was ever saved (just bought, or the
+	// server restarted first) had no row in CashShopPeriodicItem. Taken out again, the DataServer
+	// then answered "expires at 0" - already over - and the item was deleted.
+	if(lpObj->Warehouse != 0)
+	{
+		for(int n=0;n < WAREHOUSE_SIZE;n++)
+		{
+			if(lpObj->Warehouse[n].IsItem() == 0 || lpObj->Warehouse[n].m_IsPeriodicItem == 0 || lpObj->Warehouse[n].m_LoadPeriodicItem == 0)
+			{
+				continue;
+			}
+
+			if((size+sizeof(info)) > sizeof(send))
+			{
+				break;
+			}
+
+			info.serial = lpObj->Warehouse[n].m_Serial;
+
+			info.time = lpObj->Warehouse[n].m_PeriodicItemTime;
+
+			memcpy(&send[size],&info,sizeof(info));
+			size += sizeof(info);
+
+			pMsg.count++;
+		}
 	}
 
 	if(pMsg.count > 0)

@@ -2901,6 +2901,12 @@ BYTE CItemManager::MoveItemToWarehouseFromInventory(LPOBJ lpObj,BYTE SourceSlot,
 		return 0xFF;
 	}
 
+	// Keep the expiry of an expiring item that goes into the vault (see GDCashShopPeriodicItemSaveSend).
+	if(lpObj->Warehouse[TargetSlot].m_IsPeriodicItem != 0 && lpObj->Warehouse[TargetSlot].m_LoadPeriodicItem != 0)
+	{
+		gCashShop.GDCashShopPeriodicItemSaveSend(lpObj->Index);
+	}
+
 	this->InventoryDelItem(lpObj->Index,SourceSlot);
 
 	this->UpdateInventoryViewport(lpObj->Index,SourceSlot);
