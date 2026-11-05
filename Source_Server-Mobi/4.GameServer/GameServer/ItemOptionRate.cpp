@@ -473,12 +473,12 @@ bool CItemOptionRate::MakeNewOptionWeighted(int ItemIndex,int value,BYTE* option
 
 bool CItemOptionRate::MakeSetOption(int ItemIndex,int value,BYTE* option) // OK
 {
-	// A Lucky item is not an ancient: no tier, so no ancient name or set bonus. Its set option is the stat bonus alone
-	// (value 1 = +5, 2 = +10, 3 = +15 of the stat the item's SetItemType row names, e.g. Stamina +10).
-	if(value > 0 && gLuckyItem.IsLuckyItemIndex(ItemIndex) != 0 && gSetItemType.CheckSetItemType(ItemIndex) != 0)
+	// A Lucky item (Lucky Ticket exchange at David) comes out as a real Ancient - tier and stat bonus -
+	// like Hegaton's Dragon Pants. LuckyItem.txt carries a rate-table number here (10), not a tier, so it is
+	// capped to the +10 stat option an ancient can have (1 = +5, 2 = +10).
+	if(value > 2 && gLuckyItem.IsLuckyItemIndex(ItemIndex) != 0)
 	{
-		(*option) = (BYTE)(4*((value > 3) ? 3 : value));
-		return 1;
+		value = 2;
 	}
 
 	if(gSetItemType.CheckSetItemType(ItemIndex) == 0 || value == 0)
