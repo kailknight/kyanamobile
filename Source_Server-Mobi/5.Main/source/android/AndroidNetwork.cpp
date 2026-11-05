@@ -9,6 +9,8 @@
 #include <android/log.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #if defined(__ANDROID__)
 #include <linux/tcp.h>
 #elif defined(MU_IOS)
@@ -547,11 +549,60 @@ MU_EXPORT int32_t ConnectionManager_Connect(
     }
 
     NET_LOGI("connect start %s:%d", hostAscii, port);
-    if (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0)
+
+    // A plain blocking connect() waits up to ~2 minutes when the server is unreachable (mobile
+    // data, a dead route), and this runs on the thread that also takes touch input and window
+    // events - so a tap, Home or a screen lock during it was an ANR (input dispatching timed out,
+    // window destroyed). Connect with a deadline well inside Android's 5 second limit instead.
+    constexpr int kConnectTimeoutMs = 4000;
+    const int oldFlags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, oldFlags | O_NONBLOCK);
+
+    bool connected = (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+    if (!connected && errno == EINPROGRESS)
+    {
+        pollfd pfd {};
+        pfd.fd = fd;
+        pfd.events = POLLOUT;
+        int pr = 0;
+        do
+        {
+            pr = poll(&pfd, 1, kConnectTimeoutMs);
+        } while (pr < 0 && errno == EINTR);
+
+        if (pr > 0)
+        {
+            int soError = 0;
+            socklen_t soLen = sizeof(soError);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &soLen) == 0 && soError == 0)
+            {
+                connected = true;
+            }
+            else
+            {
+                errno = soError;
+            }
+        }
+        else
+        {
+            errno = ETIMEDOUT;
+        }
+    }
+
+    if (!connected)
     {
         NET_LOGE("connect failed %s:%d errno=%d", hostAscii, port, errno);
         close(fd);
         return 0;
+    }
+
+    // Back to blocking for the receive thread, but with a send deadline so a stalled link cannot
+    // park the game thread inside send() either.
+    fcntl(fd, F_SETFL, oldFlags);
+    {
+        timeval sendTimeout {};
+        sendTimeout.tv_sec = 3;
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sendTimeout, sizeof(sendTimeout));
     }
 
     auto* state = new AndroidConnState(isEncrypted != 0);
