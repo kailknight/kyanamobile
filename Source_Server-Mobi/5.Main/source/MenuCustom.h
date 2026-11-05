@@ -33,7 +33,15 @@ public:
 	void ActionButton(int TypeButton);
 	void Draw();
 
+	// Where a slot's button was drawn on the last frame (virtual 640x480
+	// screen units). False when that button is not on screen right now - the
+	// Android tutorial uses this to point at the real Events button.
+	bool GetButtonRect(int slot, float* x, float* y, float* w, float* h) const;
+	bool IsOpen() const;
+
 private:
 	int m_CurrentPage;
+	float m_BtnRect[24][4];
+	unsigned int m_BtnRectTick[24];
 };
 extern cCustomMenu gCustomMenu;

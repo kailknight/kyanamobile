@@ -424,6 +424,17 @@ namespace SEASON3B
 	public:
 		void SetBannerTargetPackage(int iPackageSeq) { m_iBannerTargetPackage = iPackageSeq; }
 
+		// For the Android tutorial: the recharge panel's state and where the
+		// real Charge (top up) button sits, in 640x480 screen units.
+		bool IsRechargePanelOpen() const { return m_bRechargeOpen; }
+		bool GetChargeButtonRect(int* x, int* y, int* w, int* h)
+		{
+			const POINT& p = m_CashChargeButton.GetPos();
+			const POINT& s = m_CashChargeButton.GetSize();
+			*x = p.x; *y = p.y; *w = s.x; *h = s.y;
+			return s.x > 0 && s.y > 0;
+		}
+
 		// 0xD3/0xF1: the server's answer to a Google Play purchase this phone
 		// handed over (GameServer/DataServer PlayBilling).
 		void OnPlayPurchaseResult(const BYTE* lpMsg, int size);

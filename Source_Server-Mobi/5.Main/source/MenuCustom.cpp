@@ -85,6 +85,8 @@ cCustomMenu gCustomMenu;
 cCustomMenu::cCustomMenu()
 	: m_CurrentPage(0)
 {
+	memset(m_BtnRect, 0, sizeof(m_BtnRect));
+	memset(m_BtnRectTick, 0, sizeof(m_BtnRectTick));
 
 }
 
@@ -208,6 +210,25 @@ void cCustomMenu::ActionButton(int TypeButton)
 	gInterface.Data[eMenu_MAIN].OnShow = 0;
 }
 
+bool cCustomMenu::IsOpen() const
+{
+	return gInterface.Data[eMenu_MAIN].OnShow != 0;
+}
+
+bool cCustomMenu::GetButtonRect(int slot, float* x, float* y, float* w, float* h) const
+{
+	if (slot < 0 || slot >= 24 || !gInterface.Data[eMenu_MAIN].OnShow
+		|| (GetTickCount() - m_BtnRectTick[slot]) > 250)
+	{
+		return false;
+	}
+	*x = m_BtnRect[slot][0];
+	*y = m_BtnRect[slot][1];
+	*w = m_BtnRect[slot][2];
+	*h = m_BtnRect[slot][3];
+	return true;
+}
+
 void cCustomMenu::Draw()
 {
 
@@ -309,6 +330,15 @@ void cCustomMenu::Draw()
 	for (int n = pageStart; n < pageEnd; n++)
 	{
 		int i = enabledSlots[n];
+
+		if (i >= 0 && i < 24)
+		{
+			m_BtnRect[i][0] = (float)(BtStartX + (cX * KhoangCachX));
+			m_BtnRect[i][1] = (float)(BtStartY + (cY * KhoangCachY));
+			m_BtnRect[i][2] = BtnW;
+			m_BtnRect[i][3] = 28.0f;
+			m_BtnRectTick[i] = GetTickCount();
+		}
 
 		// CommonManager\MenuName.txt, once an operator has migrated a slot
 		// to it (GetMainInfo.cpp/MenuName.h) - an empty slot there (not

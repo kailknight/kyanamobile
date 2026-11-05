@@ -118,8 +118,27 @@ bool SEASON3B::CNewUINameWindow::Render()
 	return true;
 }
 
+#if defined(__ANDROID__) || defined(MU_IOS)
+extern int AndroidGetAimLockedCharacterIndex();
+#endif
+
 void SEASON3B::CNewUINameWindow::RenderName()
 {
+#if defined(__ANDROID__) || defined(MU_IOS)
+	// The monster or player AIM is locked on always gets its floating name tag (the red
+	// lock plate is drawn on it, see RenderAimLockFrame), not only while it is hovered.
+	{
+		const int lockedIdx = AndroidGetAimLockedCharacterIndex();
+		if (lockedIdx >= 0)
+		{
+			CHARACTER* lc = &CharactersClient[lockedIdx];
+			if (lc->Object.Live && (lc->Object.Kind == KIND_MONSTER || (lc->Object.Kind == KIND_PLAYER && IsShopTitleVisible(lc) == false)))
+			{
+				CreateChat(lc->ID, "", lc);
+			}
+		}
+	}
+#endif
 	if(g_bGMObservation == true && !gMapManager.InChaosCastle()) //DAT Show Name CC
 	{
 		for(int i=0; i<MAX_CHARACTERS_CLIENT; i++)

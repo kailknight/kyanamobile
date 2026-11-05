@@ -131,6 +131,7 @@ typedef int32_t jint;
 #include "NewUISystem.h"
 #include "NewUIFriendWindow.h"
 #include "CBInterface.h"
+#include "MenuCustom.h"
 #include "VoiceClient.h"
 #include "VoiceAudio.h"
 #include "GameConfig/GameConfigConstants.h"
@@ -1027,6 +1028,10 @@ constexpr int kVirtualRightPanelGridRows = 4;
 constexpr int kVirtualRightPanelModeGridSlot = -1;
 constexpr uint32_t kVirtualMiniMapButtonCooldownMs = 220;
 constexpr uint32_t kVirtualAttackRepeatMs = 140;
+// Holding ATK with no skill armed (a plain weapon swing): never faster than this,
+// and never while the previous swing is still playing - the weapon's own attack
+// speed sets the pace, not the 140ms skill cadence above.
+constexpr uint32_t kVirtualBareSwingRepeatMs = 250;
 
 // Holding attack with the combo on steps through the three skills instead of
 // swinging repeatedly, and each step needs long enough to actually go off. The
@@ -4620,6 +4625,7 @@ void ClearVirtualJoystick()
 // Defined with the rest of the tutorial further down; the movement and
 // world-tap gates below it need to know whether the tour is running.
 bool IsAndroidTutorialActive();
+bool IsAndroidTutorialWorldLive();
 
 // Two different questions depending on whether the stick is already held:
 //
@@ -4651,7 +4657,7 @@ bool IsInsideVirtualJoystickDynamicArea(float uiX, float uiY)
     // the movement ring and walked the character. The tour has its own
     // practice stick (see RenderAndroidTutorialPracticeStick); the real one
     // has no business starting during it.
-    if (IsAndroidTutorialActive())
+    if (IsAndroidTutorialActive() && !IsAndroidTutorialWorldLive())
     {
         return false;
     }
@@ -6582,6 +6588,9 @@ void ClampAndroidTargetPickerScroll()
 
 bool IsAndroidSiegeAutoAim();
 static bool IsSiegeOpposingPlayer(int characterIndex);
+int GetAndroidAimMode();
+bool IsTargetAttackable(int characterIndex);
+static bool IsPlayerExcludedByAimMode(int characterIndex);
 
 bool IsAndroidTargetPickerCandidate(int characterIndex)
 {
@@ -6597,13 +6606,32 @@ bool IsAndroidTargetPickerCandidate(int characterIndex)
     // locking a player here is inert on its own (see SetAndroidTargetLock's
     // caller), the actual attack permission check still happens when ATK or
     // a skill is pressed, so there's nothing unsafe about listing them.
+    //
+    // PVE mode is the exception: there AIM locks monsters (mobs and bosses), so
+    // the list and the drag-to-lock offer the ones that can be attacked.
+    const int aimMode = GetAndroidAimMode();
     if (c->Object.Kind != KIND_PLAYER)
     {
-        return false;
+        const bool pveMonster = (c->Object.Kind == KIND_MONSTER)
+            && aimMode == 0 /* kAimModePve */
+            && IsTargetAttackable(characterIndex);
+        if (!pveMonster)
+        {
+            return false;
+        }
+    }
+    else
+    {
+        // PVE ignores players altogether; Party never offers party members and
+        // Guild never offers party, guild or union (ally) members.
+        if (aimMode == 0 /* kAimModePve */ || IsPlayerExcludedByAimMode(characterIndex))
+        {
+            return false;
+        }
     }
 
     // Locking one would be dropped straight away (UpdateAndroidPkTargetState).
-    if (IsCharacterInSafeZone(characterIndex))
+    if (c->Object.Kind == KIND_PLAYER && IsCharacterInSafeZone(characterIndex))
     {
         return false;
     }
@@ -7127,6 +7155,56 @@ int FindAndroidMixedTarget()
     return picked;
 }
 
+// Party and Guild mode: the nearest attackable PLAYER first (party members are
+// never attackable here; Guild mode also skips guild and union mates - see
+// IsTargetAttackable). Guild mode ranks players of another guild ahead of
+// unguilded ones. With no player in range this returns -1 and the generic chain
+// falls through to monsters. A target already held (by key) is kept while it stays
+// valid, so two players at the same distance do not flick the aim every frame.
+int FindAndroidPlayerFirstTarget(bool guildMode)
+{
+    if (CharactersClient == nullptr || Hero == nullptr)
+    {
+        return -1;
+    }
+
+    static SHORT s_heldKey = -1;
+    const int heroIdx = GetHeroCharacterIndex();
+
+    int bestIndex = -1;
+    int bestRank = 0;
+    int bestDist2 = 0;
+    int heldIndex = -1;
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        const CHARACTER* c = &CharactersClient[i];
+        if (i == heroIdx || !IsValidAutoCombatTarget(i) || c->Object.Kind != KIND_PLAYER
+            || !c->Object.Visible || !IsWithinVirtualAutoAcquireRange(i)
+            || IsCharacterInSafeZone(i) || !IsTargetAttackable(i))
+        {
+            continue;
+        }
+
+        if (s_heldKey != -1 && c->Key == s_heldKey)
+        {
+            heldIndex = i;
+        }
+
+        const int rank = (guildMode && c->GuildMarkIndex < 0) ? 1 : 0;
+        const int dist2 = GetAndroidTileDistance2(i);
+        if (bestIndex < 0 || rank < bestRank || (rank == bestRank && dist2 < bestDist2))
+        {
+            bestIndex = i;
+            bestRank = rank;
+            bestDist2 = dist2;
+        }
+    }
+
+    const int picked = heldIndex >= 0 ? heldIndex : bestIndex;
+    s_heldKey = picked >= 0 ? CharactersClient[picked].Key : static_cast<SHORT>(-1);
+    return picked;
+}
+
 // The mode-specific part of the offensive pick, run ahead of the generic chain
 // in EnsureOffensiveSkillTarget / EnsureNormalAttackTarget. Returns true when it
 // set SelectedCharacter. A siege war keeps its own rules (PVP path).
@@ -7141,14 +7219,32 @@ bool ApplyAndroidAimModePick()
     switch (GetAndroidAimMode())
     {
     case kAimModePve:
+        // Monsters only: a player left in the selection is dropped, and bosses
+        // outrank the mobs around them.
+        if (SelectedCharacter >= 0 && SelectedCharacter < MAX_CHARACTERS_CLIENT
+            && CharactersClient[SelectedCharacter].Object.Kind == KIND_PLAYER)
+        {
+            SelectedCharacter = -1;
+        }
         picked = FindAndroidBossTarget();
         break;
     case kAimModeParty:
+        picked = FindAndroidPlayerFirstTarget(false);
+        break;
     case kAimModeGuild:
-        picked = FindAndroidMixedTarget();
+        picked = FindAndroidPlayerFirstTarget(true);
         break;
     default:
         break;
+    }
+
+    const int aimModeNow = GetAndroidAimMode();
+    if (picked < 0 && (aimModeNow == kAimModeParty || aimModeNow == kAimModeGuild))
+    {
+        // Party and Guild mode look at players only: with nobody to aim at there
+        // is no target at all - never a monster.
+        SelectedCharacter = -1;
+        return true;
     }
 
     if (picked < 0)
@@ -7175,6 +7271,12 @@ int FindNearestMonsterTarget(bool limitToAcquireRange);
 
 int FindNearestAttackableTarget()
 {
+    const int modeForPick = GetAndroidAimMode();
+    if (modeForPick == kAimModeParty || modeForPick == kAimModeGuild)
+    {
+        return FindNearestAttackablePlayerTarget(false);   // players only in these modes
+    }
+
     if (IsVirtualPkTargetingEnabled())
     {
         const int playerTarget = FindNearestAttackablePlayerTarget(false);
@@ -7795,7 +7897,100 @@ bool IsAndroidBuffableTarget(int characterIndex, int heroIdx)
     SelectedCharacter, which the auto-acquire chain rewrites to the nearest
     monster on every offensive cast.
 */
-void EnsureSupportSkillTarget()
+// Buffs that have to be aimed at a friend: Soul Barrier (Wizard), Reflect
+// (Summoner's Thorns) and the Elf's Greater Damage / Greater Defense.
+bool IsAndroidSoulBarrierSkill(int skillType)
+{
+    return skillType == AT_SKILL_WIZARDDEFENSE
+        || skillType == MASTER_SKILL_ADD_MANA_SHIELD_IMPROVED
+        || skillType == MASTER_SKILL_ADD_MANA_SHIELD_ENHANCED
+        || skillType == MASTER_SKILL_ADD_MANA_SHIELD_MASTERED
+        || (skillType >= AT_SKILL_SOUL_UP && skillType <= AT_SKILL_SOUL_UP + 4);
+}
+
+bool IsAndroidReflectSkill(int skillType)
+{
+    return skillType == AT_SKILL_ALICE_THORNS;
+}
+
+// The Elf's buffs with every upgrade: Greater Damage, Greater Defense, Greater Life
+// and Heal (base skill, the five +n upgrades, and the master versions).
+bool IsAndroidElfBuffSkill(int skillType)
+{
+    return skillType == AT_SKILL_ATTACK
+        || (skillType >= AT_SKILL_ATT_POWER_UP && skillType <= AT_SKILL_ATT_POWER_UP + 4)
+        || skillType == MASTER_SKILL_ADD_GREATER_DAMAGE_IMPROVED
+        || skillType == MASTER_SKILL_ADD_GREATER_DAMAGE_ENHANCED
+        || skillType == AT_SKILL_DEFENSE
+        || (skillType >= AT_SKILL_DEF_POWER_UP && skillType <= AT_SKILL_DEF_POWER_UP + 4)
+        || skillType == MASTER_SKILL_ADD_GREATER_DEFENSE_IMPROVED
+        || skillType == MASTER_SKILL_ADD_GREATER_DEFENSE_ENHANCED
+        || skillType == AT_SKILL_VITALITY
+        || (skillType >= AT_SKILL_LIFE_UP && skillType <= AT_SKILL_LIFE_UP + 4)
+        || skillType == MASTER_SKILL_ADD_GREATER_LIFE_IMPROVED
+        || skillType == MASTER_SKILL_ADD_GREATER_LIFE_ENHANCED
+        || skillType == MASTER_SKILL_ADD_GREATER_LIFE_MASTERED
+        || skillType == AT_SKILL_HEALING
+        || (skillType >= AT_SKILL_HEAL_UP && skillType <= AT_SKILL_HEAL_UP + 4)
+        || skillType == MASTER_SKILL_ADD_HEAL_IMPROVED;
+}
+
+bool IsAndroidTargetedBuffSkill(int skillType)
+{
+    return IsAndroidSoulBarrierSkill(skillType) || IsAndroidReflectSkill(skillType)
+        || IsAndroidElfBuffSkill(skillType);
+}
+
+// Does this character already carry the buff the skill would give it? Skills this
+// does not know return false, so every party member counts as needing them.
+bool AndroidTargetHasSupportBuff(OBJECT* o, int skillType)
+{
+    switch (skillType)
+    {
+    case AT_SKILL_ATT_POWER_UP:
+    case AT_SKILL_ATT_POWER_UP + 1:
+    case AT_SKILL_ATT_POWER_UP + 2:
+    case AT_SKILL_ATT_POWER_UP + 3:
+    case AT_SKILL_ATT_POWER_UP + 4:
+    case AT_SKILL_ATTACK:
+    case MASTER_SKILL_ADD_GREATER_DAMAGE_IMPROVED:
+    case MASTER_SKILL_ADD_GREATER_DAMAGE_ENHANCED:
+        return g_isCharacterBuff(o, eBuff_Attack);
+    case AT_SKILL_DEF_POWER_UP:
+    case AT_SKILL_DEF_POWER_UP + 1:
+    case AT_SKILL_DEF_POWER_UP + 2:
+    case AT_SKILL_DEF_POWER_UP + 3:
+    case AT_SKILL_DEF_POWER_UP + 4:
+    case AT_SKILL_DEFENSE:
+    case MASTER_SKILL_ADD_GREATER_DEFENSE_IMPROVED:
+    case MASTER_SKILL_ADD_GREATER_DEFENSE_ENHANCED:
+        return g_isCharacterBuff(o, eBuff_Defense);
+    default:
+        break;
+    }
+
+    if (skillType == AT_SKILL_VITALITY
+        || (skillType >= AT_SKILL_LIFE_UP && skillType <= AT_SKILL_LIFE_UP + 4)
+        || skillType == MASTER_SKILL_ADD_GREATER_LIFE_IMPROVED
+        || skillType == MASTER_SKILL_ADD_GREATER_LIFE_ENHANCED
+        || skillType == MASTER_SKILL_ADD_GREATER_LIFE_MASTERED)
+    {
+        return g_isCharacterBuff(o, eBuff_HpRecovery)
+            || g_isCharacterBuff(o, EFFECT_GREATER_LIFE_ENHANCED)
+            || g_isCharacterBuff(o, EFFECT_GREATER_LIFE_MASTERED);
+    }
+    if (IsAndroidSoulBarrierSkill(skillType))
+    {
+        return g_isCharacterBuff(o, eBuff_PhysDefense) || g_isCharacterBuff(o, EFFECT_MANA_SHIELD_MASTERED);
+    }
+    if (IsAndroidReflectSkill(skillType))
+    {
+        return g_isCharacterBuff(o, eBuff_Thorns);
+    }
+    return false;
+}
+
+void EnsureSupportSkillTarget(int skillType = -1)
 {
     if (!IsVirtualPadAvailable())
     {
@@ -7811,12 +8006,15 @@ void EnsureSupportSkillTarget()
         return;
     }
 
-    // Party and Guild mode: the buff goes to the nearest party member first.
+    // Party and Guild mode: the buff locks on to the nearest party member that
+    // does NOT have it yet; when they all do, the nearest party member.
     const int aimMode = GetAndroidAimMode();
     if ((aimMode == kAimModeParty || aimMode == kAimModeGuild) && Hero != nullptr)
     {
-        int bestParty = -1;
-        int bestDist2 = 0;
+        int bestNeedy = -1;
+        int bestNeedyDist2 = 0;
+        int bestAny = -1;
+        int bestAnyDist2 = 0;
         for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
         {
             if (!IsAndroidBuffableTarget(i, heroIdx) || !g_pPartyManager->IsPartyMember(i))
@@ -7825,16 +8023,24 @@ void EnsureSupportSkillTarget()
             }
 
             const int dist2 = GetAndroidTileDistance2(i);
-            if (bestParty < 0 || dist2 < bestDist2)
+            if (bestAny < 0 || dist2 < bestAnyDist2)
             {
-                bestParty = i;
-                bestDist2 = dist2;
+                bestAny = i;
+                bestAnyDist2 = dist2;
+            }
+
+            const bool hasBuff = AndroidTargetHasSupportBuff(&CharactersClient[i].Object, skillType);
+            if (!hasBuff && (bestNeedy < 0 || dist2 < bestNeedyDist2))
+            {
+                bestNeedy = i;
+                bestNeedyDist2 = dist2;
             }
         }
 
-        if (bestParty >= 0)
+        const int chosen = (bestNeedy >= 0) ? bestNeedy : bestAny;
+        if (chosen >= 0)
         {
-            SelectedCharacter = bestParty;
+            SelectedCharacter = chosen;
             return;
         }
     }
@@ -7956,7 +8162,8 @@ bool IsElfSummonSkill(int skillType)
 bool IsSupportOrSelfSkill(ActionSkillType skillType)
 {
     return IsCorrectSkillType_Buff(skillType) || IsCorrectSkillType_FrendlySkill(skillType)
-        || IsElfSummonSkill(skillType) || skillType == AT_SKILL_PARTY_TELEPORT;
+        || IsElfSummonSkill(skillType) || skillType == AT_SKILL_PARTY_TELEPORT
+        || IsAndroidTargetedBuffSkill(static_cast<int>(skillType));
 }
 
 bool TriggerVirtualNormalAutoAttack()
@@ -9982,7 +10189,7 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
         // Buff/friendly skills: whoever is aimed, falling back to self. This used
         // to assign the hero unconditionally, which is why Greater Damage and
         // Greater Defense could never be cast on a party member.
-        EnsureSupportSkillTarget();
+        EnsureSupportSkillTarget(rawSkillType);
     }
 
     // Nova is offensive but does not need a target: it is an area attack
@@ -10070,11 +10277,27 @@ void TriggerVirtualCombat(bool useNormalAttack, int skillSlot)
     Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
 }
 
+bool IsAndroidHeroBusyForSkillCast();
+
 bool AndroidTriggerNormalAttackButtonInternal()
 {
     if (!kShowVirtualAttackButton)
     {
         return false;
+    }
+
+    // Tapping ATK again mid-swing used to start a new swing at once, which is
+    // how a fast tapper attacked far faster than the weapon's attack speed.
+    // Ignore taps while the previous swing is still playing (and any tap closer
+    // than 200ms to the last one) - the weapon sets the pace.
+    {
+        static uint32_t s_lastBareSwingMs = 0;
+        const uint32_t nowMs = MU_MobileGetTicks();
+        if (IsAndroidHeroBusyForSkillCast() || (nowMs - s_lastBareSwingMs) < 200u)
+        {
+            return true;
+        }
+        s_lastBareSwingMs = nowMs;
     }
 
     const int selectedBefore = SelectedCharacter;
@@ -10237,7 +10460,7 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
         // Same as the skill-slot path: aimed friendly player first, self only as
         // a fallback. Both entry points have to agree or a buff would land on a
         // party member from the arc but on the caster from a Q/W/E/R hotkey.
-        EnsureSupportSkillTarget();
+        EnsureSupportSkillTarget(rawSkillType);
     }
     else if (groundSkill)
     {
@@ -13730,9 +13953,20 @@ enum AndroidTutorialStepId
     kTutStepSkillBind,
     kTutStepPotions,
     kTutStepPotionBind,
+    kTutStepAutoMenu,
     kTutStepTarget,
     kTutStepItems,
-    kTutStepZoom,
+    kTutStepCamera,
+    kTutStepCmdTrade,
+    kTutStepHoldTrade,
+    kTutStepCmdZen,
+    kTutStepWarp,
+    kTutStepPotionLady,
+    kTutStepSkillLady,
+    kTutStepLearnSkill,
+    kTutStepHunt,
+    kTutStepTopUp,
+    kTutStepInvasion,
     kTutStepTravel,
     kTutStepStats,
     kTutStepTopBar,
@@ -13776,17 +14010,50 @@ constexpr std::array<AndroidTutorialStep, kAndroidTutorialStepCount> kAndroidTut
       "Q W E R hold your consumables. A short tap drinks from a slot; the number under it is how many you have left.",
       "Try it: tap one of the four slots." },
     { "Equip a Potion",
-      "Tap an empty Q/W/E/R slot and your bag opens - tap any consumable in it and that slot is bound. Press and hold a filled slot to empty it again.",
+      "Tap an empty Q/W/E/R slot and your REAL bag opens - tap the glowing practice potion (a real one works the same) and that slot is bound. Press and hold a filled slot to empty it again.",
       "Try it: tap the empty slot, pick a potion, then hold it to clear." },
-    { "Target & Page",
-      "AIM opens a list of the players near you. The button below it swaps between your two skill pages.",
-      "Try it: tap AIM to open the list, then tap a name to lock onto it." },
+    { "Auto Potion & Auto Combo",
+      "AutoPots and CMB are switches: tap to turn them on or off. Press and HOLD one to open its settings (HP/MP % to drink, which skills to chain). Changing those settings needs VIP - everyone can still switch them on and off.",
+      "Try it: tap a switch, then press and hold one." },
+    { "Target (AIM)",
+      "AIM sits above skill slot 2. Tap it for a list of nearby players, or press AIM and DRAG onto a player - let go to LOCK. The locked player's name plate turns red and ATK + skills follow them. Tap LOCK to let go.",
+      "Try it: drag from AIM onto a player and release." },
     { "Item Pickups",
       "Walk over a drop and this menu opens by itself. The picture is the item, the arrows page through everything in reach, and Pick Up walks you over and collects it.",
       "Try it: tap the picture for details, the arrows to page, then Pick Up." },
-    { "Zoom",
-      "Put two fingers on the screen and pinch to pull the camera in or push it out. There are no zoom buttons - the gesture is the control, and it works anywhere in the world.",
-      "Try it: pinch with two fingers. This one is real - watch the world behind." },
+    { "Camera (PTZ)",
+      "Use TWO fingers: pinch to zoom, drag both up or down to TILT, drag both left or right to PAN around your character. The camera button under the mic lights up once you move the view - tap it to reset.",
+      "Try it: zoom, tilt, pan, then tap Reset. This one is real." },
+    { "Chat Commands",
+      "Commands start with a /. Tap the chat box (bottom centre) to open the keyboard, type /party <name> to invite a player or /trade <name> to trade with them, and press Enter to send it.",
+      "Try it: tap the chat box and type a command (Enter sends it)." },
+    { "Tap & Hold to Trade",
+      "No typing needed: press and HOLD a player's character until the ring fills and a menu pops up, then choose Trade or Party.",
+      "Try it: hold the Dummy, then choose Trade." },
+    { "Handy Commands",
+      "Try a real one: type /zen 9999999 in the chat box and press Enter to receive zen. Also handy: /remaster resets your ACTIVE master skill page, /readd resets your stat points. Some ask you to confirm first.",
+      "Try it: send /zen 9999999 from the chat box." },
+    { "Go to Lorencia",
+      "Lorencia is the starting town: shops, NPCs and a safe zone. If you are somewhere else, tap Warp and the tutorial moves you there with the normal move list, so it costs a little zen - that is what /zen is for.",
+      "Try it: be in Lorencia (tap Warp if you are not)." },
+    { "Buy Potions",
+      "The RED lady behind the bar is Liaman the Barmaid - she sells potions. Tap Walk there and your character follows the route, then tap her to open the shop and tap a potion to buy it.",
+      "Try it: walk to Liaman (122, 135) and open her shop." },
+    { "Buy Skills",
+      "The BLUE lady next to her is Lumen the Barmaid - she sells skills and gear. Walk to her the same way, tap her, and buy the skill orb for your class.",
+      "Try it: walk to Lumen (126, 135) and open her shop." },
+    { "Learn a Skill",
+      "Skills are learned from skill ORBS in your inventory. Press and HOLD the orb until the ring fills - a quick tap only shows its details. Once learned, the skill appears in your skill list, ready to bind to your wheel.",
+      "Try it: press and hold the Orb of Twisting Slash." },
+    { "Fight Monsters",
+      "Every class has a newbie field up to level 10: the Spiders and Budge Dragons east of Lorencia (DK, DW, MG, DL), Noria for Elf, Elbeland for Summoner. Tap ATK to attack the nearest monster; your EXP bar rises when one falls.",
+      "Try it: defeat one monster with ATK." },
+    { "Top Up",
+      "Tap the Kira Shop button in the top bar. Inside the shop, tap the highlighted TOP UP button next to your WCoin balance to buy coins.",
+      "Try it: tap Kira Shop, then Top Up." },
+    { "Join an Invasion",
+      "Open Features in the top bar, tap Events, then tap the invasion you want to go to - you are taken straight in. Watch the chat for start times.",
+      "Try it: tap Features, then Events, then an invasion." },
     { "Travel",
       "The map name and coordinates at the top right are a button. Tap it to open the move list, then pick a map to warp there - it costs zen and needs the level that map asks for.",
       "Try it: tap the map chip, then pick a destination." },
@@ -13825,6 +14092,7 @@ constexpr float kAndroidTutorialLineH = 11.0f;
 // them need them.
 void BeginAndroidTutorial2D();
 void RenderAndroidTutorialNoteBox(const AndroidUiRect& note, bool done, const char* text);
+void DrawAndroidTutorialDummyItem(const AndroidUiRect& slot, int itemType, bool holding, float holdFrac);
 
 // TextDraw does NOT word-wrap. SEASON3B::TextDraw (NewUICommon.cpp) only
 // splits on '\n'/'#' via strtok and steps PosY per fragment - a long string is
@@ -13973,6 +14241,58 @@ struct AndroidTutorialState
     float itemTipY = 0.0f;
     float itemTipW = 0.0f;
     float itemTipH = 0.0f;
+
+    // Learn a Skill: which mock rows have been learned (press-and-hold).
+    bool  learned[4] = {};
+
+    // Auto Potion / Auto Combo: 0 none, 1 potion settings, 2 combo settings.
+    int   autoMenu = 0;
+    bool  autoOn[2] = {};
+
+    // AIM drag: a finger that went down on AIM, and where it is now.
+    SDL_FingerID aimDragFinger = static_cast<SDL_FingerID>(-1);
+    float aimDragX = 0.0f;
+    float aimDragY = 0.0f;
+    float aimDownX = 0.0f;
+    float aimDownY = 0.0f;
+    bool  aimDragMoved = false;
+
+    // Camera (PTZ): what the player has already done, measured against the
+    // camera as it was when the step opened.
+    bool  camStarted = false;
+    float camStartZoom = 0.0f;
+    float camStartYaw = 0.0f;
+    float camStartTilt = 0.0f;
+    bool  camZoomed = false;
+    bool  camTilted = false;
+    bool  camPanned = false;
+    bool  camReset = false;
+
+    // Command steps: bit 0/1/2 = which commands were run.
+    int   cmdRan = 0;
+    DWORD cmdTick = 0;
+    bool  dummyParty = false;
+    bool  dummyTradeOpen = false;
+    bool  dummyTradeDone = false;
+    bool  dummyMenuOpen = false;
+
+    // Lorencia walkthrough: warp, guide to an NPC, shop, hunt.
+    bool  arrived = false;
+    bool  shopSeen = false;
+    bool  bought = false;
+    DWORD zenAtShop = 0;
+    DWORD warpTick = 0;
+    bool  warpSent = false;
+    DWORD expAtStart = 0;
+    bool  killed = false;
+
+    // Auto Potion / Combo: the player's own switches, restored on leaving.
+    bool  autoInit = false;
+    bool  autoOrig[2] = {};
+
+    // Top up / invasion walkthroughs.
+    int   shopStage = 0;     // 0 closed, 1 shop open, 2 top up tapped
+    int   invStage = 0;      // 0 closed, 1 features open, 2 events open, 3 joined
 };
 static AndroidTutorialState g_androidTutorial;
 
@@ -13989,7 +14309,8 @@ bool IsAndroidTutorialActive()
 // down this file.
 bool ShouldSuppressAndroidChatForTutorial()
 {
-    return g_androidTutorial.active && g_androidTutorial.step != kTutStepChat;
+    return g_androidTutorial.active && g_androidTutorial.step != kTutStepChat
+        && g_androidTutorial.step != kTutStepCmdTrade && g_androidTutorial.step != kTutStepCmdZen;
 }
 
 // Two steps hand the screen to the player's own real window rather than a
@@ -13998,7 +14319,23 @@ bool ShouldSuppressAndroidChatForTutorial()
 // actually look like and let them actually be used.
 bool AndroidTutorialStepUsesRealWindow(int step)
 {
-    return step == kTutStepTravel || step == kTutStepStats;
+    return step == kTutStepTravel || step == kTutStepStats || step == kTutStepLearnSkill
+        || step == kTutStepPotionBind;
+}
+
+// Steps where the real world stays live: the player walks, taps NPCs and
+// attacks for real, so every touch the tutorial does not own falls through.
+bool IsAndroidTutorialWorldLive()
+{
+    return g_androidTutorial.active
+        && (g_androidTutorial.step == kTutStepPotionLady
+            || g_androidTutorial.step == kTutStepSkillLady
+            || g_androidTutorial.step == kTutStepHunt
+            || g_androidTutorial.step == kTutStepTopUp
+            || g_androidTutorial.step == kTutStepInvasion
+            || g_androidTutorial.step == kTutStepAutoMenu
+            || g_androidTutorial.step == kTutStepCmdTrade
+            || g_androidTutorial.step == kTutStepCmdZen);
 }
 
 // Whether that step's window is up right now.
@@ -14017,6 +14354,10 @@ bool IsAndroidTutorialRealWindowOpen()
     {
         return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHARACTER) != FALSE;
     }
+    if (g_androidTutorial.step == kTutStepLearnSkill || g_androidTutorial.step == kTutStepPotionBind)
+    {
+        return g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY) != FALSE;
+    }
     return false;
 }
 
@@ -14033,9 +14374,13 @@ void SyncAndroidTutorialRealWindow()
         return;
     }
 
-    const int current = (g_androidTutorial.active
-                         && AndroidTutorialStepUsesRealWindow(g_androidTutorial.step))
+    int current = (g_androidTutorial.active
+                   && AndroidTutorialStepUsesRealWindow(g_androidTutorial.step))
         ? g_androidTutorial.step : -1;
+    if (current == kTutStepPotionBind && g_androidTutorial.potionBindStage != 1)
+    {
+        current = -1;   // the bag only opens once a slot is waiting for a potion
+    }
 
     if (current == s_openedFor)
     {
@@ -14050,12 +14395,30 @@ void SyncAndroidTutorialRealWindow()
     {
         g_pNewUISystem->Hide(SEASON3B::INTERFACE_CHARACTER);
     }
+    else if (s_openedFor == kTutStepLearnSkill || s_openedFor == kTutStepPotionBind)
+    {
+        g_pNewUISystem->Hide(SEASON3B::INTERFACE_INVENTORY);
+    }
+
+    // These steps show the player's REAL bag, so open it for them.
+    if ((current == kTutStepLearnSkill || current == kTutStepPotionBind)
+        && !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY))
+    {
+        g_pNewUISystem->Show(SEASON3B::INTERFACE_INVENTORY);
+    }
 
     s_openedFor = current;
 }
 
 void ResetAndroidTutorialStepDemo()
 {
+    // The Auto Potion step uses the player's REAL switches; put them back.
+    if (g_androidTutorial.autoInit)
+    {
+        gAutoPotion.SetEnabled(g_androidTutorial.autoOrig[0]);
+        MU_MobileComboSetEnabled(g_androidTutorial.autoOrig[1]);
+        g_androidTutorial.autoInit = false;
+    }
     g_androidTutorial.holdFinger = static_cast<SDL_FingerID>(-1);
     g_androidTutorial.holdTarget = -1;
     g_androidTutorial.holdDownMs = 0;
@@ -14086,6 +14449,30 @@ void ResetAndroidTutorialStepDemo()
     g_androidTutorial.itemTipY = 0.0f;
     g_androidTutorial.itemTipW = 0.0f;
     g_androidTutorial.itemTipH = 0.0f;
+    for (bool& l : g_androidTutorial.learned) { l = false; }
+    g_androidTutorial.autoMenu = 0;
+    g_androidTutorial.autoOn[0] = g_androidTutorial.autoOn[1] = false;
+    g_androidTutorial.aimDragFinger = static_cast<SDL_FingerID>(-1);
+    g_androidTutorial.aimDragMoved = false;
+    g_androidTutorial.camStarted = false;
+    g_androidTutorial.camZoomed = g_androidTutorial.camTilted = false;
+    g_androidTutorial.camPanned = g_androidTutorial.camReset = false;
+    g_androidTutorial.cmdRan = 0;
+    g_androidTutorial.cmdTick = 0;
+    g_androidTutorial.dummyParty = false;
+    g_androidTutorial.dummyTradeOpen = false;
+    g_androidTutorial.dummyTradeDone = false;
+    g_androidTutorial.dummyMenuOpen = false;
+    g_androidTutorial.shopStage = 0;
+    g_androidTutorial.invStage = 0;
+    g_androidTutorial.arrived = false;
+    g_androidTutorial.shopSeen = false;
+    g_androidTutorial.bought = false;
+    g_androidTutorial.zenAtShop = 0;
+    g_androidTutorial.warpTick = 0;
+    g_androidTutorial.warpSent = false;
+    g_androidTutorial.expAtStart = 0;
+    g_androidTutorial.killed = false;
 }
 
 // The whole process already chdir's into the app's private writable
@@ -14132,6 +14519,148 @@ AndroidUiRect InflateAndroidUiRect(const AndroidUiRect& r, float pad)
 AndroidUiRect CircleBoundsAndroidUiRect(float cx, float cy, float radius)
 {
     return { cx - radius, cy - radius, radius * 2.0f, radius * 2.0f };
+}
+
+// Where the dummy skill orb sits: the first empty slot of the player's real
+// bag. False while the bag is not on screen.
+bool GetAndroidTutorialLearnOrbRect(AndroidUiRect& out)
+{
+    if (g_pMyInventory == nullptr || g_pNewUISystem == nullptr
+        || !g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INVENTORY))
+    {
+        return false;
+    }
+
+    SEASON3B::CNewUIInventoryCtrl* ctrl = g_pMyInventory->GetInventoryCtrl();
+    if (ctrl == nullptr)
+    {
+        return false;
+    }
+
+    int col = 0;
+    int row = 0;
+    if (!ctrl->FindEmptySlot(1, 1, col, row))
+    {
+        col = 0;
+        row = 0;
+    }
+
+    const POINT& pos = ctrl->GetPos();
+    out = { static_cast<float>(pos.x) + (20.0f * static_cast<float>(col)),
+            static_cast<float>(pos.y) + (20.0f * static_cast<float>(row)), 20.0f, 20.0f };
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Lorencia walkthrough helpers.
+// ---------------------------------------------------------------------------
+struct AndroidTutorialNpc
+{
+    const char* name;
+    int x;
+    int y;
+};
+constexpr AndroidTutorialNpc kAndroidTutorialPotionNpc = { "Liaman the Barmaid", 122, 135 };
+constexpr AndroidTutorialNpc kAndroidTutorialSkillNpc  = { "Lumen the Barmaid", 126, 135 };
+
+// Where each class levels up to 10: DK / DW / MG / DL (and RF) east of
+// Lorencia among the Spiders and Budge Dragons, Elf in Noria, Summoner in
+// Elbeland. Coordinates are tiles, read off the server's monster spawns.
+struct AndroidTutorialHunt
+{
+    const char* name;
+    const char* mapName;   // as it appears in the move list
+    int world;
+    int x;
+    int y;
+};
+
+AndroidTutorialHunt GetAndroidTutorialHuntSpot()
+{
+    const int baseClass = (CharacterAttribute != nullptr)
+        ? gCharacterManager.GetBaseClass(CharacterAttribute->Class) : -1;
+    if (baseClass == CLASS_ELF)
+    {
+        return { "Noria hunting field", "Noria", WD_3NORIA, 148, 118 };
+    }
+    if (baseClass == CLASS_SUMMONER)
+    {
+        return { "Elbeland hunting field", "Elbeland", WD_51HOME_6TH_CHAR, 36, 228 };
+    }
+    return { "Spiders & Budge Dragons", "Lorencia", WD_0LORENCIA, 187, 120 };
+}
+
+bool IsAndroidTutorialInLorencia()
+{
+    return gMapManager.WorldActive == WD_0LORENCIA;
+}
+
+int AndroidTutorialTileDistance(int x, int y)
+{
+    if (Hero == nullptr)
+    {
+        return 999;
+    }
+    return std::max(std::abs(static_cast<int>(Hero->PositionX) - x), std::abs(static_cast<int>(Hero->PositionY) - y));
+}
+
+// The same auto-walk the minimap uses when you tap it: sets the destination
+// tile and lets AutoMove() route there in legs.
+void StartAndroidTutorialWalk(int x, int y)
+{
+    if (g_pNewUIMiniMap == nullptr || Hero == nullptr)
+    {
+        return;
+    }
+    g_pNewUIMiniMap->ViTriChon.x = x;
+    g_pNewUIMiniMap->ViTriChon.y = y;
+    g_pNewUIMiniMap->ViTriDiChuyen.x = x;
+    g_pNewUIMiniMap->ViTriDiChuyen.y = y;
+    g_pNewUIMiniMap->Movement = true;
+    CGAutoMove(1);
+}
+
+// Sends the normal move-list request for Lorencia. False when the entry is
+// not in the list (the step then tells the player to use the list by hand).
+bool RequestAndroidTutorialWarp(const char* mapName, bool* outNotEnoughZen)
+{
+    if (outNotEnoughZen != nullptr)
+    {
+        *outNotEnoughZen = false;
+    }
+    if (g_pMoveCommandWindow == nullptr)
+    {
+        return false;
+    }
+
+    const std::list<SEASON3B::CMoveCommandData::MOVEINFODATA*>& list =
+        SEASON3B::CMoveCommandData::GetInstance()->GetMoveCommandDatalist();
+    for (SEASON3B::CMoveCommandData::MOVEINFODATA* data : list)
+    {
+        if (data == nullptr || strstr(data->_ReqInfo.szMainMapName, mapName) == nullptr)
+        {
+            continue;
+        }
+        if (CharacterMachine != nullptr && CharacterMachine->Gold < static_cast<DWORD>(data->_ReqInfo.iReqZen))
+        {
+            if (outNotEnoughZen != nullptr)
+            {
+                *outNotEnoughZen = true;
+            }
+            return false;
+        }
+        SendRequestMoveMap(g_pMoveCommandWindow->GetMoveCommandKey(), static_cast<WORD>(data->_ReqInfo.index));
+        return true;
+    }
+    return false;
+}
+
+constexpr AndroidUiRect kAndroidTutorialGuideCard = { 8.0f, 134.0f, 230.0f, 148.0f };
+
+AndroidUiRect GetAndroidTutorialWalkButtonRect()
+{
+    const AndroidUiRect c = kAndroidTutorialGuideCard;
+    return { c.x + 10.0f, c.y + c.h - 34.0f, c.w - 20.0f, 26.0f };
 }
 
 // One highlight rect per step, in UI units - built from the same layout
@@ -14214,15 +14743,95 @@ bool GetAndroidTutorialStepRect(int step, AndroidUiRect& outRect)
         return true;
     }
 
-    case kTutStepItems: // Item pickup menu - no real highlight, see
-                        // RenderAndroidTutorial's example for why (the menu
-                        // practically never exists on screen at the exact
-                        // moment the tutorial runs).
-        return false;
+    case kTutStepItems: // The example menu is drawn at a fixed spot, so frame it.
+        outRect = { 420.0f, 150.0f, 180.0f, 150.0f };
+        return true;
 
-    case kTutStepZoom: // Pinch is a whole-screen gesture, not a control - the
-                       // only thing worth framing is the world it acts on.
-        return false;
+    case kTutStepCamera: // The reset button under the mic is the one control here.
+        outRect = InflateAndroidUiRect(GetCameraResetButtonRect(), 5.0f);
+        return true;
+
+    case kTutStepLearnSkill: // the dummy orb in the real bag
+    {
+        AndroidUiRect orb;
+        if (GetAndroidTutorialLearnOrbRect(orb))
+        {
+            outRect = InflateAndroidUiRect(orb, 6.0f);
+            return true;
+        }
+        outRect = { 450.0f, 150.0f, 180.0f, 200.0f };
+        return true;
+    }
+
+    case kTutStepAutoMenu: // the real AutoPots + Combo switches
+        outRect = InflateAndroidUiRect(
+            UnionAndroidUiRect(GetAutoPotsToggleRect(), GetComboToggleRect()), 8.0f);
+        return true;
+
+    case kTutStepHoldTrade:
+        outRect = { 150.0f, 134.0f, 340.0f, 196.0f };
+        return true;
+
+    case kTutStepCmdTrade:
+    case kTutStepCmdZen: // the real chat: the log to tap, then the input bar once open
+        if (g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX))
+        {
+            outRect = InflateAndroidUiRect(
+                AndroidUiRect{ kVirtualHudChatBoxX, kVirtualHudChatBoxY, kVirtualHudChatBoxW, kVirtualHudChatBoxH }, 4.0f);
+            return true;
+        }
+        outRect = AndroidUiRect{
+            kChatLogX - 8.0f,
+            kChatTabsY - 4.0f,
+            ((kChatTabW + kChatTabGap) * static_cast<float>(kChatTabCount)) + 16.0f,
+            kChatLogBottomY - kChatTabsY + 8.0f
+        };
+        return true;
+
+    case kTutStepTopUp: // the real Kira Shop button, then its real Charge button
+    {
+        if (g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP))
+        {
+            int bx = 0, by = 0, bw = 0, bh = 0;
+            if (g_pInGameShop != nullptr && !g_pInGameShop->IsRechargePanelOpen()
+                && g_pInGameShop->GetChargeButtonRect(&bx, &by, &bw, &bh))
+            {
+                outRect = InflateAndroidUiRect({ static_cast<float>(bx), static_cast<float>(by),
+                                                 static_cast<float>(bw), static_cast<float>(bh) }, 4.0f);
+                return true;
+            }
+            return false;
+        }
+        outRect = InflateAndroidUiRect(GetTopBarButtonRect(1), 5.0f);
+        return true;
+    }
+
+    case kTutStepInvasion: // the real Features button, then its real Events button
+    {
+        if (gInterface.Data[eWindowEventTime].OnShow)
+        {
+            return false;
+        }
+        if (gInterface.Data[eMenu_MAIN].OnShow)
+        {
+            float ex = 0.0f, ey = 0.0f, ew = 0.0f, eh = 0.0f;
+            if (gCustomMenu.GetButtonRect(eButtonEventTime, &ex, &ey, &ew, &eh))
+            {
+                outRect = InflateAndroidUiRect({ ex, ey, ew, eh }, 3.0f);
+                return true;
+            }
+            return false;
+        }
+        outRect = InflateAndroidUiRect(GetTopBarButtonRect(10), 5.0f);
+        return true;
+    }
+
+    case kTutStepHunt: // the real ATK button
+        outRect = InflateAndroidUiRect(
+            CircleBoundsAndroidUiRect(kVirtualButtons[kVirtualAttackButton].cx,
+                                      kVirtualButtons[kVirtualAttackButton].cy,
+                                      kVirtualButtons[kVirtualAttackButton].radius), 8.0f);
+        return true;
 
     case kTutStepTravel: // The map/coords chip is the button that opens the
                          // move list (kTopBarActionLocation).
@@ -14280,8 +14889,38 @@ constexpr float kAndroidTutorialPanelW = 560.0f;
 constexpr float kAndroidTutorialPanelH = 112.0f;
 constexpr float kAndroidTutorialNavH = 20.0f;
 
+// While a real window is open on one of the steps that teaches it (a shop,
+// the bag, the move list...), the caption would sit on top of the window's
+// first rows and make it impossible to use. It shrinks to a small box in the
+// bottom-left corner instead - the windows live on the right and centre.
+bool IsAndroidTutorialPanelCompact(int step)
+{
+    switch (step)
+    {
+    case kTutStepPotionBind:
+    case kTutStepLearnSkill:
+    case kTutStepPotionLady:
+    case kTutStepSkillLady:
+    case kTutStepTopUp:
+    case kTutStepInvasion:
+    case kTutStepTravel:
+    case kTutStepStats:
+        return IsAndroidGameWindowOpen() || IsAndroidRawPopupWindowOpen()
+            || (g_pNewUISystem != nullptr
+                && (g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP)
+                    || g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP)));
+    default:
+        return false;
+    }
+}
+
 AndroidUiRect GetAndroidTutorialPanelRect(int step)
 {
+    if (IsAndroidTutorialPanelCompact(step))
+    {
+        return { 8.0f, 330.0f, 262.0f, 142.0f };
+    }
+
     AndroidUiRect highlight;
     const bool hasHighlight = GetAndroidTutorialStepRect(step, highlight);
     const bool highlightInTopHalf = hasHighlight && (highlight.y + highlight.h * 0.5f) < 240.0f;
@@ -14469,6 +15108,107 @@ ITEM GetAndroidTutorialExampleItem(int page)
     // in the damage, the requirements and everything else the tooltip reads.
     ItemConvert(&item, 0, 0, 0);
     return item;
+}
+
+// ---------------------------------------------------------------------------
+// Layout of the mock windows used by the newer steps. Everything sits in the
+// free band between the two caption-panel positions (y 130..350), so the
+// panel never covers it whichever side it lands on.
+// ---------------------------------------------------------------------------
+constexpr float kAndroidTutorialDummyX = 320.0f;
+constexpr float kAndroidTutorialDummyY = 232.0f;   // feet
+constexpr float kAndroidTutorialHoldMs = 650.0f;    // hold-to-learn / hold-to-open
+
+constexpr AndroidUiRect kAndroidTutorialMockWindow = { 150.0f, 134.0f, 340.0f, 196.0f };
+
+// The four mock inventory items: two skill orbs and two things that are not.
+// Cells are laid out like the real bag (square slots in a grid).
+constexpr bool kAndroidTutorialLearnIsOrb[4] = { true, false, true, false };
+
+AndroidUiRect GetAndroidTutorialLearnRowRect(int row)
+{
+    const int cols = 4;
+    const float cell = 52.0f;
+    return { 188.0f + (cell * static_cast<float>(row % cols)), 164.0f + (cell * static_cast<float>(row / cols)), cell - 2.0f, cell - 2.0f };
+}
+
+AndroidUiRect GetAndroidTutorialAutoCloseRect()
+{
+    return { 418.0f, 256.0f, 62.0f, 20.0f };
+}
+
+AndroidUiRect GetAndroidTutorialCmdChipRect(int i)
+{
+    return { 160.0f + (168.0f * static_cast<float>(i)), 300.0f, 152.0f, 24.0f };
+}
+
+AndroidUiRect GetAndroidTutorialTradeWindowRect()
+{
+    return { 170.0f, 134.0f, 300.0f, 190.0f };
+}
+
+AndroidUiRect GetAndroidTutorialTradeCloseRect()
+{
+    const AndroidUiRect w = GetAndroidTutorialTradeWindowRect();
+    return { w.x + w.w - 26.0f, w.y + 4.0f, 20.0f, 16.0f };
+}
+
+AndroidUiRect GetAndroidTutorialTradeConfirmRect()
+{
+    const AndroidUiRect w = GetAndroidTutorialTradeWindowRect();
+    return { w.x + (w.w * 0.5f) - 45.0f, w.y + w.h - 30.0f, 90.0f, 22.0f };
+}
+
+AndroidUiRect GetAndroidTutorialDummyMenuRect(int i)
+{
+    return { kAndroidTutorialDummyX + 34.0f, 168.0f + (28.0f * static_cast<float>(i)), 100.0f, 24.0f };
+}
+
+AndroidUiRect GetAndroidTutorialZenRowRect(int i)
+{
+    return { 160.0f, 162.0f + (48.0f * static_cast<float>(i)), 320.0f, 44.0f };
+}
+
+AndroidUiRect GetAndroidTutorialMockCloseRect()
+{
+    const AndroidUiRect w = kAndroidTutorialMockWindow;
+    return { w.x + w.w - 22.0f, w.y + 4.0f, 18.0f, 16.0f };
+}
+
+AndroidUiRect GetAndroidTutorialTopUpButtonRect()
+{
+    const AndroidUiRect w = kAndroidTutorialMockWindow;
+    return { w.x + w.w - 98.0f, w.y + 30.0f, 86.0f, 24.0f };
+}
+
+AndroidUiRect GetAndroidTutorialFeatureRowRect(int i)
+{
+    return { 160.0f + (164.0f * static_cast<float>(i % 2)), 166.0f + (32.0f * static_cast<float>(i / 2)), 156.0f, 26.0f };
+}
+
+AndroidUiRect GetAndroidTutorialEventRowRect(int i)
+{
+    return { 160.0f, 166.0f + (34.0f * static_cast<float>(i)), 320.0f, 30.0f };
+}
+
+// Where the two practice players stand for the AIM step, and how close a
+// release has to be to count as "on" one.
+constexpr float kAndroidTutorialAimTargetX[2] = { 220.0f, 330.0f };
+constexpr float kAndroidTutorialAimTargetY[2] = { 236.0f, 272.0f };
+constexpr float kAndroidTutorialAimTargetHitRadius = 40.0f;
+
+int HitAndroidTutorialAimTarget(float uiX, float uiY)
+{
+    for (int i = 0; i < 2; ++i)
+    {
+        const float dx = uiX - kAndroidTutorialAimTargetX[i];
+        const float dy = uiY - (kAndroidTutorialAimTargetY[i] - 16.0f);
+        if ((dx * dx) + (dy * dy) < (kAndroidTutorialAimTargetHitRadius * kAndroidTutorialAimTargetHitRadius))
+        {
+            return i;
+        }
+    }
+    return -1;
 }
 
 // Checked once (not once per frame) the first time the touch overlay
@@ -14677,17 +15417,15 @@ bool HandleAndroidTutorialStepTap(const SDL_TouchFingerEvent& touch, float uiX, 
     {
         if (tut.potionBindStage == 1)
         {
-            for (int row = 0; row < kAndroidTutorialPotionRowCount; ++row)
+            AndroidUiRect potion;
+            if (GetAndroidTutorialLearnOrbRect(potion)
+                && HitTestAndroidUiRect(uiX, uiY, InflateAndroidUiRect(potion, 8.0f)))
             {
-                if (!HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialPotionRowRect(row)))
-                {
-                    continue;
-                }
-
-                tut.potionBindChoice = row;
+                tut.potionBindChoice = 0;
                 tut.potionBindStage = 2;
                 tut.potionBindCleared = false;
                 MarkAndroidTutorialStepTried();
+                AndroidHapticPulse(25);
                 PlayBuffer(SOUND_CLICK01);
                 return true;
             }
@@ -14712,13 +15450,6 @@ bool HandleAndroidTutorialStepTap(const SDL_TouchFingerEvent& touch, float uiX, 
 
         return false;
     }
-
-    case kTutStepZoom:
-        // Nothing to claim: the pinch tracker sits AHEAD of the tutorial in
-        // HandleVirtualFingerDown/Motion, so a two-finger pinch already
-        // reaches the real camera while this step is up. The step just
-        // reports what the gesture did - see RenderAndroidTutorialZoomDemo.
-        return false;
 
     // Travel and Stats open the player's REAL windows, so the only thing
     // these two claim is the button that opens them. Once a window is up,
@@ -14763,19 +15494,16 @@ bool HandleAndroidTutorialStepTap(const SDL_TouchFingerEvent& touch, float uiX, 
     {
         if (HitTestAndroidUiRect(uiX, uiY, GetTargetSelectButtonRect()))
         {
-            // HandleTargetSelectButtonTap, step for step: holding a lock, the
-            // tap releases it and does NOT reopen the list; otherwise it opens
-            // or closes the list.
-            if (tut.aimLockedRow >= 0)
-            {
-                tut.aimLockedRow = -1;
-                tut.aimListOpen = false;
-            }
-            else
-            {
-                tut.aimListOpen = !tut.aimListOpen;
-            }
-            PlayBuffer(SOUND_CLICK01);
+            // Tap or drag is decided on release (HandleAndroidTutorialFingerUp):
+            // a tap opens/closes the list (or releases a lock), a drag onto a
+            // player locks that player - the same two gestures the real AIM
+            // button has.
+            tut.aimDragFinger = touch.fingerId;
+            tut.aimDownX = uiX;
+            tut.aimDownY = uiY;
+            tut.aimDragX = uiX;
+            tut.aimDragY = uiY;
+            tut.aimDragMoved = false;
             return true;
         }
 
@@ -14878,6 +15606,136 @@ bool HandleAndroidTutorialStepTap(const SDL_TouchFingerEvent& touch, float uiX, 
         return false;
     }
 
+    case kTutStepWarp:
+    {
+        if (!IsAndroidTutorialInLorencia() && HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialWalkButtonRect()))
+        {
+            bool noZen = false;
+            tut.warpSent = RequestAndroidTutorialWarp("Lorencia", &noZen);
+            tut.warpTick = GetTickCount();
+            if (noZen) { tut.warpTick = 1; }
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+        return false;
+    }
+
+    case kTutStepPotionLady:
+    case kTutStepSkillLady:
+    case kTutStepHunt:
+    {
+        if (tut.step != kTutStepHunt && g_pNewUISystem != nullptr
+            && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP))
+        {
+            return false;
+        }
+        if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialWalkButtonRect()))
+        {
+            if (tut.step == kTutStepHunt)
+            {
+                const AndroidTutorialHunt hs = GetAndroidTutorialHuntSpot();
+                if (gMapManager.WorldActive != hs.world)
+                {
+                    bool noZen = false;
+                    RequestAndroidTutorialWarp(hs.mapName, &noZen);
+                    PlayBuffer(SOUND_CLICK01);
+                    return true;
+                }
+                StartAndroidTutorialWalk(hs.x, hs.y);
+                AndroidHapticPulse(15);
+                PlayBuffer(SOUND_CLICK01);
+                return true;
+            }
+            const AndroidTutorialNpc& npc = (tut.step == kTutStepPotionLady) ? kAndroidTutorialPotionNpc
+                : kAndroidTutorialSkillNpc;
+            StartAndroidTutorialWalk(npc.x, npc.y);
+            AndroidHapticPulse(15);
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+        return false;
+    }
+
+    case kTutStepCamera:
+    {
+        // Pinch / two-finger drag reach the real camera ahead of us; the one
+        // thing to claim here is the Reset button.
+        if (HitTestAndroidUiRect(uiX, uiY, InflateAndroidUiRect(GetCameraResetButtonRect(), 6.0f)))
+        {
+            ResetAndroidCamera();
+            tut.camStarted = false;       // measure from the fresh view
+            tut.camReset = true;
+            MarkAndroidTutorialStepTried();
+            AndroidHapticPulse(25);
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+        return false;
+    }
+
+    case kTutStepLearnSkill:
+    {
+        AndroidUiRect orb;
+        if (!tut.learned[0] && GetAndroidTutorialLearnOrbRect(orb)
+            && HitTestAndroidUiRect(uiX, uiY, InflateAndroidUiRect(orb, 8.0f)))
+        {
+            tut.holdFinger = touch.fingerId;
+            tut.holdTarget = 0;
+            tut.holdDownMs = MU_MobileGetTicks();
+            return true;
+        }
+        return false;
+    }
+
+    case kTutStepHoldTrade:
+    {
+        if (tut.dummyTradeOpen)
+        {
+            if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialTradeConfirmRect()))
+            {
+                tut.dummyTradeDone = true;
+                PlayBuffer(SOUND_CLICK01);
+            }
+            else if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialTradeCloseRect()))
+            {
+                tut.dummyTradeOpen = false;
+                PlayBuffer(SOUND_CLICK01);
+            }
+            return true;
+        }
+        if (tut.dummyMenuOpen)
+        {
+            if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialDummyMenuRect(0)))
+            {
+                tut.dummyMenuOpen = false;
+                tut.dummyTradeOpen = true;
+                tut.dummyTradeDone = false;
+                MarkAndroidTutorialStepTried();
+                PlayBuffer(SOUND_CLICK01);
+            }
+            else if (HitTestAndroidUiRect(uiX, uiY, GetAndroidTutorialDummyMenuRect(1)))
+            {
+                tut.dummyParty = true;
+                tut.dummyMenuOpen = false;
+                PlayBuffer(SOUND_CLICK01);
+            }
+            else
+            {
+                tut.dummyMenuOpen = false;
+            }
+            return true;
+        }
+        const float dx = uiX - kAndroidTutorialDummyX;
+        const float dy = uiY - (kAndroidTutorialDummyY - 16.0f);
+        if ((dx * dx) + (dy * dy) < (44.0f * 44.0f))
+        {
+            tut.holdFinger = touch.fingerId;
+            tut.holdTarget = 0;
+            tut.holdDownMs = MU_MobileGetTicks();
+        }
+        return true;
+    }
+
     default:
         return false;
     }
@@ -14936,6 +15794,11 @@ bool HandleAndroidTutorialFingerDown(const SDL_TouchFingerEvent& touch, float ui
             return true;
         }
 
+        if (IsAndroidTutorialWorldLive())
+        {
+            return false;
+        }
+
         // A real-window step with its window already up gets out of the way
         // completely - the touch falls through to the window's own handlers,
         // so the character sheet and the move list behave exactly as they
@@ -14966,9 +15829,27 @@ bool HandleAndroidTutorialFingerMotion(const SDL_TouchFingerEvent& touch)
     // A real-window step with its window up is hands-off, matching
     // finger-down: dragging inside the character sheet or the move list has
     // to reach them.
-    if (AndroidTutorialStepUsesRealWindow(g_androidTutorial.step) && IsAndroidTutorialRealWindowOpen())
+    if (IsAndroidTutorialWorldLive()
+        || (AndroidTutorialStepUsesRealWindow(g_androidTutorial.step) && IsAndroidTutorialRealWindowOpen()
+            && g_androidTutorial.holdFinger != touch.fingerId))
     {
         return false;
+    }
+
+    if (g_androidTutorial.aimDragFinger == touch.fingerId)
+    {
+        float ax = 0.0f;
+        float ay = 0.0f;
+        TouchToVirtualUi(touch, ax, ay);
+        g_androidTutorial.aimDragX = ax;
+        g_androidTutorial.aimDragY = ay;
+        const float mx = ax - g_androidTutorial.aimDownX;
+        const float my = ay - g_androidTutorial.aimDownY;
+        if (((mx * mx) + (my * my)) > (10.0f * 10.0f))
+        {
+            g_androidTutorial.aimDragMoved = true;
+        }
+        return true;
     }
 
     if (g_androidTutorial.practiceFinger != touch.fingerId)
@@ -15012,8 +15893,21 @@ bool HandleAndroidTutorialFingerUp(const SDL_TouchFingerEvent& touch)
         return false;
     }
 
-    // Hands-off while a real window is up, matching finger-down and motion.
-    if (AndroidTutorialStepUsesRealWindow(tut.step) && IsAndroidTutorialRealWindowOpen())
+    // Letting go of the dummy orb early cancels the hold (the real bag is
+    // hands-off below, so this has to be checked first).
+    if (tut.step == kTutStepLearnSkill && tut.holdFinger == touch.fingerId)
+    {
+        tut.holdFinger = static_cast<SDL_FingerID>(-1);
+        tut.holdTarget = -1;
+        tut.holdDownMs = 0;
+        return true;
+    }
+
+    // Hands-off while a real window is up, matching finger-down and motion
+    // (but a hold the tutorial itself started still has to be released here).
+    if (IsAndroidTutorialWorldLive()
+        || (AndroidTutorialStepUsesRealWindow(tut.step) && IsAndroidTutorialRealWindowOpen()
+            && tut.holdFinger != touch.fingerId))
     {
         return false;
     }
@@ -15023,6 +15917,37 @@ bool HandleAndroidTutorialFingerUp(const SDL_TouchFingerEvent& touch)
         tut.practiceFinger = static_cast<SDL_FingerID>(-1);
         tut.practiceThumbX = 0.0f;
         tut.practiceThumbY = 0.0f;
+    }
+
+    // AIM: a tap toggles the list (or lets go of a lock); a drag that ends on
+    // a practice player locks it.
+    if (tut.aimDragFinger == touch.fingerId)
+    {
+        tut.aimDragFinger = static_cast<SDL_FingerID>(-1);
+
+        if (tut.aimDragMoved)
+        {
+            const int hit = HitAndroidTutorialAimTarget(tut.aimDragX, tut.aimDragY);
+            if (hit >= 0)
+            {
+                tut.aimLockedRow = hit;
+                tut.aimListOpen = false;
+                MarkAndroidTutorialStepTried();
+                AndroidHapticPulse(40);
+            }
+        }
+        else if (tut.aimLockedRow >= 0)
+        {
+            tut.aimLockedRow = -1;
+            tut.aimListOpen = false;
+        }
+        else
+        {
+            tut.aimListOpen = !tut.aimListOpen;
+        }
+        PlayBuffer(SOUND_CLICK01);
+        tut.aimDragMoved = false;
+        return true;
     }
 
     // Tap vs press-and-hold, resolved here for the same reason the real slots
@@ -15057,6 +15982,40 @@ bool HandleAndroidTutorialFingerUp(const SDL_TouchFingerEvent& touch)
                 tut.demoArmedSkill = (tut.demoArmedSkill == target) ? -1 : target;
             }
             PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (tut.step == kTutStepAutoMenu)
+        {
+            // Quick tap flips the switch; a hold opens its settings (which the
+            // real game only lets a VIP change).
+            if (static_cast<float>(heldMs) >= static_cast<float>(kComboSettingsLongPressMs))
+            {
+                tut.autoMenu = target + 1;
+                AndroidHapticPulse(30);
+            }
+            else
+            {
+                tut.autoOn[target] = !tut.autoOn[target];
+            }
+            MarkAndroidTutorialStepTried();
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
+
+        if (tut.step == kTutStepHoldTrade)
+        {
+            if (static_cast<float>(heldMs) >= kAndroidTutorialHoldMs)
+            {
+                tut.dummyMenuOpen = true;
+                AndroidHapticPulse(35);
+            }
+            return true;
+        }
+
+        if (tut.step == kTutStepLearnSkill)
+        {
+            // Released before the ring filled: a quick tap just shows details.
             return true;
         }
 
@@ -15268,7 +16227,7 @@ void RenderAndroidTutorialAimNote()
     }
     else
     {
-        text = "Tap AIM (bottom right) to open the list of players near you. The 1/2 button under it swaps skill pages.";
+        text = "Press AIM and DRAG onto a player, then let go to lock - or just tap AIM for the list. The 1/2 button under it swaps skill pages.";
     }
 
     RenderAndroidTutorialNoteBox(note, lockedRow >= 0, text);
@@ -15622,40 +16581,17 @@ void RenderAndroidTutorialPotionBindDemo()
 
     if (tut.potionBindStage == 1)
     {
-        const AndroidUiRect rect = GetAndroidTutorialPotionBagRect();
-
-        BeginBitmap();
-        BeginAndroidTutorial2D();
-
-        DrawVirtualRectFilled(rect.x - 3.0f, rect.y - 3.0f, rect.w + 6.0f, rect.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.38f);
-        DrawVirtualRectFilled(rect.x, rect.y, rect.w, rect.h, 0.05f, 0.08f, 0.14f, 0.86f);
-        DrawVirtualRectFilled(rect.x + 3.0f, rect.y + 3.0f, rect.w - 6.0f, 20.0f, 0.24f, 0.34f, 0.62f, 0.40f);
-        DrawVirtualRectOutline(rect.x, rect.y, rect.w, rect.h, 0.34f, 0.52f, 0.90f, 0.94f, 2.0f);
-
-        for (int row = 0; row < kAndroidTutorialPotionRowCount; ++row)
+        AndroidUiRect potion;
+        if (GetAndroidTutorialLearnOrbRect(potion))
         {
-            DrawVirtualRightPanelButtonBox(GetAndroidTutorialPotionRowRect(row), false);
+            DrawAndroidTutorialDummyItem(potion, ITEM_POTION + 3, false, 0.0f);
         }
-
-        HFONT titleFont = g_hFontBold != nullptr ? g_hFontBold : g_hFont;
-        TextDraw(titleFont, static_cast<int>(rect.x + 7.0f), static_cast<int>(rect.y + 5.0f),
-                 0xFFFFFFFF, 0x0, static_cast<int>(rect.w - 14.0f), 0, 3, "%s", "Bag");
-
-        for (int row = 0; row < kAndroidTutorialPotionRowCount; ++row)
-        {
-            const AndroidUiRect rowRect = GetAndroidTutorialPotionRowRect(row);
-            TextDraw(font, static_cast<int>(rowRect.x + 8.0f), static_cast<int>(rowRect.y + 5.0f),
-                     0xFFFFFFFF, 0x0, static_cast<int>(rowRect.w - 16.0f), 0, 1,
-                     "%s", kAndroidTutorialPotionNames[row]);
-        }
-
-        EndBitmap();
     }
 
     const char* note = nullptr;
     if (tut.potionBindStage == 1)
     {
-        note = "Your bag opened with that slot waiting. Tap any consumable in it and it is bound to the slot.";
+        note = "Your real bag opened with that slot waiting. Tap the glowing practice potion in it and it is bound to the slot.";
     }
     else if (tut.potionBindStage == 2)
     {
@@ -15670,10 +16606,18 @@ void RenderAndroidTutorialPotionBindDemo()
         note = "Tap an empty slot - the one marked + - to open your bag and pick what goes in it.";
     }
 
-    // Beside the bag stand-in rather than under it, and well clear of the
-    // Q/W/E/R row along the bottom that the step is binding to.
-    RenderAndroidTutorialNoteBox({ 260.0f, 250.0f, 300.0f, 84.0f },
-                                 tut.potionBindStage == 2 || tut.potionBindCleared, note);
+    // Beside the bag rather than on it, and well clear of the Q/W/E/R row
+    // along the bottom that the step is binding to.
+    AndroidUiRect noteRect = { 260.0f, 250.0f, 300.0f, 84.0f };
+    if (tut.potionBindStage == 1)
+    {
+        AndroidUiRect potion;
+        if (GetAndroidTutorialLearnOrbRect(potion))
+        {
+            noteRect = { std::max(8.0f, potion.x - 290.0f), std::max(130.0f, potion.y - 6.0f), 262.0f, 66.0f };
+        }
+    }
+    RenderAndroidTutorialNoteBox(noteRect, tut.potionBindStage == 2 || tut.potionBindCleared, note);
 }
 
 // The zoom step reports the real camera, because the real gesture is what the
@@ -15681,48 +16625,897 @@ void RenderAndroidTutorialPotionBindDemo()
 // HandleVirtualFingerDown/Motion, so two fingers already drive
 // CameraDistanceTarget with the tutorial up. Nothing to simulate - just a bar
 // showing where the camera is between kZoomMin and kZoomMax.
-void RenderAndroidTutorialZoomDemo()
+// ---------------------------------------------------------------------------
+// Shared look for the mock windows of the newer steps. The same dark body,
+// gold title strip and gold border the game's own windows wear, so what the
+// player practises on reads as the real thing. Every helper sets the 2D GL
+// state itself and finishes any text last, because TextDraw leaves a font
+// atlas bound (see BeginAndroidTutorial2D).
+// ---------------------------------------------------------------------------
+float AndroidTutorialPulse()
+{
+    return 0.72f + 0.28f * std::sin(static_cast<float>(GetTickCount() % 1600u) * 0.003926991f);
+}
+
+void AndroidTutText(HFONT font, float x, float y, float w, DWORD color, int align, const char* text)
+{
+    TextDraw(font, static_cast<int>(x), static_cast<int>(y), color, 0x0, static_cast<int>(w), 0, align, "%s", text);
+}
+
+HFONT AndroidTutMiniFont()
+{
+    return g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+}
+
+HFONT AndroidTutBoldFont()
+{
+    return g_hFontBold != nullptr ? g_hFontBold : g_hFont;
+}
+
+void DrawAndroidTutorialWindow(const AndroidUiRect& r, const char* title, bool withClose)
+{
+    BeginAndroidTutorial2D();
+    DrawVirtualRectFilled(r.x - 4.0f, r.y - 4.0f, r.w + 8.0f, r.h + 8.0f, 0.0f, 0.0f, 0.0f, 0.45f);
+    DrawVirtualRectFilled(r.x, r.y, r.w, r.h, 0.05f, 0.06f, 0.10f, 0.97f);
+    DrawVirtualRectFilled(r.x + 2.0f, r.y + 2.0f, r.w - 4.0f, 20.0f, 0.17f, 0.13f, 0.04f, 0.96f);
+    DrawVirtualRectFilled(r.x + 2.0f, r.y + 22.0f, r.w - 4.0f, 1.5f, 0.88f, 0.70f, 0.26f, 0.92f);
+    DrawVirtualRectOutline(r.x, r.y, r.w, r.h, 0.82f, 0.66f, 0.26f, 0.96f, 2.0f);
+    DrawVirtualRectOutline(r.x + 3.0f, r.y + 3.0f, r.w - 6.0f, r.h - 6.0f, 0.30f, 0.24f, 0.10f, 0.90f, 1.0f);
+
+    if (withClose)
+    {
+        const AndroidUiRect x = { r.x + r.w - 22.0f, r.y + 4.0f, 18.0f, 16.0f };
+        DrawVirtualRectFilled(x.x, x.y, x.w, x.h, 0.30f, 0.06f, 0.06f, 0.90f);
+        DrawVirtualRectOutline(x.x, x.y, x.w, x.h, 0.90f, 0.40f, 0.40f, 0.95f, 1.0f);
+    }
+
+    AndroidTutText(AndroidTutBoldFont(), r.x + 10.0f, r.y + 6.0f, r.w - 40.0f, 0xFFFFE080, 1, title);
+    if (withClose)
+    {
+        AndroidTutText(AndroidTutMiniFont(), r.x + r.w - 22.0f, r.y + 8.0f, 18.0f, 0xFFFFC0C0, 3, "X");
+    }
+}
+
+// A game-style button: the same box the right panel uses, optionally glowing
+// (gold pulse) and/or lit green once its job is done.
+void DrawAndroidTutorialButton(const AndroidUiRect& r, const char* label, bool glow, bool lit)
+{
+    BeginAndroidTutorial2D();
+    DrawVirtualRightPanelButtonBox(r, lit);
+    if (glow)
+    {
+        const float p = AndroidTutorialPulse();
+        DrawVirtualRectOutline(r.x - 2.0f, r.y - 2.0f, r.w + 4.0f, r.h + 4.0f, 1.0f, 0.86f, 0.20f, p, 2.5f);
+    }
+    AndroidTutText(AndroidTutMiniFont(), r.x, r.y + (r.h * 0.5f) - 5.0f, r.w,
+                   lit ? 0xFF90FFB0 : 0xFFFFFFFF, 3, label);
+}
+
+// Expanding "tap here" ring - the modern replacement for a static arrow.
+void DrawAndroidTutorialTapMarker(float cx, float cy)
+{
+    BeginAndroidTutorial2D();
+    const float t = static_cast<float>(GetTickCount() % 1200u) / 1200.0f;
+    DrawVirtualCircle(cx, cy, 6.0f + (22.0f * t), 1.0f, 0.88f, 0.30f, 0.85f * (1.0f - t), false);
+    DrawVirtualCircle(cx, cy, 3.5f, 1.0f, 0.88f, 0.30f, 0.95f, true);
+}
+
+// Small blocky practice character: head, torso, arms, legs, shadow.
+void DrawAndroidTutorialFigure(float cx, float feetY, float s, float r, float g, float b)
+{
+    BeginAndroidTutorial2D();
+    DrawVirtualCircle(cx, feetY, 17.0f * s, 0.0f, 0.0f, 0.0f, 0.35f, true);
+    DrawVirtualRectFilled(cx - 9.0f * s, feetY - 24.0f * s, 7.0f * s, 24.0f * s, r * 0.55f, g * 0.55f, b * 0.55f, 1.0f);
+    DrawVirtualRectFilled(cx + 2.0f * s, feetY - 24.0f * s, 7.0f * s, 24.0f * s, r * 0.55f, g * 0.55f, b * 0.55f, 1.0f);
+    DrawVirtualRectFilled(cx - 18.0f * s, feetY - 50.0f * s, 6.0f * s, 24.0f * s, r * 0.80f, g * 0.80f, b * 0.80f, 1.0f);
+    DrawVirtualRectFilled(cx + 12.0f * s, feetY - 50.0f * s, 6.0f * s, 24.0f * s, r * 0.80f, g * 0.80f, b * 0.80f, 1.0f);
+    DrawVirtualRectFilled(cx - 12.0f * s, feetY - 52.0f * s, 24.0f * s, 30.0f * s, r, g, b, 1.0f);
+    DrawVirtualCircle(cx, feetY - 62.0f * s, 9.0f * s, 0.95f, 0.80f, 0.65f, 1.0f, true);
+}
+
+// The over-head name plate the game draws; red when the player is locked.
+void DrawAndroidTutorialNamePlate(float cx, float y, const char* name, const char* tag, bool locked, bool tagGreen)
+{
+    const float w = std::max(46.0f, (static_cast<float>(strlen(name)) * 6.2f) + 14.0f);
+
+    BeginAndroidTutorial2D();
+    DrawVirtualRectFilled(cx - w * 0.5f, y, w, 14.0f,
+                          locked ? 0.58f : 0.0f, locked ? 0.05f : 0.0f, locked ? 0.05f : 0.0f, 0.82f);
+    DrawVirtualRectOutline(cx - w * 0.5f, y, w, 14.0f,
+                           locked ? 1.0f : 0.55f, locked ? 0.30f : 0.55f, locked ? 0.30f : 0.60f, 0.95f, 1.0f);
+    AndroidTutText(AndroidTutMiniFont(), cx - w * 0.5f, y + 2.0f, w,
+                   locked ? 0xFFFFB0B0 : 0xFFFFFFFF, 3, name);
+    if (tag != nullptr)
+    {
+        AndroidTutText(AndroidTutMiniFont(), cx - 50.0f, y - 11.0f, 100.0f,
+                       tagGreen ? 0xFF90FFB0 : 0xFFFFD070, 3, tag);
+    }
+}
+
+// Two practice players for the AIM step, plus the drag feedback: a line from
+// the AIM button to the finger, a crosshair under it, and a gold ring on
+// whichever player a release would lock.
+void RenderAndroidTutorialAimPlayers()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    BeginBitmap();
+    for (int i = 0; i < 2; ++i)
+    {
+        const bool locked = (tut.aimLockedRow == i);
+        DrawAndroidTutorialFigure(kAndroidTutorialAimTargetX[i], kAndroidTutorialAimTargetY[i], 0.75f,
+                                  i == 0 ? 0.30f : 0.62f, i == 0 ? 0.55f : 0.40f, i == 0 ? 0.90f : 0.30f);
+        DrawAndroidTutorialNamePlate(kAndroidTutorialAimTargetX[i], kAndroidTutorialAimTargetY[i] - 68.0f,
+                                     kAndroidTutorialAimNames[i], nullptr, locked, false);
+    }
+
+    if (tut.aimDragFinger != static_cast<SDL_FingerID>(-1) && tut.aimDragMoved)
+    {
+        BeginAndroidTutorial2D();
+        const float ax = kTargetSelectButtonCx;
+        const float ay = kTargetSelectButtonCy;
+        for (int d = 1; d < 12; ++d)
+        {
+            const float t = static_cast<float>(d) / 12.0f;
+            DrawVirtualCircle(ax + ((tut.aimDragX - ax) * t), ay + ((tut.aimDragY - ay) * t), 1.8f,
+                              1.0f, 0.86f, 0.20f, 0.8f, true);
+        }
+
+        const int over = HitAndroidTutorialAimTarget(tut.aimDragX, tut.aimDragY);
+        if (over >= 0)
+        {
+            DrawVirtualCircle(kAndroidTutorialAimTargetX[over], kAndroidTutorialAimTargetY[over] - 16.0f,
+                              kAndroidTutorialAimTargetHitRadius * 0.7f, 1.0f, 0.86f, 0.20f, 0.95f, false);
+        }
+        DrawAimCrosshair(tut.aimDragX, tut.aimDragY, over >= 0);
+    }
+    else if (!tut.tried[kTutStepTarget] && tut.aimLockedRow < 0 && !tut.aimListOpen)
+    {
+        // Show the gesture once: a marker that slides from AIM to the first player.
+        const float t = static_cast<float>(GetTickCount() % 2400u) / 2400.0f;
+        const float ax = kTargetSelectButtonCx;
+        const float ay = kTargetSelectButtonCy;
+        const float tx = kAndroidTutorialAimTargetX[1];
+        const float ty = kAndroidTutorialAimTargetY[1] - 16.0f;
+        DrawAndroidTutorialTapMarker(ax + ((tx - ax) * t), ay + ((ty - ay) * t));
+    }
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Camera (PTZ): the real camera, measured live. Pinch zooms, two fingers
+// dragged up/down tilt, left/right pan - all handled by the pinch tracker
+// ahead of the tutorial. This step reads what they did and asks for the
+// Reset button, which it draws crisp over the dim.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialCameraDemo()
 {
     AndroidTutorialState& tut = g_androidTutorial;
 
     const float zoom = GetCurrentAndroidZoom();
-    if (tut.zoomAtStepStart <= 0.0f)
+    if (!tut.camStarted)
     {
-        tut.zoomAtStepStart = zoom;
+        tut.camStarted = true;
+        tut.camStartZoom = zoom;
+        tut.camStartYaw = CameraAngle[2];
+        tut.camStartTilt = Camera3DPosY;
     }
 
-    // Anything past a nudge counts as "they did it" - the bar and the world
-    // behind are the real feedback.
-    if (std::fabs(zoom - tut.zoomAtStepStart) > 20.0f)
+    float yawDiff = std::fmod((CameraAngle[2] - tut.camStartYaw) + 540.0f, 360.0f) - 180.0f;
+    if (std::fabs(zoom - tut.camStartZoom) > 20.0f) { tut.camZoomed = true; }
+    if (std::fabs(Camera3DPosY - tut.camStartTilt) > 3.0f) { tut.camTilted = true; }
+    if (std::fabs(yawDiff) > 8.0f) { tut.camPanned = true; }
+    if (tut.camZoomed && tut.camTilted && tut.camPanned && !tut.camReset)
     {
+        // Moved all three ways - the only thing left is to put it back.
         MarkAndroidTutorialStepTried();
     }
 
-    const AndroidUiRect gauge = { 190.0f, 200.0f, 260.0f, 18.0f };
-    // kZoomMin is the closest camera, so a full bar means fully zoomed IN.
-    const float t = std::clamp((kZoomMax - zoom) / std::max(kZoomMax - kZoomMin, 1.0f), 0.0f, 1.0f);
+    const bool doneAll = tut.camReset;
+    const char* names[4] = { "Zoom", "Tilt", "Pan", "Reset" };
+    const bool flags[4] = { tut.camZoomed, tut.camTilted, tut.camPanned, tut.camReset };
 
     BeginBitmap();
     BeginAndroidTutorial2D();
 
-    DrawVirtualRectFilled(gauge.x - 3.0f, gauge.y - 3.0f, gauge.w + 6.0f, gauge.h + 6.0f, 0.0f, 0.0f, 0.0f, 0.55f);
-    DrawVirtualRectFilled(gauge.x, gauge.y, gauge.w, gauge.h, 0.06f, 0.08f, 0.12f, 0.90f);
-    DrawVirtualRectFilled(gauge.x + 2.0f, gauge.y + 2.0f, (gauge.w - 4.0f) * t, gauge.h - 4.0f, 0.36f, 0.78f, 1.0f, 0.85f);
-    DrawVirtualRectOutline(gauge.x, gauge.y, gauge.w, gauge.h, 0.60f, 0.80f, 1.0f, 0.95f, 1.5f);
+    // Four progress chips.
+    for (int i = 0; i < 4; ++i)
+    {
+        const float x = 156.0f + (84.0f * static_cast<float>(i));
+        DrawVirtualRectFilled(x, 140.0f, 76.0f, 24.0f,
+                              flags[i] ? 0.06f : 0.04f, flags[i] ? 0.28f : 0.05f, flags[i] ? 0.12f : 0.09f, 0.92f);
+        DrawVirtualRectOutline(x, 140.0f, 76.0f, 24.0f,
+                               flags[i] ? 0.40f : 0.55f, flags[i] ? 1.00f : 0.50f, flags[i] ? 0.55f : 0.30f, 0.95f, 1.5f);
+    }
 
-    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
-    TextDraw(font, static_cast<int>(gauge.x), static_cast<int>(gauge.y + 4.0f),
-             0xFF08121C, 0x0, static_cast<int>(gauge.w), 0, 3,
-             "%s", "out  <  camera  >  in");
+    // Three live gauges.
+    struct Gauge { const char* label; float t; };
+    const Gauge gauges[3] = {
+        { "Zoom", std::clamp((kZoomMax - zoom) / std::max(kZoomMax - kZoomMin, 1.0f), 0.0f, 1.0f) },
+        { "Tilt", std::clamp((Camera3DPosY - kCameraTiltMin) / (kCameraTiltMax - kCameraTiltMin), 0.0f, 1.0f) },
+        { "Pan",  std::clamp(((CameraAngle[2] - kCameraDefaultYaw) + 180.0f) / 360.0f, 0.0f, 1.0f) },
+    };
+    for (int i = 0; i < 3; ++i)
+    {
+        const AndroidUiRect g = { 196.0f, 178.0f + (28.0f * static_cast<float>(i)), 250.0f, 16.0f };
+        DrawVirtualRectFilled(g.x - 2.0f, g.y - 2.0f, g.w + 4.0f, g.h + 4.0f, 0.0f, 0.0f, 0.0f, 0.55f);
+        DrawVirtualRectFilled(g.x, g.y, g.w, g.h, 0.06f, 0.08f, 0.12f, 0.92f);
+        DrawVirtualRectFilled(g.x + 2.0f, g.y + 2.0f, (g.w - 4.0f) * gauges[i].t, g.h - 4.0f, 0.36f, 0.78f, 1.0f, 0.85f);
+        DrawVirtualRectFilled(g.x + (g.w * 0.5f) - 0.5f, g.y, 1.0f, g.h, 1.0f, 1.0f, 1.0f, 0.35f);  // default marker
+        DrawVirtualRectOutline(g.x, g.y, g.w, g.h, 0.60f, 0.80f, 1.0f, 0.95f, 1.0f);
+    }
 
     EndBitmap();
 
+    BeginBitmap();
+    for (int i = 0; i < 4; ++i)
+    {
+        const float x = 156.0f + (84.0f * static_cast<float>(i));
+        AndroidTutText(AndroidTutMiniFont(), x, 146.0f, 76.0f,
+                       flags[i] ? 0xFF90FFB0 : 0xFFD8D8E8, 3, names[i]);
+    }
+    for (int i = 0; i < 3; ++i)
+    {
+        AndroidTutText(AndroidTutMiniFont(), 150.0f, 181.0f + (28.0f * static_cast<float>(i)), 44.0f, 0xFFE0E0F0, 1, gauges[i].label);
+    }
+    AndroidTutText(AndroidTutMiniFont(), 196.0f, 262.0f, 250.0f, 0xFF9FB0C8, 3,
+                   "two fingers:  pinch = zoom   up/down = tilt   left/right = pan");
+    EndBitmap();
+
     RenderAndroidTutorialNoteBox(
-        { 190.0f, 226.0f, 260.0f, 58.0f },
-        g_androidTutorial.tried[kTutStepZoom],
-        g_androidTutorial.tried[kTutStepZoom]
-            ? "That is the real camera moving, not a preview. Wherever you leave it is where it stays."
-            : "Pinch two fingers together to pull back, spread them to move in. Put them back where they started and the camera goes back with them.");
+        { 156.0f, 280.0f, 328.0f, 46.0f },
+        doneAll,
+        doneAll
+            ? "Reset done - the camera is back to the default view. That button only glows while the view is moved."
+            : "Move the camera any way you like, then tap the glowing Reset button under the mic (top right) to snap back.");
+
+    // The real reset button, crisp over the dim, with a tap marker until used.
+    RenderCameraResetButton();
+    if (!tut.camReset)
+    {
+        BeginBitmap();
+        const AndroidUiRect r = GetCameraResetButtonRect();
+        DrawAndroidTutorialTapMarker(r.x + (r.w * 0.5f), r.y + (r.h * 0.5f));
+        EndBitmap();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Learn a skill: press and HOLD a row until it fills.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialLearnDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    AndroidUiRect orb;
+    if (!GetAndroidTutorialLearnOrbRect(orb))
+    {
+        // The bag opens on the next frame (SyncAndroidTutorialRealWindow).
+        RenderAndroidTutorialNoteBox({ 190.0f, 200.0f, 260.0f, 40.0f }, false, "Opening your inventory...");
+        return;
+    }
+
+    float holdFrac = 0.0f;
+    const bool holding = (tut.holdFinger != static_cast<SDL_FingerID>(-1)) && (tut.holdTarget == 0);
+    if (holding)
+    {
+        holdFrac = static_cast<float>(MU_MobileGetTicks() - tut.holdDownMs) / kAndroidTutorialHoldMs;
+        if (holdFrac >= 1.0f)
+        {
+            tut.learned[0] = true;
+            tut.holdFinger = static_cast<SDL_FingerID>(-1);
+            tut.holdTarget = -1;
+            holdFrac = 0.0f;
+            MarkAndroidTutorialStepTried();
+            AndroidHapticPulse(40);
+            PlayBuffer(SOUND_CLICK01);
+        }
+    }
+
+    const float cx = orb.x + (orb.w * 0.5f);
+    const float cy = orb.y + (orb.h * 0.5f);
+
+    if (!tut.learned[0])
+    {
+        // The dummy orb itself: the real Orb of Twisting Slash model, in the
+        // real slot, so it looks exactly like the one the player will find.
+        BeginBitmap();
+        BeginAndroidTutorial2D();
+        DrawVirtualRectFilled(orb.x, orb.y, orb.w, orb.h, 0.0f, 0.0f, 0.0f, 0.55f);
+        if (holding)
+        {
+            DrawVirtualRectFilled(orb.x, orb.y + orb.h * (1.0f - std::clamp(holdFrac, 0.0f, 1.0f)), orb.w,
+                                  orb.h * std::clamp(holdFrac, 0.0f, 1.0f), 1.0f, 0.82f, 0.22f, 0.55f);
+        }
+
+        const AndroidUiRect icon = InflateAndroidUiRect(orb, 3.0f);
+        {
+            const float sx = icon.x * static_cast<float>(WindowWidth) / 640.0f;
+            const float sw = icon.w * static_cast<float>(WindowWidth) / 640.0f;
+            const float syTop = icon.y * static_cast<float>(WindowHeight) / 480.0f;
+            const float sh = icon.h * static_cast<float>(WindowHeight) / 480.0f;
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(static_cast<GLint>(sx), static_cast<GLint>(static_cast<float>(WindowHeight) - syTop - sh),
+                      static_cast<GLsizei>(sw), static_cast<GLsizei>(sh));
+        }
+        EndBitmap();
+        if (g_pNewUISystem != nullptr)
+        {
+            g_pNewUISystem->RenderItem3DFree(icon.x, icon.y, icon.w, icon.h,
+                                             ITEM_WING + 7, 0, 0, 0, false, 1.2f, false);
+        }
+        BeginBitmap();
+        glDisable(GL_SCISSOR_TEST);
+        BeginAndroidTutorial2D();
+
+        if (holding)
+        {
+            DrawVirtualCircle(cx, cy, 8.0f + (18.0f * std::clamp(holdFrac, 0.0f, 1.0f)), 1.0f, 0.86f, 0.20f, 0.9f, false);
+        }
+        DrawVirtualRectOutline(orb.x - 1.0f, orb.y - 1.0f, orb.w + 2.0f, orb.h + 2.0f, 1.0f, 0.86f, 0.20f, AndroidTutorialPulse(), 2.0f);
+        if (!holding && !tut.tried[kTutStepLearnSkill])
+        {
+            DrawAndroidTutorialTapMarker(cx, cy);
+        }
+        EndBitmap();
+    }
+
+    // Caption to the left of the bag so it never sits on the window.
+    const AndroidUiRect note = { std::max(8.0f, orb.x - 290.0f), std::max(130.0f, orb.y - 6.0f), 262.0f, 66.0f };
+    const char* text = nullptr;
+    if (tut.learned[0])
+    {
+        text = "Learned: Twisting Slash. The orb is used up and the skill is now in your skill list - bind it to a slot on your wheel.";
+    }
+    else if (holding)
+    {
+        text = "Keep holding... the ring fills, then the skill is learned.";
+    }
+    else
+    {
+        text = "This is your real bag. The glowing Orb of Twisting Slash is a practice item - press and HOLD it to learn the skill. A quick tap only shows details.";
+    }
+    BeginBitmap();
+    RenderAndroidTutorialNoteBox(note, tut.learned[0], text);
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Auto Potion / Auto Combo: tap flips the switch, hold opens its settings,
+// which a non-VIP account can look at but not change.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialAutoMenuDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    // The real switches stay live. Remember how they were, tell when the
+    // player flips one, and put them back when the step ends (see
+    // ResetAndroidTutorialStepDemo).
+    const bool potsNow = gAutoPotion.IsEnabled();
+    const bool comboNow = g_virtualComboEnabled;
+    if (!tut.autoInit)
+    {
+        tut.autoInit = true;
+        tut.autoOrig[0] = potsNow;
+        tut.autoOrig[1] = comboNow;
+    }
+    else if (potsNow != tut.autoOrig[0] || comboNow != tut.autoOrig[1])
+    {
+        MarkAndroidTutorialStepTried();
+    }
+
+    const AndroidUiRect pots = GetAutoPotsToggleRect();
+    BeginBitmap();
+    if (!tut.tried[kTutStepAutoMenu])
+    {
+        DrawAndroidTutorialTapMarker(pots.x + (pots.w * 0.5f), pots.y + (pots.h * 0.5f));
+    }
+    EndBitmap();
+
+    BeginBitmap();
+    RenderAndroidTutorialNoteBox({ 8.0f, 134.0f, 236.0f, 100.0f }, tut.tried[kTutStepAutoMenu],
+        tut.tried[kTutStepAutoMenu]
+            ? "These are your real switches (restored when you tap Next). Press and HOLD one to open its real settings window - changing them needs VIP."
+            : "These are the real AutoPots and CMB switches. Tap one to turn it on or off, press and HOLD it for its settings.");
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Chat commands on a practice player.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialCmdTradeDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    const bool barOpen = g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX);
+    if (barOpen)
+    {
+        tut.cmdRan |= 1;                 // the bar was opened
+    }
+    else if (tut.cmdRan & 1)
+    {
+        MarkAndroidTutorialStepTried();  // ...and then closed: the command went out
+    }
+
+    // Where to tap: the chat log until the bar is up.
+    AndroidUiRect target;
+    if (!barOpen && GetAndroidTutorialStepRect(kTutStepCmdTrade, target))
+    {
+        BeginBitmap();
+        DrawAndroidTutorialTapMarker(target.x + (target.w * 0.5f), target.y + (target.h * 0.5f));
+        EndBitmap();
+    }
+
+    // A looping typing demo of what to enter.
+    static const char kSample[] = "/party Dummy";
+    const int sampleLen = static_cast<int>(sizeof(kSample)) - 1;
+    const int shown = std::min(sampleLen, static_cast<int>((GetTickCount() / 170u) % static_cast<DWORD>(sampleLen + 8)));
+    char typed[40];
+    snprintf(typed, sizeof(typed), "> %.*s%s", shown, kSample, ((GetTickCount() / 400u) % 2u) ? "|" : " ");
+
+    const char* text = tut.tried[kTutStepCmdTrade]
+        ? "Sent! The keyboard closed and the command ran. /trade <name> works the same way."
+        : (barOpen
+               ? "2. Type your command (for example the one below), then press Enter on the keyboard."
+               : "1. Tap the chat box (highlighted, bottom centre). The keyboard and the input bar open.");
+    BeginBitmap();
+    RenderAndroidTutorialNoteBox({ 8.0f, 134.0f, 236.0f, 64.0f }, tut.tried[kTutStepCmdTrade], text);
+    BeginAndroidTutorial2D();
+    DrawVirtualRectFilled(8.0f, 204.0f, 236.0f, 22.0f, 0.0f, 0.0f, 0.0f, 0.70f);
+    DrawVirtualRectOutline(8.0f, 204.0f, 236.0f, 22.0f, 0.82f, 0.66f, 0.26f, 0.95f, 1.5f);
+    AndroidTutText(AndroidTutMiniFont(), 14.0f, 210.0f, 224.0f, 0xFFFFE080, 1, typed);
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Press and hold a player to open the quick menu, then trade.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialHoldTradeDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    float holdFrac = 0.0f;
+    const bool holding = (tut.holdFinger != static_cast<SDL_FingerID>(-1)) && (tut.holdTarget == 0);
+    if (holding)
+    {
+        holdFrac = static_cast<float>(MU_MobileGetTicks() - tut.holdDownMs) / kAndroidTutorialHoldMs;
+        if (holdFrac >= 1.0f)
+        {
+            tut.dummyMenuOpen = true;
+            tut.holdFinger = static_cast<SDL_FingerID>(-1);
+            tut.holdTarget = -1;
+            holdFrac = 0.0f;
+            AndroidHapticPulse(35);
+            PlayBuffer(SOUND_CLICK01);
+        }
+    }
+
+    BeginBitmap();
+    // A patch of "town" for the dummy to stand in.
+    BeginAndroidTutorial2D();
+    DrawVirtualRectFilled(150.0f, 134.0f, 340.0f, 196.0f, 0.10f, 0.14f, 0.09f, 0.88f);
+    DrawVirtualRectOutline(150.0f, 134.0f, 340.0f, 196.0f, 0.82f, 0.66f, 0.26f, 0.96f, 2.0f);
+    DrawAndroidTutorialFigure(kAndroidTutorialDummyX, kAndroidTutorialDummyY, 0.9f, 0.85f, 0.55f, 0.20f);
+    DrawAndroidTutorialNamePlate(kAndroidTutorialDummyX, kAndroidTutorialDummyY - 80.0f, "Dummy",
+                                 tut.dummyParty ? "[Party]" : nullptr, false, true);
+
+    if (holding)
+    {
+        BeginAndroidTutorial2D();
+        DrawVirtualCircle(kAndroidTutorialDummyX, kAndroidTutorialDummyY - 20.0f, 40.0f, 1.0f, 0.86f, 0.20f, 0.55f, false);
+        DrawVirtualCircle(kAndroidTutorialDummyX, kAndroidTutorialDummyY - 20.0f, 6.0f + (34.0f * std::clamp(holdFrac, 0.0f, 1.0f)),
+                          1.0f, 0.86f, 0.20f, 0.45f, true);
+    }
+
+    if (tut.dummyMenuOpen)
+    {
+        const char* labels[3] = { "Trade", "Party", "Cancel" };
+        for (int i = 0; i < 3; ++i)
+        {
+            AndroidUiRect r = GetAndroidTutorialDummyMenuRect(i);
+            DrawAndroidTutorialButton(r, labels[i], i == 0, false);
+        }
+    }
+    EndBitmap();
+
+    if (tut.dummyTradeOpen)
+    {
+        const AndroidUiRect w = GetAndroidTutorialTradeWindowRect();
+        BeginBitmap();
+        DrawAndroidTutorialWindow(w, "Trade - Dummy", true);
+        BeginAndroidTutorial2D();
+        for (int side = 0; side < 2; ++side)
+        {
+            const float gx = (side == 0) ? (w.x + 14.0f) : (w.x + w.w - 14.0f - 88.0f);
+            for (int row = 0; row < 3; ++row)
+            {
+                for (int col = 0; col < 4; ++col)
+                {
+                    DrawVirtualRectFilled(gx + (22.0f * static_cast<float>(col)), w.y + 44.0f + (22.0f * static_cast<float>(row)), 21.0f, 21.0f, 0.0f, 0.0f, 0.0f, 0.55f);
+                    DrawVirtualRectOutline(gx + (22.0f * static_cast<float>(col)), w.y + 44.0f + (22.0f * static_cast<float>(row)), 21.0f, 21.0f, 0.34f, 0.34f, 0.42f, 0.9f, 1.0f);
+                }
+            }
+        }
+        // one item each side
+        DrawVirtualRectFilled(w.x + 17.0f, w.y + 47.0f, 15.0f, 15.0f, 0.30f, 0.55f, 0.95f, 1.0f);
+        DrawVirtualRectFilled(w.x + w.w - 14.0f - 88.0f + 3.0f + 22.0f, w.y + 47.0f, 15.0f, 15.0f, 0.90f, 0.40f, 0.30f, 1.0f);
+        AndroidTutText(AndroidTutMiniFont(), w.x + 14.0f, w.y + 30.0f, 88.0f, 0xFFFFE080, 1, "You");
+        AndroidTutText(AndroidTutMiniFont(), w.x + w.w - 14.0f - 88.0f, w.y + 30.0f, 88.0f, 0xFFFFE080, 1, "Dummy");
+        AndroidTutText(AndroidTutMiniFont(), w.x + 14.0f, w.y + 114.0f, 100.0f, 0xFFE0E0F0, 1, "Zen: 0");
+        AndroidTutText(AndroidTutMiniFont(), w.x + w.w - 14.0f - 88.0f, w.y + 114.0f, 100.0f, 0xFFE0E0F0, 1, "Zen: 0");
+        if (tut.dummyTradeDone)
+        {
+            AndroidTutText(AndroidTutBoldFont(), w.x, w.y + 138.0f, w.w, 0xFF90FFB0, 3, "Trade complete!");
+        }
+        DrawAndroidTutorialButton(GetAndroidTutorialTradeConfirmRect(), tut.dummyTradeDone ? "Done" : "Confirm", !tut.dummyTradeDone, tut.dummyTradeDone);
+        EndBitmap();
+        return;
+    }
+
+    // Marker: where the finger should go next.
+    BeginBitmap();
+    if (tut.dummyMenuOpen)
+    {
+        const AndroidUiRect r = GetAndroidTutorialDummyMenuRect(0);
+        DrawAndroidTutorialTapMarker(r.x + (r.w * 0.5f), r.y + (r.h * 0.5f));
+    }
+    else if (!holding)
+    {
+        DrawAndroidTutorialTapMarker(kAndroidTutorialDummyX, kAndroidTutorialDummyY - 20.0f);
+        AndroidTutText(AndroidTutMiniFont(), kAndroidTutorialDummyX - 40.0f, kAndroidTutorialDummyY + 6.0f, 80.0f, 0xFFFFD070, 3, "HOLD here");
+    }
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// /zen, /remaster, /readd.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialCmdZenDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    // A real command, so the proof is real too: the character's zen goes up.
+    const DWORD gold = (CharacterMachine != nullptr) ? static_cast<DWORD>(CharacterMachine->Gold) : 0;
+    if (!tut.shopSeen)
+    {
+        tut.shopSeen = true;      // reused as "start zen captured"
+        tut.zenAtShop = gold;
+    }
+    else if (gold > tut.zenAtShop)
+    {
+        tut.bought = true;        // reused as "zen arrived"
+        MarkAndroidTutorialStepTried();
+    }
+
+    const bool barOpen = g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_CHATINPUTBOX);
+
+    AndroidUiRect target;
+    if (!tut.bought && !barOpen && GetAndroidTutorialStepRect(kTutStepCmdZen, target))
+    {
+        BeginBitmap();
+        DrawAndroidTutorialTapMarker(target.x + (target.w * 0.5f), target.y + (target.h * 0.5f));
+        EndBitmap();
+    }
+
+    static const char kSample[] = "/zen 9999999";
+    const int sampleLen = static_cast<int>(sizeof(kSample)) - 1;
+    const int shown = std::min(sampleLen, static_cast<int>((GetTickCount() / 170u) % static_cast<DWORD>(sampleLen + 8)));
+    char typed[40];
+    snprintf(typed, sizeof(typed), "> %.*s%s", shown, kSample, ((GetTickCount() / 400u) % 2u) ? "|" : " ");
+
+    const char* text = tut.bought
+        ? "Zen received! That is how every command works. /remaster and /readd are typed the same way."
+        : (barOpen
+               ? "Type /zen 9999999 and press Enter on the keyboard."
+               : "Tap the chat box, then type /zen 9999999 and press Enter.");
+    BeginBitmap();
+    RenderAndroidTutorialNoteBox({ 8.0f, 134.0f, 236.0f, 64.0f }, tut.bought, text);
+    BeginAndroidTutorial2D();
+    DrawVirtualRectFilled(8.0f, 204.0f, 236.0f, 22.0f, 0.0f, 0.0f, 0.0f, 0.70f);
+    DrawVirtualRectOutline(8.0f, 204.0f, 236.0f, 22.0f, 0.82f, 0.66f, 0.26f, 0.95f, 1.5f);
+    AndroidTutText(AndroidTutMiniFont(), 14.0f, 210.0f, 224.0f, 0xFFFFE080, 1, typed);
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Top up: Kira Shop button -> shop -> highlighted TOP UP button.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialTopUpDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+
+    const bool shopOpen = g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_INGAMESHOP);
+    const bool rechargeOpen = shopOpen && g_pInGameShop != nullptr && g_pInGameShop->IsRechargePanelOpen();
+    if (rechargeOpen)
+    {
+        MarkAndroidTutorialStepTried();
+    }
+
+    AndroidUiRect target;
+    const bool hasTarget = GetAndroidTutorialStepRect(kTutStepTopUp, target);
+    if (hasTarget)
+    {
+        BeginBitmap();
+        DrawAndroidTutorialTapMarker(target.x + (target.w * 0.5f), target.y + (target.h * 0.5f));
+        EndBitmap();
+    }
+
+    const char* text = rechargeOpen
+        ? "This is the real top up window: pick a coin pack and pay with Google Play. The WCoin arrive in the shop within seconds."
+        : (shopOpen
+               ? "This is the real Kira Shop. The glowing button next to your WCoin balance is TOP UP - tap it."
+               : "Tap the glowing Kira Shop button in the top bar to open the real shop.");
+    BeginBitmap();
+    RenderAndroidTutorialNoteBox({ 8.0f, 134.0f, 210.0f, 96.0f }, rechargeOpen, text);
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Invasion: Features -> Events -> pick one.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialInvasionDemo()
+{
+    const bool featuresOpen = gCustomMenu.IsOpen();
+    const bool eventsOpen = gInterface.Data[eWindowEventTime].OnShow != 0;
+    if (eventsOpen)
+    {
+        MarkAndroidTutorialStepTried();
+    }
+
+    AndroidUiRect target;
+    if (GetAndroidTutorialStepRect(kTutStepInvasion, target))
+    {
+        BeginBitmap();
+        DrawAndroidTutorialTapMarker(target.x + (target.w * 0.5f), target.y + (target.h * 0.5f));
+        EndBitmap();
+    }
+
+    const char* text = eventsOpen
+        ? "This is the real Events window. Find the invasion you want and use its button to go there."
+        : (featuresOpen
+               ? "This is the real Features menu. Tap the glowing Events button."
+               : "Tap the glowing Features button in the top bar.");
+    BeginBitmap();
+    RenderAndroidTutorialNoteBox({ 8.0f, 134.0f, 210.0f, 84.0f }, eventsOpen, text);
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// A practice item drawn over an empty slot of the player's REAL bag: the
+// item's own model, a gold pulse, and (while held) the fill ring.
+// ---------------------------------------------------------------------------
+void DrawAndroidTutorialDummyItem(const AndroidUiRect& slot, int itemType, bool holding, float holdFrac)
+{
+    const float cx = slot.x + (slot.w * 0.5f);
+    const float cy = slot.y + (slot.h * 0.5f);
+
+    BeginBitmap();
+    BeginAndroidTutorial2D();
+    DrawVirtualRectFilled(slot.x, slot.y, slot.w, slot.h, 0.0f, 0.0f, 0.0f, 0.55f);
+    if (holding)
+    {
+        DrawVirtualRectFilled(slot.x, slot.y + slot.h * (1.0f - std::clamp(holdFrac, 0.0f, 1.0f)), slot.w,
+                              slot.h * std::clamp(holdFrac, 0.0f, 1.0f), 1.0f, 0.82f, 0.22f, 0.55f);
+    }
+
+    const AndroidUiRect icon = InflateAndroidUiRect(slot, 3.0f);
+    {
+        const float sx = icon.x * static_cast<float>(WindowWidth) / 640.0f;
+        const float sw = icon.w * static_cast<float>(WindowWidth) / 640.0f;
+        const float syTop = icon.y * static_cast<float>(WindowHeight) / 480.0f;
+        const float sh = icon.h * static_cast<float>(WindowHeight) / 480.0f;
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(static_cast<GLint>(sx), static_cast<GLint>(static_cast<float>(WindowHeight) - syTop - sh),
+                  static_cast<GLsizei>(sw), static_cast<GLsizei>(sh));
+    }
+    EndBitmap();
+    if (g_pNewUISystem != nullptr)
+    {
+        g_pNewUISystem->RenderItem3DFree(icon.x, icon.y, icon.w, icon.h, itemType, 0, 0, 0, false, 1.2f, false);
+    }
+    BeginBitmap();
+    glDisable(GL_SCISSOR_TEST);
+    BeginAndroidTutorial2D();
+    if (holding)
+    {
+        DrawVirtualCircle(cx, cy, 8.0f + (18.0f * std::clamp(holdFrac, 0.0f, 1.0f)), 1.0f, 0.86f, 0.20f, 0.9f, false);
+    }
+    DrawVirtualRectOutline(slot.x - 1.0f, slot.y - 1.0f, slot.w + 2.0f, slot.h + 2.0f, 1.0f, 0.86f, 0.20f, AndroidTutorialPulse(), 2.0f);
+    DrawAndroidTutorialTapMarker(cx, cy);
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Go to Lorencia: warps with the normal move list if the player is elsewhere.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialWarpDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+    const bool inLorencia = IsAndroidTutorialInLorencia();
+    if (inLorencia)
+    {
+        MarkAndroidTutorialStepTried();
+    }
+
+    const AndroidUiRect card = kAndroidTutorialGuideCard;
+    BeginBitmap();
+    DrawAndroidTutorialWindow(card, "Lorencia", false);
+
+    if (inLorencia)
+    {
+        AndroidTutText(AndroidTutBoldFont(), card.x, card.y + 40.0f, card.w, 0xFF90FFB0, 3, "You are in Lorencia.");
+        DrawAndroidTutorialWrappedText(AndroidTutMiniFont(), card.x + 10.0f, card.y + 66.0f, card.w - 20.0f, 0xFFE0E0F0, 3, "Next: buy potions and skills from the ladies at the bar.");
+    }
+    else
+    {
+        const DWORD now = GetTickCount();
+        const char* line = "You are in another map. Tap Warp to go to Lorencia.";
+        DWORD color = 0xFFFFD070;
+        if (tut.warpTick == 1)
+        {
+            line = "Not enough zen for the warp - use /zen 9999999 in chat first.";
+            color = 0xFFFF9090;
+        }
+        else if (tut.warpSent && (now - tut.warpTick) < 6000)
+        {
+            line = "Warping...";
+            color = 0xFF90FFB0;
+        }
+        else if (tut.warpTick != 0 && !tut.warpSent)
+        {
+            line = "Lorencia is not in your move list - open it from the location chip.";
+            color = 0xFFFF9090;
+        }
+        DrawAndroidTutorialWrappedText(AndroidTutMiniFont(), card.x + 10.0f, card.y + 34.0f, card.w - 20.0f, color, 3, line);
+        DrawAndroidTutorialButton(GetAndroidTutorialWalkButtonRect(), "Warp to Lorencia", true, false);
+    }
+    EndBitmap();
+}
+
+// ---------------------------------------------------------------------------
+// Guide to an NPC (or the hunting field): coordinates, live distance, a
+// Walk there button that uses the minimap auto-walk, and - once the real shop
+// opens - a running note on what to tap.
+// ---------------------------------------------------------------------------
+void RenderAndroidTutorialGuideDemo()
+{
+    AndroidTutorialState& tut = g_androidTutorial;
+    const int step = tut.step;
+    const bool hunt = (step == kTutStepHunt);
+    const AndroidTutorialHunt hs = GetAndroidTutorialHuntSpot();
+    const AndroidTutorialNpc huntNpc = { hs.name, hs.x, hs.y };
+    const AndroidTutorialNpc& npc = (step == kTutStepPotionLady) ? kAndroidTutorialPotionNpc
+        : (step == kTutStepSkillLady) ? kAndroidTutorialSkillNpc : huntNpc;
+
+    const bool inLorencia = hunt ? (gMapManager.WorldActive == hs.world) : IsAndroidTutorialInLorencia();
+    const int dist = AndroidTutorialTileDistance(npc.x, npc.y);
+    if (inLorencia && dist <= (hunt ? 10 : 5))
+    {
+        tut.arrived = true;
+    }
+
+    // ---- hunt: did an enemy go down? (EXP rises)
+    if (hunt && CharacterAttribute != nullptr)
+    {
+        const DWORD expNow = static_cast<DWORD>(CharacterAttribute->Experience) + 1;
+        if (tut.expAtStart == 0)
+        {
+            tut.expAtStart = expNow;
+        }
+        else if (expNow > tut.expAtStart)
+        {
+            tut.killed = true;
+            MarkAndroidTutorialStepTried();
+        }
+    }
+
+    // ---- shop: the real window, with a note beside it
+    const bool inShop = !hunt && g_pNewUISystem != nullptr && g_pNewUISystem->IsVisible(SEASON3B::INTERFACE_NPCSHOP);
+    if (inShop)
+    {
+        const DWORD gold = (CharacterMachine != nullptr) ? static_cast<DWORD>(CharacterMachine->Gold) : 0;
+        if (!tut.shopSeen)
+        {
+            tut.shopSeen = true;
+            tut.zenAtShop = gold;
+            MarkAndroidTutorialStepTried();
+        }
+        else if (gold < tut.zenAtShop)
+        {
+            tut.bought = true;
+        }
+
+        const char* text = tut.bought
+            ? "Bought! It is in your bag now. Close the shop and tap Next."
+            : (step == kTutStepPotionLady
+                   ? "Her real shop. Tap a potion to look at it, then buy it - the price comes out of your zen."
+                   : "Her real shop. Tap an item to look at it, then buy it - orbs teach you a skill once you hold them in your bag.");
+        BeginBitmap();
+        RenderAndroidTutorialNoteBox({ 8.0f, 134.0f, 200.0f, 84.0f }, tut.bought, text);
+        EndBitmap();
+        return;
+    }
+
+    // ---- guide card
+    const AndroidUiRect card = kAndroidTutorialGuideCard;
+    BeginBitmap();
+    DrawAndroidTutorialWindow(card, npc.name, false);
+
+    char line[96];
+    snprintf(line, sizeof(line), "Go to   X: %d   Y: %d", npc.x, npc.y);
+    AndroidTutText(AndroidTutBoldFont(), card.x, card.y + 30.0f, card.w, 0xFFFFE080, 3, line);
+
+    if (Hero != nullptr)
+    {
+        snprintf(line, sizeof(line), "You: %d, %d    Distance: %d",
+                 static_cast<int>(Hero->PositionX), static_cast<int>(Hero->PositionY), dist);
+    }
+    else
+    {
+        snprintf(line, sizeof(line), "Distance: %d tiles", dist);
+    }
+    AndroidTutText(AndroidTutMiniFont(), card.x, card.y + 50.0f, card.w, tut.arrived ? 0xFF90FFB0 : 0xFFE0E0F0, 3, line);
+
+    const char* status = nullptr;
+    DWORD statusColor = 0xFFFFD070;
+    char mapMsg[96];
+    if (!inLorencia)
+    {
+        if (hunt)
+        {
+            snprintf(mapMsg, sizeof(mapMsg), "The newbie hunting field is in %s - tap Warp to go there.", hs.mapName);
+            status = mapMsg;
+        }
+        else
+        {
+            status = "You are not in Lorencia - go back one step and Warp.";
+        }
+        statusColor = 0xFFFF9090;
+    }
+    else if (hunt)
+    {
+        if (tut.killed) { status = "Monster down! Your EXP went up."; statusColor = 0xFF90FFB0; }
+        else if (tut.arrived) { status = "Tap ATK (bottom right) to attack the nearest monster."; }
+        else { status = "Tap Walk there, or use the joystick."; }
+    }
+    else if (tut.arrived)
+    {
+        status = (step == kTutStepPotionLady) ? "You are here! Tap the RED lady to open her shop."
+                                              : "You are here! Tap the BLUE lady to open her shop.";
+        statusColor = 0xFF90FFB0;
+    }
+    else
+    {
+        status = "Tap Walk there, or use the joystick.";
+    }
+    DrawAndroidTutorialWrappedText(AndroidTutMiniFont(), card.x + 10.0f, card.y + 64.0f, card.w - 20.0f, statusColor, 3, status);
+
+    // distance bar
+    BeginAndroidTutorial2D();
+    const float frac = tut.arrived ? 1.0f : std::clamp(1.0f - (static_cast<float>(std::min(dist, 80)) / 80.0f), 0.0f, 1.0f);
+    DrawVirtualRectFilled(card.x + 14.0f, card.y + 100.0f, card.w - 28.0f, 8.0f, 0.0f, 0.0f, 0.0f, 0.6f);
+    DrawVirtualRectFilled(card.x + 15.0f, card.y + 101.0f, (card.w - 30.0f) * frac, 6.0f, tut.arrived ? 0.35f : 1.0f, tut.arrived ? 0.90f : 0.80f, tut.arrived ? 0.50f : 0.22f, 0.95f);
+    DrawVirtualRectOutline(card.x + 14.0f, card.y + 100.0f, card.w - 28.0f, 8.0f, 0.82f, 0.66f, 0.26f, 0.9f, 1.0f);
+
+    char btnLabel[48];
+    if (hunt && !inLorencia)
+    {
+        snprintf(btnLabel, sizeof(btnLabel), "Warp to %s", hs.mapName);
+    }
+    else
+    {
+        snprintf(btnLabel, sizeof(btnLabel), "%s", hunt ? "Walk to monsters" : "Walk there");
+    }
+    DrawAndroidTutorialButton(GetAndroidTutorialWalkButtonRect(), btnLabel, !tut.arrived, false);
+    EndBitmap();
+
+    if (hunt && tut.arrived && !tut.killed)
+    {
+        const VirtualButtonLayout& atk = kVirtualButtons[kVirtualAttackButton];
+        BeginBitmap();
+        DrawAndroidTutorialTapMarker(atk.cx, atk.cy);
+        EndBitmap();
+    }
 }
 
 // Travel and Stats show the player's REAL windows - the client's own move
@@ -15809,7 +17602,7 @@ void RenderAndroidTutorial()
     const char* body = content.body;
     if (step == kTutStepTarget && !IsAndroidAimAvailable())
     {
-        body = "You're in a safe zone, so the real AIM button isn't up right now - the one below is a working copy of it. It opens a list of the players near you, and the button under it swaps skill pages.";
+        body = "You're in a safe zone, so the real AIM button isn't up right now - the one below is a working copy, above skill slot 2. Tap it for a list of players, or press AIM and DRAG onto a player and let go to lock. The button under it swaps skill pages.";
     }
 
     // ---- dim + highlight -------------------------------------------------
@@ -15821,7 +17614,32 @@ void RenderAndroidTutorial()
     // on a step showing a real window, though: the window IS the lesson there,
     // and 0.62 over it made the client's own text hard to read.
     const bool realWindowUp = AndroidTutorialStepUsesRealWindow(step) && IsAndroidTutorialRealWindowOpen();
-    DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, realWindowUp ? 0.18f : 0.62f);
+    float dimAlpha = realWindowUp ? 0.18f : 0.62f;
+    if (step == kTutStepWarp)
+    {
+        dimAlpha = 0.40f;
+    }
+    else if (IsAndroidTutorialWorldLive())
+    {
+        dimAlpha = 0.0f;   // the real UI is live here - nothing to dim
+    }
+    if (hasHighlight && !realWindowUp)
+    {
+        // Spotlight: dim everything AROUND the highlighted control, so the
+        // thing being taught stays at full brightness.
+        const float hx = std::clamp(highlight.x, 0.0f, 640.0f);
+        const float hy = std::clamp(highlight.y, 0.0f, 480.0f);
+        const float hr = std::clamp(highlight.x + highlight.w, 0.0f, 640.0f);
+        const float hb = std::clamp(highlight.y + highlight.h, 0.0f, 480.0f);
+        DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, hy, 0.0f, 0.0f, 0.0f, dimAlpha);
+        DrawVirtualRectFilled(0.0f, hb, 640.0f, 480.0f - hb, 0.0f, 0.0f, 0.0f, dimAlpha);
+        DrawVirtualRectFilled(0.0f, hy, hx, hb - hy, 0.0f, 0.0f, 0.0f, dimAlpha);
+        DrawVirtualRectFilled(hr, hy, 640.0f - hr, hb - hy, 0.0f, 0.0f, 0.0f, dimAlpha);
+    }
+    else
+    {
+        DrawVirtualRectFilled(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 0.0f, 0.0f, dimAlpha);
+    }
 
     if (hasHighlight)
     {
@@ -15860,6 +17678,7 @@ void RenderAndroidTutorial()
 
     case kTutStepTarget:
     {
+        RenderAndroidTutorialAimPlayers();
         BeginBitmap();
         const int lockedRow = g_androidTutorial.aimLockedRow;
         RenderAndroidTutorialAimButtonPreview(
@@ -15885,8 +17704,46 @@ void RenderAndroidTutorial()
         RenderAndroidTutorialItemMenuExample();
         break;
 
-    case kTutStepZoom:
-        RenderAndroidTutorialZoomDemo();
+    case kTutStepCamera:
+        RenderAndroidTutorialCameraDemo();
+        break;
+
+    case kTutStepLearnSkill:
+        RenderAndroidTutorialLearnDemo();
+        break;
+
+    case kTutStepWarp:
+        RenderAndroidTutorialWarpDemo();
+        break;
+
+    case kTutStepPotionLady:
+    case kTutStepSkillLady:
+    case kTutStepHunt:
+        RenderAndroidTutorialGuideDemo();
+        break;
+
+    case kTutStepAutoMenu:
+        RenderAndroidTutorialAutoMenuDemo();
+        break;
+
+    case kTutStepCmdTrade:
+        RenderAndroidTutorialCmdTradeDemo();
+        break;
+
+    case kTutStepHoldTrade:
+        RenderAndroidTutorialHoldTradeDemo();
+        break;
+
+    case kTutStepCmdZen:
+        RenderAndroidTutorialCmdZenDemo();
+        break;
+
+    case kTutStepTopUp:
+        RenderAndroidTutorialTopUpDemo();
+        break;
+
+    case kTutStepInvasion:
+        RenderAndroidTutorialInvasionDemo();
         break;
 
     case kTutStepTravel:
@@ -15911,8 +17768,14 @@ void RenderAndroidTutorial()
     BeginBitmap();
     BeginAndroidTutorial2D();
 
-    DrawVirtualRectFilled(panel.x, panel.y, panel.w, panel.h, 0.08f, 0.06f, 0.14f, 0.90f);
-    DrawVirtualRectOutline(panel.x, panel.y, panel.w, panel.h, 0.70f, 0.60f, 1.0f, 0.9f, 2.0f);
+    // Same dark-and-gold look as the game's own windows: soft shadow, near
+    // black body, gold title strip, double gold border, and a step counter.
+    DrawVirtualRectFilled(panel.x - 4.0f, panel.y - 4.0f, panel.w + 8.0f, panel.h + 8.0f, 0.0f, 0.0f, 0.0f, 0.45f);
+    DrawVirtualRectFilled(panel.x, panel.y, panel.w, panel.h, 0.04f, 0.05f, 0.09f, 0.96f);
+    DrawVirtualRectFilled(panel.x + 2.0f, panel.y + 2.0f, panel.w - 4.0f, 21.0f, 0.17f, 0.13f, 0.04f, 0.96f);
+    DrawVirtualRectFilled(panel.x + 2.0f, panel.y + 23.0f, panel.w - 4.0f, 1.5f, 0.88f, 0.70f, 0.26f, 0.92f);
+    DrawVirtualRectOutline(panel.x, panel.y, panel.w, panel.h, 0.82f, 0.66f, 0.26f, 0.96f, 2.0f);
+    DrawVirtualRectOutline(panel.x + 3.0f, panel.y + 3.0f, panel.w - 6.0f, panel.h - 6.0f, 0.30f, 0.24f, 0.10f, 0.90f, 1.0f);
 
     DrawVirtualRightPanelButtonBox(skipRect, false);
     if (step > 0)
@@ -15925,6 +17788,7 @@ void RenderAndroidTutorial()
 
     // Progress dots between Skip and Back - a filled run up to the current
     // step, hollow after it. Reads at a glance where "3 / 10" did not.
+    if (!IsAndroidTutorialPanelCompact(step))
     {
         const float dotGap = 9.0f;
         const float dotR = 2.6f;
@@ -15955,12 +17819,19 @@ void RenderAndroidTutorial()
              static_cast<int>(panel.w - 24.0f), 0, 3,
              "%s", content.title);
 
+    TextDraw(smallFont,
+             static_cast<int>(panel.x + panel.w - 74.0f),
+             static_cast<int>(panel.y + 8.0f),
+             0xFFE8C878, 0x0,
+             64, 0, 3,
+             "%d / %d", step + 1, kAndroidTutorialStepCount);
+
     // Wrapped, not raw TextDraw - see DrawAndroidTutorialWrappedText for why
     // (TextDraw centres a long line on the width it is given and clips it at
     // both ends instead of breaking it).
     DrawAndroidTutorialWrappedText(g_hFont,
                                    panel.x + 12.0f,
-                                   panel.y + 24.0f,
+                                   panel.y + 28.0f,
                                    panel.w - 24.0f,
                                    0xFFFFFFFF, 3, body);
 
@@ -17928,9 +19799,19 @@ void UpdateVirtualPadHolds()
             continue;
         }
 
+        const bool bareSwing = !IsAndroidComboActive()
+            && !(g_virtualSelectedSkillSlot >= 0 && g_virtualSelectedSkillSlot < kVirtualOverlaySkillSlotCount);
+
+        // A plain swing waits for the previous one to finish, so a held button
+        // attacks at the character's real attack speed.
+        if (bareSwing && IsAndroidHeroBusyForSkillCast())
+        {
+            continue;
+        }
+
         const uint32_t repeatMs = IsAndroidComboActive()
             ? g_virtualComboRepeatMs[g_virtualComboStep]
-            : kVirtualAttackRepeatMs;
+            : (bareSwing ? kVirtualBareSwingRepeatMs : kVirtualAttackRepeatMs);
 
         if ((nowMs - active.lastRepeatMs) >= repeatMs)
         {
@@ -19833,6 +21714,51 @@ void RenderTargetSelectButton()
     EndBitmap();
 }
 
+// A marker on the monster (or player) AIM is locked on, so it is obvious who the
+// attacks are following: a pulsing red ring and crosshair on its body and a LOCKED
+// tag. The lock holds until the target dies or has been out of sight for 3 seconds
+// (LookupAndroidLockTarget), so the marker is simply drawn for as long as it holds.
+void RenderAndroidLockMarker()
+{
+    if (!IsVirtualPadAvailable() || CharactersClient == nullptr)
+    {
+        return;
+    }
+
+    const int index = ResolveAndroidLockedTargetIndex();
+    if (index < 0)
+    {
+        return;
+    }
+
+    const OBJECT* o = &CharactersClient[index].Object;
+    vec3_t body;
+    Vector(o->Position[0], o->Position[1], o->Position[2] + 70.0f, body);
+
+    float sx = 0.0f;
+    float sy = 0.0f;
+    if (!ProjectWorldPointWithSnapshot(body, sx, sy))
+    {
+        return;
+    }
+
+    const float pulse = 0.5f + (0.5f * std::sin(static_cast<float>(GetTickCount() % 900u) * 0.006981317f));
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    DrawVirtualCircle(sx, sy, 26.0f + (4.0f * pulse), 1.0f, 0.12f, 0.12f, 0.55f + (0.4f * pulse), false);
+    DrawVirtualCircle(sx, sy, 20.0f, 1.0f, 0.30f, 0.30f, 0.85f, false);
+    DrawAimCrosshair(sx, sy, true);
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    TextDraw(font, static_cast<int>(sx - 40.0f), static_cast<int>(sy + 30.0f), 0xFFFF7070, 0x0, 80, 0, 3, "%s", "LOCKED");
+    EndBitmap();
+}
+
 // Page switch for the skill wheel - "1/2" or "2/2", outside the ring under
 // AIM. Tapping it is handled where the other top-control taps are (see
 // HitTestSkillPageButton's call site); it just flips g_virtualSkillPage and
@@ -21641,6 +23567,7 @@ void RenderVirtualPad()
     RenderPkToggle();
     RenderAutoPotsToggle();
     RenderTargetSelectButton();
+    RenderAndroidLockMarker();
     RenderSkillPageButton();
 
     // Checked on the way to drawing rather than from a separate update hook,
