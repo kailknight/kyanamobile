@@ -745,7 +745,9 @@ bool CAutoCombo::TryCast(CHARACTER* c, int selectedSkill, float selectedDistance
 
 	// Still inside the wait after the last skill: nothing to cast yet. The held
 	// button asks again next frame.
-	if ((int)(now - this->m_NextCastTick) < 0)
+	// m_NextCastTick == 0 means no wait. Without this check (int)(now - 0) is negative once the PC has been
+	// on for more than 24.8 days (GetTickCount above 2^31), and the combo never cast anything.
+	if (this->m_NextCastTick != 0 && (int)(now - this->m_NextCastTick) < 0)
 	{
 		return true;
 	}

@@ -5201,6 +5201,27 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	this->m_ResetRewardCoin[1] = GetPrivateProfileInt(section, "ResetRewardWCoinP", 0, path);
 	this->m_ResetRewardCoin[2] = GetPrivateProfileInt(section, "ResetRewardGoblinPoint", 0, path);
 
+	// Magic Gladiator rework: the slash skills (and his weapon damage) come from Strength, the wizard skills
+	// from Energy. MGSlashMultiplierConstA / MGSlashMultiplierMaxRate replace the Energy based multiplier for
+	// the slash skills; MGPhysiDamageUseEnergy = 1 brings back the Energy part of his physical damage.
+	this->m_MGSlashMultiplierConstA = GetPrivateProfileInt(section, "MGSlashMultiplierConstA", 3, path);
+
+	if (this->m_MGSlashMultiplierConstA < 1) { this->m_MGSlashMultiplierConstA = 1; }
+
+	this->m_MGSlashMultiplierMaxRate = GetPrivateProfileInt(section, "MGSlashMultiplierMaxRate", 600, path);
+	this->m_MGPhysiDamageUseEnergy = GetPrivateProfileInt(section, "MGPhysiDamageUseEnergy", 0, path);
+
+	// Restore Full SD / HP master skills: RestoreFullChance (%, default 5) for every skill level, and a
+	// cooldown that falls with the level: RestoreFullCooldownLv1Sec (default 40) at level 1 down to
+	// RestoreFullCooldownLv20Sec (default 10) at level 20.
+	this->m_RestoreFullChance = GetPrivateProfileInt(section, "RestoreFullChance", 5, path);
+
+	if (this->m_RestoreFullChance < 0) { this->m_RestoreFullChance = 0; }
+	if (this->m_RestoreFullChance > 100) { this->m_RestoreFullChance = 100; }
+
+	this->m_RestoreCooldownLv1MS = GetPrivateProfileInt(section, "RestoreFullCooldownLv1Sec", 40, path) * 1000;
+	this->m_RestoreCooldownLv20MS = GetPrivateProfileInt(section, "RestoreFullCooldownLv20Sec", 10, path) * 1000;
+
 	// Jewel of Soul success rate (%) by the level the item reaches, per account level:
 	// SoulRateToPlus7_AL0..AL3 (item +6 -> +7), SoulRateToPlus8_*, SoulRateToPlus9_*.
 	// -1 (the default) keeps the SoulSuccessRate_ALx of GameServerInfo - Common.ini.

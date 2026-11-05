@@ -681,6 +681,7 @@ struct OBJECTSTRUCT
 	int DKDamageMultiplierRate;
 	int DLDamageMultiplierRate;
 	int MGDamageMultiplierRate;
+	int MGSlashMultiplierRate; // percent, from Strength - the Magic Gladiator slash skills
 	int RFDamageMultiplierRate[3];
 	int AttackSuccessRate;
 	int PhysiSpeed;
@@ -1104,6 +1105,10 @@ struct OBJECTSTRUCT
 	int DefensiveFullHPRestoreRate;
 	int DefensiveFullMPRestoreRate;
 	int DefensiveFullSDRestoreRate;
+	DWORD DefensiveFullSDRestoreTick; // GetTickCount() of the last full SD restore when hit (cooldown, CustomConfig.ini SDRestoreOnHitCooldownMS)
+	DWORD FullHPRestoreTick; // GetTickCount() of the last full HP restore (cooldown, CustomConfig.ini HPRestoreCooldownMS)
+	int SDRestoreSkillLevel; // level (1-20) of the Restore Full SD master skill, sets the cooldown
+	int HPRestoreSkillLevel; // level (1-20) of the Restore Full HP master skill, sets the cooldown
 	int DefensiveFullBPRestoreRate;
 	int OffensiveFullHPRestoreRate;
 	int OffensiveFullMPRestoreRate;

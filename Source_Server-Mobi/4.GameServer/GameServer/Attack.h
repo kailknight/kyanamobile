@@ -82,4 +82,15 @@ public:
 	void CGAttackRecv(PMSG_ATTACK_RECV* lpMsg,int aIndex);
 };
 
+// The player was hit: roll the "restore full SD when attacked" chance (master skills), at most once per
+// SDRestoreOnHitCooldownMS. Used by the normal attack and by the Dark Spirit.
+void gObjTryDefensiveFullSDRestore(LPOBJ lpTarget);
+
+// The "restore full HP" master skills (when attacking or when hit), at most once per HPRestoreCooldownMS.
+void gObjTryFullHPRestore(LPOBJ lpObj,int rate);
+
+// Cooldown (ms) of the Restore Full SD / HP skills at a skill level: RestoreFullCooldownLv1Sec at level 1 falling
+// in equal steps to RestoreFullCooldownLv20Sec at level 20.
+int gObjGetRestoreCooldownMS(int level);
+
 extern CAttack gAttack;

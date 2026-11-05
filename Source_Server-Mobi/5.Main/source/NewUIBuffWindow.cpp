@@ -434,6 +434,14 @@ void SEASON3B::CNewUIBuffWindow::RenderBuffIcon(eBuffState& eBuffType, float x, 
 	int iWidthIndex, iHeightIndex;
 	float u, v;
 
+	if (eBuffType >= EFFECT_SD_RESTORE_COOLDOWN && eBuffType <= EFFECT_HP_RESTORE_COOLDOWN)
+	{
+		// Cooldown icons of the Restore Full SD / HP master skills, on their own small sheet.
+		const int cell = eBuffType - EFFECT_SD_RESTORE_COOLDOWN;
+
+		RenderBitmap(BITMAP_BUFF_COOLDOWN_ICONS, x, y, width, height, cell * 20 / 256.f, 0.f, 20 / 256.f, 28 / 256.f);
+	}
+	else
 	if (eBuffType < 81) // eBuff_Berserker
 	{
 		iWidthIndex = (eBuffType - 1) % 10;
@@ -625,6 +633,7 @@ void SEASON3B::CNewUIBuffWindow::LoadImages()
 {
 	LoadBitmap("Interface\\newui_statusicon.jpg", IMAGE_BUFF_STATUS, GL_LINEAR);
 	LoadBitmap("Interface\\newui_statusicon2.jpg", IMAGE_BUFF_STATUS2, GL_LINEAR);
+	LoadBitmap("Interface\\newui_cdicons.tga", BITMAP_BUFF_COOLDOWN_ICONS, GL_LINEAR);
 }
 
 void SEASON3B::CNewUIBuffWindow::UnloadImages()

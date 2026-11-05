@@ -954,6 +954,24 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderAttribute()
 		g_pRenderText->RenderText(m_Pos.x + 20, m_Pos.y + iY, strAttakMamage);
 	}
 
+	// Magic Gladiator: how much his slash skills hit for, below the attack rate. The GameServer sends it in the
+	// Rage Fighter slot (only for the Magic Gladiator, always 200 or more); an older GameServer sends 100 and nothing is shown.
+	if (gCharacterManager.GetBaseClass(Hero->Class) == CLASS_DARK && CharacterAttribute->PrintPlayer.ViewRFDamageMultiplierA >= 200)
+	{
+		unicode::_sprintf(strAttakMamage, "Slash Damage: %d%%", CharacterAttribute->PrintPlayer.ViewRFDamageMultiplierA);
+
+		// On the Attack Rate row, in the free space to its right; on a row of its own when there is no Attack Rate row.
+		if (iAttackRatingPK > 0)
+		{
+			g_pRenderText->RenderText(m_Pos.x + 90, m_Pos.y + iY, strAttakMamage);
+		}
+		else
+		{
+			iY += 13;
+			g_pRenderText->RenderText(m_Pos.x + 20, m_Pos.y + iY, strAttakMamage);
+		}
+	}
+
 	g_pRenderText->SetFont(g_hFontBold);
 	g_pRenderText->SetBgColor(0);
 

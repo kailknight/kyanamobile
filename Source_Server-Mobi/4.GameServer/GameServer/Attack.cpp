@@ -44,6 +44,78 @@
 #include "CTCMini.h"
 #include "BattleSurvivor.h"
 CAttack gAttack;
+
+int gObjGetRestoreCooldownMS(int level) // OK
+{
+	if(level < 1 || level > 20)
+	{
+		level = 20;
+	}
+
+	return gServerInfo.m_RestoreCooldownLv1MS+(((gServerInfo.m_RestoreCooldownLv20MS-gServerInfo.m_RestoreCooldownLv1MS)*(level-1))/19);
+}
+
+void gObjTryFullHPRestore(LPOBJ lpObj,int rate) // OK
+{
+	const int hpCooldown = gObjGetRestoreCooldownMS(lpObj->HPRestoreSkillLevel);
+
+	if(rate <= 0)
+	{
+		return;
+	}
+
+	const DWORD now = GetTickCount();
+
+	if(hpCooldown > 0 && lpObj->FullHPRestoreTick != 0 && (now-lpObj->FullHPRestoreTick) < (DWORD)hpCooldown)
+	{
+		return;
+	}
+
+	if((GetLargeRand()%100) < rate)
+	{
+		lpObj->FullHPRestoreTick = now;
+
+		lpObj->Life = lpObj->MaxLife+lpObj->AddLife;
+
+		GCLifeSend(lpObj->Index,0xFF,(int)lpObj->Life,lpObj->Shield);
+
+		if(hpCooldown > 0)
+		{
+			gEffectManager.AddEffect(lpObj,1,EFFECT_HP_RESTORE_COOLDOWN,((hpCooldown+999)/1000),0,0,0,0);
+		}
+	}
+}
+
+void gObjTryDefensiveFullSDRestore(LPOBJ lpTarget) // OK
+{
+	const int sdCooldown = gObjGetRestoreCooldownMS(lpTarget->SDRestoreSkillLevel);
+
+	if(lpTarget->DefensiveFullSDRestoreRate <= 0)
+	{
+		return;
+	}
+
+	const DWORD now = GetTickCount();
+
+	if(sdCooldown > 0 && lpTarget->DefensiveFullSDRestoreTick != 0 && (now-lpTarget->DefensiveFullSDRestoreTick) < (DWORD)sdCooldown)
+	{
+		return;
+	}
+
+	if((GetLargeRand()%100) < lpTarget->DefensiveFullSDRestoreRate)
+	{
+		lpTarget->DefensiveFullSDRestoreTick = now;
+
+		if(sdCooldown > 0)
+		{
+			gEffectManager.AddEffect(lpTarget,1,EFFECT_SD_RESTORE_COOLDOWN,((sdCooldown+999)/1000),0,0,0,0);
+		}
+
+		lpTarget->Shield = lpTarget->MaxShield+lpTarget->AddShield;
+
+		GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
+	}
+}
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -444,7 +516,7 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 		{
 			damage = this->GetAttackDamageCursed(lpObj,lpTarget,lpSkill,&effect,defense);
 		}
-		else if((lpObj->Class == CLASS_DW || lpObj->Class == CLASS_MG || lpObj->Class == CLASS_SU) && skill != SKILL_NONE && skill != SKILL_FALLING_SLASH && skill != SKILL_LUNGE && skill != SKILL_UPPERCUT && skill != SKILL_CYCLONE && skill != SKILL_SLASH && skill != SKILL_TWISTING_SLASH && skill != SKILL_IMPALE && skill != SKILL_FIRE_SLASH && skill != SKILL_POWER_SLASH && skill != SKILL_SPIRAL_SLASH && skill != SKILL_SWORD_SLASH && skill != SKILL_BLOOD_STORM)
+		else if((lpObj->Class == CLASS_DW || lpObj->Class == CLASS_MG || lpObj->Class == CLASS_SU) && skill != SKILL_NONE && skill != SKILL_FALLING_SLASH && skill != SKILL_LUNGE && skill != SKILL_UPPERCUT && skill != SKILL_CYCLONE && skill != SKILL_SLASH && skill != SKILL_TWISTING_SLASH && skill != SKILL_CRESCENT_MOON_SLASH && skill != SKILL_IMPALE && skill != SKILL_FIRE_SLASH && skill != SKILL_POWER_SLASH && skill != SKILL_SPIRAL_SLASH && skill != SKILL_SWORD_SLASH && skill != SKILL_BLOOD_STORM)
 		{
 			damage = this->GetAttackDamageWizard(lpObj,lpTarget,lpSkill,&effect,defense);
 		}
@@ -539,15 +611,15 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 			//}
 			 if (skill == SKILL_POWER_SLASH)
 			{
-				damage = (damage * lpObj->MGDamageMultiplierRate) / gServerInfo.ChinhDamePhayMG;
+				damage = (damage * lpObj->MGSlashMultiplierRate) / gServerInfo.ChinhDamePhayMG;
 			}
 			else if (skill == SKILL_SWORD_SLASH)
 			{
-				damage = (damage * lpObj->MGDamageMultiplierRate) / gServerInfo.ChinhDameHoaDiemMG;
+				damage = (damage * lpObj->MGSlashMultiplierRate) / gServerInfo.ChinhDameHoaDiemMG;
 			}
 			else if (skill == SKILL_FIRE_SLASH)
 			{
-				damage = (damage * lpObj->MGDamageMultiplierRate) / gServerInfo.ChinhDameChemLuaMG;
+				damage = (damage * lpObj->MGSlashMultiplierRate) / gServerInfo.ChinhDameChemLuaMG;
 			}
 			else if (skill == SKILL_LIGHTNING_STORM)
 			{
@@ -576,7 +648,7 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 			else if (skill == SKILL_CYCLONE || skill == SKILL_SLASH || skill == SKILL_TWISTING_SLASH || skill == SKILL_CRESCENT_MOON_SLASH || skill == SKILL_IMPALE || skill == SKILL_FIRE_BREATH
 				|| skill == SKILL_BLOOD_STORM || skill == SKILL_BLAST)
 			{
-				damage = (damage * lpObj->MGDamageMultiplierRate) / 100;
+				damage = (damage * lpObj->MGSlashMultiplierRate) / 100;
 			}
 		}
 		//---DW
@@ -907,11 +979,7 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 
 	if(lpObj->Type == OBJECT_USER && effect != 4)
 	{
-		if((GetLargeRand()%100) < lpObj->OffensiveFullHPRestoreRate)
-		{
-			lpObj->Life = lpObj->MaxLife+lpObj->AddLife;
-			GCLifeSend(lpObj->Index,0xFF,(int)lpObj->Life,lpObj->Shield);
-		}
+		gObjTryFullHPRestore(lpObj,lpObj->OffensiveFullHPRestoreRate);
 
 		if((GetLargeRand()%100) < lpObj->OffensiveFullSDRestoreRate)
 		{
@@ -1179,17 +1247,9 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 				gObjAddMsgSendDelay(lpTarget,10,lpObj->Index,10,ReflectDamage);
 			}
 
-			if((GetLargeRand()%100) < lpTarget->DefensiveFullHPRestoreRate)
-			{
-				lpTarget->Life = lpTarget->MaxLife+lpTarget->AddLife;
-				GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
-			}
+			gObjTryFullHPRestore(lpTarget,lpTarget->DefensiveFullHPRestoreRate);
 
-			if((GetLargeRand()%100) < lpTarget->DefensiveFullSDRestoreRate)
-			{
-				lpTarget->Shield = lpTarget->MaxShield+lpTarget->AddShield;
-				GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
-			}
+			gObjTryDefensiveFullSDRestore(lpTarget);
 
 			if((GetLargeRand()%100) < lpTarget->DefensiveFullMPRestoreRate)
 			{
@@ -3730,7 +3790,7 @@ void CAttack::GetPreviewDamageMultiplier(LPOBJ lpObj,DWORD* DamageMultiplier,DWO
 			break;
 		case CLASS_MG:
 			(*DamageMultiplier) = lpObj->MGDamageMultiplierRate;
-			(*RFDamageMultiplierA) = 100;
+			(*RFDamageMultiplierA) = lpObj->MGSlashMultiplierRate; // the Magic Gladiator has no use for the Rage Fighter value: the client shows his slash damage with it
 			(*RFDamageMultiplierB) = 100;
 			(*RFDamageMultiplierC) = 100;
 			break;

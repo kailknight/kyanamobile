@@ -3831,16 +3831,22 @@ void CObjectManager::CharacterCalcAttribute(int aIndex) // OK
 	}
 	else if(lpObj->Class == CLASS_MG)
 	{
-		lpObj->PhysiDamageMinRight = (Strength/gServerInfo.m_MGPhysiDamageMinConstA)+(Energy/gServerInfo.m_MGPhysiDamageMinConstB);
-		lpObj->PhysiDamageMaxRight = (Strength/gServerInfo.m_MGPhysiDamageMaxConstA)+(Energy/gServerInfo.m_MGPhysiDamageMaxConstB);
-		lpObj->PhysiDamageMinLeft = (Strength/gServerInfo.m_MGPhysiDamageMinConstA)+(Energy/gServerInfo.m_MGPhysiDamageMinConstB);
-		lpObj->PhysiDamageMaxLeft = (Strength/gServerInfo.m_MGPhysiDamageMaxConstA)+(Energy/gServerInfo.m_MGPhysiDamageMaxConstB);
+		// Physical damage from Strength only (CustomConfig.ini MGPhysiDamageUseEnergy = 1 adds the old Energy part).
+		const int MGEnergyMin = ((gServerInfo.m_MGPhysiDamageUseEnergy != 0)?(Energy/gServerInfo.m_MGPhysiDamageMinConstB):0);
+		const int MGEnergyMax = ((gServerInfo.m_MGPhysiDamageUseEnergy != 0)?(Energy/gServerInfo.m_MGPhysiDamageMaxConstB):0);
+
+		lpObj->PhysiDamageMinRight = (Strength/gServerInfo.m_MGPhysiDamageMinConstA)+MGEnergyMin;
+		lpObj->PhysiDamageMaxRight = (Strength/gServerInfo.m_MGPhysiDamageMaxConstA)+MGEnergyMax;
+		lpObj->PhysiDamageMinLeft = (Strength/gServerInfo.m_MGPhysiDamageMinConstA)+MGEnergyMin;
+		lpObj->PhysiDamageMaxLeft = (Strength/gServerInfo.m_MGPhysiDamageMaxConstA)+MGEnergyMax;
 		lpObj->MagicDamageMin = Energy/gServerInfo.m_MGMagicDamageMinConstA;
 		lpObj->MagicDamageMax = Energy/gServerInfo.m_MGMagicDamageMaxConstA;
 		lpObj->CurseDamageMin = Energy/gServerInfo.m_MGMagicDamageMinConstA;
 		lpObj->CurseDamageMax = Energy/gServerInfo.m_MGMagicDamageMaxConstA;
 		lpObj->MGDamageMultiplierRate = 200 + (Energy / gServerInfo.m_MGDamageMultiplierConstA);
 		lpObj->MGDamageMultiplierRate = ((lpObj->MGDamageMultiplierRate > gServerInfo.m_MGDamageMultiplierMaxRate) ? gServerInfo.m_MGDamageMultiplierMaxRate : lpObj->MGDamageMultiplierRate);
+		lpObj->MGSlashMultiplierRate = 200 + (Strength / gServerInfo.m_MGSlashMultiplierConstA);
+		lpObj->MGSlashMultiplierRate = ((lpObj->MGSlashMultiplierRate > gServerInfo.m_MGSlashMultiplierMaxRate) ? gServerInfo.m_MGSlashMultiplierMaxRate : lpObj->MGSlashMultiplierRate);
 	}
 	else if(lpObj->Class == CLASS_DL)
 	{

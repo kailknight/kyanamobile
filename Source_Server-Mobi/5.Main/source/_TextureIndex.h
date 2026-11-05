@@ -746,6 +746,8 @@ enum
 	// VIP level badges for the name plate (CustomInterfaceVipBadges.ozt, 512x256, 128x176 tiles: V1, V2, V3).
 	// Explicit value right after the slot machine block so nothing else moves.
 	BITMAP_VIP_BADGES = BITMAP_SLOTMACHINE_END + 1,
+	// Cooldown buff icons (Interface\newui_cdicons.ozt, 256x256, 20x28 cells: 0 = Restore Full SD, 1 = Restore Full HP).
+	BITMAP_BUFF_COOLDOWN_ICONS = BITMAP_SLOTMACHINE_END + 2,
 	BITMAP_EFFECT_TEXTURE_END = 33000,
 	BITMAP_NONAMED_TEXTURES_BEGIN = 33001,
 	BITMAP_NONAMED_TEXTURES_NEW_LOAD=  111000,

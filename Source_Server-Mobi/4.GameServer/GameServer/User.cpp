@@ -1446,6 +1446,8 @@ void gObjClearSpecialOption(LPOBJ lpObj) // OK
 	lpObj->OffensiveFullMPRestoreRate = 0;
 	lpObj->OffensiveFullSDRestoreRate = 0;
 	lpObj->OffensiveFullBPRestoreRate = 0;
+	lpObj->SDRestoreSkillLevel = 0;
+	lpObj->HPRestoreSkillLevel = 0;
 }
 
 void gObjCalcExperience(LPOBJ lpObj) // OK

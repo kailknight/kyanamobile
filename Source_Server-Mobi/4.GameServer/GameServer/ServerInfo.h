@@ -420,6 +420,9 @@ public:
 	int m_DKDamageMultiplierMaxRate;
 	int m_DLDamageMultiplierMaxRate;
 	int m_MGDamageMultiplierMaxRate;
+	int m_MGSlashMultiplierConstA;   // CustomConfig.ini: Magic Gladiator slash skills scale with Strength: 200 + Strength / this
+	int m_MGSlashMultiplierMaxRate;  // cap of that multiplier (percent)
+	int m_MGPhysiDamageUseEnergy;    // 0 = the Magic Gladiator's physical damage comes from Strength only, 1 = Strength + Energy (old)
 	int m_RFDamageMultiplierMaxRate;
 	int m_DarkSpiritRangeAttackRate;
 	int m_DarkSpiritCriticalDamageRate;
@@ -1400,6 +1403,9 @@ public:
 	// every reset. 0 = nothing.
 	int m_ResetRewardCoin[3];
 	int m_SoulRateToPlus[3][MAX_ACCOUNT_LEVEL]; // Jewel of Soul success rate when the item reaches +7 / +8 / +9, per account level (-1 = SoulSuccessRate)
+	int m_RestoreFullChance;       // "Restore Full SD / HP" master skills: chance in %, the same at every skill level
+	int m_RestoreCooldownLv1MS;    // cooldown at skill level 1 (ms)
+	int m_RestoreCooldownLv20MS;   // cooldown at skill level 20 (ms); in between it falls in equal steps
 	// PotionDelayMS (CustomConfig.ini): the least time, in milliseconds,
 	// between two potions from the same character - hotkey, auto potion and
 	// MU Helper alike, since they all arrive as the same item-use request.

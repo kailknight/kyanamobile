@@ -192,6 +192,8 @@ enum eEffectNumber
 	EFFECT_MASTER_SCROLL_OF_STRENGTH = 203,
 	EFFECT_MASTER_SCROLL_OF_QUICK = 204,
 	EFFECT_DAME_ITEM_SWICH = 205,
+	EFFECT_SD_RESTORE_COOLDOWN = 206, // icon only: the "Restore Full SD" master skill is cooling down
+	EFFECT_HP_RESTORE_COOLDOWN = 207, // icon only: the "Restore Full HP" master skills are cooling down
 
 };
 

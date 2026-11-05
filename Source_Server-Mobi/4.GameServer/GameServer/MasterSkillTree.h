@@ -804,6 +804,7 @@ public:
 	void CalcMasterLevelNextExperience(LPOBJ lpObj);
 	void CalcMasterSkillTreeOption(LPOBJ lpObj,bool flag);
 	void InsertOption(LPOBJ lpObj,int index,int value,bool flag);
+	void SetRestoreSkill(LPOBJ lpObj,int index,int kind,int* rate);
 	bool ReplaceMasterSkill(LPOBJ lpObj,int index,int skill,int level);
 	// Back to the base skills: master ids leave Skill[], MasterSkill[] is emptied.
 	// MasterPoint is NOT touched (the caller decides what the points become). The
