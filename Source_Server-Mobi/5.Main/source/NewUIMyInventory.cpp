@@ -2524,17 +2524,9 @@ bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM
 
 		if (Level >= 10)
 		{
-			bool bEquipmentEmpty = true;
-			for (int i = 0; i < MAX_EQUIPMENT; i++)
-			{
-				if (CharacterMachine->Equipment[i].Type != -1)
-				{
-					bEquipmentEmpty = false;
-				}
-			}
+			// Fruits can be used with items equipped (the server no longer checks either).
 			const int Class = CharacterAttribute->Class;
 
-			if (bEquipmentEmpty == true)
 			{
 				if (pItem->Level == 32)
 				{
@@ -2548,9 +2540,6 @@ bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM
 				CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CUseFruitMsgBoxLayout));
 				return true;
 			}
-
-			CreateOkMessageBox(GlobalText[1909]);
-			return true;
 		}
 
 		CreateOkMessageBox(GlobalText[749]);

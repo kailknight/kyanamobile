@@ -87,16 +87,6 @@ bool CFruit::UseFruitAddPoint(LPOBJ lpObj,int type) // OK
 		return 0;
 	}
 
-	for(int n=0;n < INVENTORY_WEAR_SIZE;n++)
-	{
-		if(lpObj->Inventory[n].IsItem() != 0)
-		{
-			pMsg.result = 16;
-			DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
-			return 0;
-		}
-	}
-
 	if(lpObj->FruitAddPoint >= this->GetMaxFruitPoint(lpObj))
 	{
 		pMsg.result = 37;
@@ -235,16 +225,6 @@ bool CFruit::UseFruitSubPoint(LPOBJ lpObj,int type) // OK
 		return 0;
 	}
 
-	for(int n=0;n < INVENTORY_WEAR_SIZE;n++)
-	{
-		if(lpObj->Inventory[n].IsItem() != 0)
-		{
-			pMsg.result = 16;
-			DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
-			return 0;
-		}
-	}
-
 	if(lpObj->FruitSubPoint >= this->GetMaxFruitPoint(lpObj))
 	{
 		pMsg.result = 37;
@@ -373,16 +353,6 @@ bool CFruit::UseFruitResetPoint(LPOBJ lpObj,int type,int amount) // OK
 		pMsg.result = 5;
 		DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
 		return 0;
-	}
-
-	for(int n=0;n < INVENTORY_WEAR_SIZE;n++)
-	{
-		if(lpObj->Inventory[n].IsItem() != 0)
-		{
-			pMsg.result = 16;
-			DataSend(lpObj->Index,(BYTE*)&pMsg,pMsg.header.size);
-			return 0;
-		}
 	}
 
 	int* stat;
