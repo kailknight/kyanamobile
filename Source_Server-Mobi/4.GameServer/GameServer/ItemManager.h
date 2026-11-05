@@ -309,6 +309,18 @@ struct PMSG_SET_CHAOSBOX_STATE
 };
 
 
+// C1:D3:C7, right-click / long-press on a Splinter of Armor, Bless of Guardian or Claw of Beast:
+// merge every piece of that kind in the inventory into full stacks.
+#pragma pack(push,1)
+struct PMSG_ITEM_MERGE_RECV
+{
+	PSBMSG_HEAD header;
+	BYTE Slot; // inventory slot of the item that was clicked
+};
+#pragma pack(pop)
+
+static_assert(sizeof(PMSG_ITEM_MERGE_RECV) == 4 + 1,"PMSG_ITEM_MERGE_RECV must match the client's copy");
+
 class CItemManager
 {
 public:
@@ -348,6 +360,7 @@ public:
 	void InventoryDelItem(int aIndex,int slot);
 	bool InventoryInsertItemStack(LPOBJ lpObj,CItem* lpItem);
 	bool InventoryAddItemStack(LPOBJ lpObj,int SourceSlot,int TargetSlot);
+	void CGItemMergeStackRecv(PMSG_ITEM_MERGE_RECV* lpMsg,int aIndex);
 	void TradeItemSet(int aIndex,int slot,BYTE type) ;
 	BYTE TradeRectCheck(int aIndex,int x,int y,int width,int height);
 	BYTE TradeInsertItem(int aIndex,CItem item);

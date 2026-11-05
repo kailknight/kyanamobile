@@ -1621,6 +1621,9 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			case 0xC6: //Character Renaming Service item - the new name from the client's box
 				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_RENAME_ITEM_RECV)) { gCommandManager.CGRenameItemRecv((PMSG_RENAME_ITEM_RECV*)lpMsg, aIndex); }
 				break;
+			case 0xC7: //Fenrir pieces - merge every piece of that kind into full stacks (right-click / long-press)
+				if (lpMsg[0] == 0xC1 && size >= (int)sizeof(PMSG_ITEM_MERGE_RECV)) { gItemManager.CGItemMergeStackRecv((PMSG_ITEM_MERGE_RECV*)lpMsg, aIndex); }
+				break;
 			case 0x8A: //Nhan Thuong
 			{
 				XULY_CGPACKET_SOLAN* mlpMsg = (XULY_CGPACKET_SOLAN*)lpMsg;

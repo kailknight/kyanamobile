@@ -2221,6 +2221,16 @@ namespace SEASON3B
 }
 
 
+// Fenrir pieces (Splinter of Armor, Bless of Guardian, Claw of Beast): right-click, or long-press on
+// the phone, asks the server to stack every piece of that kind (C1:D3:C7).
+#pragma pack(push,1)
+struct PMSG_ITEM_MERGE_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:C7
+	BYTE Slot;
+};
+#pragma pack(pop)
+
 bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM * pItem, const int iIndex)
 {
 	if (pItem == nullptr)
@@ -2247,6 +2257,20 @@ bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM
 
 		g_pMyInventory->SetStandbyItemKey(pItem->Key);
 		CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CRenameItemMsgBoxLayout));
+		return true;
+	}
+
+	if (pItem->Type == ITEM_HELPER + 32 || pItem->Type == ITEM_HELPER + 33 || pItem->Type == ITEM_HELPER + 34) // Fenrir pieces (group 13, not the potion group 14)
+	{
+		if (iIndex >= 0 && iIndex <= 255)
+		{
+			PMSG_ITEM_MERGE_SEND pMsg;
+			memset(&pMsg, 0, sizeof(pMsg));
+			pMsg.header.set(0xD3, 0xC7, sizeof(pMsg));
+			pMsg.Slot = (BYTE)iIndex;
+			DataSend((LPBYTE)&pMsg, pMsg.header.size);
+			PlayBuffer(SOUND_CLICK01);
+		}
 		return true;
 	}
 

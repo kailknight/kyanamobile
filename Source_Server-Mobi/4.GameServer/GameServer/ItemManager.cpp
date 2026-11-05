@@ -1422,6 +1422,91 @@ bool CItemManager::InventoryAddItemStack(LPOBJ lpObj,int SourceSlot,int TargetSl
 	return 1;
 }
 
+// The Fenrir pieces arrive one per slot, and the Piece of Horn mix needs 20 + 20 of them, so the
+// player can stack them with one click instead of dragging each onto the next. Only these three
+// items: right-click means "use" for the other stackables (potions, jewels...).
+void CItemManager::CGItemMergeStackRecv(PMSG_ITEM_MERGE_RECV* lpMsg,int aIndex) // OK
+{
+	if(gObjIsConnectedGP(aIndex) == 0)
+	{
+		return;
+	}
+
+	LPOBJ lpObj = &gObj[aIndex];
+
+	// Not while a window that holds items is open (chaos machine, trade, shops, warehouse...).
+	if(lpObj->Interface.use != 0 || lpObj->Teleport != 0 || lpObj->DieRegen != 0)
+	{
+		return;
+	}
+
+	const int slot = lpMsg->Slot;
+
+	if(INVENTORY_FULL_RANGE(slot) == 0 || INVENTORY_WEAR_RANGE(slot) != 0 || lpObj->Inventory[slot].IsItem() == 0)
+	{
+		return;
+	}
+
+	const int type = lpObj->Inventory[slot].m_Index;
+
+	if(type != GET_ITEM(13,32) && type != GET_ITEM(13,33) && type != GET_ITEM(13,34))
+	{
+		return;
+	}
+
+	const int maxStack = gItemStack.GetItemMaxStack(type);
+
+	if(maxStack <= 0)
+	{
+		return;
+	}
+
+	const int level = lpObj->Inventory[slot].m_Level;
+
+	// Fill the earliest stack that has room from the pieces furthest back, until nothing more moves.
+	for(int target=INVENTORY_WEAR_SIZE;target < INVENTORY_FULL_SIZE;target++)
+	{
+		if(lpObj->Inventory[target].IsItem() == 0 || lpObj->Inventory[target].m_Index != type || lpObj->Inventory[target].m_Level != level || lpObj->Inventory[target].m_Durability >= maxStack)
+		{
+			continue;
+		}
+
+		for(int source=INVENTORY_FULL_SIZE-1;source > target;source--)
+		{
+			if(lpObj->Inventory[source].IsItem() == 0 || lpObj->Inventory[source].m_Index != type || lpObj->Inventory[source].m_Level != level)
+			{
+				continue;
+			}
+
+			this->InventoryAddItemStack(lpObj,source,target);
+
+			if(lpObj->Inventory[target].m_Durability >= maxStack)
+			{
+				break;
+			}
+		}
+	}
+
+	int total = 0;
+	int stacks = 0;
+
+	for(int n=INVENTORY_WEAR_SIZE;n < INVENTORY_FULL_SIZE;n++)
+	{
+		if(lpObj->Inventory[n].IsItem() != 0 && lpObj->Inventory[n].m_Index == type && lpObj->Inventory[n].m_Level == level)
+		{
+			total += (int)lpObj->Inventory[n].m_Durability;
+			stacks++;
+		}
+	}
+
+	ITEM_INFO ItemInfo;
+
+	if(this->GetInfo(type,&ItemInfo) != 0)
+	{
+		gNotice.GCNoticeSend(aIndex,1,0,0,0,0,0,"[Stack] %s: %d in %d stack(s) (%d per stack)",ItemInfo.Name,total,stacks,maxStack);
+	}
+}
+
 void CItemManager::TradeItemSet(int aIndex,int slot,BYTE type) // OK
 {
 	if(TRADE_RANGE(slot) == 0)
