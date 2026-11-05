@@ -328,7 +328,7 @@ void CBCongHuong::CH_ClientSetItemGS(int aIndex, PMSG_MOVEITEM* lpMsg)
 		return;
 	}
 
-	if (this->CHAllowAnc == 0 && lpObj->Inventory[lpMsg->Source].m_SetOption > 0)
+	if (this->CHAllowAnc == 0 && (lpObj->Inventory[lpMsg->Source].m_SetOption & 3) > 0)
 	{
 		gNotice.GCNoticeSend(aIndex, 0, 0, 0, 10, 0, 0, gMessage.GetMessage(3037));//"[CongHuong] Item khong phu hop !!");
 		return;

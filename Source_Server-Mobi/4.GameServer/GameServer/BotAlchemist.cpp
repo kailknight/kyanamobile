@@ -534,7 +534,7 @@ BYTE ObjBotAlchemist::Alchemy(int aIndex,int BotNum)
 			}
 		}
 	}
-	if(this->bot[BotNum].AcceptAncient == 0 && gObj[aIndex].Trade[fitem].m_SetOption > 0)
+	if(this->bot[BotNum].AcceptAncient == 0 && (gObj[aIndex].Trade[fitem].m_SetOption & 3) > 0)
 	{
 		gNotice.NewMessageDevTeam(gObj[aIndex].Index,"%s I cant work with Ancient Items!: %s",this->bot[BotNum].Name,gObj[aIndex].Name);
 		LogAdd(LOG_RED,"[BotAlchemist](%s)(%s) Ancient Item Error",gObj[aIndex].Account,gObj[aIndex].Name);
