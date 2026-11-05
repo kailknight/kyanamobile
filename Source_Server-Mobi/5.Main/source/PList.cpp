@@ -180,6 +180,20 @@ BOOL CPList::SetAt(NODE* pos, void* newElement)
 BOOL CPList::RemoveAt(NODE* position)
 {
 	NODE* pOldNode = position;
+	if (pOldNode == NULL)
+		return FALSE;
+
+	// IsBadReadPtr cannot tell on Android, so a node that is no longer in this list (already
+	// removed, or from another list) would be unlinked and freed a second time. Walk the list
+	// first - these lists are a handful of entries - and refuse a node that is not in it.
+	{
+		NODE* pFind = m_pNodeHead;
+		while (pFind != NULL && pFind != pOldNode)
+			pFind = pFind->pNext;
+		if (pFind == NULL)
+			return FALSE;
+	}
+
 	if (::IsBadReadPtr(pOldNode, sizeof(NODE)))
 		return FALSE;
 

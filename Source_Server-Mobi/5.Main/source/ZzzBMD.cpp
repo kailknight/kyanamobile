@@ -201,6 +201,8 @@ void BMD::Animation(float (*BoneMatrix)[3][4],float AnimationFrame,float PriorFr
 #endif //PBG_ADD_NEWCHAR_MONK_ANI
 {
     if ( NumActions<=0 ) return;
+	// A model that is not (or no longer) fully loaded has no bone / action tables to walk.
+	if ( Bones == NULL || Actions == NULL || BoneMatrix == NULL || NumBones <= 0 || NumBones > MAX_BONES ) return;
 
 #if defined(__ANDROID__) || defined(MU_IOS)
 	// TEMP profiling - see g_Prof* declarations above.
@@ -243,8 +245,17 @@ void BMD::Animation(float (*BoneMatrix)[3][4],float AnimationFrame,float PriorFr
 		{
 			continue;
 		}
+		if(b->BoneMatrixes == NULL)
+		{
+			continue;
+		}
 		BoneMatrix_t *bm1 = &b->BoneMatrixes[PriorAction  ];
 		BoneMatrix_t *bm2 = &b->BoneMatrixes[CurrentAction];
+		if(bm1->Quaternion == NULL || bm2->Quaternion == NULL || bm1->Position == NULL || bm2->Position == NULL
+			|| (b->Parent != -1 && (b->Parent < 0 || b->Parent >= NumBones)))
+		{
+			continue;
+		}
 		vec4_t q1,q2;
 
 		if ( i==BoneHead )
@@ -349,6 +360,12 @@ void BMD::Transform(float (*BoneMatrix)[3][4],vec3_t BoundingBoxMin,vec3_t Bound
 	} profScope;
 #endif
 
+	// Half-loaded model, or counts beyond the shared scratch tables below.
+	if(BoneMatrix == NULL || OBB == NULL || Meshs == NULL || NumMeshs > MAX_MESH)
+	{
+		return;
+	}
+
 	// transform
 	vec3_t LightPosition;
 
@@ -426,6 +443,10 @@ void BMD::Transform(float (*BoneMatrix)[3][4],vec3_t BoundingBoxMin,vec3_t Bound
 	for(int i=0;i<NumMeshs;i++)
 	{
        	Mesh_t *m = &Meshs[i];
+		if(m->Vertices == NULL || m->Normals == NULL || m->NumVertices > MAX_VERTICES || m->NumNormals > MAX_VERTICES)
+		{
+			continue;
+		}
 
 		// NO CPU SKIP HERE - do not re-add one keyed only on GPU-skin
 		// eligibility. That was tried and reverted: skipping this loop for

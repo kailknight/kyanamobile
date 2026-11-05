@@ -14,6 +14,7 @@
 #include <SDL_ttf.h>
 #include <android/log.h>
 #include <fstream>
+#include <mutex>
 #include <limits>
 #include <string.h>
 #include <wchar.h>
@@ -211,6 +212,9 @@ struct TextExtentEntry {
 };
 static std::unordered_map<unsigned long long, TextExtentEntry> s_TextExtentCache;
 static const size_t kTextExtentCacheMax = 4096;
+// Measuring runs from more than the render thread (chat lines are measured as they arrive), and both the
+// cache and SDL_ttf itself are not thread safe: a second thread inside the table crashed in the hash walk.
+static std::recursive_mutex s_TextExtentMutex;
 
 static unsigned long long HashTextExtentKey(TTF_Font* font, const std::vector<Uint16>& text) {
     unsigned long long h = 1469598103934665603ULL ^ (unsigned long long)(uintptr_t)font;
@@ -222,6 +226,7 @@ static unsigned long long HashTextExtentKey(TTF_Font* font, const std::vector<Ui
 }
 
 void AndroidGDI_Shutdown() {
+    std::lock_guard<std::recursive_mutex> extentLock(s_TextExtentMutex);
     s_TextExtentCache.clear();
     for (auto& e : s_FontCache)
         if (e.font) TTF_CloseFont(e.font);
@@ -444,6 +449,7 @@ bool AndroidGetTextExtentPoint32(HDC hdc, const wchar_t* text, int len, int* out
         return true;
     }
 
+    std::lock_guard<std::recursive_mutex> extentLock(s_TextExtentMutex);
     const unsigned long long key = HashTextExtentKey(font, utext);
     auto it = s_TextExtentCache.find(key);
     if (it != s_TextExtentCache.end() && it->second.font == font && it->second.text == utext) {

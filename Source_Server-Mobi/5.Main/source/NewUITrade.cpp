@@ -41,7 +41,7 @@ bool CNewUITrade::Create(CNewUIManager* pNewUIMng, int x, int y)
 		SAFE_DELETE(m_pYourInvenCtrl);
 		return false;
 	}
-	m_pYourInvenCtrl->LockInventory();	// »ó´ë¹æ ¹°Ç°Àº Å¬¸¯ ¾ÈµÇ°Ô ÇÔ.
+	m_pYourInvenCtrl->LockInventory();	// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ç°ï¿½ï¿½ Å¬ï¿½ï¿½ ï¿½ÈµÇ°ï¿½ ï¿½ï¿½.
 
 	m_pMyInvenCtrl = new CNewUIInventoryCtrl;
 	if (false == m_pMyInvenCtrl->Create(STORAGE_TYPE::TRADE, g_pNewUI3DRenderMng, g_pNewItemMng,
@@ -118,7 +118,7 @@ void CNewUITrade::SetPos(int x, int y)
 	m_posMyConfirm.y = m_Pos.y + 390;
 
 	m_pYourInvenCtrl->SetPos(x + 16, y + 68);
-	m_pYourInvenCtrl->LockInventory();	// »ó´ë¹æ ¹°Ç°Àº Å¬¸¯ ¾ÈµÇ°Ô ÇÔ.
+	m_pYourInvenCtrl->LockInventory();	// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ç°ï¿½ï¿½ Å¬ï¿½ï¿½ ï¿½ÈµÇ°ï¿½ ï¿½ï¿½.
 	m_pMyInvenCtrl->SetPos(x + 16, y + 274);
 }
 
@@ -386,7 +386,7 @@ void CNewUITrade::ConvertYourLevel(int& rnLevel, DWORD& rdwColor)
         rnLevel = 50;
         rdwColor = (255<<24)+(0<<16)+(150<<8)+(255);
     }
-    else							//  »¡°£»ö.
+    else							//  ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½.
     {
         rnLevel = 10;
         rdwColor = (255<<24)+(0<<16)+(0<<8)+(255);
@@ -821,7 +821,7 @@ void CNewUITrade::ProcessToReceiveTradeResult(LPPTRADE pTradeData)
         m_nYourGuildType = pTradeData->GuildKey;
         ::memcpy(m_szYourID, pTradeData->ID, MAX_ID_SIZE);
 		m_szYourID[MAX_ID_SIZE] = NULL;
-        m_nYourLevel = pTradeData->Level;   //  »ó´ë¹æ ·¹º§.
+        m_nYourLevel = pTradeData->Level;   //  ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½.
 		break;
 	}
 }
@@ -907,7 +907,10 @@ void CNewUITrade::ProcessToReceiveYourItemAdd(BYTE byYourInvenIndex, BYTE* pbyIt
 void CNewUITrade::AlertYourTradeInven()
 {
     int nCount = 0;
-    int nCompareItemType[10];
+    // One entry per item in the other player's grid, so it can hold all of them. It used to be
+    // 10 and the 11th matching item wrote past the end of the array (stack protector abort).
+    int nCompareItemType[MAX_TRADE_INVEN + 8];
+    const int nCompareCapacity = (int)(sizeof(nCompareItemType) / sizeof(nCompareItemType[0]));
 
     m_bTradeAlert = false;
 
@@ -918,6 +921,10 @@ void CNewUITrade::AlertYourTradeInven()
 	for (int i = 0; i < nYourItems; ++i)
 	{
 		pYourItemObj = m_pYourInvenCtrl->GetItem(i);
+		if (pYourItemObj == NULL)
+		{
+			continue;
+		}
 		for (int j = 0; j < MAX_TRADE_INVEN; ++j)
 		{
 			if (m_aYourInvenBackUp[j].Type == pYourItemObj->Type)
@@ -930,7 +937,7 @@ void CNewUITrade::AlertYourTradeInven()
 				}
 				else
 				{
-					if (0 == nCompareValue)
+					if (0 == nCompareValue && nCount < nCompareCapacity)
 						nCompareItemType[nCount++] = m_aYourInvenBackUp[j].Type;
 
 					pYourItemObj->byColorState = ITEM_COLOR_NORMAL;
@@ -948,7 +955,7 @@ void CNewUITrade::AlertYourTradeInven()
 			for (int j= 0; j < nYourItems; ++j)
 			{
 				pYourItemObj = m_pYourInvenCtrl->GetItem(j);
-				if (nCompareItemType[i] == pYourItemObj->Type)
+				if (pYourItemObj != NULL && nCompareItemType[i] == pYourItemObj->Type)
 					pYourItemObj->byColorState = ITEM_COLOR_NORMAL;
 			}
         }
