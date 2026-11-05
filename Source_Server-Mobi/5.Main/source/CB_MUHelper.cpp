@@ -1285,7 +1285,7 @@ bool PickUpItemName(ITEM * pItem)
 	if (((pItem->Level >> 2) & 1) != 0) text += " Luck";
 	if (((pItem->Level >> 7) & 1) != 0) text += " Skill";
 	if ((pItem->Option1 & 63) != 0) text += " Excellent";
-	if (pItem->ExtOption) text += " Ancient";
+	if ((pItem->ExtOption % 4) == 1 || (pItem->ExtOption % 4) == 2) text += " Ancient";
 
 	std::string lowText = text;
 	for (size_t k = 0; k < lowText.size(); k++) lowText[k] = (char)tolower((unsigned char)lowText[k]);
@@ -1370,7 +1370,7 @@ bool CB_MUHelper::ShouldObtainItem(int iItemId)
 
 	if ((pItem->Type == ITEM_POTION + 15 && d.PickMoney)
 		|| (CheckItemIsJewel(pItem->Type) && d.PickJewel)
-		|| (pItem->ExtOption && d.PickSet)
+		|| (((pItem->ExtOption % 4) == 1 || (pItem->ExtOption % 4) == 2) && d.PickSet)
 		|| ((pItem->Option1 & 63) != 0 && d.PickExc))
 	{
 		return true;

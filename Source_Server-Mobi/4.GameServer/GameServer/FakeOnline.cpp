@@ -409,7 +409,7 @@ int CFakeOnline::NhatItem(int aIndex) {
         if ((lpObj->ObtainPickMoney == 1 &&
              lpMapItem->m_Index == GET_ITEM(14, 15)) ||
             (lpObj->ObtainPickExcellent == 1 && lpMapItem->m_NewOption > 0) ||
-            (lpObj->ObtainPickAncient == 1 && lpMapItem->m_SetOption > 0) ||
+            (lpObj->ObtainPickAncient == 1 && (lpMapItem->m_SetOption & 3) > 0) ||
             (lpObj->ObtainPickJewels == 1 &&
              FakeisJewels(lpMapItem->m_Index) == true)) {
           PickItem = true;
