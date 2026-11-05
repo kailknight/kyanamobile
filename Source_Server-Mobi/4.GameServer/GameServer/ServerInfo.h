@@ -1399,6 +1399,7 @@ public:
 	// ResetRewardWCoinC / WCoinP / GoblinPoint (CustomConfig.ini): credited on
 	// every reset. 0 = nothing.
 	int m_ResetRewardCoin[3];
+	int m_SoulRateToPlus[3][MAX_ACCOUNT_LEVEL]; // Jewel of Soul success rate when the item reaches +7 / +8 / +9, per account level (-1 = SoulSuccessRate)
 	// PotionDelayMS (CustomConfig.ini): the least time, in milliseconds,
 	// between two potions from the same character - hotkey, auto potion and
 	// MU Helper alike, since they all arrive as the same item-use request.

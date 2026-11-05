@@ -2842,6 +2842,14 @@ Next:
 
 	int rate = gServerInfo.m_SoulSuccessRate[lpObj->AccountLevel];
 
+	// CustomConfig.ini SoulRateToPlus7 / 8 / 9: the chance for the level the item is about to reach.
+	const int soulTarget = lpItem->m_Level+1;
+
+	if(soulTarget >= 7 && soulTarget <= 9 && gServerInfo.m_SoulRateToPlus[soulTarget-7][lpObj->AccountLevel] >= 0)
+	{
+		rate = gServerInfo.m_SoulRateToPlus[soulTarget-7][lpObj->AccountLevel];
+	}
+
 	if(lpItem->m_Option2 != 0)
 	{
 		rate += gServerInfo.m_AddLuckSuccessRate1[lpObj->AccountLevel];

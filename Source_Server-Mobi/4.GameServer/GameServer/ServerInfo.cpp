@@ -5201,6 +5201,21 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	this->m_ResetRewardCoin[1] = GetPrivateProfileInt(section, "ResetRewardWCoinP", 0, path);
 	this->m_ResetRewardCoin[2] = GetPrivateProfileInt(section, "ResetRewardGoblinPoint", 0, path);
 
+	// Jewel of Soul success rate (%) by the level the item reaches, per account level:
+	// SoulRateToPlus7_AL0..AL3 (item +6 -> +7), SoulRateToPlus8_*, SoulRateToPlus9_*.
+	// -1 (the default) keeps the SoulSuccessRate_ALx of GameServerInfo - Common.ini.
+	for (int plus = 0; plus < 3; plus++)
+	{
+		for (int level = 0; level < MAX_ACCOUNT_LEVEL; level++)
+		{
+			char key[64];
+
+			wsprintf(key, "SoulRateToPlus%d_AL%d", plus + 7, level);
+
+			this->m_SoulRateToPlus[plus][level] = GetPrivateProfileInt(section, key, -1, path);
+		}
+	}
+
 	// ChatColor<Category><Text|Bg> = hex RRGGBBAA, with or without 0x. Alpha 00
 	// draws nothing, so a transparent background is 00000000.
 	static const char* chatColorName[8] = { "Normal", "PM", "Post", "Online", "Guild", "Ally", "Party", "Gens" };
