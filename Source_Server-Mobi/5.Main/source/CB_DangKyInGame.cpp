@@ -484,7 +484,7 @@ bool CB_DangKyInGame::SubmitRegistration(const char* accountText, const char* pa
 
 	if (!CheckChuoiKyTuDacBiet(szID) || !CheckChuoiKyTuDacBiet(szPass))
 	{
-		gInterface.OpenMessageBox("Error", "The account or password contains characters that are not allowed.");
+		gInterface.OpenMessageBox("Error", "The account and password can only use letters and numbers (A-Z, a-z, 0-9) - no spaces or symbols.");
 		return false;
 	}
 

@@ -9206,7 +9206,10 @@ bool AndroidRegisterAcceptsChar(int field, wchar_t ch)
     {
         return (ch >= L'0' && ch <= L'9');
     }
-    return (ch >= 33 && ch <= 126);
+    // Account and password: letters and digits only. That is all the server accepts
+    // (CheckChuoiKyTuDacBiet), so a symbol typed here used to look fine and then fail on Register
+    // with a vague error - the "registration is bugged" reports. Refuse it as it is typed instead.
+    return (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') || (ch >= L'0' && ch <= L'9');
 }
 }   // namespace
 
@@ -9506,7 +9509,7 @@ void AndroidRegisterOverlayRender()
     }
 
     TextDraw(titleFont, static_cast<int>(kRegPanelX), static_cast<int>(panelY + 14.0f),
-             0xFFFFFFFF, 0x0, static_cast<int>(kRegPanelW), 0, 3, "%s", "Create Account");
+             0xFFFFFFFF, 0x0, static_cast<int>(kRegPanelW), 0, 3, "%s", "Create Account (letters + numbers)");
 
     static const char* const kRegLabels[kRegFieldCount] = { "Account", "Password", "7 Digit Pin Code" };
 
