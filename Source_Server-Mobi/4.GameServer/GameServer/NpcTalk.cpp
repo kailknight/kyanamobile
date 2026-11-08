@@ -42,6 +42,7 @@
 #include "RuudTokenSellTemplate.h"
 #include "CB_NewQuest.h"
 #include "BossGuild.h"
+#include "DungeonRace.h"
 #if (CongHuongV2)
 #include "CBCongHuong.h"
 #endif
@@ -147,6 +148,11 @@ bool CNpcTalk::NpcTalk(LPOBJ lpNpc,LPOBJ lpObj) // OK
 	}
 
 	if (gTvTEvent.Dialog(lpObj,lpNpc))
+	if (gDungeonRace.Dialog(lpObj,lpNpc))
+	{
+		return 1;
+	}
+
 	{
 		return 1;
 	}

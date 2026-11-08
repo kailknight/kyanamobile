@@ -43,6 +43,7 @@
 #include "BossGuild.h"
 #include "CTCMini.h"
 #include "BattleSurvivor.h"
+#include "DungeonRace.h"
 CAttack gAttack;
 
 int gObjGetRestoreCooldownMS(int level) // OK
@@ -1104,6 +1105,11 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 		{
 			lpTarget->Life -= LifeDamage;
 		}
+	}
+
+	if(lpObj->Type == OBJECT_MONSTER && lpTarget->Type == OBJECT_USER)
+	{
+		gDungeonRace.OnMonsterHit(lpObj,lpTarget); // Dungeon Race: ice slow / Thunder Lich move
 	}
 
 	if(lpTarget->Type == OBJECT_MONSTER)

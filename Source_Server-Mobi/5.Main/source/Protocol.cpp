@@ -16,6 +16,7 @@
 #include "CB_AutoNapGame.h"
 #include "CustomRankUser.h"
 #include "CB_DanhHieu.h"
+#include "CB_DungeonRace.h"
 #if(JEWELBANKVER2)
 #include "CB_NewJewelBank.h"
 #else
@@ -503,6 +504,13 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				break;
 #endif
 			case 0xC4: //Ranked duel icons of the players around us (C1:D3:C4, DuelRanked.h on the GameServer)
+				break;
+			case 0x65: //Dungeon Race - NPC window (CB_DungeonRace.cpp)
+				if (gCB_DungeonRace) gCB_DungeonRace->RecvOpen(lpMsg, size);
+				break;
+			case 0x66: //Dungeon Race - on-screen counter
+				if (gCB_DungeonRace) gCB_DungeonRace->RecvHud(lpMsg, size);
+				break;
 			{
 				extern void RecvDuelRankView(const BYTE* lpMsg, int size);
 				RecvDuelRankView(lpMsg, size);

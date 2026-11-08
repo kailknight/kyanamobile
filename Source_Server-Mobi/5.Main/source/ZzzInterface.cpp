@@ -63,6 +63,7 @@
 #include "SkillManager.h"
 #include "CustomRankUser.h"
 #include "APICB.h"
+#include "CB_DungeonRace.h"
 
 
 extern int DisplayWinCDepthBox;
@@ -4289,6 +4290,10 @@ void Action(CHARACTER *c,OBJECT *o,bool Now)
 			c->Movement = false;
 		}
 		
+		if(TargetNpc != -1)
+		{
+			DungeonRaceLog("talk step: NPC class %d key %d (sends talk request when class >= 205)", (int)CharactersClient[TargetNpc].MonsterIndex, (int)CharactersClient[TargetNpc].Key);
+		}
 		if(TargetNpc != -1)
 		{
 			int npcIndex = 229;
@@ -8734,6 +8739,7 @@ void MoveHero()
 						TargetX = (int)(CharactersClient[ActionTarget].Object.Position[0]/TERRAIN_SCALE);
 						TargetY = (int)(CharactersClient[ActionTarget].Object.Position[1]/TERRAIN_SCALE);
 						TargetNpc = ActionTarget;
+						DungeonRaceLog("clicked NPC: class %d key %d at %d,%d (hero %d,%d)", (int)CharactersClient[ActionTarget].MonsterIndex, (int)CharactersClient[ActionTarget].Key, TargetX, TargetY, (int)Hero->PositionX, (int)Hero->PositionY);
 						TargetType = CharactersClient[ActionTarget].Object.Type;
 						TargetAngle = CharactersClient[ActionTarget].Object.Angle[2];
 

@@ -645,7 +645,35 @@ void CServerDisplayer::PaintInvasionTime() // OK
 		if ((rect.top + 2 + 15 + (15 * i)) >= rect.bottom - (20)) goto Exit;
 	}
 Exit:
-	SelectObject(hdc,OldFont);
+	// CUSTOM EVENT block under the invasion list: King of Kira + Dungeon Race (not in the EVENTS list)
+	{
+		int cy = rect.top + 2 + 15 + (15 * (lastRow + 2));
+		SetTextColor(hdc, RGB(30, 173, 181));
+		TextOut(hdc, rect.left + 100, cy, "CUSTOM EVENT:", 13);
+
+		static const char* names[2] = { "King of Kira", "Dungeon Race" };
+		int times[2] = { this->EventKingOfKira, this->EventDungeonRace };
+
+		for (int k = 0; k < 2; k++)
+		{
+			int ct = times[k];
+			char t2[30];
+
+			if (ct == -1) { wsprintf(t2, "OFF"); }
+			else if (ct == 0) { wsprintf(t2, "ON"); }
+			else if ((ct / 3600) > 23) { wsprintf(t2, "%d day+", (ct / 3600) / 24); }
+			else { wsprintf(t2, "%02d:%02d:%02d", ct / 3600, (ct / 60) % 60, ct % 60); }
+
+			SetTextColor(hdc, RGB(0, 102, 204));
+			TextOut(hdc, posX1, cy + 15 + (15 * k), names[k], (int)strlen(names[k]));
+
+			if (ct == -1) { SetTextColor(hdc, RGB(255, 0, 0)); }
+			else if (ct < 300) { SetTextColor(hdc, RGB(0, 190, 0)); }
+			else { SetTextColor(hdc, RGB(0, 0, 0)); }
+
+			TextOut(hdc, posX2, cy + 15 + (15 * k), t2, (int)strlen(t2));
+		}
+	}	SelectObject(hdc,OldFont);
 	SetBkMode(hdc,OldBkMode);
 	ReleaseDC(this->m_hwnd,hdc);
 #endif
@@ -1677,6 +1705,8 @@ void CServerDisplayer::ClearTimeDisplayer()
 
 }
 void CServerDisplayer::InitTimeEvent()
+	gServerDisplayer.EventKingOfKira = -1;
+	gServerDisplayer.EventDungeonRace = -1;
 {
 	gCustomEventTime.DataEventTime.clear();
 	gCustomEventTime.LoadDataTime = 0;

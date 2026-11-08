@@ -94,6 +94,7 @@
 #include "GameMain.h"
 #include "CB_NewQuest.h"
 #include "BossGuild.h"
+#include "DungeonRace.h"
 #include "CBHuyDongExc.h"
 #if (CongHuongV2)
 #include "CBCongHuong.h"
@@ -1597,6 +1598,12 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			// what lets CGConnectAccountRecv gate on it - see
 			// PMSG_CLIENT_BUILD_RECV.
 			case 0x7D:
+			case 0x67: // Dungeon Race - Join / Leave buttons
+				if(size >= (int)sizeof(PMSG_DR_ACTION_RECV))
+				{
+					gDungeonRace.CGActionRecv((PMSG_DR_ACTION_RECV*)lpMsg,aIndex);
+				}
+				break;
 			{
 				CGClientBuildRecv((PMSG_CLIENT_BUILD_RECV*)lpMsg, size, aIndex);
 			}

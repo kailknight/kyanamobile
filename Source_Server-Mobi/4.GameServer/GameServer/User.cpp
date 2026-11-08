@@ -109,6 +109,7 @@
 #include "BCustomItemBank.h"
 #include "NewUIMyInventory.h"
 #include "BossGuild.h"
+#include "DungeonRace.h"
 #include "CTCMini.h"
 #include "BattleSurvivor.h"
 #include "CustomVongQuay.h"
@@ -243,6 +244,7 @@ void gObjEventRunProc() // OK
 	gBossGuild.MainProc();
 #endif
 	gBsVEvent.MainProc();
+	gDungeonRace.MainProc();
 
 	if (gServerInfo.m_FlyingDragonsSwitch==1){
 		//Dragones quitar
@@ -1663,6 +1665,8 @@ short gObjDel(int aIndex) // OK
 	{
 		if(lpObj->MapServerMoveQuit == 0)
 		{
+		gDungeonRace.OnUserLogout(lpObj); // racers get their equipment back before the character is saved
+
 			gObjectManager.CharacterGameClose(aIndex);
 
 			GJDisconnectAccountSend(aIndex,lpObj->Account,lpObj->IpAddr);
@@ -3152,6 +3156,12 @@ BOOL gObjMoveGate(int aIndex,int gate,int forceMap,int forceX,int forceY) // OK
 	{
 		gObjInventoryRollback(aIndex);
 		goto ERROR_JUMP;
+	// Dungeon Race: racers who warp are disqualified, outsiders are kept out of the Dungeon while it runs
+	if(gDungeonRace.WarpFilter(lpObj,map,x,y) != 0)
+	{
+		goto ERROR_JUMP;
+	}
+
 	}
 
 	if(lpObj->PShopOpen != 0)
@@ -3373,6 +3383,11 @@ void gObjTeleport(int aIndex,int map,int x,int y) // OK
 		if(NextServerCode != gServerInfo.m_ServerCode)
 		{
 			if(NextServerCode == -1)
+	if(gDungeonRace.WarpFilter(&gObj[aIndex],map,x,y) != 0)
+	{
+		return;
+	}
+
 			{
 				return;
 			}

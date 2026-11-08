@@ -453,6 +453,7 @@
     <ClInclude Include="JSProtocol.h" />
     <ClInclude Include="Kalima.h" />
     <ClInclude Include="Kanturu.h" />
+    <ClInclude Include="DungeonRace.h" />
     <ClInclude Include="KanturuBattleOfMaya.h" />
     <ClInclude Include="KanturuBattleOfNightmare.h" />
     <ClInclude Include="KanturuBattleStanby.h" />
@@ -750,6 +751,7 @@
     <ClCompile Include="Kanturu.cpp" />
     <ClCompile Include="KanturuBattleOfMaya.cpp" />
     <ClCompile Include="KanturuBattleOfNightmare.cpp" />
+    <ClCompile Include="DungeonRace.cpp" />
     <ClCompile Include="KanturuBattleStanby.cpp" />
     <ClCompile Include="KanturuBattleUserMng.cpp" />
     <ClCompile Include="KanturuEntranceNPC.cpp" />

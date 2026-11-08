@@ -24,6 +24,7 @@
 #include "ServerInfo.h"
 #include "SkillManager.h"
 #include "Util.h"
+#include "DungeonRace.h"
 
 CMove gMove;
 //////////////////////////////////////////////////////////////////////
@@ -335,7 +336,9 @@ void CMove::CGTeleportRecv(PMSG_TELEPORT_RECV* lpMsg,int aIndex) // OK
 
 			if(IG_MAP_RANGE(lpObj->Map) == 0)
 			{
+				gDungeonRace.BeginGateStep(); // the player walked into a gate: not a warp (Dungeon Race)
 				gObjMoveGate(aIndex,lpMsg->gate);
+				gDungeonRace.EndGateStep();
 			}
 			else
 			{
@@ -344,7 +347,9 @@ void CMove::CGTeleportRecv(PMSG_TELEPORT_RECV* lpMsg,int aIndex) // OK
 
 			#else
 
+			gDungeonRace.BeginGateStep();
 			gObjMoveGate(aIndex,lpMsg->gate);
+			gDungeonRace.EndGateStep();
 
 			#endif
 		}

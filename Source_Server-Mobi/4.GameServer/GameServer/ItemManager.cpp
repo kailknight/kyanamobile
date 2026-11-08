@@ -51,6 +51,7 @@
 #include "NewUIMyInventory.h"
 #include "CustomMix.h"
 #include "CustomNoticeDrop.h"
+#include "DungeonRace.h"
 
 CItemManager gItemManager;
 
@@ -734,6 +735,12 @@ bool CItemManager::CheckItemMoveToInventory(LPOBJ lpObj,CItem* lpItem,int slot) 
 	if(INVENTORY_WEAR_RANGE(slot) == 0)
 	{
 		return 1;
+	}
+
+	// Dungeon Race: racers may not wear wings / weapons / rings / pendants / horns
+	if(gDungeonRace.IsItemBlocked(lpObj,lpItem) != false)
+	{
+		return 0;
 	}
 
 	if(this->CheckItemRequireLevel(lpObj,lpItem) == 0)

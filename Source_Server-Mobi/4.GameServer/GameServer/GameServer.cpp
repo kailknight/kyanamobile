@@ -37,6 +37,7 @@
 #include "CustomStore.h"
 #include "OfflineMode.h"
 #include "DeviceBan.h"
+#include "DungeonRace.h"
 #include "BossGuild.h"
 #include "CTCMini.h"
 #include "BattleSurvivor.h"
@@ -595,6 +596,9 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam) // 
 				case IDM_EVENTS_CTCMINI: gCTCMini.StartCTCMini();			break;
 #endif
 #if	BsvEvent
+				case IDM_EVENTS_DRACE_OPEN: gDungeonRace.MenuCommand("open");	break;
+				case IDM_EVENTS_DRACE_START: gDungeonRace.MenuCommand("start");	break;
+				case IDM_EVENTS_DRACE_CANCEL: gDungeonRace.MenuCommand("cancel");	break;
 				case IDM_STARTBSV:
 					gBsVEvent.StartBSV();
 					break;

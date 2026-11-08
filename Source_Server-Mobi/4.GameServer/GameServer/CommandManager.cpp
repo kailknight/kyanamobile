@@ -24,6 +24,7 @@
 #include "DevilSquare.h"
 #include "DSProtocol.h"
 #include "DuelRanked.h"
+#include "DungeonRace.h"
 #include "EventHideAndSeek.h"
 #include "EventKillAll.h"
 #include "EventPvP.h"
@@ -362,6 +363,18 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 	}
 
 	// Ranked duel routing tests (GM only, not in Command.txt): /rankedhop goes to the
+	if(_stricmp(command,"/drace") == 0)
+	{
+		char* argument = &message[strlen(command)];
+
+		if(argument[0] == 0x20)
+		{
+			argument++;
+		}
+
+		return gDungeonRace.Command(lpObj,argument);
+	}
+
 	// host's arena map, /rankedhome [map x y] comes back.
 	if(_stricmp(command,"/rankedhop") == 0 || _stricmp(command,"/rankedhome") == 0)
 	{

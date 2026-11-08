@@ -265,6 +265,7 @@ enum ObjectID
 	eWindowDuelRankedChip,   // CB_DuelRanked.cpp - "Searching..." chip. Rect only: Android hit-tests taps against it
 	eWindowDuelRankedPrompt, // CB_DuelRanked.cpp - "Match found" Accept/Decline prompt
 	eWindowDuelRankedBanner, // CB_DuelRanked.cpp - win/loss result banner
+	eWindowDungeonRace,      // CB_DungeonRace.cpp - NPC window (rect only: Android tap test)
 	eEndWindowCustom, //ket thuc
 
 

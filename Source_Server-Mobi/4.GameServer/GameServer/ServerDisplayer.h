@@ -167,6 +167,8 @@ public:
 	int EventCryWolfState;
 	int EventBossGuild;
 	int EventCTCMini;
+	int EventKingOfKira;
+	int EventDungeonRace;
 	int EventLoanChien;
 	int EventSelupan;
 	int EventKanturu;

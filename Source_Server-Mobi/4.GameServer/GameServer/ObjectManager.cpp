@@ -102,6 +102,7 @@
 #include "CB_NewQuest.h"
 #endif
 #include "BossGuild.h"
+#include "DungeonRace.h"
 #include "CBHuyDongExc.h"
 #if (CongHuongV2)
 #include "CBCongHuong.h"
@@ -1054,6 +1055,8 @@ bool CObjectManager::CharacterMapServerMove(int aIndex,int map,int x,int y) // O
 void CObjectManager::CharacterUpdateMapEffect(LPOBJ lpObj) // OK
 {
 	#if(GAMESERVER_TYPE==1)
+	gDungeonRace.OnEnterMap(lpObj);
+
 
 	if(lpObj->Map == MAP_CASTLE_SIEGE)
 	{
@@ -1086,6 +1089,10 @@ bool CObjectManager::CharacterGetRespawnLocation(LPOBJ lpObj) // OK
 	}
 #if(BOSS_GUILD == 1)
 	else if (lpObj->Map == gBossGuild.m_MapBossGuild)
+	else if(gDungeonRace.GetUserRespawnLocation(lpObj,&gate,&map,&x,&y,&dir,&level) != 0)
+	{
+		result = 1;
+	}
 	{
 		result = gBossGuild.GetUserRespawnLocation(lpObj, &gate, &map, &x, &y, &dir, &level);
 	}

@@ -11783,6 +11783,7 @@ bool IsAndroidRawPopupWindowOpen()
     {
         if (gInterface.Data[window].OnShow)
         {
+        eWindowDungeonRace,      // Dungeon Race NPC window
             return true;
         }
     }

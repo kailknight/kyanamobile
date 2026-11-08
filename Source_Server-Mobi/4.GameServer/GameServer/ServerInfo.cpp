@@ -139,6 +139,7 @@
 #include "BCustomEdit.h"
 #include "CB_NewQuest.h"
 #include "BossGuild.h"
+#include "DungeonRace.h"
 #include "CBHuyDongExc.h"
 #include "ThuMuaDoExc.h"
 #if (CongHuongV2)
@@ -4961,6 +4962,8 @@ int CServerInfo::GetDivisorEx(char* section, const char* key, const char* legacy
 void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 {
 #if FIXTELE
+	gDungeonRace.Load(section,path);
+
 	gBCustomEdit.Load();
 #endif
 	this->m_ThoiGianThoatGame = this->GetProfileIntEx(section, "GameExitTime", "ThoiGianThoatGame", 6, path);

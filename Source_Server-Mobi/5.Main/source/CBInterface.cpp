@@ -41,6 +41,7 @@
 #include "RedeemCodeWindow.h"
 #include "CB_KiraPass.h"
 #include "CB_DuelRanked.h"
+#include "CB_DungeonRace.h"
 #endif
 #include "APICB.h"
 
@@ -698,6 +699,7 @@ void Interface::Init()
 	gCB_KiraPass = new CB_KiraPass;
 	gCB_DuelRanked = new CB_DuelRanked;
 	gTradeCoinPanel = new CTradeCoinPanel;
+	gCB_DungeonRace = new CB_DungeonRace;
 	ANDROID_IF_STAGE("TradeCoinPanel ok");
 #if(CB_CUSTOMMIXINFO)
 	gCB_InfoCustomMix = new CB_InfoCustomMix;
@@ -727,6 +729,7 @@ void Interface::Clear()
 	SAFE_DELETE(gCB_DuelRanked);
 
 	SAFE_DELETE(gCB_BXHTopDmg);
+	SAFE_DELETE(gCB_DungeonRace);
 
 	SAFE_DELETE(gCB_BotTrader);
 
@@ -825,6 +828,7 @@ void Interface::Work()
 	if (gTradeCoinPanel) gTradeCoinPanel->Draw();
 #if(CUSTOM_WINDOWLOCKITEM)
 	if(gCB_LockItem) gCB_LockItem->DrawWindow();
+	if (gCB_DungeonRace) gCB_DungeonRace->DrawWindow();
 #endif
 	gInterface.DrawNoticePKSystem();
 #if(CB_VIEWCHARITEM)
