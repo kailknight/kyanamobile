@@ -42,7 +42,10 @@
 #include "RuudTokenSellTemplate.h"
 #include "CB_NewQuest.h"
 #include "BossGuild.h"
+#include "KingOfKira.h"
 #include "DungeonRace.h"
+#include "ItemReroll.h"
+#include "CustomMining.h"
 #if (CongHuongV2)
 #include "CBCongHuong.h"
 #endif
@@ -147,12 +150,27 @@ bool CNpcTalk::NpcTalk(LPOBJ lpNpc,LPOBJ lpObj) // OK
 		return 1;
 	}
 
-	if (gTvTEvent.Dialog(lpObj,lpNpc))
+	if (gKingOfKira.Dialog(lpObj,lpNpc))
+	{
+		return 1;
+	}
+
 	if (gDungeonRace.Dialog(lpObj,lpNpc))
 	{
 		return 1;
 	}
 
+	if (gItemReroll.Dialog(lpObj,lpNpc))
+	{
+		return 1;
+	}
+
+	if (gCustomMining.Dialog(lpObj,lpNpc))
+	{
+		return 1;
+	}
+
+	if (gTvTEvent.Dialog(lpObj,lpNpc))
 	{
 		return 1;
 	}

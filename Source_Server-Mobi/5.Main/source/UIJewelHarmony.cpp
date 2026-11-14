@@ -75,6 +75,8 @@ JewelHarmonyInfo* JewelHarmonyInfo::MakeInfo()
 
 JewelHarmonyInfo::JewelHarmonyInfo()
 {
+	memset(m_ServerRates, 0, sizeof(m_ServerRates));
+	m_bHasServerRates = false;
 	bool Result = true;
 	if( !OpenJewelHarmonyInfoFile( HARMONYJEWELOPTION_DATA_FILE ) )
 	{
@@ -110,6 +112,20 @@ const bool JewelHarmonyInfo::OpenJewelHarmonyInfoFile( const std::string& filena
 		return true;
 	}
 	return false;
+}
+
+void JewelHarmonyInfo::SetServerRates( const BYTE* rates )
+{
+	for( int t = 0; t < 3; ++t )
+		for( int o = 0; o < 10; ++o )
+			m_ServerRates[t][o] = rates[t * 10 + o];
+	m_bHasServerRates = true;
+}
+
+int JewelHarmonyInfo::GetServerRate( int type, int option ) const
+{
+	if( type < 0 || type >= 3 || option < 1 || option > 10 ) return 0;
+	return m_ServerRates[type][option - 1];
 }
 
 const StrengthenItem JewelHarmonyInfo::GetItemType( int type )

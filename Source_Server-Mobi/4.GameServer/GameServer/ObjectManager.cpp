@@ -102,6 +102,7 @@
 #include "CB_NewQuest.h"
 #endif
 #include "BossGuild.h"
+#include "KingOfKira.h"
 #include "DungeonRace.h"
 #include "CBHuyDongExc.h"
 #if (CongHuongV2)
@@ -1054,9 +1055,10 @@ bool CObjectManager::CharacterMapServerMove(int aIndex,int map,int x,int y) // O
 
 void CObjectManager::CharacterUpdateMapEffect(LPOBJ lpObj) // OK
 {
-	#if(GAMESERVER_TYPE==1)
+	gKingOfKira.OnEnterMap(lpObj);
 	gDungeonRace.OnEnterMap(lpObj);
 
+	#if(GAMESERVER_TYPE==1)
 
 	if(lpObj->Map == MAP_CASTLE_SIEGE)
 	{
@@ -1087,12 +1089,16 @@ bool CObjectManager::CharacterGetRespawnLocation(LPOBJ lpObj) // OK
 	{
 		result = gEventKillAll.Respawn(lpObj,&gate,&map,&x,&y,&dir,&level);
 	}
-#if(BOSS_GUILD == 1)
-	else if (lpObj->Map == gBossGuild.m_MapBossGuild)
+	else if(gKingOfKira.GetUserRespawnLocation(lpObj,&gate,&map,&x,&y,&dir,&level) != 0)
+	{
+		result = 1;
+	}
 	else if(gDungeonRace.GetUserRespawnLocation(lpObj,&gate,&map,&x,&y,&dir,&level) != 0)
 	{
 		result = 1;
 	}
+#if(BOSS_GUILD == 1)
+	else if (lpObj->Map == gBossGuild.m_MapBossGuild)
 	{
 		result = gBossGuild.GetUserRespawnLocation(lpObj, &gate, &map, &x, &y, &dir, &level);
 	}
@@ -2731,6 +2737,23 @@ bool CObjectManager::CharacterUseJewelOfBles(LPOBJ lpObj,int SourceSlot,int Targ
 
 	CItem* lpItem = &lpObj->Inventory[TargetSlot];
 
+	// Pick Axe (1,10): Bless only repairs it, 1-10 durability each, never upgrades it.
+	if(lpItem->m_Index == GET_ITEM(1,10))
+	{
+		if(lpObj->Inventory[SourceSlot].m_Index != GET_ITEM(14,13))
+		{
+			return 0; // no Bundle of Bless
+		}
+		float MaxDurability = (float)gItemManager.GetItemDurability(lpItem->m_Index,lpItem->m_Level,lpItem->IsExcItem(),lpItem->IsSetItem());
+		if(lpItem->m_Durability >= MaxDurability)
+		{
+			return 0; // already full, keep the jewel
+		}
+		lpItem->m_Durability += (float)((GetLargeRand()%10)+1);
+		lpItem->m_Durability = ((lpItem->m_Durability>MaxDurability)?MaxDurability:lpItem->m_Durability);
+		return 1;
+	}
+
 	//if(lpItem->m_Index == GET_ITEM(4,15)) // Disable Arrow
 	//{
 	//	return 0;
@@ -2821,6 +2844,11 @@ bool CObjectManager::CharacterUseJewelOfSoul(LPOBJ lpObj,int SourceSlot,int Targ
 	}
 
 	CItem* lpItem = &lpObj->Inventory[TargetSlot];
+
+	if(lpItem->m_Index == GET_ITEM(1,10)) // Pick Axe cannot be upgraded
+	{
+		return 0;
+	}
 
 	//if(lpItem->m_Index == GET_ITEM(4,15)) // Disable Arrow
 	//{
@@ -2916,6 +2944,11 @@ bool CObjectManager::CharacterUseJewelOfLife(LPOBJ lpObj,int SourceSlot,int Targ
 	}
 
 	CItem* lpItem = &lpObj->Inventory[TargetSlot];
+
+	if(lpItem->m_Index == GET_ITEM(1,10)) // Pick Axe cannot be upgraded
+	{
+		return 0;
+	}
 
 	if(lpItem->m_Index > GET_ITEM(12,6) && (lpItem->m_Index < GET_ITEM(12,36) || lpItem->m_Index > GET_ITEM(12,43)) && lpItem->m_Index != GET_ITEM(12,49) && lpItem->m_Index != GET_ITEM(12,50) && (lpItem->m_Index < GET_ITEM(12,262) || lpItem->m_Index > GET_ITEM(12,265)) && lpItem->m_Index != GET_ITEM(13,30) && gCustomWing.CheckCustomWingByItem(lpItem->m_Index) == 0)
 	{

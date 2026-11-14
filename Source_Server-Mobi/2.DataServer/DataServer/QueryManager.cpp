@@ -44,6 +44,11 @@ bool CQueryManager::Connect(char* odbc,char* user,char* pass) // OK
 		return 0;
 	}
 
+	// A hung database call must not freeze the DataServer for ever (it has ONE worker thread: if it waits, the queue fills up and
+	// every GameServer is cut off). Give up on a connect after 15 s and on a query after 30 s: the query then fails like any other error.
+	SQLSetConnectAttr(this->m_SQLConnection,SQL_ATTR_LOGIN_TIMEOUT,(SQLPOINTER)15,SQL_IS_UINTEGER);
+	SQLSetConnectAttr(this->m_SQLConnection,SQL_ATTR_CONNECTION_TIMEOUT,(SQLPOINTER)30,SQL_IS_UINTEGER);
+
 	if(SQL_SUCCEEDED(SQLConnect(this->m_SQLConnection,(SQLCHAR*)this->m_odbc,SQL_NTS,(SQLCHAR*)this->m_user,SQL_NTS,(SQLCHAR*)this->m_pass,SQL_NTS)) == 0)
 	{
 		return 0;
@@ -55,6 +60,7 @@ bool CQueryManager::Connect(char* odbc,char* user,char* pass) // OK
 	}
 	else
 	{
+		SQLSetStmtAttr(this->m_STMT,SQL_ATTR_QUERY_TIMEOUT,(SQLPOINTER)30,SQL_IS_UINTEGER);
 		return 1;
 	}
 }

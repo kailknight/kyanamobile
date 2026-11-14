@@ -72,6 +72,16 @@ static void ios_set_data_dir_early()
 
 #include <SDL.h>
 #include <sokol_app.h>
+// The browser build holds no real server address: "kcs" is a placeholder that only ws-bridge.js can resolve.
+#if defined(MU_WEB)
+#define MU_DEFAULT_SERVER_IP_A "kcs"
+#define MU_DEFAULT_SERVER_IP_W L"kcs"
+#define MU_DEFAULT_SERVER_PORT 2000
+#else
+#define MU_DEFAULT_SERVER_IP_A "31.58.143.70"
+#define MU_DEFAULT_SERVER_IP_W L"31.58.143.70"
+#define MU_DEFAULT_SERVER_PORT 63000
+#endif
 #include <android/input.h>
 #include <android/log.h>
 #include <android/keycodes.h>
@@ -335,8 +345,8 @@ static void InitializeTakumiProtectState()
         gProtect.m_MainInfo.GSPortMin = 55901;
         gProtect.m_MainInfo.GSPortMax = 55999;
         std::strcpy(gProtect.m_MainInfo.CustomerName, "takumi12");
-        std::strcpy(gProtect.m_MainInfo.IpAddress, "31.58.143.70");
-        gProtect.m_MainInfo.IpAddressPort = 63000;
+        std::strcpy(gProtect.m_MainInfo.IpAddress, MU_DEFAULT_SERVER_IP_A);
+        gProtect.m_MainInfo.IpAddressPort = MU_DEFAULT_SERVER_PORT;
         std::strcpy(gProtect.m_MainInfo.ClientVersion, "1.04.05");
         std::strcpy(gProtect.m_MainInfo.ClientSerial, "TbYehR2hFUPBKgZj");
         // Old shop on the fallback path, explicitly. Reaching here means
@@ -11773,6 +11783,10 @@ bool IsAndroidRawPopupWindowOpen()
 #endif
         eWindowFriendMail,   // Friends (modern) - opens from the friend button.
         eWindowKiraPass,     // Kira Pass (monthly WCoin) - opens from the Menu.
+        eWindowKingOfKira,       // King of Kira registration window
+        eWindowDungeonRace,      // Dungeon Race NPC window
+        eWindowItemReroll,       // Excellent Item Reroller NPC window
+        eWindowMining,           // Tarkan Mining stone window
         eWindowDuelRankedPrompt, // Ranked duel "Match found" Accept/Decline. The searching chip and the
                                  // result banner are deliberately NOT here: they are covered by the
                                  // tap test below, and listing the chip would hide the whole touch HUD
@@ -11783,7 +11797,6 @@ bool IsAndroidRawPopupWindowOpen()
     {
         if (gInterface.Data[window].OnShow)
         {
-        eWindowDungeonRace,      // Dungeon Race NPC window
             return true;
         }
     }
@@ -18771,6 +18784,47 @@ static void ReleaseVirtualPadFinger(SDL_FingerID fingerId)
     }
 }
 
+// What a press on a wheel skill slot does, from a finger or (on PC browsers) the number keys.
+static void ApplyVirtualSkillSlotPress(int skillSlot, bool held)
+{
+    const bool isEmpty = GetVirtualOverlayHotKeySkillIndex(skillSlot) < 0;
+    if (held || isEmpty)
+    {
+        // A hold on any slot, or a plain tap on an empty one (nothing to
+        // arm there yet), both open the picker to bind it.
+        ToggleVirtualSkillPickerByTouch();
+        PlayBuffer(SOUND_CLICK01);
+    }
+    else
+    {
+        // Arms the slot instead of casting it. The skill only goes off when
+        // the attack button in the middle of the arc is pressed, so aiming
+        // and firing are two separate deliberate taps.
+        //
+        // A ring armed for the previous slot's skill would otherwise keep
+        // showing (and keep intercepting taps) for a skill no longer
+        // selected.
+        CancelAndroidGroundAim("skill slot changed");
+        if (g_virtualSelectedSkillSlot == skillSlot)
+        {
+            g_virtualSelectedSkillSlot = -1;   // tap again to go back to weapon
+        }
+        else
+        {
+            g_virtualSelectedSkillSlot = skillSlot;
+
+            // Mirror it onto CurrentSkill so the rest of the UI shows the
+            // same armed skill the overlay is highlighting.
+            const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
+            if (Hero != nullptr && IsValidSkillIndex(hotKeySkillIndex))
+            {
+                Hero->CurrentSkill = static_cast<BYTE>(hotKeySkillIndex);
+            }
+        }
+        PlayBuffer(SOUND_CLICK01);
+    }
+}
+
 bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
 {
     // Before everything, including the pinch tracker: this is the release of the
@@ -18950,42 +19004,7 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
         const uint32_t heldMs = MU_MobileGetTicks() - g_androidSkillSlotPress.downMs;
         g_androidSkillSlotPress = AndroidSkillSlotPressState{};
 
-        const bool isEmpty = GetVirtualOverlayHotKeySkillIndex(skillSlot) < 0;
-        if (heldMs >= kSkillSlotRebindHoldMs || isEmpty)
-        {
-            // A hold on any slot, or a plain tap on an empty one (nothing to
-            // arm there yet), both open the picker to bind it.
-            ToggleVirtualSkillPickerByTouch();
-            PlayBuffer(SOUND_CLICK01);
-        }
-        else
-        {
-            // Arms the slot instead of casting it. The skill only goes off when
-            // the attack button in the middle of the arc is pressed, so aiming
-            // and firing are two separate deliberate taps.
-            //
-            // A ring armed for the previous slot's skill would otherwise keep
-            // showing (and keep intercepting taps) for a skill no longer
-            // selected.
-            CancelAndroidGroundAim("skill slot changed");
-            if (g_virtualSelectedSkillSlot == skillSlot)
-            {
-                g_virtualSelectedSkillSlot = -1;   // tap again to go back to weapon
-            }
-            else
-            {
-                g_virtualSelectedSkillSlot = skillSlot;
-
-                // Mirror it onto CurrentSkill so the rest of the UI shows the
-                // same armed skill the overlay is highlighting.
-                const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
-                if (Hero != nullptr && IsValidSkillIndex(hotKeySkillIndex))
-                {
-                    Hero->CurrentSkill = static_cast<BYTE>(hotKeySkillIndex);
-                }
-            }
-            PlayBuffer(SOUND_CLICK01);
-        }
+        ApplyVirtualSkillSlotPress(skillSlot, heldMs >= kSkillSlotRebindHoldMs);
         return true;
     }
 
@@ -25286,17 +25305,27 @@ static SDL_Scancode ConvertSappKeycodeToSDLScancode(sapp_keycode keycode)
     {
         return static_cast<SDL_Scancode>(SDL_SCANCODE_A + (keycode - SAPP_KEYCODE_A));
     }
-    if (keycode >= SAPP_KEYCODE_0 && keycode <= SAPP_KEYCODE_9)
+    // SDL orders these 1..9 then 0, so counting up from SDL_SCANCODE_0 runs into Return, Escape,
+    // Backspace, Tab and Space: the 2 key closed windows as if it were the back button.
+    if (keycode == SAPP_KEYCODE_0)
     {
-        return static_cast<SDL_Scancode>(SDL_SCANCODE_0 + (keycode - SAPP_KEYCODE_0));
+        return SDL_SCANCODE_0;
+    }
+    if (keycode >= SAPP_KEYCODE_1 && keycode <= SAPP_KEYCODE_9)
+    {
+        return static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (keycode - SAPP_KEYCODE_1));
     }
     if (keycode >= SAPP_KEYCODE_F1 && keycode <= SAPP_KEYCODE_F12)
     {
         return static_cast<SDL_Scancode>(SDL_SCANCODE_F1 + (keycode - SAPP_KEYCODE_F1));
     }
-    if (keycode >= SAPP_KEYCODE_KP_0 && keycode <= SAPP_KEYCODE_KP_9)
+    if (keycode == SAPP_KEYCODE_KP_0)
     {
-        return static_cast<SDL_Scancode>(SDL_SCANCODE_KP_0 + (keycode - SAPP_KEYCODE_KP_0));
+        return SDL_SCANCODE_KP_0;
+    }
+    if (keycode >= SAPP_KEYCODE_KP_1 && keycode <= SAPP_KEYCODE_KP_9)
+    {
+        return static_cast<SDL_Scancode>(SDL_SCANCODE_KP_1 + (keycode - SAPP_KEYCODE_KP_1));
     }
 
     switch (keycode)
@@ -26931,6 +26960,191 @@ static void SetBackgroundKeepAlive(bool active)
     g_bgKeepAliveCv.notify_all();
 }
 
+#if defined(MU_WEB)
+// The game's on-screen controls (tutorial, skill slots, attack button, stick) only answer finger events, so
+// the left mouse button acts as one finger. Right and middle stay mouse buttons; plain hover stays mouse motion.
+bool MuWebIsMobileBrowser();   // Web/platform/web_platform.cpp
+constexpr SDL_FingerID kWebMouseFingerId = static_cast<SDL_FingerID>(1000);
+constexpr SDL_FingerID kWebKeyboardJoystickFingerId = static_cast<SDL_FingerID>(-3);
+constexpr SDL_FingerID kWebKeyboardAttackFingerId = static_cast<SDL_FingerID>(-4);
+static bool g_webMouseFingerDown = false;
+static bool g_webKeyW = false, g_webKeyA = false, g_webKeyS = false, g_webKeyD = false, g_webKeySpace = false;
+// Keys 1-4 select the wheel's four skill slots on the current page, exactly as tapping them does.
+static bool g_webSkillKeyHeld[4] = { false, false, false, false };
+static bool g_webSkillKeyPressed[4] = { false, false, false, false };
+
+// The on-screen keyboard's text box in shell.html, by way of Web/platform/web_platform.cpp.
+void MuWebQueueChar(uint32_t codepoint)
+{
+    QueueTextInputCodepoint(codepoint);
+}
+
+void MuWebQueueKey(SDL_Keycode sym, SDL_Scancode scancode)
+{
+    SDL_Event sdlEvent {};
+    sdlEvent.type = SDL_KEYDOWN;
+    sdlEvent.key.state = SDL_PRESSED;
+    sdlEvent.key.keysym.sym = sym;
+    sdlEvent.key.keysym.scancode = scancode;
+    QueueSyntheticSDLEvent(sdlEvent);
+    sdlEvent.type = SDL_KEYUP;
+    sdlEvent.key.state = SDL_RELEASED;
+    QueueSyntheticSDLEvent(sdlEvent);
+}
+
+static void QueueWebMouseAsFinger(const sapp_event* event, Uint32 sdlType)
+{
+    const float safeW = static_cast<float>((g_NativePresentWidth > 0) ? g_NativePresentWidth : g_DrawableWidth > 0 ? g_DrawableWidth : 1);
+    const float safeH = static_cast<float>((g_NativePresentHeight > 0) ? g_NativePresentHeight : g_DrawableHeight > 0 ? g_DrawableHeight : 1);
+    SDL_Event sdlEvent {};
+    sdlEvent.type = sdlType;
+    sdlEvent.tfinger.touchId = 0;
+    sdlEvent.tfinger.fingerId = kWebMouseFingerId;
+    sdlEvent.tfinger.x = std::clamp((event->mouse_x - g_PresentOriginX) / safeW, 0.0f, 1.0f);
+    sdlEvent.tfinger.y = std::clamp((event->mouse_y - g_PresentOriginTop) / safeH, 0.0f, 1.0f);
+    sdlEvent.tfinger.pressure = 1.0f;
+    QueueSyntheticSDLEvent(sdlEvent);
+}
+
+static bool WebIsTypingText()
+{
+    return AndroidHasFocusedTextInput() || g_charNameInputActive || AndroidRegisterOverlayHasFocusedField();
+}
+
+// WASD and Space belong to the movement wheel and attack button unless a text box has focus. Returns true when
+// the key was taken, so the game's own hotkeys (a W potion slot, say) do not also fire. A release always clears.
+static bool WebHandleGameKey(const sapp_event* event)
+{
+    if (MuWebIsMobileBrowser())
+    {
+        return false;   // touch controls only, as in the app
+    }
+    if (event->key_code >= SAPP_KEYCODE_1 && event->key_code <= SAPP_KEYCODE_4)
+    {
+        const int slot = event->key_code - SAPP_KEYCODE_1;
+        if (event->type == SAPP_EVENTTYPE_KEY_UP)
+        {
+            const bool wasHeld = g_webSkillKeyHeld[slot];
+            g_webSkillKeyHeld[slot] = false;
+            return wasHeld;
+        }
+        // Typing, or the skill picker open (there the number keys bind a skill), or not in the world: not ours.
+        if (WebIsTypingText() || !IsVirtualPadAvailable() || (g_pSkillList != nullptr && g_pSkillList->IsSkillPickerOpen()))
+        {
+            return false;
+        }
+        if (!event->key_repeat)
+        {
+            g_webSkillKeyPressed[slot] = true;   // acted on in the frame, like a finger event
+        }
+        g_webSkillKeyHeld[slot] = true;
+        return true;
+    }
+
+    bool* key = nullptr;
+    switch (event->key_code)
+    {
+    case SAPP_KEYCODE_W:     key = &g_webKeyW; break;
+    case SAPP_KEYCODE_A:     key = &g_webKeyA; break;
+    case SAPP_KEYCODE_S:     key = &g_webKeyS; break;
+    case SAPP_KEYCODE_D:     key = &g_webKeyD; break;
+    case SAPP_KEYCODE_SPACE: key = &g_webKeySpace; break;
+    default: return false;
+    }
+    if (event->type == SAPP_EVENTTYPE_KEY_UP)
+    {
+        const bool wasHeld = *key;
+        *key = false;
+        return wasHeld;
+    }
+    if (WebIsTypingText())
+    {
+        return false;
+    }
+    *key = true;
+    return true;
+}
+
+// Runs each frame, just before the virtual pad's hold pump reads the stick and the attack touch.
+static void UpdateWebKeyboardControls()
+{
+    if (MuWebIsMobileBrowser())
+    {
+        return;
+    }
+    const bool available = !WebIsTypingText() && IsVirtualPadAvailable()
+        && (!IsAndroidTutorialActive() || IsAndroidTutorialWorldLive());
+
+    for (int slot = 0; slot < 4; ++slot)
+    {
+        if (g_webSkillKeyPressed[slot])
+        {
+            g_webSkillKeyPressed[slot] = false;
+            if (available)
+            {
+                ApplyVirtualSkillSlotPress(slot, false);
+            }
+        }
+    }
+
+    // Movement wheel. It only claims the stick when no finger or mouse is already holding it.
+    const int dx = (g_webKeyD ? 1 : 0) - (g_webKeyA ? 1 : 0);
+    const int dy = (g_webKeyS ? 1 : 0) - (g_webKeyW ? 1 : 0);
+    const bool ownsStick = g_virtualJoystick.fingerId == kWebKeyboardJoystickFingerId;
+    if (available && (dx != 0 || dy != 0))
+    {
+        if (g_virtualJoystick.fingerId == static_cast<SDL_FingerID>(-1))
+        {
+            StartVirtualJoystick(kWebKeyboardJoystickFingerId, kVirtualJoystickDefaultCenterX, kVirtualJoystickDefaultCenterY);
+        }
+        if (g_virtualJoystick.fingerId == kWebKeyboardJoystickFingerId)
+        {
+            const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+            UpdateVirtualJoystickByUi(
+                geometry.centerX + (dx * geometry.ringRadiusPx / geometry.pxPerUiX),
+                geometry.centerY + (dy * geometry.ringRadiusPx / geometry.pxPerUiY));
+        }
+    }
+    else if (ownsStick)
+    {
+        ClearVirtualJoystick();
+    }
+
+    // Attack: holds the same touch slot the on-screen button would, so the hold pump's attack speed, armed
+    // skill and combo logic all apply unchanged.
+    int attackSlot = -1;
+    for (int i = 0; i < static_cast<int>(sizeof(g_activeVirtualTouches) / sizeof(g_activeVirtualTouches[0])); ++i)
+    {
+        if (g_activeVirtualTouches[i].fingerId == kWebKeyboardAttackFingerId)
+        {
+            attackSlot = i;
+        }
+    }
+    if (available && g_webKeySpace && attackSlot < 0)
+    {
+        bool attackHeld = false;
+        for (const ActiveVirtualTouch& held : g_activeVirtualTouches)
+        {
+            attackHeld = attackHeld || (held.button == kVirtualAttackButton && held.fingerId != static_cast<SDL_FingerID>(-1));
+        }
+        const int slot = attackHeld ? -1 : AcquireActiveVirtualTouchSlot(kWebKeyboardAttackFingerId);
+        if (slot >= 0)
+        {
+            const uint32_t nowMs = MU_MobileGetTicks();
+            g_activeVirtualTouches[slot].fingerId = kWebKeyboardAttackFingerId;
+            g_activeVirtualTouches[slot].button = kVirtualAttackButton;
+            g_activeVirtualTouches[slot].downMs = nowMs;
+            g_activeVirtualTouches[slot].lastRepeatMs = nowMs;
+            TriggerVirtualAttackButtonPress();
+        }
+    }
+    else if ((!available || !g_webKeySpace) && attackSlot >= 0)
+    {
+        g_activeVirtualTouches[attackSlot] = ActiveVirtualTouch{};
+    }
+}
+#endif
+
 static void QueueSappEventAsSDL(const sapp_event* event)
 {
     if (!event)
@@ -26997,6 +27211,13 @@ static void QueueSappEventAsSDL(const sapp_event* event)
 
     case SAPP_EVENTTYPE_MOUSE_MOVE:
         {
+#if defined(MU_WEB)
+            if (g_webMouseFingerDown)
+            {
+                QueueWebMouseAsFinger(event, SDL_FINGERMOTION);
+                break;
+            }
+#endif
             SDL_Event sdlEvent {};
             sdlEvent.type = SDL_MOUSEMOTION;
             sdlEvent.motion.x = static_cast<Sint32>(event->mouse_x);
@@ -27008,9 +27229,31 @@ static void QueueSappEventAsSDL(const sapp_event* event)
         }
         break;
 
+#if defined(MU_WEB)
+    case SAPP_EVENTTYPE_MOUSE_LEAVE:
+        if (g_webMouseFingerDown)
+        {
+            g_webMouseFingerDown = false;
+            QueueWebMouseAsFinger(event, SDL_FINGERUP);
+        }
+        break;
+#endif
+
     case SAPP_EVENTTYPE_MOUSE_DOWN:
     case SAPP_EVENTTYPE_MOUSE_UP:
         {
+#if defined(MU_WEB)
+            if (event->mouse_button == SAPP_MOUSEBUTTON_LEFT)
+            {
+                const bool down = event->type == SAPP_EVENTTYPE_MOUSE_DOWN;
+                if (down != g_webMouseFingerDown)
+                {
+                    g_webMouseFingerDown = down;
+                    QueueWebMouseAsFinger(event, down ? SDL_FINGERDOWN : SDL_FINGERUP);
+                }
+                break;
+            }
+#endif
             SDL_Event sdlEvent {};
             sdlEvent.type = (event->type == SAPP_EVENTTYPE_MOUSE_DOWN) ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
             sdlEvent.button.state = (event->type == SAPP_EVENTTYPE_MOUSE_DOWN) ? SDL_PRESSED : SDL_RELEASED;
@@ -27080,6 +27323,12 @@ static void QueueSappEventAsSDL(const sapp_event* event)
     case SAPP_EVENTTYPE_KEY_DOWN:
     case SAPP_EVENTTYPE_KEY_UP:
         {
+#if defined(MU_WEB)
+            if (WebHandleGameKey(event))
+            {
+                break;
+            }
+#endif
             SDL_Event sdlEvent {};
             sdlEvent.type = (event->type == SAPP_EVENTTYPE_KEY_DOWN) ? SDL_KEYDOWN : SDL_KEYUP;
             sdlEvent.key.state = (event->type == SAPP_EVENTTYPE_KEY_DOWN) ? SDL_PRESSED : SDL_RELEASED;
@@ -27422,7 +27671,7 @@ static bool InitializeAndroidGame()
     AndroidAudioInit();
     SetEnableSound(m_SoundOnOff != 0);
 
-    static std::wstring serverIP = L"31.58.143.70";
+    static std::wstring serverIP = MU_DEFAULT_SERVER_IP_W;
     //static std::wstring serverIP = GameConfig::GetInstance().GetServerIP();
     int configuredPort = GameConfig::GetInstance().GetServerPort();
     // if (serverIP.empty() || serverIP == L"127.127.127.127" || serverIP == L"192.168.1.33" || serverIP == L"172.22.71.136")
@@ -27431,7 +27680,7 @@ static bool InitializeAndroidGame()
     // }
     if ((configuredPort <= 0) || (configuredPort == 55901) || (configuredPort == 44405) || (configuredPort == 44406))
     {
-        configuredPort = 63000;
+        configuredPort = MU_DEFAULT_SERVER_PORT;
     }
     GameConfig::GetInstance().SetServerIP(serverIP);
     GameConfig::GetInstance().SetServerPort(configuredPort);
@@ -27737,6 +27986,9 @@ static void RunAndroidGameFrame()
     SyncVirtualHudChatBox();
 
     AndroidDrainPackets();
+#if defined(MU_WEB)
+    UpdateWebKeyboardControls();
+#endif
     UpdateVirtualPadHolds();
 
     const uint32_t nowTicks = MU_MobileGetTicks();
@@ -28836,7 +29088,7 @@ int SDL_main(int argc, char* argv[])
     m_RememberMe = GameConfig::GetInstance().GetRememberMe() ? 1 : 0;
     LOGI("Audio config: sound=%d music=%d rememberMe=%d", (int)m_SoundOnOff, (int)m_MusicOnOff, (int)m_RememberMe);
 
-    static std::wstring serverIP = L"31.58.143.70";
+    static std::wstring serverIP = MU_DEFAULT_SERVER_IP_W;
     //static std::wstring serverIP = GameConfig::GetInstance().GetServerIP();
     int configuredPort = GameConfig::GetInstance().GetServerPort();
     // if (serverIP.empty() || serverIP == L"172.22.71.136")
@@ -28845,7 +29097,7 @@ int SDL_main(int argc, char* argv[])
     // }
     if (configuredPort <= 0 || configuredPort == 55901 || configuredPort == 44405 || configuredPort == 44406)
     {
-        configuredPort = 63000;
+        configuredPort = MU_DEFAULT_SERVER_PORT;
     }
     GameConfig::GetInstance().SetServerIP(serverIP);
     GameConfig::GetInstance().SetServerPort(configuredPort);
@@ -29126,6 +29378,9 @@ int SDL_main(int argc, char* argv[])
         }
 
         AndroidDrainPackets();
+#if defined(MU_WEB)
+        UpdateWebKeyboardControls();
+#endif
         UpdateVirtualPadHolds();
 
         // Windows builds drive MU Helper via Win32 SetTimer(MUHELPER_TIMER, 250ms).

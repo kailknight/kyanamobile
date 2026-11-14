@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && !defined(MU_WEB)
 #include <linux/tcp.h>
 #elif defined(MU_IOS)
 #include <netinet/tcp.h>
@@ -62,6 +62,13 @@ static void ProcessPacketCallback(const PacketInfo*) {}
 #endif
 
 #define MU_EXPORT extern "C" __attribute__((visibility("default")))
+
+#if defined(MU_WEB)
+// Web/platform/web_socket.cpp: WebSocket to ws-bridge.js instead of a TCP socket.
+int32_t MuWebSocketOpen(const char* host, int port, void(*onPacket)(int32_t, int32_t, uint8_t*), void(*onDisconnect)(int32_t));
+void MuWebSocketSend(int32_t handle, const uint8_t* data, size_t size);
+void MuWebSocketClose(int32_t handle);
+#endif
 
 namespace
 {
@@ -342,6 +349,11 @@ void RawSend(int32_t handle, const uint8_t* data, size_t size)
         return;
     }
 
+#if defined(MU_WEB)
+    MuWebSocketSend(handle, data, size);
+    RecordSentBytes(handle, size);
+    return;
+#else
     size_t sent = 0;
     while (sent < size)
     {
@@ -355,8 +367,10 @@ void RawSend(int32_t handle, const uint8_t* data, size_t size)
         sent += static_cast<size_t>(current);
         RecordSentBytes(handle, static_cast<size_t>(current));
     }
+#endif
 }
 
+#if !defined(MU_WEB)
 void RecvLoop(
     int32_t handle,
     bool isEncrypted,
@@ -412,6 +426,7 @@ void RecvLoop(
         onDisconnect(handle);
     }
 }
+#endif
 
 void SendGameEncrypted(int32_t handle, const uint8_t* plainPacket, size_t plainSize)
 {
@@ -523,6 +538,13 @@ MU_EXPORT int32_t ConnectionManager_Connect(
         hostAscii[i] = static_cast<char>(host[i] & 0xFF);
     }
 
+#if defined(MU_WEB)
+    const int fd = MuWebSocketOpen(hostAscii, port, onPacket, onDisconnect);
+    if (fd <= 0)
+    {
+        return 0;
+    }
+#else
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd <= 0)
     {
@@ -605,6 +627,8 @@ MU_EXPORT int32_t ConnectionManager_Connect(
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &sendTimeout, sizeof(sendTimeout));
     }
 
+#endif
+
     auto* state = new AndroidConnState(isEncrypted != 0);
     {
         std::lock_guard<std::mutex> statsLock(state->statsMutex);
@@ -616,12 +640,14 @@ MU_EXPORT int32_t ConnectionManager_Connect(
         g_connections[fd] = state;
     }
 
-    const auto runningFlag = state->running;
     const bool encrypted = state->encrypted;
+#if !defined(MU_WEB)   // web data arrives through web_socket.cpp's callbacks, on the main thread
+    const auto runningFlag = state->running;
     state->recvThread = std::thread([fd, encrypted, runningFlag, onPacket, onDisconnect]()
     {
         RecvLoop(fd, encrypted, runningFlag, onPacket, onDisconnect);
     });
+#endif
 
     if (encrypted)
     {
@@ -654,8 +680,12 @@ MU_EXPORT void ConnectionManager_Disconnect(int32_t handle)
     if (state)
     {
         state->running->store(false);
+#if defined(MU_WEB)
+        MuWebSocketClose(handle);
+#else
         shutdown(handle, SHUT_RDWR);
         close(handle);
+#endif
 
         if (state->recvThread.joinable())
         {
@@ -666,7 +696,11 @@ MU_EXPORT void ConnectionManager_Disconnect(int32_t handle)
         return;
     }
 
+#if defined(MU_WEB)
+    MuWebSocketClose(handle);
+#else
     close(handle);
+#endif
 }
 
 MU_EXPORT void ConnectionManager_BeginReceive(int32_t /*handle*/)

@@ -9,6 +9,26 @@
 #include "Util.h"
 
 CCashShop gCashShop;
+
+// Built-catalog replay cache. Every client login used to cost three SQL queries plus
+// ~250 packets built from scratch on the single queue thread; a crowd logging in grew
+// QueueSize into the hundreds. The packets for a version never change, so the first
+// complete build is recorded and replayed (per-request fields patched in).
+namespace
+{
+	CRITICAL_SECTION g_CatCs;
+	bool g_CatCsInit = false;
+	std::vector<std::string> g_CatPackets;
+	int g_CatPacketsVersion = 0;
+	std::vector<std::string>* g_CatRecord = 0;
+	bool g_CatRecordFailed = false;
+	int g_CatVerValue = 0;
+	DWORD g_CatVerTick = 0;
+	const DWORD kCatVerTtlMs = 5000;
+
+	void CatLock() { if(!g_CatCsInit) { InitializeCriticalSection(&g_CatCs); g_CatCsInit = true; } EnterCriticalSection(&g_CatCs); }
+	void CatUnlock() { LeaveCriticalSection(&g_CatCs); }
+}
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -551,6 +571,8 @@ void CCashShop::SendCatalogLine(int index,SDHP_CASH_SHOP_CATALOG_LINE_SEND* pMsg
 		pMsg->RowKind = rowKind;
 		pMsg->Flags = ((sent >= len)?CATALOG_FLAG_LINE_END:0);
 
+		if(g_CatRecord != 0) { g_CatRecord->push_back(std::string((const char*)pMsg,sizeof(*pMsg))); }
+
 		gSocketManager.DataSend(index,(BYTE*)pMsg,sizeof(*pMsg));
 	}
 	while(sent < len);
@@ -586,15 +608,29 @@ void CCashShop::GDCashShopCatalogLineReqRecv(SDHP_CASH_SHOP_CATALOG_LINE_REQ_REC
 
 	int version = 0;
 
-	if(gQueryManager.ExecQuery("SELECT TOP 1 Version FROM CustomCashShopCatalogVersion") != 0)
+	CatLock();
+
+	if(g_CatVerValue != 0 && (GetTickCount() - g_CatVerTick) < kCatVerTtlMs)
 	{
-		if(gQueryManager.Fetch() != SQL_NO_DATA)
+		version = g_CatVerValue;
+	}
+	else
+	{
+		if(gQueryManager.ExecQuery("SELECT TOP 1 Version FROM CustomCashShopCatalogVersion") != 0)
 		{
-			version = gQueryManager.GetAsInteger("Version");
+			if(gQueryManager.Fetch() != SQL_NO_DATA)
+			{
+				version = gQueryManager.GetAsInteger("Version");
+			}
 		}
+
+		gQueryManager.Close();
+
+		g_CatVerValue = version;
+		g_CatVerTick = GetTickCount();
 	}
 
-	gQueryManager.Close();
+	CatUnlock();
 
 	if(version == 0)
 	{
@@ -618,6 +654,30 @@ void CCashShop::GDCashShopCatalogLineReqRecv(SDHP_CASH_SHOP_CATALOG_LINE_REQ_REC
 		gSocketManager.DataSend(index,(BYTE*)&pMsg,sizeof(pMsg));
 		return;
 	}
+
+	// Replay the recorded stream for this version: no SQL, no row building.
+	CatLock();
+
+	if(g_CatPacketsVersion == version && g_CatPackets.empty() == 0)
+	{
+		for(size_t n=0;n < g_CatPackets.size();n++)
+		{
+			SDHP_CASH_SHOP_CATALOG_LINE_SEND copy;
+			memcpy(&copy,g_CatPackets[n].data(),sizeof(copy));
+			copy.index = lpMsg->index;
+			memcpy(copy.account,lpMsg->account,sizeof(copy.account));
+			gSocketManager.DataSend(index,(BYTE*)&copy,sizeof(copy));
+		}
+
+		CatUnlock();
+		return;
+	}
+
+	// Cache miss: record this build. Held for the whole build so a second asker
+	// waits and then replays instead of building a duplicate.
+	std::vector<std::string> recorded;
+	g_CatRecord = &recorded;
+	g_CatRecordFailed = false;
 
 	/*
 		2048, not 1024. Every text field here is bounded, but the bounds sum to
@@ -669,7 +729,7 @@ void CCashShop::GDCashShopCatalogLineReqRecv(SDHP_CASH_SHOP_CATALOG_LINE_REQ_REC
 	}
 	else
 	{
-		LogAdd(LOG_RED,"[CashShop] catalog category query failed - client keeps its .txt catalog");
+		g_CatRecordFailed = true; LogAdd(LOG_RED,"[CashShop] catalog category query failed - client keeps its .txt catalog");
 	}
 
 	gQueryManager.Close();
@@ -753,7 +813,7 @@ void CCashShop::GDCashShopCatalogLineReqRecv(SDHP_CASH_SHOP_CATALOG_LINE_REQ_REC
 	}
 	else
 	{
-		LogAdd(LOG_RED,"[CashShop] catalog product query failed - variants will be missing");
+		g_CatRecordFailed = true; LogAdd(LOG_RED,"[CashShop] catalog product query failed - variants will be missing");
 	}
 
 	gQueryManager.Close();
@@ -879,7 +939,7 @@ void CCashShop::GDCashShopCatalogLineReqRecv(SDHP_CASH_SHOP_CATALOG_LINE_REQ_REC
 	}
 	else
 	{
-		LogAdd(LOG_RED,"[CashShop] catalog package query failed - client keeps its .txt catalog");
+		g_CatRecordFailed = true; LogAdd(LOG_RED,"[CashShop] catalog package query failed - client keeps its .txt catalog");
 	}
 
 	gQueryManager.Close();
@@ -889,7 +949,18 @@ void CCashShop::GDCashShopCatalogLineReqRecv(SDHP_CASH_SHOP_CATALOG_LINE_REQ_REC
 	memset(pMsg.Fragment,0,sizeof(pMsg.Fragment));
 	pMsg.RowKind = CASH_SHOP_CATALOG_END;
 	pMsg.Flags = CATALOG_FLAG_LINE_END;
+	recorded.push_back(std::string((const char*)&pMsg,sizeof(pMsg)));
 	gSocketManager.DataSend(index,(BYTE*)&pMsg,sizeof(pMsg));
+
+	g_CatRecord = 0;
+
+	if(g_CatRecordFailed == false && version != 0)
+	{
+		g_CatPackets.swap(recorded);
+		g_CatPacketsVersion = version;
+	}
+
+	CatUnlock();
 
 	LogAdd(LOG_BLUE,"[CashShop] catalog v%d sent: %d categories, %d packages, %d product rows",
 		version,categories,packages,products);

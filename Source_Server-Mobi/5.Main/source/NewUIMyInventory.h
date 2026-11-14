@@ -95,6 +95,7 @@ namespace SEASON3B
 		MYSHOP_MODE m_MyShopMode;
 		REPAIR_MODE m_RepairMode;
 		DWORD m_dwStandbyItemKey;
+		int m_iStandbySlot; // the slot the player clicked (fruits): used as is, so the slot never depends on which grid the item is looked up in
 
 		bool m_bRepairEnableLevel;
 		bool m_bMyShopOpen;
@@ -168,6 +169,7 @@ namespace SEASON3B
 
 		//. Exporting Functions
 		void SetStandbyItemKey(DWORD dwItemKey);
+		void SetStandbyItemSlot(int iSlot);
 		DWORD GetStandbyItemKey() const;
 		int GetStandbyItemIndex() const;
 		ITEM* GetStandbyItem() const;

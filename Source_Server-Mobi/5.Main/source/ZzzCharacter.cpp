@@ -3494,6 +3494,10 @@ bool CheckMonsterSkill(CHARACTER* pCharacter, OBJECT* pObject)
 	return true;
 }
 
+// Mining animation loop: frames 0..MINING_LOOP_FRAMES repeat MINING_LOOP_COUNT times, then the stand action returns.
+#define MINING_LOOP_FRAMES	9
+#define MINING_LOOP_COUNT	3
+
 bool CharacterAnimation(CHARACTER* c, OBJECT* o)
 {
     bool Play;
@@ -3570,6 +3574,32 @@ bool CharacterAnimation(CHARACTER* c, OBJECT* o)
     }
 	
 	Play = b->PlayAnimation(&o->AnimationFrame,&o->PriorAnimationFrame,&o->PriorAction,PlaySpeed,o->Position,o->Angle);
+
+	// Mining: the first MINING_LOOP_FRAMES frames repeat MINING_LOOP_COUNT times (9 x 3 = 27 frames). The hit sound
+	// plays each time a loop ends, and after the last one the character goes back to the stand action.
+	if(o->Type == MODEL_PLAYER && o->CurrentAction == PLAYER_MINING)
+	{
+		if(o->AnimationFrame >= (float)MINING_LOOP_FRAMES)
+		{
+			c->MiningLoops++;
+			PlayBuffer(SOUND_MINING_HIT, o);
+			if(c->MiningLoops >= MINING_LOOP_COUNT)
+			{
+				c->MiningLoops = 0;
+				SetPlayerStop(c);
+			}
+			else
+			{
+				o->AnimationFrame -= (float)MINING_LOOP_FRAMES;
+				o->PriorAnimationFrame = (float)(MINING_LOOP_FRAMES - 1);
+			}
+		}
+	}
+	else
+	{
+		c->MiningLoops = 0;
+	}
+
 	if(o->CurrentAction == PLAYER_CHANGE_UP)
 	{
 		if(Play == false)
@@ -17210,6 +17240,14 @@ bool RenderCharacterBackItem(CHARACTER *c, OBJECT* o, bool bTranslate)
     {
         bBindBack = false;
     }
+
+	// Mining: the weapon (the Pick Axe) is always out in the hand, also inside a safe zone where it is
+	// normally stowed on the back. Outside a safe zone it is already in the hand. It goes back on the
+	// back by itself when the action changes.
+	if(o->Type == MODEL_PLAYER && o->CurrentAction == PLAYER_MINING)
+	{
+		bBindBack = false;
+	}
 
 	if(o->Type == MODEL_PLAYER)
 	{

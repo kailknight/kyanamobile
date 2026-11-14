@@ -46,77 +46,6 @@
 #include "DungeonRace.h"
 CAttack gAttack;
 
-int gObjGetRestoreCooldownMS(int level) // OK
-{
-	if(level < 1 || level > 20)
-	{
-		level = 20;
-	}
-
-	return gServerInfo.m_RestoreCooldownLv1MS+(((gServerInfo.m_RestoreCooldownLv20MS-gServerInfo.m_RestoreCooldownLv1MS)*(level-1))/19);
-}
-
-void gObjTryFullHPRestore(LPOBJ lpObj,int rate) // OK
-{
-	const int hpCooldown = gObjGetRestoreCooldownMS(lpObj->HPRestoreSkillLevel);
-
-	if(rate <= 0)
-	{
-		return;
-	}
-
-	const DWORD now = GetTickCount();
-
-	if(hpCooldown > 0 && lpObj->FullHPRestoreTick != 0 && (now-lpObj->FullHPRestoreTick) < (DWORD)hpCooldown)
-	{
-		return;
-	}
-
-	if((GetLargeRand()%100) < rate)
-	{
-		lpObj->FullHPRestoreTick = now;
-
-		lpObj->Life = lpObj->MaxLife+lpObj->AddLife;
-
-		GCLifeSend(lpObj->Index,0xFF,(int)lpObj->Life,lpObj->Shield);
-
-		if(hpCooldown > 0)
-		{
-			gEffectManager.AddEffect(lpObj,1,EFFECT_HP_RESTORE_COOLDOWN,((hpCooldown+999)/1000),0,0,0,0);
-		}
-	}
-}
-
-void gObjTryDefensiveFullSDRestore(LPOBJ lpTarget) // OK
-{
-	const int sdCooldown = gObjGetRestoreCooldownMS(lpTarget->SDRestoreSkillLevel);
-
-	if(lpTarget->DefensiveFullSDRestoreRate <= 0)
-	{
-		return;
-	}
-
-	const DWORD now = GetTickCount();
-
-	if(sdCooldown > 0 && lpTarget->DefensiveFullSDRestoreTick != 0 && (now-lpTarget->DefensiveFullSDRestoreTick) < (DWORD)sdCooldown)
-	{
-		return;
-	}
-
-	if((GetLargeRand()%100) < lpTarget->DefensiveFullSDRestoreRate)
-	{
-		lpTarget->DefensiveFullSDRestoreTick = now;
-
-		if(sdCooldown > 0)
-		{
-			gEffectManager.AddEffect(lpTarget,1,EFFECT_SD_RESTORE_COOLDOWN,((sdCooldown+999)/1000),0,0,0,0);
-		}
-
-		lpTarget->Shield = lpTarget->MaxShield+lpTarget->AddShield;
-
-		GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
-	}
-}
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -980,7 +909,11 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 
 	if(lpObj->Type == OBJECT_USER && effect != 4)
 	{
-		gObjTryFullHPRestore(lpObj,lpObj->OffensiveFullHPRestoreRate);
+		if((GetLargeRand()%100) < lpObj->OffensiveFullHPRestoreRate || (GetLargeRand()%10000) < lpObj->OffensiveFullHPRestoreX100)
+		{
+			lpObj->Life = lpObj->MaxLife+lpObj->AddLife;
+			GCLifeSend(lpObj->Index,0xFF,(int)lpObj->Life,lpObj->Shield);
+		}
 
 		if((GetLargeRand()%100) < lpObj->OffensiveFullSDRestoreRate)
 		{
@@ -1071,9 +1004,12 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 
 	if(lpObj->Type == OBJECT_USER && lpTarget->Type == OBJECT_USER)
 	{
-		ShieldDamage = this->GetShieldDamage(lpObj,lpTarget,damage);
+		// Soul Barrier: mana takes its share of the WHOLE hit first (also while SD is up); SD and HP split what is left
+		__int64 AfterMana = this->ManaShieldAbsorb(lpTarget,damage);
 
-		__int64 LifeDamage = this->ManaShieldAbsorb(lpTarget,damage-ShieldDamage);
+		ShieldDamage = this->GetShieldDamage(lpObj,lpTarget,AfterMana);
+
+		__int64 LifeDamage = AfterMana-ShieldDamage;
 
 		if(lpTarget->Life < LifeDamage)
 		{
@@ -1253,9 +1189,17 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 				gObjAddMsgSendDelay(lpTarget,10,lpObj->Index,10,ReflectDamage);
 			}
 
-			gObjTryFullHPRestore(lpTarget,lpTarget->DefensiveFullHPRestoreRate);
+			if((GetLargeRand()%100) < lpTarget->DefensiveFullHPRestoreRate || (GetLargeRand()%10000) < lpTarget->DefensiveFullHPRestoreX100)
+			{
+				lpTarget->Life = lpTarget->MaxLife+lpTarget->AddLife;
+				GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
+			}
 
-			gObjTryDefensiveFullSDRestore(lpTarget);
+			if((GetLargeRand()%100) < lpTarget->DefensiveFullSDRestoreRate || (GetLargeRand()%10000) < lpTarget->DefensiveFullSDRestoreX100)
+			{
+				lpTarget->Shield = lpTarget->MaxShield+lpTarget->AddShield;
+				GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
+			}
 
 			if((GetLargeRand()%100) < lpTarget->DefensiveFullMPRestoreRate)
 			{
@@ -1484,9 +1428,12 @@ bool CAttack::AttackElemental(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,bool se
 
 	if(lpObj->Type == OBJECT_USER && lpTarget->Type == OBJECT_USER)
 	{
-		ShieldDamage = this->GetShieldDamage(lpObj,lpTarget,damage);
+		// Soul Barrier: mana takes its share of the WHOLE hit first (also while SD is up); SD and HP split what is left
+		__int64 AfterMana = this->ManaShieldAbsorb(lpTarget,damage);
 
-		__int64 LifeDamage = this->ManaShieldAbsorb(lpTarget,damage-ShieldDamage);
+		ShieldDamage = this->GetShieldDamage(lpObj,lpTarget,AfterMana);
+
+		__int64 LifeDamage = AfterMana-ShieldDamage;
 
 		if(lpTarget->Life < LifeDamage)
 		{
@@ -3580,25 +3527,26 @@ int CAttack::GetShieldDamage(LPOBJ lpObj, LPOBJ lpTarget, __int64 damage) // OK
 	int SDDamage = (damage*rate)/100;
 	int HPDamage = damage-SDDamage;
 
+	// the shield explosion (client effect 17: shield crash + sound) plays EVERY time a player's SD is broken down to 0 by a hit,
+	// whether the hit overflowed into HP or used up the last SD exactly
+	bool sdBroken = (lpTarget->Type == OBJECT_USER && lpTarget->Shield > 0 && SDDamage > 0 && SDDamage >= lpTarget->Shield);
+
 	if(lpTarget->Shield < SDDamage)
 	{
 		HPDamage = HPDamage+(SDDamage-lpTarget->Shield);
 		SDDamage = lpTarget->Shield;
+	}
 
-		if(lpTarget->Shield > 0 && HPDamage > (((lpTarget->MaxLife+lpTarget->AddLife)*20)/100))
-		{
-			if(CC_MAP_RANGE(lpTarget->Map) == 0 || IT_MAP_RANGE(lpTarget->Map) == 0)
-			{
-				GCEffectInfoSend(lpTarget->Index,17);
-			}
-		}
+	if(sdBroken != false)
+	{
+		GCEffectInfoSend(lpTarget->Index,17);
 	}
 
 	return SDDamage;
 }
 
-// Soul Barrier: the HP part of a hit is paid from mana first, and only what
-// mana cannot cover reaches HP. ManaShieldManaAbsorbRate is the share of the
+// Soul Barrier: mana pays its share of a hit FIRST (before SD and HP, so mana drops even while
+// the SD is up), and only what mana does not cover goes on to SD and HP. ManaShieldManaAbsorbRate is the share of the
 // hit mana takes (0 = old behaviour, reduction only), ManaShieldManaCostRate the
 // mana spent per 100 damage absorbed. Returns the damage left for HP.
 __int64 CAttack::ManaShieldAbsorb(LPOBJ lpTarget, __int64 damage) // OK

@@ -67,6 +67,7 @@ CNewUIMyInventory::CNewUIMyInventory()
 	m_MyShopMode = MYSHOP_MODE_OPEN;
 	m_RepairMode = REPAIR_MODE_OFF;
 	m_dwStandbyItemKey = 0;
+	m_iStandbySlot = -1;
 
 	m_bRepairEnableLevel = false;
 	m_bMyShopOpen = false;
@@ -1066,6 +1067,12 @@ void CNewUIMyInventory::UI2DEffectCallback(LPVOID pClass, DWORD dwParamA, DWORD 
 void CNewUIMyInventory::SetStandbyItemKey(DWORD dwItemKey)
 {
 	m_dwStandbyItemKey = dwItemKey;
+	m_iStandbySlot = -1; // a new item: the slot is set again by whoever knows it
+}
+
+void CNewUIMyInventory::SetStandbyItemSlot(int iSlot)
+{
+	m_iStandbySlot = iSlot;
 }
 
 DWORD CNewUIMyInventory::GetStandbyItemKey() const
@@ -1076,15 +1083,24 @@ DWORD CNewUIMyInventory::GetStandbyItemKey() const
 int CNewUIMyInventory::GetStandbyItemIndex() const
 {
 	int Result = -1;
+
+	// the slot the player clicked (set for fruits) wins over any lookup
+	if (m_iStandbySlot >= 12 && m_iStandbySlot <= 255)
+	{
+		return m_iStandbySlot;
+	}
 	if (ITEM * pItem = GetStandbyItem())
 	{
 		//==Inv Ext
 		for (int iInv = 0; iInv < CharacterAttribute->InventoryExtensions; iInv++)
 		{
-			Result = g_pMyInventoryExt->GetInventoryCtrl(iInv)->GetIndexByItem(pItem);
-			if (Result != -1)
+			// GetIndexByItem() just turns x/y into a slot without checking the item is in
+			// this grid, so with the backpack on the first extension claimed every item
+			// (fruits, charms) and the server got an empty slot. Only answer if it is here.
+			SEASON3B::CNewUIInventoryCtrl* pExtCtrl = g_pMyInventoryExt->GetInventoryCtrl(iInv);
+			if (pExtCtrl && pExtCtrl->FindItemByKey(pItem->Key) == pItem)
 			{
-				return Result;
+				return pExtCtrl->GetIndexByItem(pItem);
 			}
 		}
 		return m_pNewInventoryCtrl->GetIndexByItem(pItem);
@@ -2357,6 +2373,7 @@ bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM
 		if (point[attributeType] < (pItem->Durability * 10))
 		{
 			g_pMyInventory->SetStandbyItemKey(pItem->Key);
+			g_pMyInventory->SetStandbyItemSlot(iIndex);
 			CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CUsePartChargeFruitMsgBoxLayout));
 			return false;
 		}
@@ -2537,6 +2554,7 @@ bool CNewUIMyInventory::TryConsumeItem(CNewUIInventoryCtrl * targetControl, ITEM
 					}
 				}
 				g_pMyInventory->SetStandbyItemKey(pItem->Key);
+				g_pMyInventory->SetStandbyItemSlot(iIndex);
 				CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CUseFruitMsgBoxLayout));
 				return true;
 			}

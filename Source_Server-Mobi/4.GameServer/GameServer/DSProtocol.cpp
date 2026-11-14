@@ -4,6 +4,7 @@
 #include "DSProtocol.h"
 #include "MonthlyCard.h"
 #include "DuelRanked.h"
+#include "KingOfKira.h"
 #include "MasterPage.h"
 #include "BloodCastle.h"
 #include "CashShop.h"
@@ -152,6 +153,15 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x50: //Kira Pass (monthly WCoin) - paid / status
 				gMonthlyCard.DGResultRecv((SDHP_MONTHLYCARD_RESULT*)lpMsg);
+				break;
+			case 0x60: //King of Kira - relayed state / registration
+				gKingOfKira.DGRelayRecv(lpMsg,size);
+				break;
+			case 0x63: //King of Kira - the current King
+				if(size >= (int)sizeof(SDHP_KOK_WINNER))
+				{
+					gKingOfKira.DGWinnerRecv((SDHP_KOK_WINNER*)lpMsg);
+				}
 				break;
 			case 0x51: //Ranked duel - status / prompt / go / expect / applied / list / msg / cancel (0x5F is DataServer-internal)
 			case 0x52:

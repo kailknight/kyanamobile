@@ -5,6 +5,11 @@
 // =============================================================================
 
 #if defined(__ANDROID__) || defined(MU_IOS)
+// iOS and WebGL2 both stop at GLES 3.0: no GLSL 3.10 (explicit uniform locations, UBO binding qualifier),
+// no buffer storage, no base vertex. The blocks below written for iOS are what those two share.
+#if defined(MU_IOS) || defined(MU_WEB)
+#define MU_GLES30_ONLY 1
+#endif
 
 // This file implements the viewport/scissor shift, so it calls the real ones.
 #define MU_GL_RAW_VIEWPORT 1
@@ -294,7 +299,7 @@ typedef void (GL_APIENTRY* MU_PFNGLDRAWELEMENTSBASEVERTEX)(
     GLenum mode, GLsizei count, GLenum type, const void* indices, GLint basevertex);
 static MU_PFNGLDRAWELEMENTSBASEVERTEX s_glDrawElementsBaseVertex = nullptr;
 
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
 // Defined below, next to the attribute state it has to touch.
 static void DrawQuadIndicesWithAttribOffset(GLsizei indexCount, GLint firstVertex);
 // True on iOS: the ring buffers exist but are mapped per draw (see InitStreamRing).
@@ -306,7 +311,7 @@ static bool s_streamRingMapPerDraw = false;
 static inline void DrawQuadIndicesFrom(GLsizei indexCount, GLint firstVertex) {
     if (firstVertex != 0 && s_glDrawElementsBaseVertex) {
         s_glDrawElementsBaseVertex(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0, firstVertex);
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
     } else if (firstVertex != 0) {
         DrawQuadIndicesWithAttribOffset(indexCount, firstVertex);
 #endif
@@ -489,7 +494,7 @@ static void DestroyBoneRing() {
 
 static void InitBoneRing() {
     s_boneRingTried = true;
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
     return;   // the iOS stream ring maps per draw - no persistent mapping
 #else
     if (!s_streamRingAvailable || !s_glBufferStorageEXT) {
@@ -1005,7 +1010,7 @@ static inline void BindImmediateVertexAttribLayout() {
     s_imAttribValid = true;
 }
 
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
 // Base-vertex stand-in for ES 3.0: point the attributes at this draw's first
 // vertex inside the bound ring buffer, draw the shared quad indices from 0,
 // and mark the layout stale so the next draw re-points it at offset 0.
@@ -1026,7 +1031,7 @@ static void DrawQuadIndicesWithAttribOffset(GLsizei indexCount, GLint firstVerte
 // =============================================================================
 // Shader helpers
 // =============================================================================
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
 // The shaders are written for GLSL ES 3.10. iOS stops at 3.00, and the only
 // 3.10 features they use are explicit uniform locations and the UBO binding
 // qualifier - both dropped here. Uniforms are then found by name (s_uMVP etc.,
@@ -1068,7 +1073,7 @@ static std::string AdaptShaderSource(const char* src) {
 #endif
 
 static GLuint CompileShader(GLenum type, const char* src) {
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
     const std::string adapted = AdaptShaderSource(src);
     src = adapted.c_str();
 #endif
@@ -1291,6 +1296,15 @@ void GL_Compat_Init() {
     glUniform1i(s_uSampler, 0);
     UseProgramCached(0);
     s_samplerUniformInitialized = true;
+#if defined(MU_WEB)
+    // Every uniform location above came from s_prog. Emscripten resolves a location against the current
+    // program's own table, and s_progOpaque never had one built, so uniforms set on it were dropped without
+    // any GL error: it drew with an all-zero MVP, every vertex at one point, and opaque draws (all terrain)
+    // never reached the screen. s_prog handles opaque draws correctly with u_alphaTest off; the separate
+    // no-discard program only exists to help tile-based mobile GPUs, so the web build goes without it.
+    glDeleteProgram(s_progOpaque);
+    s_progOpaque = 0;
+#endif
 
     LOGI("GL_Compat_Init: OK (prog=%u, progOpaque=%u, vbo=%u, ebo=%u)", s_prog, s_progOpaque, s_vbo, s_ebo);
 
@@ -3256,7 +3270,7 @@ void main() {
 // layout(location = N), so on Android SKIN_U(n) is just n. GLSL ES 3.00 (iOS)
 // has no explicit uniform locations: there GL_SkinInit looks each one up by
 // name after linking and stores it at its pinned index.
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
 static GLint s_skinLoc[19];
 #define SKIN_U(n) s_skinLoc[n]
 static const char* const kSkinUniformNames[19] = {
@@ -3386,7 +3400,7 @@ bool GL_SkinInit() {
         return false;
     }
 
-#if defined(MU_IOS)
+#if defined(MU_GLES30_ONLY)
     for (int i = 0; i < 19; ++i) {
         s_skinLoc[i] = kSkinUniformNames[i] ? glGetUniformLocation(s_skinProg, kSkinUniformNames[i]) : -1;
     }
@@ -3447,7 +3461,7 @@ void GL_UpdateSkinningBones(const float boneMatrix3x4[][3][4], int boneCount) {
         boneCount = kMaxSkinBones;
     }
 
-#if !defined(MU_IOS)
+#if !defined(MU_GLES30_ONLY)
     // Bone ring (see kBoneRingSlotBytes): no orphan, no driver copy - a memcpy
     // into persistent-mapped memory and a ranged bind. Same contents as the
     // orphan path below: this set's bones, then identity to the end of the block.

@@ -4,7 +4,6 @@
 
 #include "stdafx.h"
 #include "MasterSkillTree.h"
-#include "Attack.h"
 #include "GameMain.h"
 #include "ItemManager.h"
 #include "MasterPage.h"
@@ -198,11 +197,11 @@ flt CMasterSkillTree::GetMasterSkillValue(int index,int level) // OK
 	}
 	else
 	{
-		// The Restore Full SD / HP skills have a flat chance, so the value the client shows in the skill
-		// tooltip (this level and the next) is the cooldown in seconds instead: level 1 = Lv1Sec ... level 20 = Lv20Sec.
+		// The Restore Full HP / SD skills: the chance (in %, with decimals) comes from RestoreFullChanceTable (CustomConfig.ini),
+		// level here is 0 based. This is also what the client shows in the skill tooltip.
 		if(index == MASTER_SKILL_ADD_RESTORE_HP_RATE1 || index == MASTER_SKILL_ADD_RESTORE_SD_RATE1 || index == MASTER_SKILL_ADD_RESTORE_HP_RATE2 || index == MASTER_SKILL_ADD_RESTORE_SD_RATE2 || index == MASTER_SKILL_ADD_RECOVERY_HP || index == MASTER_SKILL_ADD_RECOVERY_SHIELD)
 		{
-			return (flt)gObjGetRestoreCooldownMS(level+1)/1000.0f;
+			return gServerInfo.m_RestoreChanceTable[((level<0)?0:((level>19)?19:level))];
 		}
 
 		return it->second.MainValue[level];
@@ -953,20 +952,17 @@ void CMasterSkillTree::CalcMasterSkillTreeOption(LPOBJ lpObj,bool flag) // OK
 	#endif
 }
 
-// The Restore Full SD / HP master skills: the same chance (RestoreFullChance) at every skill level; the level
-// only sets the cooldown (see gObjGetRestoreCooldownMS). kind 0 = SD, 1 = HP.
-void CMasterSkillTree::SetRestoreSkill(LPOBJ lpObj,int index,int kind,int* rate)
+// Restore Full HP / SD: adds the chance of this skill's level (RestoreFullChanceTable) in 1/100 %.
+void CMasterSkillTree::SetRestoreChance(LPOBJ lpObj,int index,int* chanceX100)
 {
-	*rate = gServerInfo.m_RestoreFullChance;
-
 	int level = this->GetMasterSkillLevel(lpObj,index);
 
-	int* best = ((kind == 0)?&lpObj->SDRestoreSkillLevel:&lpObj->HPRestoreSkillLevel);
-
-	if(level > (*best))
+	if(level < 1)
 	{
-		*best = level;
+		return;
 	}
+
+	(*chanceX100) += (int)(gServerInfo.m_RestoreChanceTable[((level>20)?19:(level-1))]*100.0f+0.5f);
 }
 
 void CMasterSkillTree::InsertOption(LPOBJ lpObj,int index,int value,bool flag) // OK
@@ -1194,7 +1190,7 @@ void CMasterSkillTree::InsertOption(LPOBJ lpObj,int index,int value,bool flag) /
 			lpObj->OffensiveFullMPRestoreRate += value;
 			break;
 		case MASTER_SKILL_ADD_RESTORE_HP_RATE1:
-			this->SetRestoreSkill(lpObj,index,1,&lpObj->OffensiveFullHPRestoreRate);
+			this->SetRestoreChance(lpObj,index,&lpObj->OffensiveFullHPRestoreX100);
 			break;
 		case MASTER_SKILL_ADD_EXCELLENT_DAMAGE_RATE1:
 			lpObj->ExcellentDamageRate += value;
@@ -1206,7 +1202,7 @@ void CMasterSkillTree::InsertOption(LPOBJ lpObj,int index,int value,bool flag) /
 			lpObj->IgnoreDefenseRate += value;
 			break;
 		case MASTER_SKILL_ADD_RESTORE_SD_RATE1:
-			this->SetRestoreSkill(lpObj,index,0,&lpObj->DefensiveFullSDRestoreRate);
+			this->SetRestoreChance(lpObj,index,&lpObj->DefensiveFullSDRestoreX100); // restore full SD when HIT
 			break;
 		case MASTER_SKILL_ADD_DW_WING_DEFENSE:
 			if(lpObj->Inventory[7].m_Index == GET_ITEM(12,37))
@@ -1693,7 +1689,7 @@ void CMasterSkillTree::InsertOption(LPOBJ lpObj,int index,int value,bool flag) /
 			lpObj->DefensiveFullMPRestoreRate += value;
 			break;
 		case MASTER_SKILL_ADD_RESTORE_HP_RATE2:
-			this->SetRestoreSkill(lpObj,index,1,&lpObj->DefensiveFullHPRestoreRate);
+			this->SetRestoreChance(lpObj,index,&lpObj->DefensiveFullHPRestoreX100);
 			break;
 		case MASTER_SKILL_ADD_EXCELLENT_DAMAGE_RATE2:
 			lpObj->ExcellentDamageRate += value;
@@ -1705,7 +1701,7 @@ void CMasterSkillTree::InsertOption(LPOBJ lpObj,int index,int value,bool flag) /
 			lpObj->IgnoreDefenseRate += value;
 			break;
 		case MASTER_SKILL_ADD_RESTORE_SD_RATE2:
-			this->SetRestoreSkill(lpObj,index,0,&lpObj->DefensiveFullSDRestoreRate);
+			this->SetRestoreChance(lpObj,index,&lpObj->DefensiveFullSDRestoreX100); // restore full SD when HIT
 			break;
 		case MASTER_SKILL_ADD_TRIPLE_DAMAGE_RATE:
 			lpObj->TripleDamageRate += value;
@@ -1752,11 +1748,11 @@ void CMasterSkillTree::InsertOption(LPOBJ lpObj,int index,int value,bool flag) /
 			break;
 		//--
 		case MASTER_SKILL_ADD_RECOVERY_HP:
-			this->SetRestoreSkill(lpObj,index,1,&lpObj->OffensiveFullHPRestoreRate);
+			this->SetRestoreChance(lpObj,index,&lpObj->OffensiveFullHPRestoreX100);
 			break;
 		//---
 		case MASTER_SKILL_ADD_RECOVERY_SHIELD:
-			this->SetRestoreSkill(lpObj,index,0,&lpObj->DefensiveFullSDRestoreRate);
+			this->SetRestoreChance(lpObj,index,&lpObj->DefensiveFullSDRestoreX100); // restore full SD when HIT
 			break;
 		//---
 	}

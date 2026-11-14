@@ -57,6 +57,8 @@ void Other::Load()
 		GetPrivateProfileStringA("Text_ChangeItem", GetFotText, "Null", Text_ChangeItem[st], sizeof(Text_ChangeItem[st]), NameFileLocal);
 		GetPrivateProfileStringA("Text_ChacracterInfo", GetFotText, "Null", Text_ChacracterInfo[st], sizeof(Text_ChacracterInfo[st]), NameFileLocal);
 		GetPrivateProfileStringA("Text_HuyDong", GetFotText, "Null", Text_HuyDong[st], sizeof(Text_HuyDong[st]), NameFileLocal);
+		GetPrivateProfileStringA("Text_ItemReroll", GetFotText, "Null", Text_ItemReroll[st], sizeof(Text_ItemReroll[st]), NameFileLocal);
+		GetPrivateProfileStringA("Text_Mining", GetFotText, "Null", Text_Mining[st], sizeof(Text_Mining[st]), NameFileLocal);
 #if(CongHuongV2)
 		GetPrivateProfileStringA("TextVN_CONGHUONG", GetFotText, "Null", TextVN_CongHuongTrangBi[st], sizeof(TextVN_CongHuongTrangBi[st]), NameFileLocal);
 #endif

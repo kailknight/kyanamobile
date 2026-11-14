@@ -1011,9 +1011,17 @@ bool CDarkSpirit::Attack(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,bool send,BY
 				gObjAddMsgSendDelay(lpTarget,10,lpObj->Index,10,ReflectDamage);
 			}
 
-			gObjTryFullHPRestore(lpTarget,lpTarget->DefensiveFullHPRestoreRate);
+			if((GetLargeRand()%100) < lpTarget->DefensiveFullHPRestoreRate || (GetLargeRand()%10000) < lpTarget->DefensiveFullHPRestoreX100)
+			{
+				lpTarget->Life = lpTarget->MaxLife+lpTarget->AddLife;
+				GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
+			}
 
-			gObjTryDefensiveFullSDRestore(lpTarget);
+			if((GetLargeRand()%100) < lpTarget->DefensiveFullSDRestoreRate || (GetLargeRand()%10000) < lpTarget->DefensiveFullSDRestoreX100)
+			{
+				lpTarget->Shield = lpTarget->MaxShield+lpTarget->AddShield;
+				GCLifeSend(lpTarget->Index,0xFF,(int)lpTarget->Life,lpTarget->Shield);
+			}
 
 			if((GetLargeRand()%100) < lpTarget->DefensiveFullMPRestoreRate)
 			{

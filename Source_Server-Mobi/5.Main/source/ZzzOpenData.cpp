@@ -362,8 +362,15 @@ void OpenPlayers()
 	for(int i=PLAYER_DIE1;i<=PLAYER_DIE2;i++)
 	    Models[MODEL_PLAYER].Actions[i].PlaySpeed = 0.45f;
 
-	for(int i=PLAYER_SIT1;i<MAX_PLAYER_ACTION;i++)
+	for(int i=PLAYER_SIT1;i<MAX_PLAYER_ACTION && i<Models[MODEL_PLAYER].NumActions;i++)
 	    Models[MODEL_PLAYER].Actions[i].PlaySpeed = 0.4f;
+
+	// PLAYER_MINING only exists in a player.bmd that has the appended action (285+ actions).
+	if(Models[MODEL_PLAYER].NumActions > PLAYER_MINING)
+	{
+		Models[MODEL_PLAYER].Actions[PLAYER_MINING].PlaySpeed = 0.3f;
+		Models[MODEL_PLAYER].Actions[PLAYER_MINING].Loop = true;
+	}
 
 	Models[MODEL_PLAYER].Actions[PLAYER_SHOCK              ].PlaySpeed = 0.4f;
 	Models[MODEL_PLAYER].Actions[PLAYER_SEE1               ].PlaySpeed = 0.28f;
@@ -1281,6 +1288,8 @@ void OpenItems()
 	gLoadData.AccessModel(MODEL_15GRADE_ARMOR_OBJ_HEAD,		"Data\\Item\\", "class15_head");        //Efeito +15
 	gLoadData.AccessModel(MODEL_15GRADE_ARMOR_OBJ_PANTLEFT,	"Data\\Item\\", "class15_pantleft");    //Efeito +15
 	gLoadData.AccessModel(MODEL_15GRADE_ARMOR_OBJ_PANTRIGHT,	"Data\\Item\\", "class15_pantright");   //Efeito +15
+	// Pick Axe (item 1,10): Data\Item\Axe11.bmd is BC_diggingpick re-oriented, scaled and gripped like the other axes. Its texture loads in the MODEL_AXE+i loop in OpenItemTextures.
+	gLoadData.AccessModel(MODEL_AXE+10, "Data\\Item\\", "Axe", 11);
 
 
 
@@ -4776,6 +4785,7 @@ void OpenImages()
 	LoadBitmap("Interface\\lock_03.jpg" ,BITMAP_INVENTORY_BUTTON+16);
 	LoadBitmap("Interface\\lock_04.jpg" ,BITMAP_INVENTORY_BUTTON+17);
 	LoadBitmap("Interface\\guild.tga",BITMAP_GUILD);
+	LoadBitmap("Interface\\guild.tga",BITMAP_KOK_FLAG);
 }
 
 void OpenSounds()
@@ -5006,6 +5016,9 @@ void OpenSounds()
 	LoadWaveFile(SOUND_RAGESKILL_BUFF_1, "Data\\Sound\\Ragefighter\\Rage_Buff_1.wav");
 	LoadWaveFile(SOUND_RAGESKILL_BUFF_2, "Data\\Sound\\Ragefighter\\Rage_Buff_2.wav");
 #endif //PBG_ADD_NEWCHAR_MONK
+
+	// Mining hit, played at the end of every loop of the mining animation (see CharacterAnimation).
+	LoadWaveFile(SOUND_MINING_HIT, "Data\\Sound\\SendMine_Attack.wav", 2, true);
 }
 
 extern int	g_iRenderTextType;
@@ -5024,6 +5037,7 @@ void OpenFont()
 void SaveMacro(char *FileName)
 {
 	FILE *fp = fopen(FileName,"wt");
+	if(fp == NULL) return;
 	for(int i=0;i<10;i++)
 	{
 		fprintf(fp,"%s\n",MacroText[i]);

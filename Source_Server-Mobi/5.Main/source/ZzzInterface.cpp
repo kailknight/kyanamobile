@@ -3943,6 +3943,33 @@ bool SkillElf(CHARACTER *c,ITEM *p)
 int ItemKey = 0;
 int ActionTarget = -1;
 
+// Mining Stone NPCs (classes 615 normal, 616 blue, 617 purple, 618 gold; the Tarkan Mining event spawns 616-618). A click goes to the
+// server like any NPC (the "Mine this stone?" window is CB_Mining.cpp); the click only remembers where the stone is so that the swing
+// animation, started when the server confirms an attempt, can face it.
+#define MINING_STONE_FIRST	615
+#define MINING_STONE_LAST	618
+static float g_MiningStonePos[2] = { 0.f, 0.f };
+static bool  g_MiningStoneKnown = false;
+
+// Called by CB_Mining when the server starts a mining attempt: turn to the stone and swing (3 loops, then back to stand).
+void PlayMiningAnimation()
+{
+	if(Hero == NULL)
+		return;
+	OBJECT *o = &Hero->Object;
+	if(Models[MODEL_PLAYER].NumActions <= PLAYER_MINING)
+		return;		// player.bmd without the mining animation (phones, old data)
+	if(o->CurrentAction == PLAYER_MINING)
+		return;		// already swinging
+
+	SetPlayerStop(Hero);
+	Hero->Movement = false;
+
+	if(g_MiningStoneKnown)
+		o->Angle[2] = CreateAngle(o->Position[0], o->Position[1], g_MiningStonePos[0], g_MiningStonePos[1]);
+	SetAction(o, PLAYER_MINING);
+}
+
 void Action(CHARACTER *c,OBJECT *o,bool Now)
 {
 
@@ -4290,6 +4317,13 @@ void Action(CHARACTER *c,OBJECT *o,bool Now)
 			c->Movement = false;
 		}
 		
+		if(TargetNpc != -1 && CharactersClient[TargetNpc].MonsterIndex >= MINING_STONE_FIRST && CharactersClient[TargetNpc].MonsterIndex <= MINING_STONE_LAST)
+		{
+			// remember the stone; the click itself goes to the server below (the window and the mining are server driven)
+			g_MiningStonePos[0] = CharactersClient[TargetNpc].Object.Position[0];
+			g_MiningStonePos[1] = CharactersClient[TargetNpc].Object.Position[1];
+			g_MiningStoneKnown = true;
+		}
 		if(TargetNpc != -1)
 		{
 			DungeonRaceLog("talk step: NPC class %d key %d (sends talk request when class >= 205)", (int)CharactersClient[TargetNpc].MonsterIndex, (int)CharactersClient[TargetNpc].Key);
@@ -4749,6 +4783,17 @@ bool CheckCommand(char *Text, bool bMacroText )
 	// /block, /unblock, /blocklist stay on this device (PlayerBlock.h).
 	if(bMacroText == false && gPlayerBlock.HandleCommand(Text))
 	{
+		return true;
+	}
+
+	// TEMP test command: /mining plays the mining animation on the local hero only.
+	// Remove once the animation is approved.
+	if(bMacroText == false && Hero != NULL && stricmp(Text, "/mining") == 0)
+	{
+		if(Models[MODEL_PLAYER].NumActions > PLAYER_MINING)
+		{
+			SetAction(&Hero->Object, PLAYER_MINING);
+		}
 		return true;
 	}
 

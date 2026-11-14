@@ -2266,3 +2266,10 @@ struct PMSG_SKILL_RULES_SEND
 	DWORD TeleportCooldownMS;	// from reappearing; 0 = none
 };
 void GCSkillRulesSend(int aIndex);
+// 0xD3:0xF6, server -> client: Jewel of Harmony option rates (JewelOfHarmonyOption.txt).
+struct PMSG_JEWEL_OF_HARMONY_RATES_SEND
+{
+	PSBMSG_HEAD header; // C1:D3:F6
+	BYTE rate[3][10];	// [weapon, staff, armour][option 1-10]; 0 = none
+};
+void GCJewelOfHarmonyRatesSend(int aIndex);

@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "UIManager.h"
 #include "Protocol.h"
 #include "WSclient.h"
 #include "NewUISystem.h"
@@ -16,7 +17,10 @@
 #include "CB_AutoNapGame.h"
 #include "CustomRankUser.h"
 #include "CB_DanhHieu.h"
+#include "CB_KingOfKira.h"
 #include "CB_DungeonRace.h"
+#include "CB_Mining.h"
+#include "CB_ItemReroll.h"
 #if(JEWELBANKVER2)
 #include "CB_NewJewelBank.h"
 #else
@@ -503,7 +507,17 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 				MasterPagesRecvResult(lpMsg, size);
 				break;
 #endif
-			case 0xC4: //Ranked duel icons of the players around us (C1:D3:C4, DuelRanked.h on the GameServer)
+			case 0x60: //King of Kira - registration window (CB_KingOfKira.cpp)
+				if (gCB_KingOfKira) gCB_KingOfKira->RecvOpen(lpMsg, size);
+				break;
+			case 0x62: //King of Kira - registration answer
+				if (gCB_KingOfKira) gCB_KingOfKira->RecvResult(lpMsg, size);
+				break;
+			case 0x63: //King of Kira - on-screen counter
+				if (gCB_KingOfKira) gCB_KingOfKira->RecvHud(lpMsg, size);
+				break;
+			case 0x64: //King of Kira - the current King (flag marks)
+				if (gCB_KingOfKira) gCB_KingOfKira->RecvFlag(lpMsg, size);
 				break;
 			case 0x65: //Dungeon Race - NPC window (CB_DungeonRace.cpp)
 				if (gCB_DungeonRace) gCB_DungeonRace->RecvOpen(lpMsg, size);
@@ -511,6 +525,19 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 			case 0x66: //Dungeon Race - on-screen counter
 				if (gCB_DungeonRace) gCB_DungeonRace->RecvHud(lpMsg, size);
 				break;
+			case 0x6D: //Tarkan Mining - window / attempt state / result (CB_Mining.cpp)
+				if (gCB_Mining) gCB_Mining->RecvState(lpMsg, size);
+				break;
+			case 0x6E: //Tarkan Mining - event line
+				if (gCB_Mining) gCB_Mining->RecvHud(lpMsg, size);
+				break;
+			case 0x68: //Excellent Item Reroller - window opens (CB_ItemReroll.cpp)
+				if (gCB_ItemReroll) gCB_ItemReroll->RecvOpen(lpMsg, size);
+				break;
+			case 0x69: //Excellent Item Reroller - state / result
+				if (gCB_ItemReroll) gCB_ItemReroll->RecvState(lpMsg, size);
+				break;
+			case 0xC4: //Ranked duel icons of the players around us (C1:D3:C4, DuelRanked.h on the GameServer)
 			{
 				extern void RecvDuelRankView(const BYTE* lpMsg, int size);
 				RecvDuelRankView(lpMsg, size);
@@ -569,6 +596,12 @@ BOOL ProtocolCoreEx(BYTE head, BYTE* lpMsg, int size, int key) // OK
 #endif
 			case 0xE7: // Trade - both coin offers
 				if (gTradeCoinPanel && size >= (int)sizeof(PMSG_TRADE_COIN_RECV)) gTradeCoinPanel->RecvCoins((PMSG_TRADE_COIN_RECV*)lpMsg);
+				break;
+			case 0xF6: // Jewel of Harmony option rates - GCJewelOfHarmonyRatesSend (3 types x 10 options)
+				if (size >= (int)(sizeof(PSBMSG_HEAD) + 30) && g_pUIJewelHarmonyinfo)
+				{
+					g_pUIJewelHarmonyinfo->SetServerRates(lpMsg + sizeof(PSBMSG_HEAD));
+				}
 				break;
 			case 0xE6: // Skill rules (CustomConfig) - Teleport cooldown
 				if (size >= (int)(sizeof(PSBMSG_HEAD) + sizeof(DWORD)))

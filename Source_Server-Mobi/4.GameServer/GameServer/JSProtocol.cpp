@@ -262,6 +262,16 @@ void JGMapServerMoveAuthRecv(SDHP_MAP_SERVER_MOVE_AUTH_RECV* lpMsg) // OK
 		return;
 	}
 
+	// The allow-list also applies to players who arrive from ANOTHER GameServer (map / server move): before, only a direct login was checked,
+	// so any account could get in by moving over from the main server.
+	if(gServerInfo.IsAccountAllowed(lpMsg->account) == 0)
+	{
+		LogAdd(LOG_RED,"[AllowedAccounts] %s refused (server move) - not on this server's list",lpMsg->account);
+		GJDisconnectAccountSend(lpMsg->index,lpMsg->account,gObj[lpMsg->index].IpAddr);
+		GCMapServerMoveAuthSend(lpMsg->index,9);
+		return;
+	}
+
 	gObj[lpMsg->index].Connected = OBJECT_LOGGED;
 
 	memcpy(gObj[lpMsg->index].Account,lpMsg->account,sizeof(gObj[lpMsg->index].Account));

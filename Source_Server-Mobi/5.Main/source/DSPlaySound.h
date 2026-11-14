@@ -775,6 +775,8 @@ enum
 	SOUND_KARUTAN_KARDAMAHAL_ENV,						// Kardamahal_entrance_env.wav
 #endif	// ASG_ADD_MAP_KARUTAN
 
+	SOUND_MINING_HIT,									// SendMine_Attack.wav
+
     MAX_BUFFER
 };
 

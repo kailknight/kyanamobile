@@ -105,7 +105,6 @@ void OpenFilterFile(char *FileName)
 	}
 
 	delete [] Buffer;
-	fclose(fp);
 }
 
 void OpenNameFilterFile(char *FileName)

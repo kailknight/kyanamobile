@@ -69,3 +69,11 @@
 /Source_Server-Mobi/4.GameServer/**/*.aps
 /Source_Server-Mobi/2.DataServer/**/*.aps
 /Source_Server-Mobi/4.GameServer/**/*.prerename
+
+# Android signing key, build output and Gradle/CMake caches: never commit
+/Source_Server-Mobi/android/keystore/
+/Source_Server-Mobi/android/app/build/
+/Source_Server-Mobi/android/app/.cxx/
+/Source_Server-Mobi/android/.gradle/
+# hand-made backup copies next to the sources
+*.bak*

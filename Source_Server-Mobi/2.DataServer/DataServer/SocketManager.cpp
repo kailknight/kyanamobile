@@ -705,7 +705,13 @@ DWORD WINAPI CSocketManager::ServerQueueThread(CSocketManager* lpSocketManager) 
 		{
 			if(SERVER_RANGE(QueueInfo.index) != 0 && gServerManager[QueueInfo.index].CheckState() != 0)
 			{
+				lpSocketManager->m_BusyHead = QueueInfo.head;
+				lpSocketManager->m_BusyServer = QueueInfo.index;
+				lpSocketManager->m_BusySince = GetTickCount();
+
 				DataServerProtocolCore(QueueInfo.index,QueueInfo.head,QueueInfo.buff,QueueInfo.size);
+
+				lpSocketManager->m_BusySince = 0;
 			}
 		}
 	}
@@ -740,6 +746,25 @@ bool CSocketManager::PostInternal(int index,BYTE head,BYTE* lpMsg,DWORD size)
 	}
 
 	return result;
+}
+
+void CSocketManager::CheckStall() // OK
+{
+	DWORD since = this->m_BusySince;
+
+	if(since == 0 || (GetTickCount()-since) < 10000)
+	{
+		return;
+	}
+
+	if((GetTickCount()-this->m_StallLogTick) < 10000)
+	{
+		return;
+	}
+
+	this->m_StallLogTick = GetTickCount();
+
+	LogAdd(LOG_RED,"[DataServer] STALLED: one packet (head 0x%02X from server %d) has been running for %d s, %d packets are waiting. Check the SQL Server (blocking / locks).",this->m_BusyHead,this->m_BusyServer,(int)((GetTickCount()-since)/1000),(int)this->GetQueueSize());
 }
 
 DWORD CSocketManager::GetQueueSize() // OK

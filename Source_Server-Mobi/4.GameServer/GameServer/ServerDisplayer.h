@@ -90,6 +90,9 @@ struct LOGGLOBAL_DISPLAY_INFO
 	eLogColor color;
 };
 
+// Shown in the status bar of the GameServer window.
+#define GAMESERVER_RELEASE_TEXT "GameServer 1.0.50"
+
 class CServerDisplayer
 {
 public:
@@ -164,11 +167,12 @@ public:
 	int EventCsState;
 	int EventCastleDeep;
 	int EventCryWolf;
+	int EventKingOfKira;
+	int EventDungeonRace;
+	int EventTarkanMining;
 	int EventCryWolfState;
 	int EventBossGuild;
 	int EventCTCMini;
-	int EventKingOfKira;
-	int EventDungeonRace;
 	int EventLoanChien;
 	int EventSelupan;
 	int EventKanturu;

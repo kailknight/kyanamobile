@@ -453,7 +453,11 @@
     <ClInclude Include="JSProtocol.h" />
     <ClInclude Include="Kalima.h" />
     <ClInclude Include="Kanturu.h" />
+    <ClInclude Include="KingOfKira.h" />
+    <ClInclude Include="CustomMining.h" />
     <ClInclude Include="DungeonRace.h" />
+    <ClInclude Include="ItemReroll.h" />
+    <ClInclude Include="KingOfKiraProtocol.h" />
     <ClInclude Include="KanturuBattleOfMaya.h" />
     <ClInclude Include="KanturuBattleOfNightmare.h" />
     <ClInclude Include="KanturuBattleStanby.h" />
@@ -749,9 +753,12 @@
     <ClCompile Include="JSProtocol.cpp" />
     <ClCompile Include="Kalima.cpp" />
     <ClCompile Include="Kanturu.cpp" />
+    <ClCompile Include="KingOfKira.cpp" />
+    <ClCompile Include="CustomMining.cpp" />
+    <ClCompile Include="DungeonRace.cpp" />
+    <ClCompile Include="ItemReroll.cpp" />
     <ClCompile Include="KanturuBattleOfMaya.cpp" />
     <ClCompile Include="KanturuBattleOfNightmare.cpp" />
-    <ClCompile Include="DungeonRace.cpp" />
     <ClCompile Include="KanturuBattleStanby.cpp" />
     <ClCompile Include="KanturuBattleUserMng.cpp" />
     <ClCompile Include="KanturuEntranceNPC.cpp" />

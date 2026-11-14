@@ -4529,6 +4529,17 @@ void BMD::CreateBoundingBox()
 		for(int j=0;j<m->NumVertices;j++)
 		{
 			Vertex_t *v = &m->Vertices[j];
+			// Node comes straight from the model file and indexes the three MAX_BONES tables above. A bad value
+			// wrote into whatever global sits past them, which damaged unrelated state far from this code.
+			if (v->Node < 0 || v->Node >= MAX_BONES)
+			{
+#if defined(MU_WEB)
+				static int s_badNodeLogs = 0;
+				if (s_badNodeLogs++ < 20)
+					printf("[bmd] bad vertex node %d (NumBones %d) in %s mesh %d\n", (int)v->Node, (int)NumBones, Name, i);
+#endif
+				continue;
+			}
 			for(int k=0;k<3;k++)
 			{
 				if (v->Position[k] < BoundingMin[v->Node][k]) BoundingMin[v->Node][k] = v->Position[k];

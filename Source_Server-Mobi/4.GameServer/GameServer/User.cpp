@@ -109,7 +109,10 @@
 #include "BCustomItemBank.h"
 #include "NewUIMyInventory.h"
 #include "BossGuild.h"
+#include "KingOfKira.h"
 #include "DungeonRace.h"
+#include "ItemReroll.h"
+#include "CustomMining.h"
 #include "CTCMini.h"
 #include "BattleSurvivor.h"
 #include "CustomVongQuay.h"
@@ -243,8 +246,11 @@ void gObjEventRunProc() // OK
 #if(BOSS_GUILD == 1)
 	gBossGuild.MainProc();
 #endif
-	gBsVEvent.MainProc();
+	gKingOfKira.MainProc();
 	gDungeonRace.MainProc();
+	gItemReroll.MainProc();
+	gCustomMining.MainProc();
+	gBsVEvent.MainProc();
 
 	if (gServerInfo.m_FlyingDragonsSwitch==1){
 		//Dragones quitar
@@ -1441,6 +1447,9 @@ void gObjClearSpecialOption(LPOBJ lpObj) // OK
 	lpObj->PetDurabilityRate = 100;
 	lpObj->FullDamageReflectRate = 0;
 	lpObj->DefensiveFullHPRestoreRate = 0;
+	lpObj->OffensiveFullHPRestoreX100 = 0;
+	lpObj->DefensiveFullHPRestoreX100 = 0;
+	lpObj->DefensiveFullSDRestoreX100 = 0;
 	lpObj->DefensiveFullMPRestoreRate = 0;
 	lpObj->DefensiveFullSDRestoreRate = 0;
 	lpObj->DefensiveFullBPRestoreRate = 0;
@@ -1663,10 +1672,12 @@ short gObjDel(int aIndex) // OK
 
 	if(lpObj->Type == OBJECT_USER)
 	{
+		gDungeonRace.OnUserLogout(lpObj); // racers get their equipment back before the character is saved
+		gCustomMining.OnUserLogout(lpObj); // pay out what the player won on the stone before the character is saved
+		gItemReroll.OnUserLogout(lpObj); // an item on the Item Reroller NPC goes back to the bag before the character is saved
+
 		if(lpObj->MapServerMoveQuit == 0)
 		{
-		gDungeonRace.OnUserLogout(lpObj); // racers get their equipment back before the character is saved
-
 			gObjectManager.CharacterGameClose(aIndex);
 
 			GJDisconnectAccountSend(aIndex,lpObj->Account,lpObj->IpAddr);
@@ -2699,6 +2710,8 @@ void gObjUserDie(LPOBJ lpObj,LPOBJ lpTarget) // OK
 	{
 		return;
 	}
+	gKingOfKira.OnUserDie(lpObj,lpTarget);
+
 //FakeOnline_EMU
 #if USE_FAKE_ONLINE == TRUE
 	if (lpTarget->Type == OBJECT_USER && lpObj->IsFakeOnline == true) //Neu bi nguoi kill 
@@ -3152,16 +3165,31 @@ BOOL gObjMoveGate(int aIndex,int gate,int forceMap,int forceX,int forceY) // OK
 		y = forceY;
 	}
 
-	if (lpObj->Transaction == 1)
 	{
-		gObjInventoryRollback(aIndex);
-		goto ERROR_JUMP;
+		// King of Kira: warps into Devias are refused / redirected while it is playing
+		int kok = gKingOfKira.WarpFilter(lpObj,&map,&x,&y);
+
+		if(kok == 1)
+		{
+			goto ERROR_JUMP;
+		}
+
+		if(kok == 2)
+		{
+			return 1;
+		}
+	}
+
 	// Dungeon Race: racers who warp are disqualified, outsiders are kept out of the Dungeon while it runs
 	if(gDungeonRace.WarpFilter(lpObj,map,x,y) != 0)
 	{
 		goto ERROR_JUMP;
 	}
 
+	if (lpObj->Transaction == 1)
+	{
+		gObjInventoryRollback(aIndex);
+		goto ERROR_JUMP;
 	}
 
 	if(lpObj->PShopOpen != 0)
@@ -3364,6 +3392,16 @@ void gObjTeleport(int aIndex,int map,int x,int y) // OK
 		return;
 	}
 
+	if(gKingOfKira.WarpFilter(&gObj[aIndex],&map,&x,&y) != 0)
+	{
+		return;
+	}
+
+	if(gDungeonRace.WarpFilter(&gObj[aIndex],map,x,y) != 0)
+	{
+		return;
+	}
+
 	if(MAP_RANGE(map) == 0)
 	{
 		return;
@@ -3383,11 +3421,6 @@ void gObjTeleport(int aIndex,int map,int x,int y) // OK
 		if(NextServerCode != gServerInfo.m_ServerCode)
 		{
 			if(NextServerCode == -1)
-	if(gDungeonRace.WarpFilter(&gObj[aIndex],map,x,y) != 0)
-	{
-		return;
-	}
-
 			{
 				return;
 			}

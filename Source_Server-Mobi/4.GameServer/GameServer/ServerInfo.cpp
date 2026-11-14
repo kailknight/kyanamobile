@@ -139,7 +139,10 @@
 #include "BCustomEdit.h"
 #include "CB_NewQuest.h"
 #include "BossGuild.h"
+#include "KingOfKira.h"
 #include "DungeonRace.h"
+#include "ItemReroll.h"
+#include "CustomMining.h"
 #include "CBHuyDongExc.h"
 #include "ThuMuaDoExc.h"
 #if (CongHuongV2)
@@ -410,6 +413,11 @@ void CServerInfo::ReadCommonInfo() // OK
 	LogAdd(LOG_BLUE,"[ServerInfo] Common loaded successfully");
 }
 
+void CServerInfo::ReadMiningInfo() // OK
+{
+	gCustomMining.Load(gPath.GetFullPath("Custom\\CustomMining.txt"));
+}
+
 void CServerInfo::ReadCustomInfo() // OK
 {
 	gCustomVongQuay.LoadFileXML(gPath.GetFullPath("Custom\\CustomSpinWheel.xml"));
@@ -467,6 +475,10 @@ void CServerInfo::ReadCustomInfo() // OK
 	gCustomMix.Load(gPath.GetFullPath("Custom\\CustomMix.txt"));
 
 	gCustomMarlon.Load(gPath.GetFullPath("Custom\\CustomMarlonTeleport.txt"));
+
+	gItemReroll.Load(gPath.GetFullPath("Custom\\CustomItemReroll.txt"));
+
+	this->ReadMiningInfo();
 
 	gDeviceBan.Load(gPath.GetFullPath("Custom\\DeviceBan.txt"));
 
@@ -4961,9 +4973,42 @@ int CServerInfo::GetDivisorEx(char* section, const char* key, const char* legacy
 
 void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 {
-#if FIXTELE
-	gDungeonRace.Load(section,path);
+	// King of Kira has its own file: Data\Custom\CustomKingOfKira.txt, section [KingOfKira] (same key names as before).
+	// Only when that file is missing are the old KingOfKira* keys of CustomConfig.ini used.
+	{
+		char kokPath[MAX_PATH];
+		strcpy_s(kokPath,gPath.GetFullPath("Custom\\CustomKingOfKira.txt"));
 
+		if(GetFileAttributesA(kokPath) != INVALID_FILE_ATTRIBUTES)
+		{
+			gKingOfKira.Load("KingOfKira",kokPath);
+			LogAdd(LOG_BLUE,"[KingOfKira] settings loaded from %s",kokPath);
+		}
+		else
+		{
+			gKingOfKira.Load(section,path);
+			LogAdd(LOG_RED,"[KingOfKira] %s not found: using the KingOfKira keys of %s",kokPath,path);
+		}
+	}
+	// Dungeon Race has its own file: Data\Custom\CustomDungeonRace.txt, section [DungeonRace] (same key names as before).
+	// Only when that file is missing are the old DungeonRace* keys of CustomConfig.ini used.
+	{
+		char drPath[MAX_PATH];
+		strcpy_s(drPath,gPath.GetFullPath("Custom\\CustomDungeonRace.txt"));
+
+		if(GetFileAttributesA(drPath) != INVALID_FILE_ATTRIBUTES)
+		{
+			gDungeonRace.Load("DungeonRace",drPath);
+			LogAdd(LOG_BLUE,"[DungeonRace] settings loaded from %s",drPath);
+		}
+		else
+		{
+			gDungeonRace.Load(section,path);
+			LogAdd(LOG_RED,"[DungeonRace] %s not found: using the DungeonRace keys of %s",drPath,path);
+		}
+	}
+
+#if FIXTELE
 	gBCustomEdit.Load();
 #endif
 	this->m_ThoiGianThoatGame = this->GetProfileIntEx(section, "GameExitTime", "ThoiGianThoatGame", 6, path);
@@ -5222,6 +5267,32 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	if (this->m_RestoreFullChance < 0) { this->m_RestoreFullChance = 0; }
 	if (this->m_RestoreFullChance > 100) { this->m_RestoreFullChance = 100; }
 
+	// Restore Full HP / SD master skills (both): the chance in % at each skill level 1..20, with decimals.
+	{
+		static const float defaults[20] = {0.12f,0.19f,0.26f,0.31f,0.38f,0.44f,0.49f,0.57f,0.63f,0.68f,0.74f,0.81f,0.87f,0.92f,0.97f,1.03f,1.08f,1.13f,1.17f,1.20f};
+
+		char text[512] = {0};
+		GetPrivateProfileString(section, "RestoreFullChanceTable", "", text, sizeof(text), path);
+
+		for (int n = 0; n < 20; n++) { this->m_RestoreChanceTable[n] = defaults[n]; }
+
+		const char* p = text;
+
+		for (int n = 0; n < 20 && *p != 0; n++)
+		{
+			char* end = 0;
+			double value = strtod(p, &end);
+
+			if (end == p) { break; }
+
+			this->m_RestoreChanceTable[n] = (float)((value < 0) ? 0 : ((value > 100) ? 100 : value));
+
+			p = end;
+
+			while (*p == ',' || *p == ' ') { p++; }
+		}
+	}
+
 	this->m_RestoreCooldownLv1MS = GetPrivateProfileInt(section, "RestoreFullCooldownLv1Sec", 40, path) * 1000;
 	this->m_RestoreCooldownLv20MS = GetPrivateProfileInt(section, "RestoreFullCooldownLv20Sec", 10, path) * 1000;
 
@@ -5466,6 +5537,8 @@ void CServerInfo::ReadAllowedAccounts(char* section,char* path) // OK
 	{
 		this->m_AllowedAccounts.push_back(token);
 	}
+
+	LogAdd(LOG_BLUE,"[AllowedAccounts] %s, %d account(s) listed",(this->m_AllowedAccountsOnly != 0)?"ON - only the listed accounts can enter":"OFF - any account can enter",(int)this->m_AllowedAccounts.size());
 }
 
 bool CServerInfo::IsAccountAllowed(const char* account) // OK

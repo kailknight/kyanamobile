@@ -9,6 +9,9 @@
 #include "NewUIBase.h"
 #include "Other.h"
 #include "ZzzInterface.h"
+#include "CB_DuelRanked.h"
+#include "NewUIBCustomMenu.h"
+#include "Input.h"
 
 #if(CB_ActiveInvasionsD)
 CB_ActiveInvasions* gCB_ActiveInvasions;
@@ -65,8 +68,19 @@ void CB_ActiveInvasions::update_monster_recv(PMSG_INVASION_MONSTER_UPDATE_RECV* 
 }
 extern float NoticeInverse;
 int startValue = 0;
+
+// Modern look (code drawn, same helpers as the event windows): a small "Invasion" tab at the top centre that only exists while an
+// invasion is going on, and a list panel (monster, killed/total) under the top-right corner when the tab is clicked.
 void CB_ActiveInvasions::DrawWindow()
 {
+	if (this->m_data.empty())
+	{
+		// no invasion running: nothing is shown, and the panel starts closed for the next one
+		gInterface.Data[eActiveInvasionsMain].OnShow = false;
+		startValue = 0;
+		return;
+	}
+
 	if (gInterface.CheckWindow(Interface::MoveList) || gInterface.CheckWindow(Interface::ObjWindow::CashShop) || gInterface.CheckWindow(Interface::ObjWindow::SkillTree) || gInterface.CheckWindow(Interface::ObjWindow::FullMap)
 		|| (gInterface.CheckWindow(Interface::Inventory)
 			&& gInterface.CheckWindow(Interface::ExpandInventory)
@@ -79,99 +93,137 @@ void CB_ActiveInvasions::DrawWindow()
 		return;
 	}
 
-	float width = 150;
-	float height = 20;
-	float X = (MAX_WIN_WIDTH/2)-(width/2);
-	float Y = 0;
-	gInterface.DrawBarForm(X + 30, Y, width - 60, height-4, 0.0, 0.0, 0.0, 0.7);//Background
-	if ((int)NoticeInverse % 20 < 5)
-	{
-		TextDraw(g_hFontBold, X, Y + 3, 0xFFD51CFF, 0x0, width, height, 3, "[Boss Info]"); //
-	}
-	else
-	{
-		TextDraw(g_hFont, X, Y + 3, 0xFFD51CFF, 0x0, width, height, 3, "[Boss Info]"); //
-	}
+	const DWORD kGold = RankedUi::Col(255, 200, 80);
+	const DWORD kWhite = RankedUi::Col(255, 255, 255);
+	const DWORD kNew = RankedUi::Col(190, 130, 255);
 
-	if (SEASON3B::CheckMouseIn(X, Y, width, height) == true)
+	// the tab
+	char tab[48];
+	sprintf_s(tab, "INVASION  (%d)", (int)this->m_data.size());
+	const float tabW = 130.0f, tabH = 20.0f;
+	const float tabX = (float)MAX_WIN_WIDTH * 0.5f - tabW * 0.5f;
+	const float tabY = 0.0f;
+	const bool pulse = ((int)NoticeInverse % 20 < 5);
+
+	RankedUi::Bar(tabX, tabY, tabW, tabH, RankedUi::Col(12, 12, 16, 215));
+	RankedUi::Outline(tabX, tabY, tabW, tabH, pulse ? RankedUi::Col(255, 235, 150) : RankedUi::Col(214, 170, 70));
+	RankedUi::DrawDiamond(tabX + 10.0f, tabY + tabH * 0.5f, 3.0f, kGold);
+	RankedUi::TextBox(g_hFontBold, tabX, tabY, tabW, tabH, RT3_SORT_CENTER, kGold, tab);
+
+	if (RankedUi::Inside(tabX, tabY, tabW, tabH) && SEASON3B::IsPress(VK_LBUTTON))
 	{
-		if (SEASON3B::IsPress(VK_LBUTTON))
-		{
-			gInterface.Data[eActiveInvasionsMain].OnShow ^= 1;
-		}
+		gInterface.Data[eActiveInvasionsMain].OnShow ^= 1;
 	}
 
 	if (!gInterface.Data[eActiveInvasionsMain].OnShow)
 	{
 		return;
 	}
-	float WindowW = 190;
-	float WindowH = 250;
-	float StartX = (MAX_WIN_WIDTH - WindowW) - (10);
-	float StartY = 0;
 
+	// the list
+	const int perPage = 12;
+	const int total = (int)this->m_data.size();
 
-	g_pBCustomMenuInfo->DrawWindowCustomMini(&StartX, &StartY, WindowW, WindowH, eActiveInvasionsMain, "Boss Info");
-	int InfoX = StartX + 5;
-	int InfoY = StartY + 10;
-	int HText = 12;
-	int CountText = 0;
-	//TextDraw((HFONT)g_hFont, InfoX, InfoY + (HText * CountText++), 0xFFC421FF, 0x0, WindowW - 30, 0, 1, "TTTTTTTTTTTT/BVBBBBBB");
+	if (startValue >= total) startValue = 0;
 
-	//int startValue = ((this->m_data.size() - 15.0) / 100.0 * static_cast<double>(this->scroll_value + 1));
-	
+	const int rows = min(perPage, total - startValue);
+	const float rowH = 16.0f;
+	const bool paged = (total > perPage);
+	const float W = 200.0f;
+	const float H = 30.0f + rows * rowH + (paged ? 26.0f : 8.0f);
 
-	for (int i = startValue, counter = 0; counter < 12; i++)
+	// Opens in the middle of the screen, then the player can drag it by its title bar (the position is kept).
+	static float s_X = 0.0f, s_Y = 0.0f, s_DX = 0.0f, s_DY = 0.0f;
+	static bool s_Set = false, s_Dragging = false, s_WasDown = false;
+
+#if defined(MU_TOUCH_UI)
+	const bool down = SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnDn();
+#else
+	const bool down = ((GetKeyState(VK_LBUTTON) & 0x8000) != 0);
+#endif
+	const bool clickEdge = down && !s_WasDown;
+	s_WasDown = down;
+
+	if (!s_Set)
 	{
-		if (i >= this->m_data.size())
-		{
-			break;
-		}
-
-		std::string Text;
-
-		Text = getMonsterName(this->m_data[i].monster_id);
-
-		std::string count = std::to_string(static_cast<long long>(this->m_data[i].count._count)) + "/" + std::to_string(static_cast<long long>(this->m_data[i].count._max_count));
-
-		DWORD Color = 0xFFD51CFF;
-
-		if (this->m_data[i].is_update)
-		{
-			if (this->m_data[i].blink_type)
-				Color = 0xBD7AFFFF;
-
-			//if (this->draw_count >= 20)
-			//{
-			//	this->m_data[i].blink_type = !this->draw_type;
-			//}
-		}
-
-		TextDraw(g_hFontBold, InfoX + 10, InfoY + 18 + (counter * 15), Color, 0x0, 0, 0, 1, "%s", Text.c_str());
-		TextDraw(g_hFontBold, InfoX + WindowW - 15, InfoY + 18 + (counter * 15), Color, 0x0, 0, 0, 7, "%s", count.c_str());
-		//gInterface.DrawBarForm(InfoX + 5, InfoY + 29 + (counter * 15), WindowW - 7, 2, 0.0, 0.0, 0.0, 1.0);
-
-		if (SEASON3B::CheckMouseIn(InfoX + 10, InfoY + 18 + (counter * 15), InfoX + 10 + 80, InfoY + 18 + (counter * 15) + 15))
-		{
-			this->m_data[i].is_update = false;
-		}
-
-		counter++;
+		s_X = ((float)MAX_WIN_WIDTH - W) * 0.5f;
+		s_Y = ((float)MAX_WIN_HEIGHT - H) * 0.5f;
+		s_Set = true;
 	}
 
-	if (startValue > 0)
+	if (clickEdge && RankedUi::Inside(s_X, s_Y, W, 24.0f))
 	{
-		if (g_pBCustomMenuInfo->DrawButtonGUI(CNewUIGuildInfoWindow::IMAGE_GUILDINFO_TAB_BUTTON, StartX + 40, StartY + (WindowH - 40), 20, 23, 3))
+		s_Dragging = true;
+		s_DX = (float)MouseX - s_X;
+		s_DY = (float)MouseY - s_Y;
+	}
+	if (!down) s_Dragging = false;
+	if (s_Dragging)
+	{
+		s_X = (float)MouseX - s_DX;
+		s_Y = (float)MouseY - s_DY;
+	}
+	if (s_X < 0.0f) s_X = 0.0f;
+	if (s_X > (float)MAX_WIN_WIDTH - W) s_X = (float)MAX_WIN_WIDTH - W;
+	if (s_Y < 0.0f) s_Y = 0.0f;
+	if (s_Y > (float)MAX_WIN_HEIGHT - H) s_Y = (float)MAX_WIN_HEIGHT - H;
+
+	const float X = s_X;
+	const float Y = s_Y;
+
+	if (RankedUi::Inside(X, Y, W, H) && g_pBCustomMenuInfo != NULL)
+	{
+		g_pBCustomMenuInfo->SetBlockCur(TRUE);
+	}
+
+	InterfaceObject& d = gInterface.Data[eActiveInvasionsMain];
+	d.X = X; d.Y = Y; d.Width = W; d.Height = H; d.FirstLoad = true;
+
+	RankedUi::Bar(X, Y, W, H, RankedUi::Col(12, 12, 16, 225));
+	RankedUi::Outline(X, Y, W, H, RankedUi::Col(214, 170, 70));
+	RankedUi::Outline(X + 2.0f, Y + 2.0f, W - 4.0f, H - 4.0f, RankedUi::Col(70, 58, 34));
+	RankedUi::DrawDiamond(X + 12.0f, Y + 13.0f, 3.5f, kGold);
+	RankedUi::DrawDiamond(X + W - 12.0f, Y + 13.0f, 3.5f, kGold);
+	RankedUi::Text(g_hFontBold, X, Y + 6.0f, W, RT3_SORT_CENTER, kGold, "INVASION  (drag to move)");
+
+	for (int c = 0; c < rows; c++)
+	{
+		ACTIVE_INVASIONS& e = this->m_data[startValue + c];
+
+		char count[32];
+		sprintf_s(count, "%d/%d", e.count._count, e.count._max_count);
+
+		const float ry = Y + 28.0f + c * rowH;
+		const DWORD color = e.is_update ? kNew : kWhite;
+
+		if (c % 2 == 0)
 		{
-			startValue--;
+			RankedUi::Bar(X + 5.0f, ry - 1.0f, W - 10.0f, rowH - 1.0f, RankedUi::Col(255, 255, 255, 14));
+		}
+
+		RankedUi::Text(g_hFont, X + 10.0f, ry + 1.0f, W - 80.0f, RT3_SORT_LEFT, color, getMonsterName(e.monster_id));
+		RankedUi::Text(g_hFontBold, X + W - 70.0f, ry + 1.0f, 60.0f, RT3_SORT_RIGHT, color, count);
+
+		if (RankedUi::Inside(X + 5.0f, ry - 1.0f, W - 10.0f, rowH - 1.0f))
+		{
+			e.is_update = false;
 		}
 	}
-	if ((this->m_data.size() / 12) > startValue)
+
+	if (paged)
 	{
-		if (g_pBCustomMenuInfo->DrawButtonGUI(CNewUIGuildInfoWindow::IMAGE_GUILDINFO_TAB_BUTTON, StartX + (WindowW - 65), StartY + (WindowH - 40), 20, 23, 3))
+		const float by = Y + H - 24.0f;
+		char page[24];
+		sprintf_s(page, "%d / %d", startValue / perPage + 1, (total + perPage - 1) / perPage);
+		RankedUi::Text(g_hFont, X, by + 5.0f, W, RT3_SORT_CENTER, kGold, page);
+
+		RankedUi::DrawButton(X + 10.0f, by, 30.0f, 20.0f, "<", 0, startValue > 0, true);
+		RankedUi::DrawButton(X + W - 40.0f, by, 30.0f, 20.0f, ">", 0, startValue + perPage < total, true);
+
+		if (SEASON3B::IsPress(VK_LBUTTON))
 		{
-			startValue++;
-	
+			if (startValue > 0 && RankedUi::Inside(X + 10.0f, by, 30.0f, 20.0f)) startValue -= perPage;
+			else if (startValue + perPage < total && RankedUi::Inside(X + W - 40.0f, by, 30.0f, 20.0f)) startValue += perPage;
 		}
 	}
 }

@@ -748,6 +748,8 @@ enum
 	BITMAP_VIP_BADGES = BITMAP_SLOTMACHINE_END + 1,
 	// Cooldown buff icons (Interface\newui_cdicons.ozt, 256x256, 20x28 cells: 0 = Restore Full SD, 1 = Restore Full HP).
 	BITMAP_BUFF_COOLDOWN_ICONS = BITMAP_SLOTMACHINE_END + 2,
+	// King of Kira: a private copy of the 8x8 guild mark texture, drawn on the Devias flags (CB_KingOfKira.cpp).
+	BITMAP_KOK_FLAG = BITMAP_SLOTMACHINE_END + 3,
 	BITMAP_EFFECT_TEXTURE_END = 33000,
 	BITMAP_NONAMED_TEXTURES_BEGIN = 33001,
 	BITMAP_NONAMED_TEXTURES_NEW_LOAD=  111000,

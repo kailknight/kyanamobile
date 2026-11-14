@@ -12,6 +12,7 @@
 #include "ServerInfo.h"
 #include "SocketManager.h"
 #include "User.h"
+#include "KingOfKira.h"
 #include "CustomEventTime.h"
 CServerDisplayer gServerDisplayer;
 //////////////////////////////////////////////////////////////////////
@@ -228,7 +229,7 @@ void CServerDisplayer::SetWindowName() // OK
 
 	SendMessage(hWndStatusBar, SB_SETTEXT, 4,(LPARAM)text);
 
-	SendMessage(hWndStatusBar, SB_SETTEXT, 5,(LPARAM)NULL);
+	SendMessage(hWndStatusBar, SB_SETTEXT, 5,(LPARAM)GAMESERVER_RELEASE_TEXT);
 
 	ShowWindow(hWndStatusBar, SW_SHOW);
 
@@ -457,7 +458,7 @@ void CServerDisplayer::PaintEventTime() // OK
 	rect.left = rect.right - 145;
 	rect.right = rect.right - 5;
 	rect.top = 0;
-	rect.bottom = rect.top + 270;
+	rect.bottom = rect.top + 292;
 
 	HDC hdc = GetDC(this->m_hwnd);
 
@@ -583,10 +584,12 @@ void CServerDisplayer::PaintInvasionTime() // OK
 	SetTextColor(hdc, RGB(30, 173, 181));
 	TextOut(hdc, rect.left + 100, rect.top + 2, "INVASION:", 9);
 	int CountTime = -1;
+	int lastRow = 0;
 	for (int i = 0; i < 30; i++)
 	{
 		if (gCustomEventTime.DataEventTime.empty() || i > gCustomEventTime.DataEventTime.size()) break;
 		if (strlen(gCustomEventTime.DataEventTime[i].NameEvent) < 1) continue;
+		lastRow = i;
 		SetTextColor(hdc, RGB(0, 102, 204));
 		wsprintf(text1, "%d. %s", i, gCustomEventTime.DataEventTime[i].NameEvent);
 		//CountTime = this->EventBc;
@@ -651,10 +654,10 @@ Exit:
 		SetTextColor(hdc, RGB(30, 173, 181));
 		TextOut(hdc, rect.left + 100, cy, "CUSTOM EVENT:", 13);
 
-		static const char* names[2] = { "King of Kira", "Dungeon Race" };
-		int times[2] = { this->EventKingOfKira, this->EventDungeonRace };
+		static const char* names[3] = { "King of Kira", "Dungeon Race", "Tarkan Mining" };
+		int times[3] = { this->EventKingOfKira, this->EventDungeonRace, this->EventTarkanMining };
 
-		for (int k = 0; k < 2; k++)
+		for (int k = 0; k < 3; k++)
 		{
 			int ct = times[k];
 			char t2[30];
@@ -1702,11 +1705,12 @@ void CServerDisplayer::ClearTimeDisplayer()
 	gServerDisplayer.EventSelupan = -1;
 	gServerDisplayer.EventKanturu = -1;
 	gServerDisplayer.EventCryWolf = -1;
+	gServerDisplayer.EventKingOfKira = -1;
+	gServerDisplayer.EventDungeonRace = -1;
+	gServerDisplayer.EventTarkanMining = -1;
 
 }
 void CServerDisplayer::InitTimeEvent()
-	gServerDisplayer.EventKingOfKira = -1;
-	gServerDisplayer.EventDungeonRace = -1;
 {
 	gCustomEventTime.DataEventTime.clear();
 	gCustomEventTime.LoadDataTime = 0;
@@ -1729,5 +1733,8 @@ void CServerDisplayer::InitTimeEvent()
 	gCustomEventTime.AddDataEventsTime("Selupan", &this->EventSelupan); this->CountTimeEventS++;
 	gCustomEventTime.AddDataEventsTime("Kanturu", &this->EventKanturu); this->CountTimeEventS++;
 	gCustomEventTime.AddDataEventsTime("Crywolf", &this->EventCryWolf); this->CountTimeEventS++;
+	gCustomEventTime.AddDataEventsTime("Tarkan Mining", &this->EventTarkanMining); this->CountTimeEventS++;
+	gCustomEventTime.AddDataEventsTime("King of Kira", &this->EventKingOfKira); this->CountTimeEventS++;
+	gCustomEventTime.AddDataEventsTime("Dungeon Race", &this->EventDungeonRace); this->CountTimeEventS++;
 
 }

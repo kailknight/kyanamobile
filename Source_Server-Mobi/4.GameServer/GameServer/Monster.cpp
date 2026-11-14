@@ -192,7 +192,7 @@ void gObjMonsterDieGiveItem(LPOBJ lpObj,LPOBJ lpTarget) // OK
 
 		if(lpObj->Level >= 25 && (GetLargeRand()%100) < SetItemDropRate)
 		{
-			gSetItemType.MakeRandomSetItem(lpTarget->Index,lpObj->Map,lpObj->X,lpObj->Y);
+			gSetItemType.MakeRandomSetItem(lpTarget->Index,lpObj->Map,lpObj->X,lpObj->Y,true);
 			return;
 		}
 

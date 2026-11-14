@@ -25,8 +25,17 @@ CProtect::~CProtect() // OK
 
 BYTE EncDecKey1;
 BYTE EncDecKey2;
+#if defined(MU_WEB)
+int MuWebSocketPeerPort(int32_t handle);
+#endif
+
 bool CProtect::CheckSocketPort(SOCKET s) // OK1
 {
+#if defined(MU_WEB)
+	// A WebSocket has no getpeername; web_socket.cpp keeps the port the game connected to.
+	const int webPort = MuWebSocketPeerPort(static_cast<int32_t>(s));
+	return webPort >= gProtect.m_MainInfo.GSPortMin && webPort <= gProtect.m_MainInfo.GSPortMax;
+#endif
 	SOCKADDR_IN addr;
 	int addr_len = sizeof(addr);
 

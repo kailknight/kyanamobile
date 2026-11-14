@@ -32,6 +32,8 @@ public:
 	char TextVN_CongHuongTrangBi[50][120];
 #endif
 	char Text_HuyDong[50][120];
+	char Text_ItemReroll[50][160];	// [Text_ItemReroll] CB_ItemReroll.cpp
+	char Text_Mining[50][160];	// [Text_Mining] CB_Mining.cpp
 
 };
 

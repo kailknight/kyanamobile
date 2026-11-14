@@ -71,6 +71,7 @@ void CServerDisplayer::Init(HWND hWnd) // OK
 
 void CServerDisplayer::Run() // OK
 {
+	gSocketManager.CheckStall();
 	this->SetWindowName();
 	this->PaintAllInfo();
 	this->LogTextPaint();

@@ -19,6 +19,11 @@
 #if defined(__ANDROID__) || (defined(MU_IOS) && !defined(MU_MACOS))
 #define MU_STORE_BILLING 1
 #include "Platform/MobilePlatform.h"
+
+#if defined(MU_WEB)
+extern "C" void MuWebOpenTopUp();   // Web/platform/web_platform.cpp
+#endif
+
 #endif
 #if defined(__ANDROID__)
 #define MU_STORE_NAME "Google Play"
@@ -929,6 +934,11 @@ bool CNewUIInGameShop::BtnProcess()
 
 	if( m_CashChargeButton.UpdateMouseEvent() == true )
 	{
+#if defined(MU_WEB)
+		// Google Play cannot charge from a browser: top-ups go through the website's store.
+		MuWebOpenTopUp();
+		return true;
+#endif
 #if defined(MU_STORE_BILLING)
 		OpenRecharge();
 		return true;

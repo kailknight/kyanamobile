@@ -1428,6 +1428,7 @@ enum
 	PLAYER_RAGE_FENRIR_ATTACK_RIGHT	,
 	PLAYER_STOP_RAGEFIGHTER			,
 #endif //PBG_ADD_NEWCHAR_MONK_SKILL
+	PLAYER_MINING                   ,	// 284: appended to player.bmd from the new-season file (its action 389)
 	MAX_PLAYER_ACTION               ,
 };
 //ai end

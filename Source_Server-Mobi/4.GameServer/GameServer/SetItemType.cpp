@@ -172,7 +172,7 @@ int CSetItemType::GetRandomSetItem() // OK
 	return ((IndexTableCount==0)?-1:IndexTable[GetLargeRand()%IndexTableCount]);
 }
 
-void CSetItemType::MakeRandomSetItem(int aIndex,int map,int x,int y) // OK
+void CSetItemType::MakeRandomSetItem(int aIndex,int map,int x,int y,bool mapDrop) // OK
 {
 	WORD ItemIndex = this->GetRandomSetItem();
 
@@ -203,7 +203,9 @@ void CSetItemType::MakeRandomSetItem(int aIndex,int map,int x,int y) // OK
 
 	gItemOptionRate.GetItemOption6(2,&ItemSocketOption[0]);
 
-	gItemOptionRate.MakeNewOption(ItemIndex,ItemNewOption,&ItemNewOption);
+	// Monster drops on the map use the CustomConfig.ini MapExlOption weights (ancient drops included); box drops keep the plain roll.
+	if(mapDrop != 0){gItemOptionRate.MakeNewOptionWeighted(ItemIndex,ItemNewOption,&ItemNewOption);}
+	else{gItemOptionRate.MakeNewOption(ItemIndex,ItemNewOption,&ItemNewOption);}
 
 	gItemOptionRate.MakeSetOption(ItemIndex,ItemSetOption,&ItemSetOption);
 

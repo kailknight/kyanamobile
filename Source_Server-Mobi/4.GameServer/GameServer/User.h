@@ -1103,6 +1103,9 @@ struct OBJECTSTRUCT
 	int PetDurabilityRate;
 	int FullDamageReflectRate;
 	int DefensiveFullHPRestoreRate;
+	int OffensiveFullHPRestoreX100; // master skills: chance in 1/100 % (1.20 % = 120), see CMasterSkillTree::SetRestoreChance
+	int DefensiveFullHPRestoreX100;
+	int DefensiveFullSDRestoreX100;
 	int DefensiveFullMPRestoreRate;
 	int DefensiveFullSDRestoreRate;
 	DWORD DefensiveFullSDRestoreTick; // GetTickCount() of the last full SD restore when hit (cooldown, CustomConfig.ini SDRestoreOnHitCooldownMS)

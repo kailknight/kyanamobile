@@ -41,7 +41,10 @@
 #include "RedeemCodeWindow.h"
 #include "CB_KiraPass.h"
 #include "CB_DuelRanked.h"
+#include "CB_KingOfKira.h"
 #include "CB_DungeonRace.h"
+#include "CB_Mining.h"
+#include "CB_ItemReroll.h"
 #endif
 #include "APICB.h"
 
@@ -613,6 +616,7 @@ void Interface::CloseAllWindowCustom()
 //== Xử Lý Send Get Item
 bool Interface::ActionSendItemGS(ITEM* ItemSell, int Slot)
 {
+	if (gCB_ItemReroll && gCB_ItemReroll->SendItem(ItemSell, Slot)) return 1;
 #if(CongHuongV2)
 	if (gCB_CongHuong->SendItem(ItemSell, Slot, GetKeyState(VK_RBUTTON))) return 1;
 #endif
@@ -698,8 +702,11 @@ void Interface::Init()
 	ANDROID_IF_STAGE("FriendMailWindow ok");
 	gCB_KiraPass = new CB_KiraPass;
 	gCB_DuelRanked = new CB_DuelRanked;
-	gTradeCoinPanel = new CTradeCoinPanel;
+	gCB_KingOfKira = new CB_KingOfKira;
 	gCB_DungeonRace = new CB_DungeonRace;
+	gCB_Mining = new CB_Mining;
+	gCB_ItemReroll = new CB_ItemReroll;
+	gTradeCoinPanel = new CTradeCoinPanel;
 	ANDROID_IF_STAGE("TradeCoinPanel ok");
 #if(CB_CUSTOMMIXINFO)
 	gCB_InfoCustomMix = new CB_InfoCustomMix;
@@ -727,9 +734,12 @@ void Interface::Init()
 void Interface::Clear()
 {
 	SAFE_DELETE(gCB_DuelRanked);
+	SAFE_DELETE(gCB_KingOfKira);
+	SAFE_DELETE(gCB_DungeonRace);
+	SAFE_DELETE(gCB_Mining);
+	SAFE_DELETE(gCB_ItemReroll);
 
 	SAFE_DELETE(gCB_BXHTopDmg);
-	SAFE_DELETE(gCB_DungeonRace);
 
 	SAFE_DELETE(gCB_BotTrader);
 
@@ -825,10 +835,13 @@ void Interface::Work()
 	if (gFriendMailWindow) gFriendMailWindow->DrawWindow();
 	if (gCB_KiraPass) gCB_KiraPass->DrawWindow();
 	if (gCB_DuelRanked) gCB_DuelRanked->DrawWindow();
+	if (gCB_KingOfKira) gCB_KingOfKira->DrawWindow();
+	if (gCB_DungeonRace) gCB_DungeonRace->DrawWindow();
+	if (gCB_Mining) gCB_Mining->DrawWindow();
+	if (gCB_ItemReroll) gCB_ItemReroll->DrawWindow();
 	if (gTradeCoinPanel) gTradeCoinPanel->Draw();
 #if(CUSTOM_WINDOWLOCKITEM)
 	if(gCB_LockItem) gCB_LockItem->DrawWindow();
-	if (gCB_DungeonRace) gCB_DungeonRace->DrawWindow();
 #endif
 	gInterface.DrawNoticePKSystem();
 #if(CB_VIEWCHARITEM)

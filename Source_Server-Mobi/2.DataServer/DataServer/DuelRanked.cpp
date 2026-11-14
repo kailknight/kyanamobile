@@ -1350,7 +1350,7 @@ void CDuelRanked::SendRank(int serverIndex,const char* name,const char* account)
 		this->RankOf(stats.Mmr,&pMsg.Tier,&pMsg.Div,0,0);
 	}
 
-	LogAdd(LOG_BLACK,"[DuelRanked] rank icon for %s: played %d tier %d div %d (mmr %d)",pMsg.Name,(int)pMsg.Played,(int)pMsg.Tier,(int)pMsg.Div,stats.Mmr);
+	// Per-login line removed: it flooded the window and cost a lock + repaint per login.
 
 	gSocketManager.DataSend(serverIndex,(BYTE*)&pMsg,pMsg.header.size);
 }

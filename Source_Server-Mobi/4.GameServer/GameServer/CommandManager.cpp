@@ -24,7 +24,9 @@
 #include "DevilSquare.h"
 #include "DSProtocol.h"
 #include "DuelRanked.h"
+#include "KingOfKira.h"
 #include "DungeonRace.h"
+#include "CustomMining.h"
 #include "EventHideAndSeek.h"
 #include "EventKillAll.h"
 #include "EventPvP.h"
@@ -362,7 +364,18 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 		return this->CommandDeviceBan(lpObj,command,argument);
 	}
 
-	// Ranked duel routing tests (GM only, not in Command.txt): /rankedhop goes to the
+	if(_stricmp(command,"/kok") == 0)
+	{
+		char* argument = &message[strlen(command)];
+
+		if(argument[0] == 0x20)
+		{
+			argument++;
+		}
+
+		return gKingOfKira.Command(lpObj,argument);
+	}
+
 	if(_stricmp(command,"/drace") == 0)
 	{
 		char* argument = &message[strlen(command)];
@@ -375,6 +388,19 @@ bool CCommandManager::ManagementCore(LPOBJ lpObj,char* message, int Npc) // OK
 		return gDungeonRace.Command(lpObj,argument);
 	}
 
+	if(_stricmp(command,"/mining") == 0)
+	{
+		char* argument = &message[strlen(command)];
+
+		if(argument[0] == 0x20)
+		{
+			argument++;
+		}
+
+		return gCustomMining.Command(lpObj,argument);
+	}
+
+	// Ranked duel routing tests (GM only, not in Command.txt): /rankedhop goes to the
 	// host's arena map, /rankedhome [map x y] comes back.
 	if(_stricmp(command,"/rankedhop") == 0 || _stricmp(command,"/rankedhome") == 0)
 	{
@@ -3719,6 +3745,10 @@ bool CCommandManager::CommandReload(LPOBJ lpObj,char* arg) // OK
     else if (strcmp(name,"custom") == 0)
     {
 		gServerInfo.ReadCustomInfo();
+    }
+    else if (strcmp(name,"mining") == 0)
+    {
+		gServerInfo.ReadMiningInfo();
     }
     else if (strcmp(name,"event") == 0)
     {

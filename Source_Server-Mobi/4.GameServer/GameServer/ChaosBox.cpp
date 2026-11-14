@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "ChaosBox.h"
+#include "KingOfKira.h"
 #include "CastleSiegeSync.h"
 #include "CustomWingMix.h"
 #include "DSProtocol.h"
@@ -182,6 +183,14 @@ bool CChaosBox::GetTalismanOfLuckRate(LPOBJ lpObj,int* rate,bool bTalismanAllowe
 {
 	int count = 0;
 	int rateBonus = 0;
+
+	// King of Kira: the winning guild and its alliance get a bonus at the Devias Chaos Goblin (every mix that takes a Talisman of Luck passes through here).
+	int kingBonus = gKingOfKira.GetChaosBonus(lpObj);
+
+	if(kingBonus > 0)
+	{
+		(*rate) += kingBonus;
+	}
 
 	GetChaosBoxTalismanCount(lpObj,GET_ITEM(14,53),&count,&rateBonus); // Talisman of Luck
 

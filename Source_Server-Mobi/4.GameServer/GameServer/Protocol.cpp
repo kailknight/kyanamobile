@@ -41,6 +41,7 @@
 #include "ImperialGuardian.h"
 #include "InventoryEquipment.h"
 #include "ItemManager.h"
+#include "JewelOfHarmonyOption.h"
 #include "JewelMix.h"
 #include "JSProtocol.h"
 #include "KanturuEntranceNPC.h"
@@ -94,7 +95,10 @@
 #include "GameMain.h"
 #include "CB_NewQuest.h"
 #include "BossGuild.h"
+#include "KingOfKira.h"
 #include "DungeonRace.h"
+#include "ItemReroll.h"
+#include "CustomMining.h"
 #include "CBHuyDongExc.h"
 #if (CongHuongV2)
 #include "CBCongHuong.h"
@@ -1597,13 +1601,31 @@ void ProtocolCore(BYTE head,BYTE* lpMsg,int size,int aIndex,int encrypt,int seri
 			// Client build report. Arrives before the login packet, which is
 			// what lets CGConnectAccountRecv gate on it - see
 			// PMSG_CLIENT_BUILD_RECV.
-			case 0x7D:
+			case 0x61: // King of Kira - registration click
+				if(size >= (int)sizeof(PMSG_KOK_REG_RECV))
+				{
+					gKingOfKira.CGRegisterRecv((PMSG_KOK_REG_RECV*)lpMsg,aIndex);
+				}
+				break;
 			case 0x67: // Dungeon Race - Join / Leave buttons
 				if(size >= (int)sizeof(PMSG_DR_ACTION_RECV))
 				{
 					gDungeonRace.CGActionRecv((PMSG_DR_ACTION_RECV*)lpMsg,aIndex);
 				}
 				break;
+			case 0x6D: // Tarkan Mining - window buttons
+				if(size >= (int)sizeof(PMSG_CM_ACTION_RECV))
+				{
+					gCustomMining.CGActionRecv((PMSG_CM_ACTION_RECV*)lpMsg,aIndex);
+				}
+				break;
+			case 0x69: // Excellent Item Reroller - window buttons
+				if(size >= (int)sizeof(PMSG_RR_ACTION_RECV))
+				{
+					gItemReroll.CGActionRecv((PMSG_RR_ACTION_RECV*)lpMsg,aIndex);
+				}
+				break;
+			case 0x7D:
 			{
 				CGClientBuildRecv((PMSG_CLIENT_BUILD_RECV*)lpMsg, size, aIndex);
 			}
@@ -6813,6 +6835,7 @@ void GCAccountLevelSend(int aIndex) // OK
 	// rules change, which is when the client needs the chat colours too.
 	GCChatColorsSend(aIndex);
 	GCSkillRulesSend(aIndex);
+	GCJewelOfHarmonyRatesSend(aIndex);
 }
 
 void GCSkillRulesSend(int aIndex) // OK
@@ -6827,6 +6850,36 @@ void GCSkillRulesSend(int aIndex) // OK
 	pMsg.header.set(0xD3, 0xE6, sizeof(pMsg));
 
 	pMsg.TeleportCooldownMS = (DWORD)gServerInfo.m_TeleportCooldownMS;
+
+	DataSend(aIndex, (BYTE*)&pMsg, pMsg.header.size);
+}
+
+void GCJewelOfHarmonyRatesSend(int aIndex) // OK
+{
+	if (OBJECT_RANGE(aIndex) == 0)
+	{
+		return;
+	}
+
+	PMSG_JEWEL_OF_HARMONY_RATES_SEND pMsg;
+
+	pMsg.header.set(0xD3, 0xF6, sizeof(pMsg));
+
+	memset(pMsg.rate, 0, sizeof(pMsg.rate));
+
+	// Option rates (weights) from JewelOfHarmonyOption.txt: [type 1-3 -> 0-2][option 1-10 -> 0-9].
+	for (int type = 1; type <= 3; type++)
+	{
+		for (int option = 1; option <= 10; option++)
+		{
+			JEWEL_OF_HARMONY_OPTION_INFO* lpInfo = gJewelOfHarmonyOption.GetInfo(type, option);
+
+			if (lpInfo != 0)
+			{
+				pMsg.rate[type - 1][option - 1] = (BYTE)((lpInfo->Rate > 255) ? 255 : ((lpInfo->Rate < 0) ? 0 : lpInfo->Rate));
+			}
+		}
+	}
 
 	DataSend(aIndex, (BYTE*)&pMsg, pMsg.header.size);
 }

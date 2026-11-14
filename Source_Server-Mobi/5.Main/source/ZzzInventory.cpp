@@ -2341,6 +2341,7 @@ void GetSpecialOptionText ( int Type, char* Text, BYTE Option, BYTE Value, int i
     }
 }
 #if(USE_ITEMTOOLTIP_SS6)
+bool IsHarmonyJewelPicked(); // NewUIInventoryCtrl.cpp
 int field_11BB64 = -1;
 //==render_item_tooltip
 BOOL pIsAbsoluteWeapon(__int16 a2)
@@ -2786,6 +2787,99 @@ bool pSetTooltipValueText(std::string* new_text, std::string Format, int* line, 
 // lines are replaced by a short summary - Luck / Option +N / N Excellent option -
 // instead of the real excellent options.
 bool g_bItemInfoOptionSummary = false;
+
+// Jewel of Harmony: while the jewel is carried over an item without a harmony option, a panel
+// to the LEFT of the item tooltip lists every option it can roll with its chance (rates from the
+// server's JewelOfHarmonyOption.txt; same filter as the server's random pick: option min level,
+// and no Sub Require Str/Dex on items that need none). Called straight after the tooltip is
+// drawn, so g_fLastTip* still describe its box. Overwrites TextList.
+static void RenderHarmonyRatesPanel(const ITEM* ip, int item_level)
+{
+	if (ip->Jewel_Of_Harmony_Option != 0 || g_SocketItemMgr.IsSocketItem(ip) || !IsHarmonyJewelPicked()
+		|| !g_pUIJewelHarmonyinfo->HasServerRates())
+	{
+		return;
+	}
+
+	const StrengthenItem jtype = g_pUIJewelHarmonyinfo->GetItemType(static_cast<int>(ip->Type));
+	if (jtype >= SI_None)
+	{
+		return;
+	}
+
+	const ITEM_ATTRIBUTE* attr = &ItemAttribute[ip->Type];
+	int rate[MAXHARMONYJEWELOPTIONINDEX + 1] = { 0 };
+	int total = 0;
+	for (int o = 1; o <= MAXHARMONYJEWELOPTIONINDEX; ++o)
+	{
+		if (!g_pUIJewelHarmonyinfo->IsHarmonyJewelOption(jtype, o)) continue;
+		const HARMONYJEWELOPTION& jo = g_pUIJewelHarmonyinfo->GetHarmonyJewelOptionInfo(jtype, o);
+		if (jo.Minlevel > item_level) continue;
+		if (jtype == SI_Weapon && o == 3 && attr->RequireStrength == 0) continue;
+		if (jtype == SI_Weapon && o == 4 && attr->RequireDexterity == 0) continue;
+		if (jtype == SI_Staff && o == 2 && attr->RequireStrength == 0) continue;
+		if (jtype == SI_Staff && o == 3 && attr->RequireDexterity == 0) continue;
+		rate[o] = g_pUIJewelHarmonyinfo->GetServerRate(jtype, o);
+		total += rate[o];
+	}
+	if (total <= 0)
+	{
+		return;
+	}
+
+	for (int i = 0; i < 60; ++i)
+	{
+		TextList[i][0] = '\0';
+		TextListColor[i] = TEXT_COLOR_WHITE;
+		TextBold[i] = false;
+	}
+
+	int TNum = 0;
+	sprintf(TextList[TNum], "Jewel of Harmony");
+	TextListColor[TNum] = TEXT_COLOR_YELLOW; TextBold[TNum] = true; TNum++;
+	sprintf(TextList[TNum], "possible options");
+	TextListColor[TNum] = TEXT_COLOR_YELLOW; TextBold[TNum] = true; TNum++;
+	sprintf(TextList[TNum], "\n"); TNum++;
+	for (int o = 1; o <= MAXHARMONYJEWELOPTIONINDEX && TNum < 50; ++o)
+	{
+		if (rate[o] <= 0) continue;
+		const HARMONYJEWELOPTION& jo = g_pUIJewelHarmonyinfo->GetHarmonyJewelOptionInfo(jtype, o);
+		const int tenths = (rate[o] * 1000 + total / 2) / total;
+		sprintf(TextList[TNum], "%s : %d.%d%%", jo.Name, tenths / 10, tenths % 10);
+		TextListColor[TNum] = TEXT_COLOR_WHITE; TextBold[TNum] = false; TNum++;
+	}
+
+	// Measure like RenderTipTextList will, so the panel can sit flush against the tooltip.
+	SIZE TextSize = { 0, 0 };
+	float fPanelWidth = 0.0f;
+	for (int i = 0; i < TNum; ++i)
+	{
+		if (TextList[i][0] == '\0') break;
+		g_pRenderText->SetFont(TextBold[i] ? g_hFontBold : g_hFont);
+		g_pMultiLanguage->_GetTextExtentPoint32(g_pRenderText->GetFontDC(), TextList[i], lstrlen(TextList[i]), &TextSize);
+		if (fPanelWidth < TextSize.cx) fPanelWidth = (float)TextSize.cx;
+	}
+	fPanelWidth /= g_fScreenRate_x;
+	fPanelWidth += 4.0f;
+
+	float fPanelLeft = g_fLastTipX - fPanelWidth;
+	if (fPanelLeft < 0.0f)
+	{
+		fPanelLeft = g_fLastTipX + g_fLastTipW;	// no room on the left: flip to the right
+	}
+
+	const float fSavedTipX = g_fLastTipX;
+	const float fSavedTipY = g_fLastTipY;
+	const float fSavedTipW = g_fLastTipW;
+	const float fSavedTipH = g_fLastTipH;
+
+	RenderTipTextList((int)(fPanelLeft + (fPanelWidth / 2.0f)), (int)g_fLastTipY, TNum, 0, RT3_SORT_CENTER, STRP_NONE, TRUE, false);
+
+	g_fLastTipX = fSavedTipX;
+	g_fLastTipY = fSavedTipY;
+	g_fLastTipW = fSavedTipW;
+	g_fLastTipH = fSavedTipH;
+}
 
 void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bItemTextListBoxUse, bool Render3DItem)
 {
@@ -3595,6 +3689,7 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
 	if (isrendertooltip && !bItemTextListBoxUse)
 	{
 		g_csItemOption.RenderSetInfoPanel(ip);
+		RenderHarmonyRatesPanel(ip, item_level);
 	}
 }
 #else
@@ -13920,6 +14015,8 @@ bool IsStrifeMap(int nMapIndex)
 
 unsigned int MarkColor[16];
 
+extern int CachTexture; // ZzzOpenglUtil.cpp
+
 void CreateGuildMark( int nMarkIndex, bool blend )
 {
 	BITMAP_t *b = &Bitmaps[BITMAP_GUILD];
@@ -13970,6 +14067,7 @@ void CreateGuildMark( int nMarkIndex, bool blend )
 	glBindTexture(GL_TEXTURE_2D,b->TextureNumber);
 
     glTexImage2D(GL_TEXTURE_2D,0,b->Components,Width,Height,0,GL_RGBA,GL_UNSIGNED_BYTE,b->Buffer);
+	CachTexture = -1; // bound directly above: make the next BindTexture() really bind (the King of Kira flags drew with this guild mark)
 }
 
 void BCreateGuildMark(BYTE* MarkBuffer, bool blend)
@@ -14166,6 +14264,7 @@ void RenderGuildColor(float x,float y,int SizeX,int SizeY,int Index)
 	glBindTexture(GL_TEXTURE_2D,b->TextureNumber);
 
     glTexImage2D(GL_TEXTURE_2D,0,b->Components,Width,Height,0,GL_RGBA,GL_UNSIGNED_BYTE,b->Buffer);
+	CachTexture = -1; // bound directly above: make the next BindTexture() really bind (the King of Kira flags drew with this guild mark)
     RenderBitmap(BITMAP_GUILD,x,y,(float)SizeX,(float)SizeY);
 }
 

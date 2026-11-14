@@ -27,7 +27,7 @@ public:
 	int GetSetItemOptionIndex(int index,int number);
 	int GetSetItemStatType(int index);
 	int GetRandomSetItem();
-	void MakeRandomSetItem(int aIndex,int map,int x,int y);
+	void MakeRandomSetItem(int aIndex,int map,int x,int y,bool mapDrop=false);
 private:
 	SET_ITEM_TYPE_INFO m_SetItemTypeInfo[MAX_SET_ITEM_TYPE];
 	int m_count;

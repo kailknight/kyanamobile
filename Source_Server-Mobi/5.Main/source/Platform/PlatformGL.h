@@ -8,6 +8,7 @@
 
 #if defined(__ANDROID__) || defined(MU_IOS)
 
+#include <cstring>
 #include <GLES3/gl32.h>
 #include <GLES3/gl3ext.h>
 #include <EGL/egl.h>
@@ -202,6 +203,33 @@
 // glDrawArrays calls remain the real GLES2 function.
 #define glDrawArrays(m,f,c)         GL_DrawArrays_Compat(m,f,c)
 #define glDrawArrays_compat(m,f,c)  GL_DrawArrays_Compat(m,f,c)
+
+#if defined(MU_WEB)
+// Emscripten's GL glue reaches C memory as HEAP32[ptr >> 2], which assumes a 4-byte aligned pointer. BITMAP_t is
+// packed, so &TextureNumber can be odd: the id landed in the wrong bytes (damaging the field next to it) and
+// TextureNumber stayed 0, so every texture upload ran with nothing bound. Native GL has no such requirement.
+// These two are the calls that take a pointer into a BITMAP_t. The parentheses stop the macros re-expanding.
+inline void MU_WebGenTextures(GLsizei n, GLuint* out)
+{
+    for (GLsizei i = 0; i < n; ++i)
+    {
+        GLuint id = 0;
+        (glGenTextures)(1, &id);
+        memcpy(reinterpret_cast<char*>(out) + i * sizeof(GLuint), &id, sizeof(GLuint));
+    }
+}
+inline void MU_WebDeleteTextures(GLsizei n, const GLuint* in)
+{
+    for (GLsizei i = 0; i < n; ++i)
+    {
+        GLuint id = 0;
+        memcpy(&id, reinterpret_cast<const char*>(in) + i * sizeof(GLuint), sizeof(GLuint));
+        (glDeleteTextures)(1, &id);
+    }
+}
+#define glGenTextures(n,p)     MU_WebGenTextures((n), (p))
+#define glDeleteTextures(n,p)  MU_WebDeleteTextures((n), (p))
+#endif
 
 // BindTexture tracking
 #define glBindTexture(t,n)          GL_TrackBindTexture(t,n)

@@ -157,6 +157,8 @@
     <ClInclude Include="PlayBilling.h" />
     <ClInclude Include="DeviceLog.h" />
     <ClInclude Include="ItemTracker.h" />
+    <ClInclude Include="KingOfKira.h" />
+    <ClInclude Include="KingOfKiraProtocol.h" />
     <ClInclude Include="FriendMail.h" />
     <ClInclude Include="MonthlyCard.h" />
     <ClInclude Include="DuelRanked.h" />
@@ -217,6 +219,7 @@
     <ClCompile Include="PlayBilling.cpp" />
     <ClCompile Include="DeviceLog.cpp" />
     <ClCompile Include="ItemTracker.cpp" />
+    <ClCompile Include="KingOfKira.cpp" />
     <ClCompile Include="FriendMail.cpp" />
     <ClCompile Include="MonthlyCard.cpp" />
     <ClCompile Include="DuelRanked.cpp" />

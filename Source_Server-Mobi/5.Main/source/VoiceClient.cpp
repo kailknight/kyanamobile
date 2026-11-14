@@ -168,6 +168,11 @@ bool CVoiceClient::OpenSocket() // OK
 		memcpy(&this->m_ServerAddr.sin_addr, pHost->h_addr_list[0], sizeof(struct in_addr));
 	}
 
+#if defined(MU_WEB)
+	// No UDP in a browser; voice needs its own transport before it can work here.
+	return false;
+#endif
+
 	this->m_Socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
 	if (this->m_Socket == INVALID_SOCKET)

@@ -74,6 +74,12 @@ public:
 	static DWORD WINAPI ServerAcceptThread(CSocketManager* lpSocketManager);
 	static DWORD WINAPI ServerWorkerThread(CSocketManager* lpSocketManager);
 	static DWORD WINAPI ServerQueueThread(CSocketManager* lpSocketManager);
+	// Called every second from the window timer: logs when the queue thread has been inside ONE packet for more than 10 s.
+	void CheckStall();
+	volatile DWORD m_BusySince;
+	volatile int m_BusyHead;
+	volatile int m_BusyServer;
+	DWORD m_StallLogTick;
 	DWORD GetQueueSize();
 	// Queues a message as if it had arrived from that GameServer connection, so
 	// a worker thread's result is handled on ServerQueueThread like any other

@@ -287,6 +287,8 @@ public:
 	DWORD	CacheTimeAttack_WING;
 	int		WingCache;
 #endif
+	// Loops of the mining animation played so far (0 whenever the character is not mining).
+	BYTE	MiningLoops;
 };
 
 #endif // !defined(AFX_W_CHARACTERINFO_H__95647591_5047_48A4_81AE_E88B5F17EE94__INCLUDED_)

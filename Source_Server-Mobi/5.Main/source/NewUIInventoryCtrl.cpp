@@ -181,6 +181,7 @@ void SEASON3B::CNewUIPickedItem::Render3D()
 	}
 }
 
+bool IsHarmonyJewelPicked();
 CNewUIPickedItem* SEASON3B::CNewUIInventoryCtrl::ms_pPickedItem = nullptr;
 
 SEASON3B::CNewUIInventoryCtrl::CNewUIInventoryCtrl()
@@ -860,7 +861,7 @@ bool SEASON3B::CNewUIInventoryCtrl::UpdateMouseEvent()
 	else if (m_EventState == EVENT_HOVER
 		&& SEASON3B::IsNone(VK_LBUTTON)
 		&& m_iPointedSquareIndex != -1
-		&& nullptr == GetPickedItem()
+		&& (nullptr == GetPickedItem() || IsHarmonyJewelPicked())
 		&& (m_pdwItemCheckBox[m_iPointedSquareIndex - m_nIndexOffset] > 1) && g_pNewUIMng)
 	{
 		ITEM* pItem = FindItemByKey(m_pdwItemCheckBox[m_iPointedSquareIndex - m_nIndexOffset]);
@@ -887,6 +888,16 @@ bool SEASON3B::CNewUIInventoryCtrl::Update()
 		UpdateProcess();
 	}
 	return true;
+}
+
+// True while the player is carrying a Jewel of Harmony: the item under the cursor
+// then shows its tooltip with the harmony options the jewel could roll.
+bool IsHarmonyJewelPicked()
+{
+	SEASON3B::CNewUIPickedItem* pPicked = SEASON3B::CNewUIInventoryCtrl::GetPickedItem();
+	if (pPicked == nullptr) return false;
+	ITEM* pItem = pPicked->GetItem();
+	return pItem && pItem->Type == ITEM_POTION + 42;
 }
 
 void SEASON3B::CNewUIInventoryCtrl::UpdateProcess()
@@ -1169,7 +1180,7 @@ void SEASON3B::CNewUIInventoryCtrl::Render()
 	if (m_pNew3DRenderMng)
 	{
 		m_pNew3DRenderMng->RenderUI2DEffect(INVENTORY_CAMERA_Z_ORDER, UI2DEffectCallback, this, RENDER_NUMBER_OF_ITEM, 0);
-		if (m_pToolTipItem && GetPickedItem() == nullptr)
+		if (m_pToolTipItem && (GetPickedItem() == nullptr || IsHarmonyJewelPicked()))
 		{
 			if (tooltipvisible)
 			{

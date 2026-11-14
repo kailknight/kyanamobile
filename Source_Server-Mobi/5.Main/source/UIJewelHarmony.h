@@ -97,6 +97,11 @@ public:
 
 public:
 	const bool IsHarmonyJewelOption( int type, int option );
+
+	// Option weights from the server (JewelOfHarmonyOption.txt, C1:D3:F6); [type 0-2][option 1-10]. 0 = unknown/none.
+	void SetServerRates( const BYTE* rates );
+	int  GetServerRate( int type, int option ) const;
+	bool HasServerRates() const { return m_bHasServerRates; }
 	
 private:
 	JewelHarmonyInfo();
@@ -104,6 +109,8 @@ private:
 
 private:
 	HARMONYJEWELOPTION		m_OptionData[MAXHARMONYJEWELOPTIONTYPE][MAXHARMONYJEWELOPTIONINDEX];
+	BYTE					m_ServerRates[MAXHARMONYJEWELOPTIONTYPE][MAXHARMONYJEWELOPTIONINDEX];
+	bool					m_bHasServerRates;
 };
 
 inline

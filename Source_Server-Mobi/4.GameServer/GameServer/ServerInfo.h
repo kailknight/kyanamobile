@@ -32,6 +32,7 @@ public:
 	void ReadItemInfo();
 	void ReadMapInfo();
 	void ReadMessageInfo();
+	void ReadMiningInfo();
 	void ReadMonsterInfo();
 	void ReadNoticeInfo();
 	void ReadMoveInfo();
@@ -1403,6 +1404,7 @@ public:
 	// every reset. 0 = nothing.
 	int m_ResetRewardCoin[3];
 	int m_SoulRateToPlus[3][MAX_ACCOUNT_LEVEL]; // Jewel of Soul success rate when the item reaches +7 / +8 / +9, per account level (-1 = SoulSuccessRate)
+	float m_RestoreChanceTable[20]; // Restore Full HP / SD master skills: chance in % at skill level 1..20 (RestoreFullChanceTable)
 	int m_RestoreFullChance;       // "Restore Full SD / HP" master skills: chance in %, the same at every skill level
 	int m_RestoreCooldownLv1MS;    // cooldown at skill level 1 (ms)
 	int m_RestoreCooldownLv20MS;   // cooldown at skill level 20 (ms); in between it falls in equal steps

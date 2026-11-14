@@ -236,7 +236,10 @@
     <ClCompile Include="source\RedeemCodeWindow.cpp" />
     <ClCompile Include="source\CB_KiraPass.cpp" />
     <ClCompile Include="source\CB_DuelRanked.cpp" />
+    <ClCompile Include="source\CB_KingOfKira.cpp" />
     <ClCompile Include="source\CB_DungeonRace.cpp" />
+    <ClCompile Include="source\CB_ItemReroll.cpp" />
+    <ClCompile Include="source\CB_Mining.cpp" />
     <ClCompile Include="source\FriendMailWindow.cpp" />
     <ClCompile Include="source\TradeCoinPanel.cpp" />
     <ClCompile Include="source\CB_DrawCustomRank.cpp" />
@@ -698,8 +701,11 @@
     <ClInclude Include="source\RedeemCodeWindow.h" />
     <ClInclude Include="source\CB_KiraPass.h" />
     <ClInclude Include="source\CB_DuelRanked.h" />
-    <ClInclude Include="source\FriendMailWindow.h" />
+    <ClInclude Include="source\CB_KingOfKira.h" />
     <ClInclude Include="source\CB_DungeonRace.h" />
+    <ClInclude Include="source\CB_ItemReroll.h" />
+    <ClInclude Include="source\CB_Mining.h" />
+    <ClInclude Include="source\FriendMailWindow.h" />
     <ClInclude Include="source\TradeCoinPanel.h" />
     <ClInclude Include="source\CB_DrawCustomRank.h" />
     <ClInclude Include="source\CB_GetMixRate.h" />

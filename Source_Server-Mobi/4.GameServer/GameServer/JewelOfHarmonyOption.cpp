@@ -400,10 +400,7 @@ bool CJewelOfHarmonyOption::AddJewelOfHarmonyOption(LPOBJ lpObj,int SourceSlot,i
 		return 0;
 	}
 
-	if((lpItem->m_Index/MAX_ITEM_TYPE) >= 7 && (lpItem->m_Index/MAX_ITEM_TYPE) <= 11 && (lpItem->m_Index%MAX_ITEM_TYPE) >= 62 && (lpItem->m_Index%MAX_ITEM_TYPE) <= 72) // Lucky Item
-	{
-		return 0;
-	}
+	// Lucky items (armor 7-11, index 62-72) are allowed to take Jewel of Harmony: the old block that refused them is removed.
 
 	int ItemOptionType = this->GetJewelOfHarmonyItemOptionType(lpItem);
 
@@ -413,7 +410,7 @@ bool CJewelOfHarmonyOption::AddJewelOfHarmonyOption(LPOBJ lpObj,int SourceSlot,i
 	}
 
 	int ItemOption = this->GetJewelOfHarmonyRandomOption(lpItem);
-	
+
 	if(ItemOption == JEWEL_OF_HARMONY_OPTION_NONE)
 	{
 		return 0;

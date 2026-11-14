@@ -37,7 +37,9 @@
 #include "CustomStore.h"
 #include "OfflineMode.h"
 #include "DeviceBan.h"
+#include "KingOfKira.h"
 #include "DungeonRace.h"
+#include "CustomMining.h"
 #include "BossGuild.h"
 #include "CTCMini.h"
 #include "BattleSurvivor.h"
@@ -368,7 +370,7 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam) // 
 
             SendMessage(hWndStatusBar, SB_SETTEXT, 4,(LPARAM)text);
 
-			SendMessage(hWndStatusBar, SB_SETTEXT, 5,(LPARAM)NULL);
+			SendMessage(hWndStatusBar, SB_SETTEXT, 5,(LPARAM)GAMESERVER_RELEASE_TEXT);
 
             ShowWindow(hWndStatusBar, SW_SHOW);
 
@@ -500,6 +502,9 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam) // 
 				case IDM_RELOAD_RELOADCUSTOM:
 					gServerInfo.ReadCustomInfo();
 					break;
+				case IDM_RELOAD_RELOADMINING:
+					gServerInfo.ReadMiningInfo();
+					break;
 				case IDM_RELOAD_RELOADEVENT:
 					gServerInfo.ReadEventInfo();
 					RefreshInvasionMenu(hWnd);
@@ -595,10 +600,15 @@ LRESULT CALLBACK WndProc(HWND hWnd,UINT message,WPARAM wParam,LPARAM lParam) // 
 #if(CTCMINI)
 				case IDM_EVENTS_CTCMINI: gCTCMini.StartCTCMini();			break;
 #endif
-#if	BsvEvent
+				case IDM_EVENTS_KOK_OPEN: gKingOfKira.MenuCommand("open");		break;
+				case IDM_EVENTS_KOK_START: gKingOfKira.MenuCommand("start");	break;
+				case IDM_EVENTS_KOK_CANCEL: gKingOfKira.MenuCommand("cancel");	break;
 				case IDM_EVENTS_DRACE_OPEN: gDungeonRace.MenuCommand("open");	break;
 				case IDM_EVENTS_DRACE_START: gDungeonRace.MenuCommand("start");	break;
 				case IDM_EVENTS_DRACE_CANCEL: gDungeonRace.MenuCommand("cancel");	break;
+				case IDM_EVENTS_MINING_START: gCustomMining.MenuCommand("start");	break;
+				case IDM_EVENTS_MINING_STOP: gCustomMining.MenuCommand("stop");	break;
+#if	BsvEvent
 				case IDM_STARTBSV:
 					gBsVEvent.StartBSV();
 					break;

@@ -119,6 +119,11 @@ namespace CfgDefaults
     inline constexpr wchar_t CfgDefaultEncryptedUsername[] = L"";
     inline constexpr wchar_t CfgDefaultEncryptedPassword[] = L"";
 
+#if defined(MU_WEB)
+    inline constexpr wchar_t CfgDefaultServerIP[] = L"kcs";
+    inline constexpr int CfgDefaultServerPort = 2000;
+#else
     inline constexpr wchar_t CfgDefaultServerIP[] = L"31.58.143.70";
     inline constexpr int CfgDefaultServerPort = 63000;
+#endif
 }

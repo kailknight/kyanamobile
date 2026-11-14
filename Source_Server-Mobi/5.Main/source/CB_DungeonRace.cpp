@@ -18,9 +18,6 @@
 
 CB_DungeonRace* gCB_DungeonRace = NULL;
 
-// Proves this Main.exe is the Dungeon Race build the moment the process starts (before login / any click).
-struct DungeonRaceStartLog { DungeonRaceStartLog() { DungeonRaceLog("Main.exe started (Dungeon Race client build)"); } };
-static DungeonRaceStartLog s_DungeonRaceStartLog;
 
 // Packet layouts, identical to PMSG_DR_* in the GameServer DungeonRace.h (packed, fixed width only).
 #pragma pack(push,1)
@@ -328,48 +325,8 @@ void CB_DungeonRace::DrawWindow()
 	}
 }
 
+// The diagnostic file log (DungeonRaceClient.log next to Main.exe) was removed: nothing is written any more.
 void DungeonRaceLog(const char* fmt, ...)
 {
-#if defined(_WIN32) && !defined(__ANDROID__)
-	// PC client only: a plain file next to Main.exe, so it works without the debug console.
-	char buff[512];
-
-	va_list arg;
-	va_start(arg, fmt);
-	vsnprintf(buff, sizeof(buff), fmt, arg);
-	va_end(arg);
-	buff[sizeof(buff) - 1] = '\0';
-
-	SYSTEMTIME st;
-	GetLocalTime(&st);
-
-	// next to the exe (not the working directory, which the launcher may change); fall back to the working dir
-	char path[MAX_PATH + 32] = {0};
-	DWORD n = GetModuleFileNameA(NULL, path, MAX_PATH);
-	FILE* f = NULL;
-
-	if (n > 0 && n < MAX_PATH)
-	{
-		char* slash = strrchr(path, '\\');
-
-		if (slash != NULL)
-		{
-			strcpy(slash + 1, "DungeonRaceClient.log");
-			f = fopen(path, "a");
-		}
-	}
-
-	if (f == NULL)
-	{
-		f = fopen("DungeonRaceClient.log", "a");
-	}
-
-	if (f != NULL)
-	{
-		fprintf(f, "%02d:%02d:%02d.%03d %s\n", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, buff);
-		fclose(f);
-	}
-#else
 	(void)fmt;
-#endif
 }

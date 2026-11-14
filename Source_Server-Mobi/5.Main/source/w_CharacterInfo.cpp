@@ -30,6 +30,7 @@ void CHARACTER::Initialize()
 	HideShadow = false;
 	m_bIsSelected = false;
 	Decoy = false;
+	MiningLoops = 0;
 
 	Class = 0;
 	Skin = 0;

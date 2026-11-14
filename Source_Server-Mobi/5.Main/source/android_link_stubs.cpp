@@ -38,6 +38,10 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#if defined(MU_WEB)
+#include <emscripten/emscripten.h>
+#include <emscripten/em_asm.h>
+#endif
 
 extern "C" int32_t ConnectionManager_Connect(
     const wchar_t* host,
@@ -58,7 +62,11 @@ extern BOOL g_bGameServerConnected;
 char* szServerIpAddress = (char*)"127.0.0.1";
 std::string g_strSelectedML = "Eng";
 int m_SavePassOnOff = 0;
+#if defined(MU_WEB)
+unsigned short g_ServerPort = 2000;   // placeholder, see ws-bridge.js
+#else
 unsigned short g_ServerPort = 63000;
+#endif
 BYTE Version[5] = { '1' + 1, '0' + 2, '4' + 3, '0' + 4, '5' + 5 };
 BYTE Serial[17] = "TbYehR2hFUPBKgZj";
 char m_ID[11] = {};
@@ -291,6 +299,51 @@ namespace
         return nullptr;
     }
 
+#if defined(MU_WEB)
+    // The browser has no Java: the page's muAudio object (Web/shell.html, Web Audio) plays everything. Calls are
+    // proxied to the main thread, which owns the AudioContext. Only the methods this file sends with plain numbers
+    // come through here; the two that carry a path (register, playMusic) go straight to the page below.
+    void CallMuAudioVoid(const char* method, const char* sig, ...)
+    {
+        (void)sig;
+        va_list args;
+        va_start(args, sig);
+        if (std::strcmp(method, "play") == 0)
+        {
+            const int id = va_arg(args, int);
+            const int loop = va_arg(args, int);
+            MAIN_THREAD_ASYNC_EM_ASM({ muAudio.play($0, $1); }, id, loop);
+        }
+        else if (std::strcmp(method, "stop") == 0)
+        {
+            const int id = va_arg(args, int);
+            MAIN_THREAD_ASYNC_EM_ASM({ muAudio.stop($0); }, id);
+        }
+        else if (std::strcmp(method, "setVolume") == 0)
+        {
+            const int percent = va_arg(args, int);
+            MAIN_THREAD_ASYNC_EM_ASM({ muAudio.setVolume($0); }, percent);
+        }
+        else if (std::strcmp(method, "setEnabled") == 0)
+        {
+            const int enabled = va_arg(args, int);
+            MAIN_THREAD_ASYNC_EM_ASM({ muAudio.setEnabled($0); }, enabled);
+        }
+        else if (std::strcmp(method, "stopAll") == 0)
+        {
+            MAIN_THREAD_ASYNC_EM_ASM({ muAudio.stopAll(); });
+        }
+        else if (std::strcmp(method, "stopMusic") == 0)
+        {
+            MAIN_THREAD_ASYNC_EM_ASM({ muAudio.stopMusic(); });
+        }
+        else if (std::strcmp(method, "init") == 0)
+        {
+            MAIN_THREAD_ASYNC_EM_ASM({ muAudio.init(); });
+        }
+        va_end(args);
+    }
+#else
     void CallMuAudioVoid(const char* method, const char* sig, ...)
     {
         JNIEnv* env = AndroidAudioEnv();
@@ -316,6 +369,7 @@ namespace
             env->ExceptionClear();
         }
     }
+#endif
 }
 
 // Attached from an existing JNI entry point rather than JNI_OnLoad.
@@ -576,6 +630,21 @@ namespace
             return true;
         }
 
+#if defined(MU_WEB)
+        // Paths only. Each sound is fetched and decoded by the page the first time it plays, and its length comes
+        // from the decoded audio, so no .wav is opened (and so downloaded) here.
+        for (int id = 0; id < kAndroidSoundSlotCount; ++id)
+        {
+            if (!g_androidSoundPaths[id].empty())
+            {
+                MAIN_THREAD_EM_ASM({ muAudio.register($0, UTF8ToString($1)); }, id, g_androidSoundPaths[id].c_str());
+            }
+        }
+        g_androidSoundTablePushed = true;
+        ApplyAndroidMasterVolume();
+        return true;
+#endif
+
         JNIEnv* env = AndroidAudioEnv();
         if (env == nullptr || g_muAudioClass == nullptr)
         {
@@ -709,6 +778,11 @@ extern "C" void AndroidAudioPlayMusic(const char* absolutePath, bool loop)
         return;
     }
 
+#if defined(MU_WEB)
+    MAIN_THREAD_EM_ASM({ muAudio.playMusic(UTF8ToString($0), $1); }, absolutePath, loop ? 1 : 0);
+    return;
+#endif
+
     JNIEnv* env = AndroidAudioEnv();
     if (env == nullptr || g_muAudioClass == nullptr)
     {
@@ -752,6 +826,9 @@ extern "C" void AndroidAudioSetFocusMuted(bool muted)
 
 extern "C" bool AndroidAudioIsMusicPlaying()
 {
+#if defined(MU_WEB)
+    return MAIN_THREAD_EM_ASM_INT({ return muAudio.isMusicPlaying() ? 1 : 0; }) != 0;
+#endif
     JNIEnv* env = AndroidAudioEnv();
     if (env == nullptr || g_muAudioClass == nullptr)
     {
@@ -918,7 +995,11 @@ namespace
 
     bool IsConnectServerPort(unsigned short port)
     {
+        #if defined(MU_WEB)
+        return port == g_ServerPort;
+#else
         return (port == g_ServerPort || port == 63000);
+#endif
     }
 
     void CopyPacketKey(DWORD* target, const DWORD* source)

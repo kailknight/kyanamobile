@@ -46,6 +46,7 @@
 #include "FriendMail.h"
 #include "MonthlyCard.h"
 #include "DuelRanked.h"
+#include "KingOfKira.h"
 #include "SpinClaim.h"
 #include "SlotClaim.h"
 void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
@@ -976,6 +977,15 @@ void DataServerProtocolCore(int index,BYTE head,BYTE* lpMsg,int size) // OK
 				break;
 			case 0x48: //==Hardware ban / unban record
 				gDeviceLog.OnBan((SDHP_DEVICE_BAN_RECV*)lpMsg);
+				break;
+			case 0x60: //==King of Kira - relay between GameServers
+				gKingOfKira.OnRelay(lpMsg,size,index);
+				break;
+			case 0x61: //==King of Kira - winner save
+				gKingOfKira.OnSave(lpMsg,size,index);
+				break;
+			case 0x62: //==King of Kira - winner load
+				gKingOfKira.OnLoad(lpMsg,size,index);
 				break;
 			case 0x56: //==Item Tracker row (ItemTracker.h)
 				gItemTracker.OnItem((SDHP_ITEMTRACK_RECV*)lpMsg,size);
@@ -3597,9 +3607,8 @@ void GDCustomRankingRecv(SDHP_CUSTOM_RANKING_RECV* lpMsg,int index) // OK
 
 				gDuelRanked.RankText(mmr,rank,sizeof(rank));
 
-				_snprintf_s(info.value2,sizeof(info.value2),_TRUNCATE,"%s - %d",rank,mmr);
-
-				gQueryManager.GetAsString("LastPlayed", info.value3, sizeof(info.value3));
+				_snprintf_s(info.value2,sizeof(info.value2),_TRUNCATE,"%s",rank);
+				_snprintf_s(info.value3,sizeof(info.value3),_TRUNCATE,"%d",mmr);
 #if(CUSTOM_BRANKINGNEW)
 				info.CheckOnline = gCharacterManager.CheckCharacterOnline(info.szName);
 #endif
