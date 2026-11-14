@@ -40,7 +40,16 @@
 #endif // FOR_WORK
 
 #define WINDOWMODE						// (2006-07-18)
-//#define ENABLE_FULLSCREEN
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+// PC: present the frame (scaled onto the window/screen after a live display change) - replaces SwapBuffers.
+void PcPresentSwap(HDC hDC);
+// PC Options window: change display mode / resolution while the game runs. resolution = registry index (see Winmain.cpp).
+bool ApplyDisplaySettings(int resolution, int windowMode);
+bool GetResolutionSize(int resolution, int* w, int* h);
+// Mouse: physical client position -> engine pixels (handles the scaled/letterboxed frame).
+void PcPresentMapMouse(float* x, float* y);
+#endif
+#define ENABLE_FULLSCREEN		// real fullscreen: WindowMode = 0 switches the monitor to the chosen resolution
 
 #if defined USER_WINDOW_MODE || (defined WINDOWMODE)
 #define ACTIVE_FOCUS_OUT

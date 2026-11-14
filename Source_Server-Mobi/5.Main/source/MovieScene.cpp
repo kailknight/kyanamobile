@@ -76,7 +76,11 @@ void CMovieScene::InitOpenGLClear(HDC hDC)
 
 	::EndOpengl();
 	::glFlush();
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	PcPresentSwap(hDC);
+#else
 	::SwapBuffers(hDC);
+#endif
 }
 
 void CMovieScene::Initialize_DirectShow(HWND hWnd, char* strFileName)

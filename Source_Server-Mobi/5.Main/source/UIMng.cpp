@@ -191,7 +191,11 @@ void CUIMng::RenderTitleSceneUI(HDC hDC, DWORD dwNow, DWORD dwTotal)
 	::EndBitmap();
 	::EndOpengl();
 	::glFlush();
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	PcPresentSwap(hDC);
+#else
 	::SwapBuffers(hDC);
+#endif
 }
 
 void CUIMng::Create()

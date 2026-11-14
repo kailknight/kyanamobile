@@ -39,6 +39,9 @@ extern HWND g_hWnd;
 // second .cpp (Winmain.cpp already does) is an ODR violation and fails to
 // link (LNK2005). Forward-declaring just what's needed here avoids it.
 #define WZAOPT_STOPBEFOREPLAY 0
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+extern BOOL g_bUseWindowMode; // Winmain.cpp
+#endif
 extern "C" int wzAudioCreate(HWND hParentWnd);
 extern "C" void wzAudioOption(int nOption, int nVal);
 #endif
@@ -400,7 +403,34 @@ namespace
 	float CardH(int rows) { return kHeadH + rows * kRowH + kPad; }
 
 	// Drop-down ids.
-	enum { DD_NONE = 0, DD_LANG, DD_MIC, DD_BOOST, DD_TALK, DD_CHANNEL, DD_TEXTSIZE, DD_OPACITY };
+	enum { DD_NONE = 0, DD_LANG, DD_MIC, DD_BOOST, DD_TALK, DD_CHANNEL, DD_TEXTSIZE, DD_OPACITY, DD_SCREENMODE, DD_RESOLUTION };
+
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	// PC screen settings (Winmain.cpp): applied live, saved to the registry like the .reg scripts
+
+	// the resolutions offered in the drop-down (registry index), 99 = the monitor's own
+	static const int kScreenResolutions[12] = { 1, 16, 11, 4, 5, 12, 7, 13, 8, 14, 15, 99 };
+
+	static void ScreenResolutionName(int index, char* out, size_t cb)
+	{
+		int w = 0, h = 0;
+
+		if (GetResolutionSize(index, &w, &h) == false)
+		{
+			_snprintf(out, cb, "#%d", index);
+		}
+		else if (index == 99)
+		{
+			_snprintf(out, cb, "Native %dx%d", w, h);
+		}
+		else
+		{
+			_snprintf(out, cb, "%d x %d", w, h);
+		}
+
+		out[cb - 1] = '\0';
+	}
+#endif
 }
 
 void SEASON3B::CNewUIOptionWindow::AddHit(float x, float y, float w, float h, int id, int arg)
@@ -583,6 +613,24 @@ void SEASON3B::CNewUIOptionWindow::BuildDropOptions(int dd)
 		break;
 	}
 #endif
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	case DD_SCREENMODE:
+	{
+		add("Fullscreen", 0, g_bUseWindowMode == FALSE);
+		add("Window", 1, g_bUseWindowMode != FALSE);
+		break;
+	}
+	case DD_RESOLUTION:
+	{
+		for (int i = 0; i < 12; ++i)
+		{
+			char s[32];
+			ScreenResolutionName(kScreenResolutions[i], s, sizeof(s));
+			add(s, kScreenResolutions[i], kScreenResolutions[i] == m_Resolution);
+		}
+		break;
+	}
+#endif
 	case DD_OPACITY:
 	{
 		for (int p = 100; p >= 30; p -= 10)
@@ -634,6 +682,14 @@ void SEASON3B::CNewUIOptionWindow::ApplyDropOption(int dd, int idx)
 		WritePrivateProfileStringA("FONT", "FontSizeBonus", s, "./config.ini");
 		break;
 	}
+#endif
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	case DD_SCREENMODE:
+		ApplyDisplaySettings(m_Resolution, v);
+		break;
+	case DD_RESOLUTION:
+		ApplyDisplaySettings(v, g_bUseWindowMode ? 1 : 0);
+		break;
 #endif
 	case DD_OPACITY:
 		m_iOpacity = v;
@@ -909,8 +965,11 @@ void SEASON3B::CNewUIOptionWindow::RenderModern()
 	CNewUINameWindow* pNameWindow = g_pNewUISystem->GetUI_NewNameWindow();
 	const bool bItemNames = (pNameWindow != NULL);
 	int dispRows = 7 /*5 switches + text size + opacity*/ + (bItemNames ? 1 : 0);
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	dispRows += 2;	// screen mode + resolution
+#endif
 	const float qualityH = kHeadH + 34.f + kPad;
-	const float hA = CardH(3) + kGap + CardH(2) + (bVoice ? kGap + CardH(3 + micRows) : 0.f);
+	float hA = CardH(3) + kGap + CardH(2) + (bVoice ? kGap + CardH(3 + micRows) : 0.f);
 	const float hB = CardH(eEndOnOffGrap) + kGap + CardH(2);
 	const float hC = CardH(dispRows) + kGap + qualityH + kGap + CardH(1);
 	float total = hA;
@@ -980,6 +1039,7 @@ void SEASON3B::CNewUIOptionWindow::RenderModern()
 		DrawToggleRow(colX[0], yy, kColW, "Music", m_MusicOnOff != 0, MH_MUSIC, 0); yy += kRowH;
 		DrawToggleRow(colX[0], yy, kColW, "Sound effects", m_SoundOnOff != 0, MH_SOUND, 0);
 		y += CardH(2) + kGap;
+
 
 		if (bVoice)
 		{
@@ -1072,8 +1132,28 @@ void SEASON3B::CNewUIOptionWindow::RenderModern()
 		{
 			char szAlpha[16];
 			sprintf(szAlpha, "%d%%", m_iOpacity);
-			DrawDropRow(colX[2], yy, kColW, "Transparency", szAlpha, DD_OPACITY);
+			DrawDropRow(colX[2], yy, kColW, "Transparency", szAlpha, DD_OPACITY); yy += kRowH;
 		}
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+		// screen: applied at once; a size other than the one the game started with is scaled until the next start
+		DrawDropRow(colX[2], yy, kColW, "Screen", g_bUseWindowMode ? "Window" : "Fullscreen", DD_SCREENMODE); yy += kRowH;
+		{
+			char szRes[48];
+			ScreenResolutionName(m_Resolution, szRes, sizeof(szRes));
+
+			int w = 0, h = 0;
+			if (GetResolutionSize(m_Resolution, &w, &h) && (w != (int)WindowWidth || h != (int)WindowHeight))
+			{
+				strncat(szRes, " *", sizeof(szRes) - strlen(szRes) - 1);
+				if (m_iFontWanted == m_FontSizePlus)	// the header spot is free (text size shows "restart needed" there)
+				{
+					TextDraw(g_hFont, (int)(colX[2] + kColW - 120.f), (int)(y + 7.f), 0xFF60A8FFu, 0x0, 110, 0, 2, "%s", "* sharp after restart");
+				}
+			}
+
+			DrawDropRow(colX[2], yy, kColW, "Resolution", szRes, DD_RESOLUTION);
+		}
+#endif
 		y += CardH(dispRows) + kGap;
 
 		// Effect limit: five steps, the same 5/7/9/11/13 scale the old bar showed.

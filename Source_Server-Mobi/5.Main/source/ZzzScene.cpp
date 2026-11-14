@@ -1799,7 +1799,11 @@ void LoadingScene(HDC hDC)
 	::EndBitmap();
 	::EndOpengl();
 	::glFlush();
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+	PcPresentSwap(hDC);
+#else
 	::SwapBuffers(hDC);
+#endif
 
 	SAFE_DELETE(rUIMng.m_pLoadingScene);
 
@@ -3742,7 +3746,11 @@ void MainScene(HDC hDC)
 		if (Success)
 		{
 			//glFlush();
+#if !defined(__ANDROID__) && !defined(MU_IOS)
+			PcPresentSwap(hDC);
+#else
 			SwapBuffers(hDC);
+#endif
 		}
 
 		const float current_frame_time_ms = current_tick_count - last_render_tick_count;

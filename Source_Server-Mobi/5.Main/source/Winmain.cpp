@@ -602,6 +602,482 @@ extern int TimeRemain;
 extern bool EnableFastInput;
 void MainScene(HDC hDC);
 
+//////////////////////////////////////////////////////////////////////
+// Screen size + real fullscreen (PC)
+//
+// Resolution (registry SOFTWARE\Webzen\Mu\Config, value "Resolution"):
+//   0-10  the original table (unchanged, so saved settings keep working)
+//   11 1280x720  12 1600x900  13 1920x1080  14 2560x1440  15 3840x2160  16 1024x768  17 1280x1024  18 1600x1200
+//   99    the monitor's own (desktop) resolution
+// WindowMode = 0: real fullscreen - the monitor is switched to that resolution (no stretching, no black bars);
+// Alt+Tab gives the desktop back and the mode is switched again when the game gets the focus back.
+// WindowMode = 1: a fixed window of that size (made smaller when it does not fit on the screen).
+//////////////////////////////////////////////////////////////////////
+
+extern int m_Resolution;
+
+static DEVMODE g_FsMode;
+static bool g_FsHave = false;
+
+// The UI is laid out on a virtual screen at least 640x480: the scale keeps both sides inside it.
+static float ScreenScaleFor(int w,int h)
+{
+	float sx = (float)w / 640.0f;
+	float sy = (float)h / 480.0f;
+	return (sx < sy) ? sx : sy;
+}
+
+void ApplyScreenSize(int w,int h,float rate)
+{
+	WindowWidth = w;
+	WindowHeight = h;
+
+	g_fScreenRate_x = rate;
+	g_fScreenRate_y = rate;
+
+	DisplayWinCDepthBox = (int)WindowWidth / g_fScreenRate_y - 640;
+	DisplayWin = (int)WindowWidth / g_fScreenRate_y;
+	DisplayWinMid = (int)WindowWidth / g_fScreenRate_y / 2;
+	DisplayWinExt = (int)((DisplayWin * 0.5) - 320.0);
+	DisplayWinReal = (int)DisplayWin / 640.0;
+
+	DisplayHeight = (int)((double)WindowHeight / g_fScreenRate_y);
+	DisplayHeightExt = (int)((double)DisplayHeight - 480.0);
+}
+
+// Picks the display mode for w x h: 32 bit first, the desktop's refresh rate when the mode has it, else the highest.
+static bool FullscreenFindMode(int w,int h)
+{
+	DEVMODE cur;
+	memset(&cur,0,sizeof(cur));
+	cur.dmSize = sizeof(cur);
+	EnumDisplaySettings(NULL,ENUM_CURRENT_SETTINGS,&cur);
+
+	DEVMODE dm;
+	DEVMODE best;
+	bool found = false;
+
+	memset(&dm,0,sizeof(dm));
+	dm.dmSize = sizeof(dm);
+
+	for(int n=0;EnumDisplaySettings(NULL,n,&dm);n++)
+	{
+		if((int)dm.dmPelsWidth != w || (int)dm.dmPelsHeight != h || dm.dmBitsPerPel < 16)
+		{
+			continue;
+		}
+
+		if(found == false)
+		{
+			best = dm;
+			found = true;
+			continue;
+		}
+
+		bool better = false;
+
+		if(dm.dmBitsPerPel != best.dmBitsPerPel)
+		{
+			better = (dm.dmBitsPerPel > best.dmBitsPerPel);
+		}
+		else if(dm.dmDisplayFrequency == cur.dmDisplayFrequency)
+		{
+			better = (best.dmDisplayFrequency != cur.dmDisplayFrequency);
+		}
+		else if(best.dmDisplayFrequency != cur.dmDisplayFrequency)
+		{
+			better = (dm.dmDisplayFrequency > best.dmDisplayFrequency);
+		}
+
+		if(better)
+		{
+			best = dm;
+		}
+	}
+
+	if(found)
+	{
+		best.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY;
+		g_FsMode = best;
+		g_FsHave = true;
+	}
+
+	return found;
+}
+
+static bool FullscreenApply()
+{
+	if(g_FsHave == false)
+	{
+		return false;
+	}
+
+	return (ChangeDisplaySettings(&g_FsMode,CDS_FULLSCREEN) == DISP_CHANGE_SUCCESSFUL);
+}
+
+//////////////////////////////////////////////////////////////////////
+// Live display change (PC)
+//////////////////////////////////////////////////////////////////////
+
+#define KOK_GL_FRAMEBUFFER 0x8D40
+#define KOK_GL_RENDERBUFFER 0x8D41
+#define KOK_GL_COLOR_ATTACHMENT0 0x8CE0
+#define KOK_GL_DEPTH_ATTACHMENT 0x8D00
+#define KOK_GL_STENCIL_ATTACHMENT 0x8D20
+#define KOK_GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#define KOK_GL_DEPTH24_STENCIL8 0x88F0
+#define KOK_GL_RGBA8 0x8058
+#define KOK_GL_CLAMP_TO_EDGE 0x812F
+
+typedef void (APIENTRY *PFN_GenFramebuffers)(GLsizei, GLuint*);
+typedef void (APIENTRY *PFN_BindFramebuffer)(GLenum, GLuint);
+typedef void (APIENTRY *PFN_FramebufferTexture2D)(GLenum, GLenum, GLenum, GLuint, GLint);
+typedef void (APIENTRY *PFN_GenRenderbuffers)(GLsizei, GLuint*);
+typedef void (APIENTRY *PFN_BindRenderbuffer)(GLenum, GLuint);
+typedef void (APIENTRY *PFN_RenderbufferStorage)(GLenum, GLenum, GLsizei, GLsizei);
+typedef void (APIENTRY *PFN_FramebufferRenderbuffer)(GLenum, GLenum, GLenum, GLuint);
+typedef GLenum (APIENTRY *PFN_CheckFramebufferStatus)(GLenum);
+
+static PFN_GenFramebuffers s_glGenFramebuffers = NULL;
+static PFN_BindFramebuffer s_glBindFramebuffer = NULL;
+static PFN_FramebufferTexture2D s_glFramebufferTexture2D = NULL;
+static PFN_GenRenderbuffers s_glGenRenderbuffers = NULL;
+static PFN_BindRenderbuffer s_glBindRenderbuffer = NULL;
+static PFN_RenderbufferStorage s_glRenderbufferStorage = NULL;
+static PFN_FramebufferRenderbuffer s_glFramebufferRenderbuffer = NULL;
+static PFN_CheckFramebufferStatus s_glCheckFramebufferStatus = NULL;
+
+static bool s_PresentScaled = false;   // the engine renders offscreen, the frame is scaled onto the window
+static bool s_PresentCheck = false;    // the window changed: decide again after the next frame
+static GLuint s_PresentFbo = 0;
+static GLuint s_PresentTex = 0;
+static GLuint s_PresentDepth = 0;
+static int s_PhysW = 0, s_PhysH = 0;   // the window's client size
+static int s_DstX = 0, s_DstY = 0, s_DstW = 0, s_DstH = 0;   // where the frame lands in it (letterboxed)
+
+static bool PresentLoadGl()
+{
+	if (s_glBindFramebuffer != NULL)
+	{
+		return true;
+	}
+
+	s_glGenFramebuffers = (PFN_GenFramebuffers)wglGetProcAddress("glGenFramebuffersEXT");
+	s_glBindFramebuffer = (PFN_BindFramebuffer)wglGetProcAddress("glBindFramebufferEXT");
+	s_glFramebufferTexture2D = (PFN_FramebufferTexture2D)wglGetProcAddress("glFramebufferTexture2DEXT");
+	s_glGenRenderbuffers = (PFN_GenRenderbuffers)wglGetProcAddress("glGenRenderbuffersEXT");
+	s_glBindRenderbuffer = (PFN_BindRenderbuffer)wglGetProcAddress("glBindRenderbufferEXT");
+	s_glRenderbufferStorage = (PFN_RenderbufferStorage)wglGetProcAddress("glRenderbufferStorageEXT");
+	s_glFramebufferRenderbuffer = (PFN_FramebufferRenderbuffer)wglGetProcAddress("glFramebufferRenderbufferEXT");
+	s_glCheckFramebufferStatus = (PFN_CheckFramebufferStatus)wglGetProcAddress("glCheckFramebufferStatusEXT");
+
+	if (s_glGenFramebuffers == NULL || s_glBindFramebuffer == NULL || s_glFramebufferTexture2D == NULL || s_glGenRenderbuffers == NULL
+		|| s_glBindRenderbuffer == NULL || s_glRenderbufferStorage == NULL || s_glFramebufferRenderbuffer == NULL || s_glCheckFramebufferStatus == NULL)
+	{
+		s_glBindFramebuffer = NULL;
+		g_ErrorReport.Write("> Live display change: this graphics driver has no framebuffer objects.\r\n");
+		return false;
+	}
+
+	return true;
+}
+
+static bool PresentCreateTarget()
+{
+	if (s_PresentFbo != 0)
+	{
+		return true;
+	}
+
+	if (PresentLoadGl() == false)
+	{
+		return false;
+	}
+
+	extern int CachTexture;
+
+	glGenTextures(1, &s_PresentTex);
+	glBindTexture(GL_TEXTURE_2D, s_PresentTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, KOK_GL_RGBA8, (int)WindowWidth, (int)WindowHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, KOK_GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, KOK_GL_CLAMP_TO_EDGE);
+	CachTexture = -1;
+
+	s_glGenRenderbuffers(1, &s_PresentDepth);
+	s_glBindRenderbuffer(KOK_GL_RENDERBUFFER, s_PresentDepth);
+	s_glRenderbufferStorage(KOK_GL_RENDERBUFFER, KOK_GL_DEPTH24_STENCIL8, (int)WindowWidth, (int)WindowHeight);
+
+	s_glGenFramebuffers(1, &s_PresentFbo);
+	s_glBindFramebuffer(KOK_GL_FRAMEBUFFER, s_PresentFbo);
+	s_glFramebufferTexture2D(KOK_GL_FRAMEBUFFER, KOK_GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_PresentTex, 0);
+	s_glFramebufferRenderbuffer(KOK_GL_FRAMEBUFFER, KOK_GL_DEPTH_ATTACHMENT, KOK_GL_RENDERBUFFER, s_PresentDepth);
+	s_glFramebufferRenderbuffer(KOK_GL_FRAMEBUFFER, KOK_GL_STENCIL_ATTACHMENT, KOK_GL_RENDERBUFFER, s_PresentDepth);
+
+	const GLenum status = s_glCheckFramebufferStatus(KOK_GL_FRAMEBUFFER);
+	s_glBindFramebuffer(KOK_GL_FRAMEBUFFER, 0);
+
+	if (status != KOK_GL_FRAMEBUFFER_COMPLETE)
+	{
+		g_ErrorReport.Write("> Live display change: offscreen frame not complete (0x%04X).\r\n", (unsigned)status);
+		return false;
+	}
+
+	g_ErrorReport.Write("> Live display change: offscreen frame %dx%d ready.\r\n", (int)WindowWidth, (int)WindowHeight);
+	return true;
+}
+
+// After the window changed: scale the frame when the window's client area is not the engine's size.
+static void PresentDecide()
+{
+	RECT rc;
+
+	if (g_hWnd == NULL || GetClientRect(g_hWnd, &rc) == FALSE || rc.right <= 0 || rc.bottom <= 0)
+	{
+		return;
+	}
+
+	s_PhysW = rc.right;
+	s_PhysH = rc.bottom;
+
+	// fit the engine frame inside the client area, keeping its shape (black bars where the shapes differ)
+	const float sx = (float)s_PhysW / (float)WindowWidth;
+	const float sy = (float)s_PhysH / (float)WindowHeight;
+	const float s = (sx < sy) ? sx : sy;
+	s_DstW = (int)((float)WindowWidth * s + 0.5f);
+	s_DstH = (int)((float)WindowHeight * s + 0.5f);
+	s_DstX = (s_PhysW - s_DstW) / 2;
+	s_DstY = (s_PhysH - s_DstH) / 2;
+
+	const bool want = (s_PhysW != (int)WindowWidth || s_PhysH != (int)WindowHeight);
+
+	if (want && PresentCreateTarget())
+	{
+		s_PresentScaled = true;
+		s_glBindFramebuffer(KOK_GL_FRAMEBUFFER, s_PresentFbo);
+		glViewport(0, 0, WindowWidth, WindowHeight);
+	}
+	else
+	{
+		if (s_PresentScaled && s_glBindFramebuffer != NULL)
+		{
+			s_glBindFramebuffer(KOK_GL_FRAMEBUFFER, 0);
+		}
+
+		s_PresentScaled = false;
+		glViewport(0, 0, WindowWidth, WindowHeight);
+	}
+}
+
+void PcPresentSwap(HDC hDC)
+{
+	if (s_PresentScaled)
+	{
+		extern int CachTexture;
+
+		s_glBindFramebuffer(KOK_GL_FRAMEBUFFER, 0);
+
+		glPushAttrib(GL_ALL_ATTRIB_BITS);
+		glMatrixMode(GL_PROJECTION);
+		glPushMatrix();
+		glLoadIdentity();
+		glOrtho(0, s_PhysW, 0, s_PhysH, -1, 1);
+		glMatrixMode(GL_MODELVIEW);
+		glPushMatrix();
+		glLoadIdentity();
+
+		glViewport(0, 0, s_PhysW, s_PhysH);
+		glDisable(GL_SCISSOR_TEST);
+		glClearColor(0.f, 0.f, 0.f, 1.f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+		glDisable(GL_DEPTH_TEST);
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_BLEND);
+		glDisable(GL_ALPHA_TEST);
+		glDisable(GL_FOG);
+		glDisable(GL_LIGHTING);
+		glEnable(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, s_PresentTex);
+		glColor4f(1.f, 1.f, 1.f, 1.f);
+
+		const float x0 = (float)s_DstX, x1 = (float)(s_DstX + s_DstW);
+		const float y0 = (float)(s_PhysH - s_DstY - s_DstH), y1 = (float)(s_PhysH - s_DstY);
+		glBegin(GL_QUADS);
+		glTexCoord2f(0.f, 0.f); glVertex2f(x0, y0);
+		glTexCoord2f(1.f, 0.f); glVertex2f(x1, y0);
+		glTexCoord2f(1.f, 1.f); glVertex2f(x1, y1);
+		glTexCoord2f(0.f, 1.f); glVertex2f(x0, y1);
+		glEnd();
+
+		glMatrixMode(GL_MODELVIEW);
+		glPopMatrix();
+		glMatrixMode(GL_PROJECTION);
+		glPopMatrix();
+		glPopAttrib();
+		CachTexture = -1;
+
+		::SwapBuffers(hDC);
+
+		// back to the offscreen frame for the next one
+		s_glBindFramebuffer(KOK_GL_FRAMEBUFFER, s_PresentFbo);
+		glViewport(0, 0, WindowWidth, WindowHeight);
+	}
+	else
+	{
+		::SwapBuffers(hDC);
+	}
+
+	if (s_PresentCheck)
+	{
+		s_PresentCheck = false;
+		PresentDecide();
+	}
+}
+
+void PcPresentMapMouse(float* x, float* y)
+{
+	if (s_PresentScaled && s_DstW > 0 && s_DstH > 0)
+	{
+		*x = (*x - (float)s_DstX) * (float)WindowWidth / (float)s_DstW;
+		*y = (*y - (float)s_DstY) * (float)WindowHeight / (float)s_DstH;
+		return;
+	}
+
+	RECT rcClient;
+
+	if (g_hWnd != NULL && GetClientRect(g_hWnd, &rcClient) && rcClient.right > 0 && rcClient.bottom > 0)
+	{
+		*x = *x * (float)WindowWidth / (float)rcClient.right;
+		*y = *y * (float)WindowHeight / (float)rcClient.bottom;
+	}
+}
+
+bool GetResolutionSize(int resolution, int* w, int* h)
+{
+	static const int table[][3] = {
+		{0,640,480}, {1,800,600}, {2,1024,640}, {3,1280,800}, {4,1366,768}, {5,1440,900}, {6,1536,960}, {7,1680,1050}, {8,1920,1200},
+		{9,2560,1600}, {10,3840,2400}, {11,1280,720}, {12,1600,900}, {13,1920,1080}, {14,2560,1440}, {15,3840,2160}, {16,1024,768},
+		{17,1280,1024}, {18,1600,1200} };
+
+	if (resolution == 99)
+	{
+		*w = GetSystemMetrics(SM_CXSCREEN);
+		*h = GetSystemMetrics(SM_CYSCREEN);
+		return true;
+	}
+
+	for (int n = 0; n < (int)(sizeof(table) / sizeof(table[0])); n++)
+	{
+		if (table[n][0] == resolution)
+		{
+			*w = table[n][1];
+			*h = table[n][2];
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool ApplyDisplaySettings(int resolution, int windowMode)
+{
+	int w = 0, h = 0;
+
+	if (g_hWnd == NULL || GetResolutionSize(resolution, &w, &h) == false)
+	{
+		return false;
+	}
+
+	if (windowMode == 0)
+	{
+		bool ok = FullscreenFindMode(w, h) && FullscreenApply();
+
+		if (ok == false)
+		{
+			w = GetSystemMetrics(SM_CXSCREEN);
+			h = GetSystemMetrics(SM_CYSCREEN);
+			ok = FullscreenFindMode(w, h) && FullscreenApply();
+		}
+
+		if (ok == false)
+		{
+			g_ErrorReport.Write("> Live display change: fullscreen %dx%d failed.\r\n", w, h);
+			return false;
+		}
+
+		w = (int)g_FsMode.dmPelsWidth;
+		h = (int)g_FsMode.dmPelsHeight;
+
+		SetWindowLong(g_hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+		SetWindowLong(g_hWnd, GWL_EXSTYLE, WS_EX_TOPMOST | WS_EX_APPWINDOW);
+		SetWindowPos(g_hWnd, HWND_TOPMOST, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+	}
+	else
+	{
+		// Window mode first, then give the desktop its resolution back: the mode change sends activation messages,
+		// and the fullscreen Alt+Tab handler must not take them as "back to fullscreen" (it re-applied the mode and
+		// the borderless top-left popup).
+		const bool wasFullscreen = (g_bUseWindowMode == FALSE);
+
+		g_bUseWindowMode = TRUE;
+		g_FsHave = false;
+
+		if (wasFullscreen)
+		{
+			ChangeDisplaySettings(NULL, 0);
+		}
+
+		ShowWindow(g_hWnd, SW_RESTORE);
+
+		const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPCHILDREN;
+
+		// a window must fit on the screen
+		RECT wa;
+		SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
+		RECT frame = { 0, 0, 100, 100 };
+		AdjustWindowRect(&frame, style, FALSE);
+		const int extraW = (frame.right - frame.left) - 100;
+		const int extraH = (frame.bottom - frame.top) - 100;
+		const int maxW = (wa.right - wa.left) - extraW;
+		const int maxH = (wa.bottom - wa.top) - extraH;
+
+		if (w > maxW || h > maxH)
+		{
+			const float s1 = (float)maxW / (float)w;
+			const float s2 = (float)maxH / (float)h;
+			const float s = (s1 < s2) ? s1 : s2;
+			w = (int)(w * s);
+			h = (int)(h * s);
+		}
+
+		RECT rc = { 0, 0, w, h };
+		AdjustWindowRect(&rc, style, FALSE);
+		const int ww = rc.right - rc.left;
+		const int wh = rc.bottom - rc.top;
+
+		SetWindowLong(g_hWnd, GWL_STYLE, style | WS_VISIBLE);
+		SetWindowLong(g_hWnd, GWL_EXSTYLE, WS_EX_APPWINDOW);
+		SetWindowPos(g_hWnd, HWND_NOTOPMOST, wa.left + ((wa.right - wa.left) - ww) / 2, wa.top + ((wa.bottom - wa.top) - wh) / 2, ww, wh, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+		RECT check;
+		GetWindowRect(g_hWnd, &check);
+		g_ErrorReport.Write("> Live display change: window style %08X at %d,%d size %dx%d.\r\n", (unsigned)GetWindowLong(g_hWnd, GWL_STYLE), (int)check.left, (int)check.top, (int)(check.right - check.left), (int)(check.bottom - check.top));
+	}
+
+	g_bUseWindowMode = (windowMode != 0) ? TRUE : FALSE;
+	m_Resolution = resolution;
+
+	SaveConfigDword("Resolution", resolution);
+	SaveConfigDword("WindowMode", (windowMode != 0) ? 1 : 0);
+
+	s_PresentCheck = true;   // switch to / from the scaled frame after this frame
+
+	g_ErrorReport.Write("> Live display change: %s %dx%d (the game renders at %dx%d until the next start).\r\n", (windowMode == 0) ? "fullscreen" : "window", w, h, (int)WindowWidth, (int)WindowHeight);
+	return true;
+}
+
 LONG FAR PASCAL WndProc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 {
 	MOUSEHOOKSTRUCTEX* Mouse = (MOUSEHOOKSTRUCTEX*)lParam;
@@ -624,6 +1100,28 @@ LONG FAR PASCAL WndProc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 		break;
 #endif // !FOR_WORK
 #endif // PROTECT_SYSTEMKEY && NDEBUG
+#ifdef ENABLE_FULLSCREEN
+	case WM_ACTIVATEAPP:
+		// Real fullscreen: leaving the game gives the desktop its own resolution back and minimizes the game; coming
+		// back switches the monitor again. (g_bMinimizedEnabled: this minimize is ours, not a cheat.)
+		if (g_bUseWindowMode == FALSE && g_FsHave)
+		{
+			if (wParam == FALSE)
+			{
+				ChangeDisplaySettings(NULL,0);
+				g_bMinimizedEnabled = TRUE;
+				ShowWindow(hwnd,SW_MINIMIZE);
+				g_bMinimizedEnabled = FALSE;
+			}
+			else
+			{
+				FullscreenApply();
+				ShowWindow(hwnd,SW_RESTORE);
+				SetWindowPos(hwnd,HWND_TOPMOST,0,0,(int)g_FsMode.dmPelsWidth,(int)g_FsMode.dmPelsHeight,SWP_SHOWWINDOW);
+			}
+		}
+		break;
+#endif
     case WM_ACTIVATE:
 		if(LOWORD(wParam) == WA_INACTIVE)
 		{
@@ -828,8 +1326,12 @@ LONG FAR PASCAL WndProc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam)
 	{
 	case WM_MOUSEMOVE:
 		{
-			MouseX = (float)LOWORD(lParam) / g_fScreenRate_x; //g_fScreenRate_x
-			MouseY = (float)HIWORD(lParam) / g_fScreenRate_y;
+			// the client area can differ from the render size (window resized / scaled by Windows): map through it
+			float px = (float)(short)LOWORD(lParam);
+			float py = (float)(short)HIWORD(lParam);
+			PcPresentMapMouse(&px, &py);
+			MouseX = px / g_fScreenRate_x; //g_fScreenRate_x
+			MouseY = py / g_fScreenRate_y;
 			if(MouseX < 0) 
 				MouseX = 0;
 			if(MouseX > DisplayWin) //Fix Wide
@@ -1075,66 +1577,28 @@ HWND StartWindow(HINSTANCE hCurrentInst,int nCmdShow)
 	gTrayMode.Init(g_hInst);
 
 #ifdef ENABLE_FULLSCREEN
+	// Window mode: a fixed, captioned window, centred on the work area. Fullscreen: a topmost popup covering the
+	// (already switched) screen. Not tied to FOR_WORK any more - that switch used to force the borderless popup always.
+	if (g_bUseWindowMode == TRUE)
 	{
-#ifndef FOR_WORK
-#if defined USER_WINDOW_MODE || (defined WINDOWMODE)
-		if (g_bUseWindowMode == TRUE)
-		{
-			RECT rc = { 0, 0, WindowWidth, WindowHeight };
-#if defined WINDOWMODE
-			if (g_bUseWindowMode == TRUE)
-				AdjustWindowRect(&rc, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPCHILDREN, NULL);
-			else
-#endif	//WINDOWMODE
-			AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, NULL);
-			rc.right -= rc.left;
-			rc.bottom -= rc.top;
+		const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPCHILDREN;
+		RECT rc = { 0, 0, (LONG)WindowWidth, (LONG)WindowHeight };
+		AdjustWindowRect(&rc, style, FALSE);
+		const int ww = rc.right - rc.left;
+		const int wh = rc.bottom - rc.top;
 
-#if defined WINDOWMODE
-			if (g_bUseWindowMode == TRUE)
-			{
-			hWnd = CreateWindow(
-				windowName, windowName,
-				WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPCHILDREN,
-				(GetSystemMetrics(SM_CXSCREEN) - rc.right) / 2,
-				(GetSystemMetrics(SM_CYSCREEN) - rc.bottom) / 2,
-				rc.right,
-				rc.bottom,
-				NULL, NULL, hCurrentInst, NULL);
-			}
-			else
-#endif//WINDOWMODE
-			{
-			hWnd = CreateWindow(
-				windowName, windowName,
-				WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-				(GetSystemMetrics(SM_CXSCREEN) - rc.right) / 2,
-				(GetSystemMetrics(SM_CYSCREEN) - rc.bottom) / 2,
-				rc.right,
-				rc.bottom,
-				NULL, NULL, hCurrentInst, NULL);
-			}
-		}
-		else
-#endif//WINDOWMODE
-		{
-			hWnd = CreateWindowEx( WS_EX_TOPMOST | WS_EX_APPWINDOW,
-				windowName, windowName,
-				WS_POPUP,
-				0, 0,
-				WindowWidth,
-				WindowHeight,
-				NULL, NULL, hCurrentInst, NULL);
-		}
-#else //FOR_WORK
-		hWnd = CreateWindow(
-			windowName, windowName,
-			WS_POPUP,
-			0, 0,
-			WindowWidth,
-			WindowHeight,
-			NULL, NULL, hCurrentInst, NULL);
-#endif
+		RECT wa;
+		SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
+		int x = wa.left + ((wa.right - wa.left) - ww) / 2;
+		int y = wa.top + ((wa.bottom - wa.top) - wh) / 2;
+		if (x < wa.left) x = wa.left;
+		if (y < wa.top) y = wa.top;
+
+		hWnd = CreateWindow(windowName, windowName, style, x, y, ww, wh, NULL, NULL, hCurrentInst, NULL);
+	}
+	else
+	{
+		hWnd = CreateWindowEx(WS_EX_TOPMOST | WS_EX_APPWINDOW, windowName, windowName, WS_POPUP, 0, 0, WindowWidth, WindowHeight, NULL, NULL, hCurrentInst, NULL);
 	}
 #else //ENABLE_FULLSCREEN
 	{
@@ -1527,35 +1991,72 @@ BOOL OpenInitFile()
 
 #if(WIDE_SCREEN)
 	float GetPos = 0.0f;
+	int fsW = 0, fsH = 0;
 	switch (m_Resolution) //Resolution
 	{
-	case 0:WindowWidth = 640; WindowHeight = 480;	GetPos = 1.25f; break;			 
-	case 1:WindowWidth = 800; WindowHeight = 600;	GetPos = 1.25f; break;			 
-	case 2:WindowWidth = 1024; WindowHeight = 640;	GetPos = 1.25f; break;			 
-	case 3:WindowWidth = 1280; WindowHeight = 800;	GetPos = 1.50f; break;			 
-	case 4:WindowWidth = 1366; WindowHeight = 768;	GetPos = 1.60f; break;			 
-	case 5:WindowWidth = 1440; WindowHeight = 900;	GetPos = 1.69f; break;			 
-	case 6:WindowWidth = 1536; WindowHeight = 960;	GetPos = 1.87f; break;			 
-	case 7:WindowWidth = 1680; WindowHeight = 1050; GetPos = 2.10f; break;			 
-	case 8:WindowWidth = 1920; WindowHeight = 1200; GetPos = 2.10f; break;			 
-	case 9:WindowWidth = 2560; WindowHeight = 1600; GetPos = 2.10f; break;			 
-	case 10:WindowWidth = 3840; WindowHeight = 2400; GetPos = 2.10f; break;			 
-	default:WindowWidth = 1920; WindowHeight = 1200; GetPos = 1.20f; break;			 
+	case 0:WindowWidth = 640; WindowHeight = 480;	GetPos = 1.25f; break;
+	case 1:WindowWidth = 800; WindowHeight = 600;	GetPos = 1.25f; break;
+	case 2:WindowWidth = 1024; WindowHeight = 640;	GetPos = 1.25f; break;
+	case 3:WindowWidth = 1280; WindowHeight = 800;	GetPos = 1.50f; break;
+	case 4:WindowWidth = 1366; WindowHeight = 768;	GetPos = 1.60f; break;
+	case 5:WindowWidth = 1440; WindowHeight = 900;	GetPos = 1.69f; break;
+	case 6:WindowWidth = 1536; WindowHeight = 960;	GetPos = 1.87f; break;
+	case 7:WindowWidth = 1680; WindowHeight = 1050; GetPos = 2.10f; break;
+	case 8:WindowWidth = 1920; WindowHeight = 1200; GetPos = 2.10f; break;
+	case 9:WindowWidth = 2560; WindowHeight = 1600; GetPos = 2.10f; break;
+	case 10:WindowWidth = 3840; WindowHeight = 2400; GetPos = 2.10f; break;
+	// 16:9 and 4:3/5:4 sizes (the UI scale follows the screen: the same layout as 1366x768 for 16:9)
+	case 11:WindowWidth = 1280; WindowHeight = 720; break;
+	case 12:WindowWidth = 1600; WindowHeight = 900; break;
+	case 13:WindowWidth = 1920; WindowHeight = 1080; break;
+	case 14:WindowWidth = 2560; WindowHeight = 1440; break;
+	case 15:WindowWidth = 3840; WindowHeight = 2160; break;
+	case 16:WindowWidth = 1024; WindowHeight = 768; break;
+	case 17:WindowWidth = 1280; WindowHeight = 1024; break;
+	case 18:WindowWidth = 1600; WindowHeight = 1200; break;
+	case 99:WindowWidth = GetSystemMetrics(SM_CXSCREEN); WindowHeight = GetSystemMetrics(SM_CYSCREEN); break; // the monitor's own resolution
+	default:WindowWidth = 1920; WindowHeight = 1200; GetPos = 1.20f; break;
 		//case 3:WindowWidth=1920;WindowHeight=1440;break;
 		//case 4:WindowWidth=1600;WindowHeight=1200;break;
 	}
-	g_fScreenRate_x = GetPos;
-	g_fScreenRate_y = GetPos;
 
-	DisplayWinCDepthBox = (int)WindowWidth / g_fScreenRate_y - 640;
-	DisplayWin = (int)WindowWidth / g_fScreenRate_y;
-	DisplayWinMid = (int)WindowWidth / g_fScreenRate_y / 2;
-	//DisplayWinExt = (int)WindowWidth / g_fScreenRate_y / 2 - 320;
-	DisplayWinExt = (int)((DisplayWin * 0.5) - 320.0);
-	DisplayWinReal = (int)DisplayWin / 640.0;
+	if (GetPos <= 0.0f)
+	{
+		GetPos = ScreenScaleFor((int)WindowWidth, (int)WindowHeight);
+	}
 
-	DisplayHeight = (int)((double)WindowHeight / g_fScreenRate_y);
-	DisplayHeightExt = (int)((double)DisplayHeight - 480.0);
+	// A window must fit on the screen: when the chosen size is bigger than the work area, use the biggest size that fits.
+	if (g_bUseWindowMode == TRUE)
+	{
+		RECT wa;
+		SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
+
+		RECT frame = { 0, 0, 100, 100 };
+		AdjustWindowRect(&frame, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_BORDER | WS_CLIPCHILDREN, FALSE);
+		const int extraW = (frame.right - frame.left) - 100;
+		const int extraH = (frame.bottom - frame.top) - 100;
+		const int maxW = (wa.right - wa.left) - extraW;
+		const int maxH = (wa.bottom - wa.top) - extraH;
+
+		if ((int)WindowWidth > maxW || (int)WindowHeight > maxH)
+		{
+			static const int sizes[][2] = { {2560,1440}, {1920,1080}, {1680,1050}, {1600,900}, {1440,900}, {1366,768}, {1280,720}, {1024,768}, {800,600} };
+
+			for (int n = 0; n < (int)(sizeof(sizes) / sizeof(sizes[0])); n++)
+			{
+				if (sizes[n][0] <= maxW && sizes[n][1] <= maxH)
+				{
+					g_ErrorReport.Write("> Window %dx%d does not fit the screen: using %dx%d.\r\n", (int)WindowWidth, (int)WindowHeight, sizes[n][0], sizes[n][1]);
+					WindowWidth = sizes[n][0];
+					WindowHeight = sizes[n][1];
+					GetPos = ScreenScaleFor(sizes[n][0], sizes[n][1]);
+					break;
+				}
+			}
+		}
+	}
+
+	ApplyScreenSize((int)WindowWidth, (int)WindowHeight, GetPos);
 
 #else
 	switch (m_Resolution)
@@ -1809,16 +2310,14 @@ bool ExceptionCallback(_EXCEPTION_POINTERS* pExceptionInfo )
 
 	CloseHandle(file);
 
-	return EXCEPTION_CONTINUE_SEARCH;
-
 #ifdef ENABLE_FULLSCREEN
-#if defined USER_WINDOW_MODE || (defined WINDOWMODE)
 	if (g_bUseWindowMode == FALSE)
-#endif	// USER_WINDOW_MODE
 	{
-		ChangeDisplaySettings(NULL,0);
+		ChangeDisplaySettings(NULL,0); // a crash must not leave the desktop in the game's resolution
 	}
 #endif //ENABLE_FULLSCREEN
+
+	return EXCEPTION_CONTINUE_SEARCH;
 	return true;
 }
 #endif
@@ -1887,27 +2386,11 @@ MSG MainLoop()
 			{
 				Scene(g_hDC);
 			}
-#ifndef FOR_WORK
-			else if (g_bUseWindowMode == FALSE)
+			else
 			{
-				SetForegroundWindow(g_hWnd);
-				SetFocus(g_hWnd);
-
-				if (g_iInactiveWarning > 1)
-				{
-					SetTimer(g_hWnd, WINDOWMINIMIZED_TIMER, 1 * 1000, NULL);
-					PostMessage(g_hWnd, WM_CLOSE, 0, 0);
-				}
-				else
-				{
-					g_iInactiveWarning++;
-					g_bMinimizedEnabled = TRUE;
-					ShowWindow(g_hWnd, SW_MINIMIZE);
-					g_bMinimizedEnabled = FALSE;
-					ShowWindow(g_hWnd, SW_MAXIMIZE);
-				}
+				// fullscreen game in the background (Alt+Tab): it waits, minimized, until the player comes back
+				Sleep(20);
 			}
-#endif//FOR_WORK
 #else//WINDOWMODE
 			if (g_bWndActive)
 				Scene(g_hDC);
@@ -2103,18 +2586,32 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLin
 	}
 
 #ifdef ENABLE_FULLSCREEN
-#if defined USER_WINDOW_MODE || (defined WINDOWMODE)
 	if (g_bUseWindowMode == FALSE)
-#endif	// USER_WINDOW_MODE
 	{
-		for(int n2=0; n2<nModes; n2++)
+		// Real fullscreen: switch the monitor to the chosen resolution. A resolution the monitor does not have falls back
+		// to the desktop's own resolution (still fullscreen, still no stretching).
+		bool ok = FullscreenFindMode((int)WindowWidth, (int)WindowHeight) && FullscreenApply();
+
+		if (ok == false)
 		{
-			if(pDevmodes[n2].dmPelsWidth==WindowWidth && pDevmodes[n2].dmPelsHeight==WindowHeight && pDevmodes[n2].dmBitsPerPel == dwBitsPerPel)
-			{
-				g_ErrorReport.Write( "> Change display setting %dx%d.\r\n", pDevmodes[n2].dmPelsWidth, pDevmodes[n2].dmPelsHeight);
-				ChangeDisplaySettings(&pDevmodes[n2],0);
-				break;
-			}
+			const int dw = GetSystemMetrics(SM_CXSCREEN);
+			const int dh = GetSystemMetrics(SM_CYSCREEN);
+
+			g_ErrorReport.Write("> Fullscreen %dx%d is not available on this monitor: using %dx%d.\r\n", (int)WindowWidth, (int)WindowHeight, dw, dh);
+
+			ApplyScreenSize(dw, dh, ScreenScaleFor(dw, dh));
+			ok = FullscreenFindMode(dw, dh) && FullscreenApply();
+		}
+
+		if (ok)
+		{
+			g_ErrorReport.Write("> Fullscreen %dx%d, %d bit, %d Hz.\r\n", (int)g_FsMode.dmPelsWidth, (int)g_FsMode.dmPelsHeight, (int)g_FsMode.dmBitsPerPel, (int)g_FsMode.dmDisplayFrequency);
+		}
+		else
+		{
+			g_ErrorReport.Write("> Fullscreen failed: starting in a window.\r\n");
+			g_FsHave = false;
+			g_bUseWindowMode = TRUE;
 		}
 	}
 #endif //ENABLE_FULLSCREEN
