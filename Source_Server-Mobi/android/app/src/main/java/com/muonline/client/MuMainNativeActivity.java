@@ -1032,22 +1032,156 @@ public class MuMainNativeActivity extends NativeActivity {
             @Override
             public void run() {
                 try {
-                    new android.app.AlertDialog.Builder(MuMainNativeActivity.this)
-                        .setTitle("Auto clicker detected")
-                        .setMessage(reason + "\n\nAuto clickers are not allowed. Remove it to play. The game will close.")
-                        .setCancelable(false)
-                        .setPositiveButton("Close game", new android.content.DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(android.content.DialogInterface dialog, int which) {
-                                exit.run();
-                            }
-                        })
-                        .show();
+                    showAutoClickerDialog(reason, exit);
                 } catch (Throwable t) {
                     exit.run();
                 }
             }
         });
+    }
+
+    private static int dp(float density, float value) {
+        return Math.round(value * density);
+    }
+
+    /** The "auto clicker detected" card: dark, gold-edged like the game's own windows, with a countdown to the forced close. */
+    private void showAutoClickerDialog(final String reason, final Runnable exit) {
+        final float d = getResources().getDisplayMetrics().density;
+        final int gold = 0xFFD6AA46;
+
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setCancelable(false);
+        dialog.setCanceledOnTouchOutside(false);
+
+        final android.widget.LinearLayout card = new android.widget.LinearLayout(this);
+        card.setOrientation(android.widget.LinearLayout.VERTICAL);
+        card.setPadding(dp(d, 20), dp(d, 18), dp(d, 20), dp(d, 18));
+        final android.graphics.drawable.GradientDrawable cardBg = new android.graphics.drawable.GradientDrawable();
+        cardBg.setColor(0xF2101116);
+        cardBg.setCornerRadius(dp(d, 16));
+        cardBg.setStroke(Math.max(1, dp(d, 1.5f)), gold);
+        card.setBackground(cardBg);
+
+        // icon + headline side by side: it has to fit a landscape phone
+        final android.widget.LinearLayout head = new android.widget.LinearLayout(this);
+        head.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        final android.widget.TextView icon = new android.widget.TextView(this);
+        icon.setText("!");
+        icon.setTextColor(gold);
+        icon.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 26);
+        icon.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        icon.setGravity(android.view.Gravity.CENTER);
+        final android.graphics.drawable.GradientDrawable iconBg = new android.graphics.drawable.GradientDrawable();
+        iconBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        iconBg.setColor(0x22D6AA46);
+        iconBg.setStroke(Math.max(1, dp(d, 1.5f)), gold);
+        icon.setBackground(iconBg);
+        head.addView(icon, new android.widget.LinearLayout.LayoutParams(dp(d, 52), dp(d, 52)));
+
+        final android.widget.LinearLayout titles = new android.widget.LinearLayout(this);
+        titles.setOrientation(android.widget.LinearLayout.VERTICAL);
+        titles.setPadding(dp(d, 14), 0, 0, 0);
+
+        final android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("Auto clicker detected");
+        title.setTextColor(0xFFFFFFFF);
+        title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 19);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        titles.addView(title);
+
+        final android.widget.TextView note = new android.widget.TextView(this);
+        note.setText("Auto clickers are not allowed. Remove it to keep playing.");
+        note.setTextColor(0xFFC9CBD3);
+        note.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13.5f);
+        note.setPadding(0, dp(d, 3), 0, 0);
+        titles.addView(note);
+
+        head.addView(titles, new android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(head);
+
+        // what was found (the app or the tap pattern)
+        final android.widget.TextView found = new android.widget.TextView(this);
+        // the full text (package/service) stays in the log; the card shows just the app
+        found.setText(reason.indexOf('/') > 0 ? reason.substring(0, reason.indexOf('/')) : reason);
+        found.setTextColor(0xFF8D90A0);
+        found.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11.5f);
+        found.setPadding(dp(d, 12), dp(d, 9), dp(d, 12), dp(d, 9));
+        final android.graphics.drawable.GradientDrawable foundBg = new android.graphics.drawable.GradientDrawable();
+        foundBg.setColor(0x33000000);
+        foundBg.setCornerRadius(dp(d, 8));
+        found.setBackground(foundBg);
+        final android.widget.LinearLayout.LayoutParams foundLp = new android.widget.LinearLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        foundLp.topMargin = dp(d, 14);
+        card.addView(found, foundLp);
+
+        final android.widget.TextView countdown = new android.widget.TextView(this);
+        countdown.setTextColor(gold);
+        countdown.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
+        countdown.setGravity(android.view.Gravity.CENTER);
+        final android.widget.LinearLayout.LayoutParams countLp = new android.widget.LinearLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        countLp.topMargin = dp(d, 12);
+        card.addView(countdown, countLp);
+
+        final android.widget.TextView button = new android.widget.TextView(this);
+        button.setText("Close game");
+        button.setTextColor(0xFF15161B);
+        button.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        button.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        button.setGravity(android.view.Gravity.CENTER);
+        button.setPadding(0, dp(d, 11), 0, dp(d, 11));
+        final android.graphics.drawable.GradientDrawable buttonBg = new android.graphics.drawable.GradientDrawable();
+        buttonBg.setColor(gold);
+        buttonBg.setCornerRadius(dp(d, 10));
+        button.setBackground(buttonBg);
+        button.setClickable(true);
+        button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                exit.run();
+            }
+        });
+        final android.widget.LinearLayout.LayoutParams buttonLp = new android.widget.LinearLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        buttonLp.topMargin = dp(d, 8);
+        card.addView(button, buttonLp);
+
+        final android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.addView(card);
+        dialog.setContentView(scroll);
+
+        final android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(0.72f);
+            final android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+            final int width = Math.min(Math.round(metrics.widthPixels * 0.9f), dp(d, 440));
+            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+
+        dialog.show();
+
+        // the forced close is 8 seconds after the detection; this counts it down in front of the player
+        final long endAt = android.os.SystemClock.uptimeMillis() + 8000;
+        final Runnable tick = new Runnable() {
+            @Override
+            public void run() {
+                final long left = endAt - android.os.SystemClock.uptimeMillis();
+                if (left <= 0) {
+                    countdown.setText("Closing now");
+                    return;
+                }
+                countdown.setText("The game closes in " + ((left + 999) / 1000) + " s");
+                antiClickerHandler.postDelayed(this, 250);
+            }
+        };
+        tick.run();
     }
 
     @Override
