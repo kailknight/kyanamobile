@@ -61,11 +61,6 @@ void CChoTroi::CreateTable()
 	gQueryManager.Fetch();
 	gQueryManager.Close();
 
-	// the listing's token (see SDHP_REQ_MARKET_SELL): a listing sent twice is filed once
-	gQueryManager.ExecQuery("ALTER TABLE [ItemMarketData] ADD [Token] BIGINT not null default(0)");
-	gQueryManager.Fetch();
-	gQueryManager.Close();
-
 #if(MARKET_FILTER_DEV)
 
 	gQueryManager.ExecQuery("ALTER TABLE [ItemMarketData] ADD [FilterType] INT not null default(0)");
@@ -288,71 +283,44 @@ void CChoTroi::GDReqItemSell(SDHP_REQ_MARKET_SELL* lpMsg, int uIndex)
 	memset(szName, 0, sizeof(szName));
 	memcpy(szName, lpMsg->Name, sizeof(szName) - 1);
 
-	// An old GameServer sends the shorter packet without a token: it is filed the old way (no confirmation).
-	const bool hasToken = ((int)lpMsg->h.size >= (int)sizeof(SDHP_REQ_MARKET_SELL));
-
-	const unsigned __int64 token = hasToken ? ((((unsigned __int64)lpMsg->TokenHigh) << 32) | (unsigned __int64)lpMsg->TokenLow) : 0;
-
 	int TimeHSD = (int)(time(0) + ((lpMsg->ItemDay * 86400))); //HSD
 
-	int id = 0;
+	//LogAdd(LOG_RED, "GDReqItemSell Day %d Time %d Pass %d", lpMsg->ItemDay, TimeHSD,lpMsg->Pass);
+	sprintf(szQuery,
+		"INSERT INTO ItemMarketData (Account, PriceType, PriceValue, Date, TypeItem, Name, Time,Pass) VALUES ('%s', %d, %d, '%s', %d, '%s', %d, %d)",
+		szAccountID,
+		lpMsg->PriceType,
+		lpMsg->Price,
+		"19.12.2020",
+		lpMsg->TypeItem,
+		szName,
+		TimeHSD,
+		lpMsg->Pass
+	);
 
-	// This listing may already be filed: the GameServer sends it again when the confirmation did not arrive (a stall of this
-	// server or of SQL). Then only the item is written again, and the confirmation is repeated.
-	if (token != 0)
+
+	//pMsg.Result = gQueryManager.ExecQuery(szQuery);
+	gQueryManager.ExecQuery(szQuery);
+
+	gQueryManager.Fetch();
+
+	gQueryManager.Close();
+
+	// --
+
+	sprintf(szQuery, "SELECT TOP 1 ID FROM ItemMarketData ORDER BY ID DESC");	//need recode
+
+	if (!gQueryManager.ExecQuery(szQuery) || gQueryManager.Fetch() == SQL_NO_DATA)
 	{
-		if (gQueryManager.ExecQuery("SELECT ID FROM ItemMarketData WHERE Token = %I64d", (__int64)token) != 0 && gQueryManager.Fetch() != SQL_NO_DATA)
-		{
-			id = gQueryManager.GetAsInteger("ID");
-		}
-
+		//pMsg.Result = 0;
+		LogAdd(LOG_RED, "[ChoTroi] Loi Sell Item len cho !!");
 		gQueryManager.Close();
+		return;
 	}
 
-	if (id == 0)
-	{
-		sprintf(szQuery,
-			"INSERT INTO ItemMarketData (Account, PriceType, PriceValue, Date, TypeItem, Name, Time,Pass,Token) VALUES ('%s', %d, %d, '%s', %d, '%s', %d, %d, %I64d)",
-			szAccountID,
-			lpMsg->PriceType,
-			lpMsg->Price,
-			"19.12.2020",
-			lpMsg->TypeItem,
-			szName,
-			TimeHSD,
-			lpMsg->Pass,
-			(__int64)token
-		);
+	int id = gQueryManager.GetAsInteger("ID");
 
-		gQueryManager.ExecQuery(szQuery);
-
-		gQueryManager.Fetch();
-
-		gQueryManager.Close();
-
-		// --
-
-		if (token != 0)
-		{
-			// the row is found by its token (the old "newest ID" lookup could return somebody else's listing)
-			sprintf(szQuery, "SELECT ID FROM ItemMarketData WHERE Token = %I64d", (__int64)token);
-		}
-		else
-		{
-			sprintf(szQuery, "SELECT TOP 1 ID FROM ItemMarketData ORDER BY ID DESC");	//need recode
-		}
-
-		if (!gQueryManager.ExecQuery(szQuery) || gQueryManager.Fetch() == SQL_NO_DATA)
-		{
-			LogAdd(LOG_RED, "[ChoTroi] Loi Sell Item len cho !! (listing %I64d of %s not filed: the GameServer sends it again)", (__int64)token, szAccountID);
-			gQueryManager.Close();
-			return;
-		}
-
-		id = gQueryManager.GetAsInteger("ID");
-
-		gQueryManager.Close();
-	}
+	gQueryManager.Close();
 
 	// --
 
@@ -360,32 +328,14 @@ void CChoTroi::GDReqItemSell(SDHP_REQ_MARKET_SELL* lpMsg, int uIndex)
 
 	gQueryManager.BindParameterAsBinary(1, lpMsg->ItemData, sizeof(lpMsg->ItemData));
 
-	const int written = gQueryManager.ExecQuery(szQuery, id);
+	gQueryManager.ExecQuery(szQuery, id);
 
 	gQueryManager.Close();
 
-	if (written == 0)
-	{
-		LogAdd(LOG_RED, "[ChoTroi] Listing %I64d of %s: the item could not be written (the GameServer sends it again)", (__int64)token, szAccountID);
-		return;
-	}
 
 	// --
 
-	if (token != 0)
-	{
-		SDHP_ANS_MARKET_SELL_ACK ack;
-
-		memset(&ack, 0, sizeof(ack));
-
-		ack.h.set((LPBYTE)&ack, 0xFE, 0x04, sizeof(ack));
-
-		ack.TokenLow = lpMsg->TokenLow;
-
-		ack.TokenHigh = lpMsg->TokenHigh;
-
-		gSocketManager.DataSend(uIndex, (BYTE*)&ack, sizeof(ack));
-	}
+	//gSocketManager.DataSend(uIndex, (BYTE*)&pMsg, sizeof(pMsg));
 }
 
 void CChoTroi::GDReqBuyItem(SDHP_REQ_MARKET_BUY* lpMsg, int uIndex)
@@ -447,9 +397,7 @@ void DeleteItemCoin(int ID)
 }
 void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get va Update List Item Da Ban
 {
-	// Sold rows (Status 1) go to the seller's GameServer to be paid. They are NOT deleted here any more: they become Status 2
-	// ("sent") and are deleted by CFriendMail::OnPayoutRequest once the payout letter really exists. A payout lost to a stall
-	// of this server or of SQL leaves its row at Status 2, and it is sent again the next time the seller asks.
+
 	BYTE send[4096];
 
 	CBCUSTOM_LOAD_COUNT pMsg;
@@ -467,25 +415,16 @@ void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get 
 
 	SDHP_ANS_MARKET_STATUS info;
 
-	if (gQueryManager.ExecQuery("SELECT * FROM ItemMarketData WHERE Account = '%s' AND (Status = 1 OR Status = 2) ORDER BY ID", szAccountID) != 0)
+	if (gQueryManager.ExecQuery("SELECT * FROM ItemMarketData WHERE Account = '%s' AND Status = 1", szAccountID) != 0)
 	{
 		while (gQueryManager.Fetch() != SQL_NO_DATA)
 		{
-			// the reply buffer is 4096 bytes: the rest goes out with the next request
-			if ((size + (int)sizeof(info)) > (int)sizeof(send))
-			{
-				break;
-			}
-
-			memset(&info, 0, sizeof(info));
 
 			info.TypeItem = gQueryManager.GetAsInteger("TypeItem");
 
 			info.PriceType = gQueryManager.GetAsInteger("PriceType");
 
 			info.PriceValue = gQueryManager.GetAsInteger("PriceValue");
-
-			info.ID = gQueryManager.GetAsInteger("ID");
 
 			gQueryManager.GetAsString("Account", info.Account, sizeof(info.Account));
 
@@ -496,14 +435,11 @@ void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get 
 			size += sizeof(info);
 
 			pMsg.count++;
+
 		}
 		gQueryManager.Close();
-
-		if (pMsg.count > 0)
-		{
-			gQueryManager.ExecQuery("UPDATE ItemMarketData SET Status = 2 WHERE Account = '%s' AND Status = 1", szAccountID);
-			gQueryManager.Close();
-		}
+		gQueryManager.ExecQuery("Delete FROM ItemMarketData WHERE Account = '%s' AND Status = 1", szAccountID);
+		gQueryManager.Close();
 	}
 	else
 	{
@@ -511,13 +447,19 @@ void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get 
 		return;
 	}
 
+
+
 	pMsg.header.size[0] = SET_NUMBERHB(size);
 	pMsg.header.size[1] = SET_NUMBERLB(size);
 
 	memcpy(send, &pMsg, sizeof(pMsg));
 
 	gSocketManager.DataSend(uIndex, send, size);
+
 }
+
+
+
 
 void CChoTroi::GDReqItemListPage(SDHP_REQ_MARKET_ITEM* lpMsg, int uIndex)
 {

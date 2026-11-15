@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "BCustomChoTroi.h"
 #include "User.h"
 #include "380ItemOption.h"
 #include "Attack.h"
@@ -251,9 +250,6 @@ void gObjEventRunProc() // OK
 	gDungeonRace.MainProc();
 	gItemReroll.MainProc();
 	gCustomMining.MainProc();
-#if(CUSTOM_BCHOTROI)
-	gBCustomChoTroi.SellRetryProc();
-#endif
 	gBsVEvent.MainProc();
 
 	if (gServerInfo.m_FlyingDragonsSwitch==1){

@@ -895,56 +895,18 @@ void CFriendMail::OnPayoutRequest(SDHP_FRIENDMAIL_PAYOUT_REQ* lpMsg)
 	CopyName(subject,sizeof(subject),lpMsg->Subject,32);
 	CopyName(memo,sizeof(memo),lpMsg->Memo,200);
 
-	// The sold row this payout belongs to (0 = an old GameServer that sends none). It is still there at Status 2 if nothing
-	// has paid it yet. A second request for the same row (the seller asked again while the first was still queued) finds it
-	// gone and is dropped, so one sale can never pay twice.
-	const int marketID = lpMsg->MarketID;
-
-	if(marketID > 0)
-	{
-		bool open = false;
-
-		if(gQueryManager.ExecQuery("SELECT 1 AS X FROM ItemMarketData WHERE ID = %d AND Status = 2",marketID) != 0 && gQueryManager.Fetch() != SQL_NO_DATA)
-		{
-			open = true;
-		}
-
-		gQueryManager.Close();
-
-		if(open == false)
-		{
-			LogAdd(LOG_BLACK,"[FriendMail] Flea market payout for sale #%d to %s skipped: already paid",marketID,name);
-			return;
-		}
-	}
-
 	if(lpMsg->CoinType < FRIENDMAIL_COIN_WCOINC || lpMsg->CoinType > FRIENDMAIL_COIN_CHAOS || lpMsg->CoinAmount == 0 || lpMsg->CoinAmount > 1000000000)
 	{
 		LogAdd(LOG_RED,"[FriendMail] Flea market payout refused for %s: coin type %d amount %u",name,(int)lpMsg->CoinType,lpMsg->CoinAmount);
-
-		// nothing is owed (a 0 payout after tax): close the row so it is not offered again and again
-		if(marketID > 0)
-		{
-			gQueryManager.ExecQuery("DELETE FROM ItemMarketData WHERE ID = %d AND Status = 2",marketID);
-			gQueryManager.Close();
-		}
-
 		return;
 	}
 
 	// expireDays 0: a sale payout never goes back to anyone.
 	if(this->MailCoins(name,"Market",subject,memo,(int)lpMsg->CoinType,(int)lpMsg->CoinAmount,0) == 0)
 	{
-		// The sold row stays (Status 2) and is offered again at the seller's next status request, so this is a delay, not a loss.
-		LogAdd(LOG_RED,"[FriendMail] FLEA MARKET PAYOUT NOT DELIVERED YET to %s: coin type %d amount %u (mailbox full or no such character) - kept for retry%s",name,(int)lpMsg->CoinType,lpMsg->CoinAmount,(marketID > 0)?"":" [OLD GAMESERVER: the sold row is already gone, owed amount above]");
+		// The sold row is already gone, so say exactly what is owed.
+		LogAdd(LOG_RED,"[FriendMail] FLEA MARKET PAYOUT NOT DELIVERED to %s: coin type %d amount %u (mailbox full or no such character)",name,(int)lpMsg->CoinType,lpMsg->CoinAmount);
 		return;
-	}
-
-	// the letter exists: the sold row is done
-	if(marketID > 0)
-	{
-		gQueryManager.ExecQuery("DELETE FROM ItemMarketData WHERE ID = %d AND Status = 2",marketID);
-		gQueryManager.Close();
 	}
 
 	LogAdd(LOG_BLACK,"[FriendMail] Flea market payout mailed to %s: coin type %d x %u",name,(int)lpMsg->CoinType,lpMsg->CoinAmount);

@@ -137,17 +137,6 @@ struct SDHP_REQ_MARKET_SELL
 	int TypeItem;
 	int ItemDay;
 	int Pass;
-	DWORD TokenLow;		// the listing's id (GameServer makes it, DataServer files it under it and sends it back)
-	DWORD TokenHigh;
-};
-
-// 0xFE:0x04 DataServer -> GameServer: the listing with this token is in ItemMarketData with its item. Until this arrives the
-// GameServer keeps the listing in Data\ChoTroiPending and sends it again.
-struct SDHP_ANS_MARKET_SELL_ACK
-{
-	PBMSG_HEAD2 h;
-	DWORD TokenLow;
-	DWORD TokenHigh;
 };
 
 struct SDHP_ANS_MARKET_SELL
@@ -190,7 +179,6 @@ struct SDHP_ANS_MARKET_STATUS
 	int PriceType;
 	int PriceValue;
 	int TypeItem;
-	int ID;			// ItemMarketData row: the payout is only complete when the mail is made, then this row goes
 };
 #endif
 

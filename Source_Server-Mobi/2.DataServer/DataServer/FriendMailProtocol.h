@@ -185,8 +185,6 @@ struct SDHP_FRIENDMAIL_COUNTS_RECV
 };
 
 // 0x57 GameServer -> DataServer: put a flea market payout in the seller's mailbox as a coin attachment. No reply.
-// MarketID = the sold ItemMarketData row. The DataServer keeps that row (Status 2) until the letter exists and only then deletes
-// it, so a payout lost to a DataServer / SQL stall is sent again at the seller's next status request instead of being gone.
 struct SDHP_FRIENDMAIL_PAYOUT_REQ
 {
 	PSBMSG_HEAD header;
@@ -195,5 +193,4 @@ struct SDHP_FRIENDMAIL_PAYOUT_REQ
 	DWORD CoinAmount;
 	char Subject[32];
 	char Memo[200];
-	int MarketID;
 };
