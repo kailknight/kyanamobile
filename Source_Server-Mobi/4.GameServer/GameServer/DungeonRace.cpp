@@ -2,6 +2,7 @@
 #include "stdafx.h"
 #include "DungeonRace.h"
 #include "Attack.h"
+#include "CashShop.h"
 #include "CommandManager.h"
 #include "DSProtocol.h"
 #include "EffectManager.h"
@@ -126,6 +127,9 @@ CDungeonRace::CDungeonRace() // OK
 	for(int n=0;n < 3;n++)
 	{
 		this->m_Zen[n] = 0;
+		this->m_WCoinC[n] = 0;
+		this->m_WCoinP[n] = 0;
+		this->m_GoblinPoint[n] = 0;
 		this->m_Bag[n] = 600+n;
 	}
 }
@@ -251,6 +255,15 @@ void CDungeonRace::Load(char* section,char* path) // OK
 
 		sprintf_s(key,"DungeonRaceZen%d",n+1);
 		this->m_Zen[n] = (DWORD)GetPrivateProfileInt(section,key,zenDefaults[n],path);
+
+		sprintf_s(key,"DungeonRaceWCoinC%d",n+1);
+		this->m_WCoinC[n] = (DWORD)GetPrivateProfileInt(section,key,0,path);
+
+		sprintf_s(key,"DungeonRaceWCoinP%d",n+1);
+		this->m_WCoinP[n] = (DWORD)GetPrivateProfileInt(section,key,0,path);
+
+		sprintf_s(key,"DungeonRaceGoblinPoint%d",n+1);
+		this->m_GoblinPoint[n] = (DWORD)GetPrivateProfileInt(section,key,0,path);
 	}
 
 	if(this->m_RegisterMin < 1){this->m_RegisterMin = 1;}
@@ -1357,6 +1370,14 @@ void CDungeonRace::GiveReward(LPOBJ lpObj,int rank) // OK
 
 		lpObj->Money = total;
 		GCMoneySend(lpObj->Index,lpObj->Money);
+	}
+
+	// WCoin (C), WCoin (P) and Goblin Points go through the cash shop save, the same path the shop and the other events use
+	if(this->m_WCoinC[rank-1] != 0 || this->m_WCoinP[rank-1] != 0 || this->m_GoblinPoint[rank-1] != 0)
+	{
+		gCashShop.GDCashShopAddPointSaveSend(lpObj->Index,0,this->m_WCoinC[rank-1],this->m_WCoinP[rank-1],this->m_GoblinPoint[rank-1],0);
+
+		this->Notify(lpObj,"Dungeon Race: place %d bonus: %d WCoin(C), %d WCoin(P), %d Goblin Points.",rank,(int)this->m_WCoinC[rank-1],(int)this->m_WCoinP[rank-1],(int)this->m_GoblinPoint[rank-1]);
 	}
 
 	this->Notify(lpObj,"Dungeon Race: you won place %d! Your reward is in your inventory.",rank);

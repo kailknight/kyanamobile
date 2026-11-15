@@ -222,6 +222,9 @@ private:
 	std::map<int,int> m_MonsterMap;
 	int m_Bag[3];    // EventItemBagManager.txt SpecialValue of the 1st / 2nd / 3rd place item bag
 	DWORD m_Zen[3];  // extra zen per place
+	DWORD m_WCoinC[3];     // WCoin (C) per place
+	DWORD m_WCoinP[3];     // WCoin (P) per place
+	DWORD m_GoblinPoint[3]; // Goblin Points per place
 
 	// state
 	volatile int m_State;
