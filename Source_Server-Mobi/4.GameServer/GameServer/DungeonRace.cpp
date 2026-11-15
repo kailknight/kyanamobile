@@ -482,7 +482,7 @@ void CDungeonRace::SetNextStart() // OK
 
 void CDungeonRace::SpawnNpc() // OK
 {
-	if(this->m_NpcIndex != -1 && gObjIsConnected(this->m_NpcIndex) != 0 && gObj[this->m_NpcIndex].Class == this->m_NpcClass)
+	if(this->m_NpcIndex != -1 && gObjIsConnected(this->m_NpcIndex) != 0 && gObj[this->m_NpcIndex].Class == this->m_NpcClass && gObj[this->m_NpcIndex].Map == this->m_NpcMap && gObj[this->m_NpcIndex].X == this->m_NpcX && gObj[this->m_NpcIndex].Y == this->m_NpcY)
 	{
 		return;
 	}
@@ -985,7 +985,6 @@ bool CDungeonRace::Dialog(LPOBJ lpObj,LPOBJ lpNpc) // OK
 
 	// the window (Join / Leave buttons) shows every state, so the player also sees when the next race is
 	LogAdd(LOG_BLUE,"[DungeonRace] NPC clicked by %s (state %d)",lpObj->Name,(int)this->m_State);
-	this->Notify(lpObj,"Dungeon Race: %s. (If no window opens, your client is too old: install the new main.exe + kyana.ah.)",(this->m_State == DR_STATE_REGISTER)?"registration is OPEN":((this->m_State == DR_STATE_IDLE)?"no race open right now":"a race is running"));
 	this->SendOpen(lpObj);
 
 	return true;

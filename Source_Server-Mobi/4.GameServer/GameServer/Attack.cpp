@@ -46,6 +46,14 @@
 #include "DungeonRace.h"
 CAttack gAttack;
 
+void gObjLogStun(LPOBJ lpObj,LPOBJ lpTarget,const char* source) // OK
+{
+	if(gServerInfo.m_StunDebugLog != 0)
+	{
+		LogAdd(LOG_BLUE,"[Stun] %s stunned %s: %s (weapons %d / %d)",lpObj->Name,lpTarget->Name,source,(int)lpObj->Inventory[0].m_Index,(int)lpObj->Inventory[1].m_Index);
+	}
+}
+
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -420,20 +428,37 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 
 	if(damage == 0)
 	{
-		if((lpObj->Type != OBJECT_USER || lpTarget->Type != OBJECT_USER) && this->MissCheck(lpObj,lpTarget,lpSkill,send,count,&miss) == 0)
+		// A finished COMBO hit has its own hit chance (Character.ini ComboMissRate, default 10 = 90% hit) instead of the
+		// normal attack/defense success rates. -1 keeps the normal rates for combos too.
+		if(combo != 0 && gServerInfo.m_ComboMissRate >= 0)
 		{
-			#if(GAMESERVER_UPDATE>=701)
-			this->AttackElemental(lpObj,lpTarget,lpSkill,send,flag,damage,count,combo);
-			#endif
-			return 1;
-		}
+			if((int)(GetLargeRand()%100) < gServerInfo.m_ComboMissRate)
+			{
+				this->MissSend(lpObj,lpTarget,lpSkill,send,count);
 
-		if((lpObj->Type == OBJECT_USER && lpTarget->Type == OBJECT_USER) && this->MissCheckPvP(lpObj,lpTarget,lpSkill,send,count,&miss) == 0)
+				#if(GAMESERVER_UPDATE>=701)
+				this->AttackElemental(lpObj,lpTarget,lpSkill,send,flag,damage,count,combo);
+				#endif
+				return 1;
+			}
+		}
+		else
 		{
-			#if(GAMESERVER_UPDATE>=701)
-			this->AttackElemental(lpObj,lpTarget,lpSkill,send,flag,damage,count,combo);
-			#endif
-			return 1;
+			if((lpObj->Type != OBJECT_USER || lpTarget->Type != OBJECT_USER) && this->MissCheck(lpObj,lpTarget,lpSkill,send,count,&miss) == 0)
+			{
+				#if(GAMESERVER_UPDATE>=701)
+				this->AttackElemental(lpObj,lpTarget,lpSkill,send,flag,damage,count,combo);
+				#endif
+				return 1;
+			}
+
+			if((lpObj->Type == OBJECT_USER && lpTarget->Type == OBJECT_USER) && this->MissCheckPvP(lpObj,lpTarget,lpSkill,send,count,&miss) == 0)
+			{
+				#if(GAMESERVER_UPDATE>=701)
+				this->AttackElemental(lpObj,lpTarget,lpSkill,send,flag,damage,count,combo);
+				#endif
+				return 1;
+			}
 		}
 
 		int defense = this->GetTargetDefense(lpObj,lpTarget,&effect);
@@ -941,6 +966,7 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 			{
 				if(gEffectManager.CheckEffect(lpTarget,EFFECT_IRON_DEFENSE) == 0 && gEffectManager.CheckEffect(lpTarget,EFFECT_IRON_DEFENSE_IMPROVED) == 0)
 				{
+					gObjLogStun(lpObj,lpTarget,"Mace Mastery (right hand)");
 					gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,2,0,0,0,0);
 				}
 			}
@@ -952,6 +978,7 @@ bool CAttack::Attack(LPOBJ lpObj, LPOBJ lpTarget, CSkill* lpSkill, bool send, BY
 			{
 				if(gEffectManager.CheckEffect(lpTarget,EFFECT_IRON_DEFENSE) == 0 && gEffectManager.CheckEffect(lpTarget,EFFECT_IRON_DEFENSE_IMPROVED) == 0)
 				{
+					gObjLogStun(lpObj,lpTarget,"Mace Mastery (left hand)");
 					gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,2,0,0,0,0);
 				}
 			}

@@ -2087,6 +2087,11 @@ void CServerInfo::ReadCharacterInfo(char* section,char* path) // OK
 
 	this->m_ComboDamageConstB = GetPrivateProfileInt(section,"ComboDamageConstB",0,path);
 
+	// a finished combo hit misses this % of the time (10 = 90% hit, whatever the hit rates are); -1 = the normal hit rate
+	this->m_ComboMissRate = GetPrivateProfileInt(section,"ComboMissRate",10,path);
+
+	if(this->m_ComboMissRate > 100){this->m_ComboMissRate = 100;}
+
 	{
 		static const char* comboClassName[7] = { "DW", "DK", "FE", "MG", "DL", "SU", "RF" };
 
@@ -4973,6 +4978,10 @@ int CServerInfo::GetDivisorEx(char* section, const char* key, const char* legacy
 
 void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 {
+	// Selupan (Raklion boss): his teleport and heal no longer spam - each may be used again only after this long
+	this->m_SelupanTeleportCooldownMS = GetPrivateProfileInt(section,"SelupanTeleportCooldownMS",15000,path);
+	this->m_SelupanHealCooldownMS = GetPrivateProfileInt(section,"SelupanHealCooldownMS",30000,path);
+
 	// King of Kira has its own file: Data\Custom\CustomKingOfKira.txt, section [KingOfKira] (same key names as before).
 	// Only when that file is missing are the old KingOfKira* keys of CustomConfig.ini used.
 	{
@@ -5045,6 +5054,7 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	// (BCustomEdit.cpp) and CSkillManager::ApplyEarthquakeEffect()
 	// (SkillManager.cpp), both otherwise gated by a random roll.
 	this->m_CommboEffectEnable = GetPrivateProfileInt(section, "CommboEffectEnable", 0, path);
+	this->m_StunDebugLog = GetPrivateProfileInt(section, "StunDebugLog", 0, path);
 
 	// DarkHorsePushBackChance (CustomConfig.ini): independent 0-100 chance
 	// for the Dark Horse stomp (Earthquake) to physically knock the target
@@ -5361,7 +5371,7 @@ void CServerInfo::ReadCustomConfig(char* section, char* path) // OK
 	this->m_AutoComboConfigure[2] = GetPrivateProfileInt(section, "AutoCombo_AL2", 1, path);
 	this->m_AutoComboConfigure[3] = GetPrivateProfileInt(section, "AutoCombo_AL3", 1, path);
 
-	this->m_AutoComboDelayMS = GetPrivateProfileInt(section, "AutoComboDelayMS", 400, path);
+	this->m_AutoComboDelayMS = GetPrivateProfileInt(section, "AutoComboDelayMS", 300, path);
 
 	if (this->m_AutoComboDelayMS < 200)
 	{

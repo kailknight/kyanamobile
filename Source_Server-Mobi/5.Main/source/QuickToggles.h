@@ -97,7 +97,7 @@ public:
 	CAutoCombo();
 
 	static const int kSteps = 3;            // hotkeys 1, 2 and 3
-	static const int kDefaultDelayMs = 400;
+	static const int kDefaultDelayMs = 300;
 	static const int kMinDelayMs = 200;
 	static const int kMaxDelayMs = 600; // same range as the mobile combo
 	static const int kDelayStepMs = 50;

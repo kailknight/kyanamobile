@@ -5812,6 +5812,7 @@ void CSkillManager::ApplyMeteoriteEffect(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSk
 
 	if((GetLargeRand()%100) < (gMasterSkillTree.GetMasterSkillValue(lpObj,MASTER_SKILL_ADD_METEORITE_ENHANCED)-lpTarget->ResistStunRate))
 	{
+		gObjLogStun(lpObj,lpTarget,__FUNCTION__);
 		gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,3,0,0,0,0);
 	}
 
@@ -5884,6 +5885,7 @@ void CSkillManager::ApplyDeathStabEffect(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSk
 	if (DeathStabStunRate > 0 && (GetLargeRand() % DeathStabStunRate) < (gMasterSkillTree.GetMasterSkillValue(lpObj, MASTER_SKILL_ADD_DEATH_STAB_MASTERED) - lpTarget->ResistStunRate))
 	{
 		//gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,2,0,0,0,0);
+		gObjLogStun(lpObj,lpTarget,__FUNCTION__);
 		gEffectManager.AddEffect(lpTarget, 0, EFFECT_STERN, gServerInfo.ThoiGianChoangSkillMasterDamGio, 0, 0, 0, 0);
 	}
 	else if((GetLargeRand()%100) < gMasterSkillTree.GetMasterSkillValue(lpObj,MASTER_SKILL_ADD_DEATH_STAB_ENHANCED))
@@ -5918,6 +5920,7 @@ void CSkillManager::ApplyFireBurstEffect(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSk
 
 	if((GetLargeRand()%100) < (gMasterSkillTree.GetMasterSkillValue(lpObj,MASTER_SKILL_ADD_FIRE_BURST_ENHANCED)-lpTarget->ResistStunRate))
 	{
+		gObjLogStun(lpObj,lpTarget,__FUNCTION__);
 		gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,2,0,0,0,0);
 	}
 
@@ -5951,6 +5954,7 @@ void CSkillManager::ApplyEarthquakeEffect(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpS
 	// stomp effect instead of only on this random roll.
 	if(gServerInfo.m_CommboEffectEnable || (GetLargeRand()%100) < (gMasterSkillTree.GetMasterSkillValue(lpObj,MASTER_SKILL_ADD_EARTHQUAKE_ENHANCED)-lpTarget->ResistStunRate))
 	{
+		gObjLogStun(lpObj,lpTarget,__FUNCTION__);
 		gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,2,0,0,0,0);
 	}
 
@@ -6023,6 +6027,7 @@ void CSkillManager::ApplyNeilEffect(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSkill,i
 
 	if((GetLargeRand()%100) < (gMasterSkillTree.GetMasterSkillValue(lpObj,MASTER_SKILL_ADD_NEIL_ENHANCED)-lpTarget->ResistStunRate))
 	{
+		gObjLogStun(lpObj,lpTarget,__FUNCTION__);
 		gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,2,0,0,0,0);
 	}
 
@@ -6087,6 +6092,7 @@ void CSkillManager::ApplyFiveShotEffect(LPOBJ lpObj,LPOBJ lpTarget,CSkill* lpSki
 
 	if (FiveShotStunRate > 0 && (GetLargeRand() % FiveShotStunRate) < (gMasterSkillTree.GetMasterSkillValue(lpObj, MASTER_SKILL_ADD_FIVE_SHOT_ENHANCED) - lpTarget->ResistStunRate))
 	{
+		gObjLogStun(lpObj,lpTarget,__FUNCTION__);
 		gEffectManager.AddEffect(lpTarget, 0, EFFECT_STERN, gServerInfo.ThoiGianChoangSkillMasterNguTien, 0, 0, 0, 0);
 	}
 
@@ -6190,6 +6196,7 @@ void CSkillManager::ApplyDragonSlayerEffect(LPOBJ lpObj,LPOBJ lpTarget,CSkill* l
 
 	if((GetLargeRand()%100) < (gMasterSkillTree.GetMasterSkillValue(lpObj,MASTER_SKILL_ADD_DRAGON_SLAYER_ENHANCED)-lpTarget->ResistStunRate))
 	{
+		gObjLogStun(lpObj,lpTarget,__FUNCTION__);
 		gEffectManager.AddEffect(lpTarget,0,EFFECT_STERN,2,0,0,0,0);
 	}
 

@@ -6,6 +6,7 @@
 #include "RaklionBattleOfSelupan.h"
 #include "Message.h"
 #include "Notice.h"
+#include "ServerInfo.h"
 #include "RaklionBattleUserMng.h"
 #include "RaklionUtil.h"
 #include "User.h"
@@ -30,6 +31,7 @@ void CRaklionBattleOfSelupan::ResetAllData() // OK
 	this->m_IsUsed = 0;
 	this->m_SkillDelay = 0;
 	this->m_SkillDelayTick = 0;
+	memset(this->m_SkillLastUse,0,sizeof(this->m_SkillLastUse));
 	this->m_IsUseFirstSkill = 0;
 
 	memset(this->m_PatternSkill,0,sizeof(this->m_PatternSkill));
@@ -408,6 +410,20 @@ void CRaklionBattleOfSelupan::PatternStateSkillUseProc(int skill) // OK
 	if(gObj[aIndex].Teleport != 0 || gObj[aIndex].ActionState.Move != 0)
 	{
 		return;
+	}
+
+	// Teleport and heal are rationed (CustomConfig.ini SelupanTeleportCooldownMS / SelupanHealCooldownMS): inside the cooldown
+	// the skill is simply not used, so the pattern goes on with its other skills instead of spamming them.
+	if(skill == SELUPAN_SKILL_TELEPORT || skill == SELUPAN_SKILL_HEAL)
+	{
+		const DWORD cooldown = (DWORD)((skill == SELUPAN_SKILL_TELEPORT)?gServerInfo.m_SelupanTeleportCooldownMS:gServerInfo.m_SelupanHealCooldownMS);
+
+		if(cooldown > 0 && this->m_SkillLastUse[skill] != 0 && (GetTickCount()-this->m_SkillLastUse[skill]) < cooldown)
+		{
+			return;
+		}
+
+		this->m_SkillLastUse[skill] = GetTickCount();
 	}
 
 	switch(skill)

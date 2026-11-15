@@ -345,7 +345,7 @@ void CItemReroll::MainProc() // OK
 
 	RRLock lock(&this->m_cs);
 
-	bool alive = (this->m_NpcIndex != -1 && gObjIsConnected(this->m_NpcIndex) != 0 && gObj[this->m_NpcIndex].Class == this->m_NpcClass && gObj[this->m_NpcIndex].Map == this->m_NpcMap);
+	bool alive = (this->m_NpcIndex != -1 && gObjIsConnected(this->m_NpcIndex) != 0 && gObj[this->m_NpcIndex].Class == this->m_NpcClass && gObj[this->m_NpcIndex].Map == this->m_NpcMap && gObj[this->m_NpcIndex].X == this->m_NpcX && gObj[this->m_NpcIndex].Y == this->m_NpcY);
 
 	if(this->m_Switch == 0 || this->Served() == false)
 	{

@@ -19,6 +19,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.concurrent.atomic.AtomicInteger;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -961,10 +962,96 @@ public class MuMainNativeActivity extends NativeActivity {
         nativeSetDeviceId(deviceId());
         installImeBridge();
         MuHaptics.init(this);
+        startAntiClickerScan();
+    }
+
+    // ---- auto clicker protection (MuAntiClicker) -------------------------------------------------------------------
+    private final android.os.Handler antiClickerHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean antiClickerClosing = false;
+
+    private final Runnable antiClickerScan = new Runnable() {
+        @Override
+        public void run() {
+            final String reason = MuAntiClicker.scanInstalledServices(MuMainNativeActivity.this);
+            if (reason != null) {
+                closeForAutoClicker(reason);
+                return;
+            }
+            antiClickerHandler.postDelayed(this, 30000);
+        }
+    };
+
+    private void startAntiClickerScan() {
+        if (MuAntiClicker.ENABLED) {
+            antiClickerHandler.postDelayed(antiClickerScan, 3000);
+        }
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        final String reason = MuAntiClicker.onTouch(ev);
+        if (reason != null) {
+            closeForAutoClicker(reason);
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /** Tells the player why, then closes the game. Always closes, even if the dialog cannot be shown. */
+    private void closeForAutoClicker(final String reason) {
+        if (antiClickerClosing) {
+            return;
+        }
+        antiClickerClosing = true;
+
+        try {
+            final File log = new File(getFilesDir(), "anticlicker.log");
+            final FileOutputStream out = new FileOutputStream(log, true);
+            out.write((new java.util.Date().toString() + "  " + reason + "\n").getBytes("UTF-8"));
+            out.close();
+        } catch (Throwable ignored) {
+        }
+
+        Log.w(TAG, "auto clicker: " + reason);
+
+        final Runnable exit = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    finishAffinity();
+                } catch (Throwable ignored) {
+                }
+                android.os.Process.killProcess(android.os.Process.myPid());
+            }
+        };
+
+        // whatever happens with the dialog, the game is gone within 8 seconds
+        antiClickerHandler.postDelayed(exit, 8000);
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    new android.app.AlertDialog.Builder(MuMainNativeActivity.this)
+                        .setTitle("Auto clicker detected")
+                        .setMessage(reason + "\n\nAuto clickers are not allowed. Remove it to play. The game will close.")
+                        .setCancelable(false)
+                        .setPositiveButton("Close game", new android.content.DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(android.content.DialogInterface dialog, int which) {
+                                exit.run();
+                            }
+                        })
+                        .show();
+                } catch (Throwable t) {
+                    exit.run();
+                }
+            }
+        });
     }
 
     @Override
     protected void onDestroy() {
+        antiClickerHandler.removeCallbacksAndMessages(null);
         nativeClearKeyboardBridge();
         if (instance == this) {
             instance = null;

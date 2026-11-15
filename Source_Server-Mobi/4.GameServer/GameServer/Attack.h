@@ -82,4 +82,7 @@ public:
 	void CGAttackRecv(PMSG_ATTACK_RECV* lpMsg,int aIndex);
 };
 
+// StunDebugLog: says which skill stunned whom (to find where an unexpected stun comes from)
+void gObjLogStun(LPOBJ lpObj,LPOBJ lpTarget,const char* source);
+
 extern CAttack gAttack;

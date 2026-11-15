@@ -32,6 +32,12 @@
          installing a game that works perfectly well without it. -->
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+        <queries>
+        <intent>
+            <action android:name="android.accessibilityservice.AccessibilityService" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:label="World of Kira"

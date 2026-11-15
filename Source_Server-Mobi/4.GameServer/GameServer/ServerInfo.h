@@ -457,6 +457,9 @@ public:
 	int m_MariaDecDamageConstA;
 	int m_ComboDamageConstA;
 	int m_ComboDamageConstB;
+	int m_ComboMissRate;            // Character.ini ComboMissRate: % chance a finished COMBO hit misses (10 = 90% hit); -1 = the normal hit rate
+	int m_SelupanTeleportCooldownMS; // CustomConfig.ini: Selupan teleport at most once per this many ms (0 = off)
+	int m_SelupanHealCooldownMS;     // same for his heal
 	// [attacker][target class] (DW, DK, FE, MG, DL, SU, RF): a percent of a combo
 	// hit against a player, ComboRate<Attacker>vs<Target> in Character.ini.
 	// 100 = unchanged.
@@ -1299,6 +1302,7 @@ public:
 	int m_BossRewardTopDamage;
 	int m_ChaosMachineLuckyUpgrade;
 	int m_CommboEffectEnable;
+	int m_StunDebugLog; // CustomConfig.ini StunDebugLog: 1 = log every stun with the skill that caused it
 	int m_DarkHorsePushBackChance;
 	// ItemDropLog (CustomConfig.ini): 1 enables the [ItemLog] ground-item
 	// lifecycle trace (DROP/PICKUP/EXPIRE) in Map.cpp. Off by default - it is

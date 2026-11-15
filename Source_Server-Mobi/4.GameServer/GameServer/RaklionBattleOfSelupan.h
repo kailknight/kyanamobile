@@ -88,6 +88,7 @@ private:
 	int m_PatternCondition[6];
 	DWORD m_SkillDelay;
 	DWORD m_SkillDelayTick;
+	DWORD m_SkillLastUse[MAX_SELUPAN_SKILL]; // GetTickCount() of each skill's last use, for the heal / teleport cooldowns
 	int m_IsUseFirstSkill;
 	int m_IsSucccess;
 	CRaklionSelupan m_RaklionSelupan;

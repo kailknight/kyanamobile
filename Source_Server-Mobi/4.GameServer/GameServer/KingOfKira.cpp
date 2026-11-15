@@ -620,7 +620,7 @@ void CKingOfKira::SpawnGoblin() // OK
 		return;
 	}
 
-	if(this->m_GoblinIndex != -1 && gObjIsConnected(this->m_GoblinIndex) != 0 && gObj[this->m_GoblinIndex].Class == this->m_GoblinClass)
+	if(this->m_GoblinIndex != -1 && gObjIsConnected(this->m_GoblinIndex) != 0 && gObj[this->m_GoblinIndex].Class == this->m_GoblinClass && gObj[this->m_GoblinIndex].Map == this->m_NpcMap && gObj[this->m_GoblinIndex].X == this->m_GoblinX && gObj[this->m_GoblinIndex].Y == this->m_GoblinY)
 	{
 		return;
 	}
@@ -651,7 +651,7 @@ void CKingOfKira::SpawnNpc() // OK
 		return;
 	}
 
-	if(this->m_NpcIndex != -1 && gObjIsConnected(this->m_NpcIndex) != 0)
+	if(this->m_NpcIndex != -1 && gObjIsConnected(this->m_NpcIndex) != 0 && gObj[this->m_NpcIndex].Class == this->m_NpcClass && gObj[this->m_NpcIndex].Map == this->m_NpcMap && gObj[this->m_NpcIndex].X == this->m_NpcX && gObj[this->m_NpcIndex].Y == this->m_NpcY)
 	{
 		return;
 	}

@@ -1050,7 +1050,7 @@ constexpr uint32_t kVirtualBareSwingRepeatMs = 250;
 // (declared beside the other combo state) is what actually gets read; this is
 // only every slot's starting value and the shared floor/ceiling/step the
 // settings panel clamps and nudges each one by.
-constexpr uint32_t kVirtualComboRepeatMsDefault = 420;
+constexpr uint32_t kVirtualComboRepeatMsDefault = 300;
 constexpr uint32_t kVirtualComboRepeatMsMin = 200;
 constexpr uint32_t kVirtualComboRepeatMsMax = 600; // same range as the PC auto combo
 constexpr uint32_t kVirtualComboRepeatStepMs = 20;
@@ -2165,6 +2165,9 @@ constexpr float kZoomDefault = 1200.0f;
 // units because UI space is stretched unevenly on non-4:3 panels, and a pinch
 // should feel the same whichever way the fingers happen to be oriented.
 constexpr float kPinchActivateSlopPx = 24.0f;
+// Pinch zoom is switched off: two fingers (a skill held with one, the joystick with the other) must never turn into a camera
+// gesture that stops the character.
+constexpr bool kAndroidPinchZoomEnabled = false;
 constexpr float kMainFrameItemHotKeyX = 0.0f;
 constexpr float kMainFrameItemHotKeyY = 430.0f;
 constexpr float kMainFrameItemHotKeyW = 38.0f;
@@ -2588,6 +2591,73 @@ int g_virtualSelectedSkillSlot = -1;
 // Which of the two pages the wheel's four slots are currently showing.
 int g_virtualSkillPage = 0;
 
+// ---- ML-style skill buttons (Settings > "Hold-to-aim skills") -------------------------------------------------------
+// Legacy: tapping a skill button arms it, the attack button in the middle fires it. ML style: a tap on a skill button
+// casts it at once, holding it shows an aim joystick (drag to choose the direction, release to cast) and the attack button
+// only ever does the normal attack - no skill, no combo. Ground-targeted skills (Teleport) keep their own aim flow.
+bool g_virtualMlSkillMode = false;
+bool g_virtualMlSkillModeLoaded = false;
+constexpr const char* kMlSkillModePath = "Data/Local/android_touch_skill_mode.cfg";
+
+bool IsMlSkillMode()
+{
+    if (!g_virtualMlSkillModeLoaded)
+    {
+        g_virtualMlSkillModeLoaded = true;
+        std::ifstream in(kMlSkillModePath, std::ios::in);
+        int value = 0;
+        if (in.good() && (in >> value))
+        {
+            g_virtualMlSkillMode = (value != 0);
+        }
+    }
+
+    return g_virtualMlSkillMode;
+}
+
+void SetMlSkillMode(bool on)
+{
+    IsMlSkillMode();   // makes sure the saved value was read first
+    g_virtualMlSkillMode = on;
+
+    std::error_code ec;
+    const std::filesystem::path savePath(kMlSkillModePath);
+    if (savePath.has_parent_path())
+    {
+        std::filesystem::create_directories(savePath.parent_path(), ec);
+    }
+
+    std::ofstream out(savePath, std::ios::out | std::ios::trunc);
+    if (out.good())
+    {
+        out << (on ? 1 : 0) << '\n';
+    }
+}
+
+// An aim in progress: the finger that pressed a skill button is held (or dragged), and its offset from where it pressed is
+// the direction to cast.
+struct AndroidSkillAimState
+{
+    bool active = false;
+    SDL_FingerID finger = static_cast<SDL_FingerID>(-1);
+    int slot = -1;
+    float originX = 0.0f;   // where the press began (UI space)
+    float originY = 0.0f;
+    float uiX = 0.0f;       // where the finger is now
+    float uiY = 0.0f;
+    uint32_t downMs = 0;
+    bool holdReady = false; // held 1 s inside the dead zone: release opens the skill picker (rebind), as before
+    uint32_t lastCastMs = 0; // no-target skills: when the last cast went out while holding
+};
+AndroidSkillAimState g_androidSkillAim{};
+// The hold-to-aim joystick is switched off: a skill button is a plain tap that casts at the nearest enemy (the PvE monster, or
+// the player in PK mode); holding it 1 s opens the skill picker as it always did. The aim code below is left dormant.
+constexpr bool kSkillHoldAimEnabled = false;
+constexpr uint32_t kSkillAimHoldMs = 180;        // a press this long turns into an aim
+constexpr float kSkillAimDeadzoneUi = 12.0f;     // inside this the release is a plain tap
+constexpr float kSkillAimRadiusUi = 46.0f;       // the joystick ring
+constexpr float kSkillAimConeDeg = 38.0f;        // targets further off the aimed direction than this are ignored
+
 // A buff pressed mid-swing: ExecuteSkill's own action-state gate
 // (ZzzInterface.cpp, right before the class dispatch) silently drops any
 // skill request while Hero->Object.CurrentAction is outside the idle "stop"
@@ -2605,6 +2675,22 @@ AndroidPendingBuffCast g_androidPendingBuffCast{};
 // Safety net only - normal swings are well under this, so this should never
 // actually fire the discard branch in practice.
 constexpr uint32_t kAndroidPendingBuffCastTimeoutMs = 4000;
+
+// Attack skills tapped while the character is still in a swing. ExecuteSkill drops them, which made a combo (Cyclone, Twisting
+// Slash, Death Stab) wait for each animation to end before the next tap counted. They queue here instead, in order, and the
+// first one goes out the moment the character is idle again. Only the skill buttons' own taps queue (the flag below), not
+// the auto combo or helper, which keep their own timing.
+constexpr int kAndroidSkillQueueMax = 3;
+constexpr uint32_t kAndroidSkillQueueTimeoutMs = 1500;
+int g_androidSkillQueue[kAndroidSkillQueueMax] = { -1, -1, -1 };
+uint32_t g_androidSkillQueueMs[kAndroidSkillQueueMax] = { 0, 0, 0 };
+int g_androidSkillQueueCount = 0;
+bool g_androidQueueSkillWhenBusy = false;
+uint32_t g_androidLastSkillSentMs = 0;
+// Animation cancel: tapping the next skill ends the swing in progress once the previous cast has had time to show; the time
+// comes from the character's attack speed (this is only the fallback).
+constexpr uint32_t kAndroidSkillCancelMinMs = 300;
+bool g_androidFiringQueuedSkill = false;
 
 // Auto-combo. Each press of the attack button advances one step through arc
 // slots 1, 2 and 3, so the Knight combo can be played with a single button.
@@ -2659,9 +2745,26 @@ uint32_t g_virtualComboBlockedSinceMs = 0;
 // LoadVirtualSkillSlots. kVirtualComboResetMs above stays fixed: that is the
 // "chain went cold" idle timeout, a different thing from the pacing between
 // steps this controls.
+// The pace a combo step really runs at: the same rule as the PC auto combo. Accounts that may not configure it (no VIP and
+// no server permission) follow the server's AutoComboDelayMS; the others use their own value (default 300 ms).
 std::array<uint32_t, kVirtualComboSlotCount> g_virtualComboRepeatMs = {
     kVirtualComboRepeatMsDefault, kVirtualComboRepeatMsDefault, kVirtualComboRepeatMsDefault
 };
+
+uint32_t EffectiveComboRepeatMs(int step)
+{
+    if (step < 0 || step >= kVirtualComboSlotCount)
+    {
+        return kVirtualComboRepeatMsDefault;
+    }
+
+    if (!gAutoCombo.CanConfigure())
+    {
+        return static_cast<uint32_t>(gAutoCombo.GetServerDelayMs());
+    }
+
+    return g_virtualComboRepeatMs[step];
+}
 bool g_virtualComboSettingsOpen = false;
 
 // A press on the combo toggle, resolved on finger-up the same way the Q/W/E/R
@@ -2740,6 +2843,9 @@ struct AndroidGroundAim
     // so a pulse fires only when it turns valid, not continuously.
     bool aimValid = false;
     int validCheckFrame = 0;
+
+    // Queued by a held no-target skill (Evil Spirit, Twisting Slash, ...): cast at the aimed ground point with no target.
+    bool holdCast = false;
 };
 
 AndroidGroundAim g_androidGroundAim{};
@@ -5557,6 +5663,14 @@ bool HandleAndroidPinchFingerDown(const SDL_TouchFingerEvent& touch)
     // to reach that button's own hit test rather than being claimed here as
     // a pinch partner, since this runs before every other hit test in
     // HandleVirtualFingerDown.
+    // A finger already on the joystick or holding a skill button is never half of a camera gesture.
+    if (g_virtualJoystick.fingerId != static_cast<SDL_FingerID>(-1)
+        || g_androidSkillAim.active
+        || g_androidSkillSlotPress.slot >= 0)
+    {
+        return false;
+    }
+
     float bUiX = 0.0f, bUiY = 0.0f;
     TouchToVirtualUi(touch, bUiX, bUiY);
     const bool fingerBOnExclusiveButton =
@@ -5697,7 +5811,7 @@ bool HandleAndroidPinchFingerMotion(const SDL_TouchFingerEvent& touch)
     // separate: each switches on once its own movement is clear of the slop, and
     // neither is mistaken for the other - a pinch drifts its centre a little, a swipe
     // changes the gap a little. Both can run at once, like a PTZ camera.
-    if (!g_androidPinch.zoomOn && gapChange >= kPinchActivateSlopPx && gapChange >= travel)
+    if (kAndroidPinchZoomEnabled && !g_androidPinch.zoomOn && gapChange >= kPinchActivateSlopPx && gapChange >= travel)
     {
         g_androidPinch.zoomOn = true;
     }
@@ -10337,6 +10451,106 @@ bool IsGroundTargetedSkillIndex(int skillIndex)
     return IsGroundTargetedSkillType(CharacterAttribute->Skill[skillIndex]);
 }
 
+// Skills that need no target: they fire at a spot on the ground or in a direction. Held, they keep casting at the point 2 m
+// from the character (hold-to-aim controls). Master-tree upgrades count as their base skill.
+bool IsAimGroundSkillType(int rawSkillType)
+{
+    int base = gSkillManager.MasterSkillToBaseSkillIndex(rawSkillType);
+    if (base <= 0)
+    {
+        base = rawSkillType;
+    }
+
+    switch (base)
+    {
+    // Wizard
+    case AT_SKILL_EVIL:
+    case AT_SKILL_HELL:
+    case AT_SKILL_INFERNO:
+    case AT_SKILL_FLASH:        // Aqua Beam
+    case AT_SKILL_STORM:        // Twister
+    case AT_SKILL_FLAME:
+    case AT_SKILL_POWERWAVE:
+    case AT_SKILL_BLAST_POISON: // Decay
+    case AT_SKILL_BLAST_FREEZE: // Ice Storm
+    // Elf
+    case AT_SKILL_MULTI_SHOT:   // Five Shot
+    case AT_SKILL_CROSSBOW:     // Triple Shot
+    case AT_SKILL_PIERCING:     // Penetration
+    case 30: case 31: case 32: case 33: case 34: case 35: case 36:   // the summons
+    // Blade Knight
+    case AT_SKILL_FURY_STRIKE:  // Rageful Blow
+    case AT_SKILL_WHEEL:        // Twisting Slash
+    case AT_SKILL_BLOW_OF_DESTRUCTION:
+    // Summoner
+    case AT_SKILL_LIGHTNING_SHOCK:
+    // Dark Lord
+    case AT_SKILL_GAOTIC:       // Chaotic Diseier
+    case AT_SKILL_DARK_SCREAM:  // Fire Scream
+    case AT_SKILL_THUNDER_STRIKE: // Electric Spike
+    // Magic Gladiator
+    case AT_SKILL_ICE_BLADE:    // Power Slash
+    case AT_SKILL_REDUCEDEFENSE: // Fire Slash
+    case AT_SKILL_FLAME_STRIKE:
+    case AT_SKILL_GIGANTIC_STORM:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Wizard spells recast on the character's MAGIC speed, everything else on its attack speed.
+bool IsMagicSpeedAimSkillType(int rawSkillType)
+{
+    int base = gSkillManager.MasterSkillToBaseSkillIndex(rawSkillType);
+    if (base <= 0)
+    {
+        base = rawSkillType;
+    }
+
+    switch (base)
+    {
+    case AT_SKILL_EVIL:
+    case AT_SKILL_HELL:
+    case AT_SKILL_INFERNO:
+    case AT_SKILL_FLASH:
+    case AT_SKILL_STORM:
+    case AT_SKILL_FLAME:
+    case AT_SKILL_POWERWAVE:
+    case AT_SKILL_BLAST_POISON:
+    case AT_SKILL_BLAST_FREEZE:
+    case AT_SKILL_LIGHTNING_SHOCK:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Delay between two casts while the button is held: faster characters recast faster. 0 speed = 800 ms, 100 = 400 ms,
+// and never under 300 ms (the request rate limit swallows anything faster).
+uint32_t AimHoldRecastDelayMs(int skillIndex)
+{
+    if (CharacterAttribute == nullptr || !IsValidSkillIndex(skillIndex))
+    {
+        return 800u;
+    }
+
+    const bool magic = IsMagicSpeedAimSkillType(CharacterAttribute->Skill[skillIndex]);
+    const float speed = static_cast<float>(magic ? CharacterAttribute->MagicSpeed : CharacterAttribute->AttackSpeed);
+    const float delay = 800.0f * 100.0f / (100.0f + speed);
+    return static_cast<uint32_t>(std::max(300.0f, delay));
+}
+
+bool IsAimGroundSkillIndex(int skillIndex)
+{
+    if (CharacterAttribute == nullptr || !IsValidSkillIndex(skillIndex))
+    {
+        return false;
+    }
+
+    return IsAimGroundSkillType(CharacterAttribute->Skill[skillIndex]);
+}
+
 // Mirrors the action-state gate ExecuteSkill itself applies right before its
 // class dispatch (ZzzInterface.cpp) - same CurrentAction ranges, same
 // exemption list of special "stand" states (Fenrir/Uniria mount idles, the
@@ -10374,9 +10588,50 @@ bool IsAndroidHeroBusyForSkillCast()
     return true;
 }
 
+// Animation cancel, for tapping skills fast (Twisting Slash into Death Stab, ...). The server only limits a skill by its own delay,
+// never by the swing, so the next skill may start as soon as the last one has been on screen for a moment: the swing is cut
+// short and the character is idle at once. Returns true when the character is free to cast now.
+bool TryCancelSwingForSkill()
+{
+    if (Hero == nullptr || Hero->Dead > 0)
+    {
+        return false;
+    }
+
+    if (!IsAndroidHeroBusyForSkillCast())
+    {
+        return true;
+    }
+
+    const int action = Hero->Object.CurrentAction;
+    if (action < PLAYER_ATTACK_FIST || action >= PLAYER_GREETING1)
+    {
+        return false;   // walking, hit, teleporting...: not a swing
+    }
+
+    // How long the last cast must have been on screen, from the character's speed (the faster of attack and magic speed; 200 is
+    // the most a character can reach): 650 ms at speed 0 down to 300 ms at 200 - never under 300, the request limit.
+    uint32_t minMs = kAndroidSkillCancelMinMs;
+    if (CharacterAttribute != nullptr)
+    {
+        const int speed = std::max(static_cast<int>(CharacterAttribute->AttackSpeed), static_cast<int>(CharacterAttribute->MagicSpeed));
+        const float t = 1.0f - (static_cast<float>(std::min(std::max(speed, 0), 200)) / 200.0f);
+        minMs = 300u + static_cast<uint32_t>(t * 350.0f);
+    }
+
+    if ((MU_MobileGetTicks() - g_androidLastSkillSentMs) < minMs)
+    {
+        return false;
+    }
+
+    SetPlayerStop(Hero);
+    Hero->AttackTime = 0;
+    return !IsAndroidHeroBusyForSkillCast();
+}
+
 // Defined just below - forward-declared so the queue-fire function above can
 // re-enter it once the swing that blocked the original tap ends.
-bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex);
+bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex, int forcedTarget = -1);
 
 // Fires a buff queued by AndroidTriggerHotKeySkillTapInternal the instant the
 // swing that blocked it ends, so the press is never silently eaten. Runs from
@@ -10411,7 +10666,66 @@ void UpdateAndroidPendingBuffCast()
     AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex);
 }
 
-bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
+// Fires the oldest queued attack skill as soon as the swing in progress is over.
+void UpdateAndroidQueuedSkills()
+{
+    if (g_androidSkillQueueCount <= 0)
+    {
+        return;
+    }
+
+    if (Hero == nullptr || Hero->Dead > 0 || !IsVirtualPadAvailable())
+    {
+        g_androidSkillQueueCount = 0;
+        return;
+    }
+
+    const uint32_t nowMs = MU_MobileGetTicks();
+
+    // stale presses are dropped from the front
+    while (g_androidSkillQueueCount > 0 && (nowMs - g_androidSkillQueueMs[0]) >= kAndroidSkillQueueTimeoutMs)
+    {
+        for (int i = 1; i < g_androidSkillQueueCount; ++i)
+        {
+            g_androidSkillQueue[i - 1] = g_androidSkillQueue[i];
+            g_androidSkillQueueMs[i - 1] = g_androidSkillQueueMs[i];
+        }
+        --g_androidSkillQueueCount;
+    }
+
+    if (g_androidSkillQueueCount <= 0 || (IsAndroidHeroBusyForSkillCast() && !TryCancelSwingForSkill()))
+    {
+        return;
+    }
+
+    // The request can still be swallowed right after the swing (the 300 ms request limit, the skill delay), so the skill stays
+    // at the front and is tried again every few frames until it goes out or times out - what holding the button does on PC.
+    static uint32_t s_lastTryMs = 0;
+    if ((nowMs - s_lastTryMs) < 40u)
+    {
+        return;
+    }
+    s_lastTryMs = nowMs;
+
+    const int skillIndex = g_androidSkillQueue[0];
+
+    g_androidFiringQueuedSkill = true;
+    const bool sent = AndroidTriggerHotKeySkillTapInternal(skillIndex);
+    g_androidFiringQueuedSkill = false;
+
+    if (sent)
+    {
+        for (int i = 1; i < g_androidSkillQueueCount; ++i)
+        {
+            g_androidSkillQueue[i - 1] = g_androidSkillQueue[i];
+            g_androidSkillQueueMs[i - 1] = g_androidSkillQueueMs[i];
+        }
+        --g_androidSkillQueueCount;
+        AndroidHapticPulse(30);
+    }
+}
+
+bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex, int forcedTarget)
 {
     if (!IsVirtualPadAvailable()
         || Hero == nullptr
@@ -10450,7 +10764,8 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
     // (gObjSkillNovaCheckTime), so a single tap still gives a full Nova.
     const bool isNovaSkill = (rawSkillType == AT_SKILL_BLAST_HELL);
 
-    const bool groundSkill = IsGroundTargetedSkillType(rawSkillType);
+    const bool groundSkill = IsGroundTargetedSkillType(rawSkillType)
+        || (g_androidGroundAim.holdCast && g_androidGroundAim.skillIndex == hotKeySkillIndex);
 
     // A buff pressed mid-swing would just be silently dropped by ExecuteSkill's
     // own action-state gate (see IsAndroidHeroBusyForSkillCast's comment) -
@@ -10465,6 +10780,28 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
         Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
         LOGI("VirtualPad: buff queued skillIndex=%d skillType=%d action=%d",
              hotKeySkillIndex, rawSkillType, Hero->Object.CurrentAction);
+        return true;
+    }
+
+    if (!supportSkill
+        && g_androidQueueSkillWhenBusy
+        && !g_androidFiringQueuedSkill
+        && IsAndroidHeroBusyForSkillCast()
+        && (g_androidSkillQueueCount > 0 || !TryCancelSwingForSkill()))
+    {
+        const bool duplicateOfLast = g_androidSkillQueueCount > 0
+            && g_androidSkillQueue[g_androidSkillQueueCount - 1] == hotKeySkillIndex;
+
+        if (!duplicateOfLast && g_androidSkillQueueCount < kAndroidSkillQueueMax)
+        {
+            g_androidSkillQueue[g_androidSkillQueueCount] = hotKeySkillIndex;
+            g_androidSkillQueueMs[g_androidSkillQueueCount] = MU_MobileGetTicks();
+            ++g_androidSkillQueueCount;
+        }
+
+        Hero->CurrentSkill = static_cast<BYTE>(previousSkillIndex);
+        LOGI("VirtualPad: skill queued skillIndex=%d skillType=%d action=%d queue=%d",
+             hotKeySkillIndex, rawSkillType, Hero->Object.CurrentAction, g_androidSkillQueueCount);
         return true;
     }
 
@@ -10491,7 +10828,14 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
     }
     else
     {
-        EnsureOffensiveSkillTarget();
+        if (forcedTarget >= 0)
+        {
+            SelectedCharacter = forcedTarget;   // an aimed cast: the target was chosen by the aim joystick
+        }
+        else
+        {
+            EnsureOffensiveSkillTarget();
+        }
 
         // Nova is an area attack centred on the caster and does not need a
         // target - the PC path falls back to the hero's own key. Without this
@@ -10514,7 +10858,11 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
         return false;
     }
 
-    const float skillDistance = gSkillManager.GetSkillDistance(skillType, Hero);
+    float skillDistance = gSkillManager.GetSkillDistance(skillType, Hero);
+    if (skillDistance < 3.0f && g_androidGroundAim.holdCast && g_androidGroundAim.skillIndex == hotKeySkillIndex)
+    {
+        skillDistance = 3.0f;   // Inferno has distance 0 in the skill file; the aimed point is 2 tiles away
+    }
 
     // Tap 1 sends the charge-start id, tap 2 sends the normal id to release.
     // ExecuteSkill maps the charge-start id back to Nova when it looks the
@@ -10558,6 +10906,10 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
 
     const int executeResult = ExecuteSkill(Hero, skillToSend, skillDistance);
     const bool skillRequestSent = (g_SkillRequestSendSeq != skillSendSeqBefore);
+    if (skillRequestSent)
+    {
+        g_androidLastSkillSentMs = MU_MobileGetTicks();
+    }
     const bool startedSkillMove = Hero->Movement && Hero->MovementType == MOVEMENT_SKILL;
 
     LOGI(
@@ -10583,12 +10935,173 @@ bool AndroidTriggerHotKeySkillTapInternal(int hotKeySkillIndex)
 // Defined below, next to the other overlay slot helpers.
 int GetVirtualOverlayHotKeySkillIndex(int visualSlot);
 
+bool ProjectWorldPointWithSnapshot(const vec3_t position, float& outUiX, float& outUiY);
+
+// Hold-to-aim ground cast: the skill lands on the ground 2 m (2 tiles) from the character. The joystick turns the point around
+// the character; with the finger still, it is straight ahead of where the character faces.
+constexpr float kSkillAimGroundDistance = 200.0f;
+
+bool ComputeSkillAimGround(const AndroidSkillAimState& aim, float& outWorldX, float& outWorldY, float& outUiX, float& outUiY)
+{
+    if (Hero == nullptr)
+    {
+        return false;
+    }
+
+    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+    const float dxUi = aim.uiX - aim.originX;
+    const float dyUi = aim.uiY - aim.originY;
+    const float pxX = dxUi * geometry.pxPerUiX;
+    const float pxY = dyUi * geometry.pxPerUiY;
+
+    float worldAngle = Hero->Object.Angle[2];
+    if (((dxUi * dxUi) + (dyUi * dyUi)) > (kSkillAimDeadzoneUi * kSkillAimDeadzoneUi))
+    {
+        // the same screen-to-world turn the walking joystick uses
+        worldAngle = 270.0f - CreateAngle(0.0f, 0.0f, pxX, pxY) + CameraAngle[2];
+    }
+    worldAngle = std::fmod(worldAngle + 720.0f, 360.0f);
+
+    const float rad = worldAngle * 0.01745329252f;
+    outWorldX = Hero->Object.Position[0] + (std::sin(rad) * kSkillAimGroundDistance);
+    outWorldY = Hero->Object.Position[1] - (std::cos(rad) * kSkillAimGroundDistance);
+
+    vec3_t point;
+    Vector(outWorldX, outWorldY, RequestTerrainHeight(outWorldX, outWorldY), point);
+    return ProjectWorldPointWithSnapshot(point, outUiX, outUiY);
+}
+
+// Queues a cast at the aimed ground point; the scene phase turns the point into a tile and casts.
+bool QueueAimGroundCast(const AndroidSkillAimState& aim, int skillIndex, bool holdCast)
+{
+    float wx = 0.0f, wy = 0.0f, ux = 0.0f, uy = 0.0f;
+    if (!ComputeSkillAimGround(aim, wx, wy, ux, uy))
+    {
+        return false;
+    }
+
+    g_androidGroundAim = AndroidGroundAim{};
+    g_androidGroundAim.armed = true;
+    g_androidGroundAim.skillIndex = skillIndex;
+    g_androidGroundAim.uiX = ux;
+    g_androidGroundAim.uiY = uy;
+    g_androidGroundAim.pendingCast = true;
+    g_androidGroundAim.fromDrag = true;
+    g_androidGroundAim.holdCast = holdCast;
+    g_androidGroundAim.settleFrames = 2;
+    return true;
+}
+
+// ML-style aimed cast: the target is the attackable character lying closest to the aimed direction ON SCREEN (aimPx = the
+// drag vector in screen pixels), inside the skill's range. Buffs, ground skills and Nova have nothing to aim at and just go.
+// Returns false when nothing lies that way (the skill is not wasted).
+bool AndroidCastSkillInDirection(int skillSlot, float aimPxX, float aimPxY)
+{
+    const int hotKeySkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
+
+    if (!IsValidSkillIndex(hotKeySkillIndex) || Hero == nullptr || CharacterAttribute == nullptr || CharactersClient == nullptr)
+    {
+        return false;
+    }
+
+    const int rawSkillType = CharacterAttribute->Skill[hotKeySkillIndex];
+    if (rawSkillType <= 0 || rawSkillType >= MAX_SKILLS)
+    {
+        return false;
+    }
+
+    const ActionSkillType skillType = static_cast<ActionSkillType>(rawSkillType);
+
+    if (IsSupportOrSelfSkill(skillType) || IsGroundTargetedSkillType(rawSkillType) || rawSkillType == AT_SKILL_BLAST_HELL)
+    {
+        return AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex);
+    }
+
+    const float aimLen = std::sqrt((aimPxX * aimPxX) + (aimPxY * aimPxY));
+
+    vec3_t heroBody;
+    Vector(Hero->Object.Position[0], Hero->Object.Position[1], Hero->Object.Position[2] + 90.0f, heroBody);
+
+    float hx = 0.0f;
+    float hy = 0.0f;
+
+    if (aimLen < 1.0f || !ProjectWorldPointWithSnapshot(heroBody, hx, hy))
+    {
+        return AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex);   // no usable aim: behave as a tap
+    }
+
+    const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+    const float maxTiles = gSkillManager.GetSkillDistance(skillType, Hero) + 2.0f;
+    const int heroIdx = GetHeroCharacterIndex();
+
+    int best = -1;
+    float bestScore = 1.0e9f;
+
+    for (int i = 0; i < MAX_CHARACTERS_CLIENT; ++i)
+    {
+        if (i == heroIdx || !IsTargetAttackable(i))
+        {
+            continue;
+        }
+
+        const float tiles = std::sqrt(static_cast<float>(GetAndroidTileDistance2(i)));
+        if (tiles > maxTiles)
+        {
+            continue;
+        }
+
+        const OBJECT* o = &CharactersClient[i].Object;
+        vec3_t body;
+        Vector(o->Position[0], o->Position[1], o->Position[2] + 90.0f, body);
+
+        float sx = 0.0f;
+        float sy = 0.0f;
+        if (!ProjectWorldPointWithSnapshot(body, sx, sy))
+        {
+            continue;
+        }
+
+        const float vx = (sx - hx) * geometry.pxPerUiX;
+        const float vy = (sy - hy) * geometry.pxPerUiY;
+        const float vLen = std::sqrt((vx * vx) + (vy * vy));
+        if (vLen < 1.0f)
+        {
+            continue;
+        }
+
+        float cosA = ((vx * aimPxX) + (vy * aimPxY)) / (vLen * aimLen);
+        cosA = std::max(-1.0f, std::min(1.0f, cosA));
+        const float angle = std::acos(cosA) * 57.29578f;
+
+        if (angle > kSkillAimConeDeg)
+        {
+            continue;
+        }
+
+        const float score = (angle * 0.15f) + tiles;   // lined up first, then nearest
+        if (score < bestScore)
+        {
+            bestScore = score;
+            best = i;
+        }
+    }
+
+    if (best < 0)
+    {
+        LOGI("VirtualPad: aimed cast skillIndex=%d: nothing in the aimed direction", hotKeySkillIndex);
+        return false;
+    }
+
+    return AndroidTriggerHotKeySkillTapInternal(hotKeySkillIndex, best);
+}
+
 // The combo is a Knight mechanic, so the setting only takes effect on that
 // class line. Leaving it enabled on another character is harmless - it simply
 // does nothing.
 bool IsAndroidComboClass()
 {
     return Hero != nullptr
+        && !IsMlSkillMode()   // ML style: the attack button casts no skills, so there is no auto combo
         && gCharacterManager.GetBaseClass(Hero->Class) == CLASS_KNIGHT;
 }
 
@@ -10663,18 +11176,24 @@ bool HandleAndroidComboSettingsFingerDown(float uiX, float uiY)
     {
         if (HitTestAndroidUiRect(uiX, uiY, GetComboSettingsMinusRect(step)))
         {
-            g_virtualComboRepeatMs[step] = std::max(kVirtualComboRepeatMsMin, g_virtualComboRepeatMs[step] - kVirtualComboRepeatStepMs);
-            g_virtualSkillSlotsDirty = true;
-            SaveVirtualSkillSlots();
+            if (gAutoCombo.CanConfigure())
+            {
+                g_virtualComboRepeatMs[step] = std::max(kVirtualComboRepeatMsMin, g_virtualComboRepeatMs[step] - kVirtualComboRepeatStepMs);
+                g_virtualSkillSlotsDirty = true;
+                SaveVirtualSkillSlots();
+            }
             PlayBuffer(SOUND_CLICK01);
             return true;
         }
 
         if (HitTestAndroidUiRect(uiX, uiY, GetComboSettingsPlusRect(step)))
         {
-            g_virtualComboRepeatMs[step] = std::min(kVirtualComboRepeatMsMax, g_virtualComboRepeatMs[step] + kVirtualComboRepeatStepMs);
-            g_virtualSkillSlotsDirty = true;
-            SaveVirtualSkillSlots();
+            if (gAutoCombo.CanConfigure())
+            {
+                g_virtualComboRepeatMs[step] = std::min(kVirtualComboRepeatMsMax, g_virtualComboRepeatMs[step] + kVirtualComboRepeatStepMs);
+                g_virtualSkillSlotsDirty = true;
+                SaveVirtualSkillSlots();
+            }
             PlayBuffer(SOUND_CLICK01);
             return true;
         }
@@ -11255,7 +11774,7 @@ void UpdateAndroidGroundAimCastResolve()
             // permitting. CheckTile does the same tile-center-to-hero distance
             // test CanExecuteSkill runs for the summon skills, against the same
             // GetSkillDistance value the ring's radius comes from.
-            if (skillType > 0 && !CheckTile(Hero, &Hero->Object, gSkillManager.GetSkillDistance(skillType, Hero)))
+            if (skillType > 0 && !g_androidGroundAim.holdCast && !CheckTile(Hero, &Hero->Object, gSkillManager.GetSkillDistance(skillType, Hero)))
             {
                 g_androidGroundCastResult = kGroundCastOutOfRange;
                 LOGI("VirtualPad: ground cast no-op, tile (%d,%d) outside range", tileX, tileY);
@@ -18452,6 +18971,7 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
         // fires would otherwise fire whatever the new page put in that same
         // slot number instead.
         g_androidPendingBuffCast = AndroidPendingBuffCast{};
+        g_androidSkillQueueCount = 0;
         PlayBuffer(SOUND_CLICK01);
         return true;
     }
@@ -18546,6 +19066,21 @@ bool HandleVirtualFingerDown(const SDL_TouchFingerEvent& touch)
     if (skillButton >= kVirtualSkillButtonBase)
     {
         const int skillSlot = skillButton - kVirtualSkillButtonBase;
+
+        // Holding a skill (aim joystick up): tapping another skill button with a second finger swaps to that skill. The
+        // holding finger keeps aiming, so rotating over other buttons never changes the skill by accident.
+        if (g_androidSkillAim.active
+            && skillSlot != g_androidSkillAim.slot
+            && IsValidSkillIndex(GetVirtualOverlayHotKeySkillIndex(skillSlot)))
+        {
+            g_androidSkillAim.slot = skillSlot;
+            g_androidSkillAim.lastCastMs = 0;
+            g_androidSkillAim.holdReady = false;
+            g_virtualSelectedSkillSlot = skillSlot;
+            AndroidHapticPulse(25);
+            PlayBuffer(SOUND_CLICK01);
+            return true;
+        }
 
         const int hotKeySlot = GetVirtualOverlayHotKeySlot(skillSlot);
         const uint32_t nowMs = MU_MobileGetTicks();
@@ -18667,6 +19202,17 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
         return true;
     }
 
+    // The aim joystick follows its finger.
+    if (g_androidSkillAim.active && g_androidSkillAim.finger == touch.fingerId)
+    {
+        float aimX = 0.0f;
+        float aimY = 0.0f;
+        TouchToVirtualUi(touch, aimX, aimY);
+        g_androidSkillAim.uiX = aimX;
+        g_androidSkillAim.uiY = aimY;
+        return true;
+    }
+
     // Same idea for a skill slot press - sliding off it abandons the tap/hold
     // rather than arming whatever slot the finger happens to end up over.
     if (g_androidSkillSlotPress.slot >= 0 && g_androidSkillSlotPress.fingerId == touch.fingerId)
@@ -18701,6 +19247,24 @@ bool HandleVirtualFingerMotion(const SDL_TouchFingerEvent& touch)
                 // Selecting it here keeps the wheel highlight on the skill
                 // being aimed, as the tap flow does.
                 g_virtualSelectedSkillSlot = g_androidSkillSlotPress.slot;
+            }
+            else if (kSkillHoldAimEnabled
+                && IsMlSkillMode()
+                && IsValidSkillIndex(dragSkillIndex)
+                && IsVirtualPadAvailable()
+                && Hero != nullptr
+                && Hero->Dead <= 0)
+            {
+                // ML style: dragging off a skill button is an aim - the finger steers the direction.
+                g_androidSkillAim = AndroidSkillAimState{};
+                g_androidSkillAim.active = true;
+                g_androidSkillAim.finger = touch.fingerId;
+                g_androidSkillAim.slot = g_androidSkillSlotPress.slot;
+                g_androidSkillAim.originX = g_androidSkillSlotPress.downX;
+                g_androidSkillAim.originY = g_androidSkillSlotPress.downY;
+                g_androidSkillAim.uiX = moveX;
+                g_androidSkillAim.uiY = moveY;
+                g_androidSkillAim.downMs = g_androidSkillSlotPress.downMs;
             }
 
             g_androidSkillSlotPress = AndroidSkillSlotPressState{};
@@ -18793,6 +19357,50 @@ static void ApplyVirtualSkillSlotPress(int skillSlot, bool held)
         // A hold on any slot, or a plain tap on an empty one (nothing to
         // arm there yet), both open the picker to bind it.
         ToggleVirtualSkillPickerByTouch();
+        PlayBuffer(SOUND_CLICK01);
+    }
+    else if (IsMlSkillMode() && IsAimGroundSkillIndex(GetVirtualOverlayHotKeySkillIndex(skillSlot)))
+    {
+        // a no-target skill: cast at the nearest enemy (the monster in PvE, the player in PK mode); with nobody around, at
+        // the point 2 m ahead of the character
+        CancelAndroidGroundAim("skill tap");
+        g_virtualSelectedSkillSlot = -1;
+        const int tapSkillIndex = GetVirtualOverlayHotKeySkillIndex(skillSlot);
+        EnsureOffensiveSkillTarget();
+        if (SelectedCharacter >= 0)
+        {
+            const int queuedBefore = g_androidSkillQueueCount;
+            g_androidQueueSkillWhenBusy = true;
+            const bool tapCast = AndroidTriggerHotKeySkillTapInternal(tapSkillIndex);
+            g_androidQueueSkillWhenBusy = false;
+            if (tapCast && g_androidSkillQueueCount == queuedBefore)
+            {
+                AndroidHapticPulse(30);   // the cast went out (or is queued behind the swing in progress)
+            }
+        }
+        else
+        {
+            AndroidSkillAimState ahead{};
+            if (QueueAimGroundCast(ahead, tapSkillIndex, true))
+            {
+                AndroidHapticPulse(30);
+            }
+        }
+        PlayBuffer(SOUND_CLICK01);
+    }
+    else if (IsMlSkillMode() && !IsGroundTargetedSkillIndex(GetVirtualOverlayHotKeySkillIndex(skillSlot)))
+    {
+        // ML style: a tap casts right away at the usual target (hold the button to aim it instead).
+        CancelAndroidGroundAim("skill tap");
+        g_virtualSelectedSkillSlot = -1;
+        const int queuedBefore = g_androidSkillQueueCount;
+        g_androidQueueSkillWhenBusy = true;
+        const bool tapCast = AndroidTriggerHotKeySkillTapInternal(GetVirtualOverlayHotKeySkillIndex(skillSlot));
+        g_androidQueueSkillWhenBusy = false;
+        if (tapCast && g_androidSkillQueueCount == queuedBefore)
+        {
+            AndroidHapticPulse(30);   // the cast went out (or is queued behind the swing in progress)
+        }
         PlayBuffer(SOUND_CLICK01);
     }
     else
@@ -18992,6 +19600,50 @@ bool HandleVirtualFingerUp(const SDL_TouchFingerEvent& touch)
             g_androidGroundAim.fromDrag = true;
             g_androidGroundAim.settleFrames = 2;
         }
+        return true;
+    }
+
+    // ML style: releasing the aim joystick casts toward where it points; released on the spot it is a plain tap (or, after a
+    // long hold, the rebind picker).
+    if (g_androidSkillAim.active && g_androidSkillAim.finger == touch.fingerId)
+    {
+        const AndroidSkillAimState aim = g_androidSkillAim;
+        g_androidSkillAim = AndroidSkillAimState{};
+
+        const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+        const float dxUi = aim.uiX - aim.originX;
+        const float dyUi = aim.uiY - aim.originY;
+        const float distUi = std::sqrt((dxUi * dxUi) + (dyUi * dyUi));
+
+        const int aimSkillIndex = GetVirtualOverlayHotKeySkillIndex(aim.slot);
+        const bool groundSkill = IsGroundTargetedSkillIndex(aimSkillIndex);
+
+        if (IsAimGroundSkillIndex(aimSkillIndex))
+        {
+            // no-target skills were already casting at the 2 m point the whole time the button was held; resting the
+            // finger on the button for a second instead opens the picker to change the skill
+            if (aim.holdReady && distUi <= kSkillAimDeadzoneUi)
+            {
+                ApplyVirtualSkillSlotPress(aim.slot, true);
+            }
+        }
+        else if (groundSkill && !(distUi <= kSkillAimDeadzoneUi && (MU_MobileGetTicks() - aim.downMs) >= kSkillSlotRebindHoldMs))
+        {
+            // lands on the ground 2 m from the character, turned by the joystick
+            if (QueueAimGroundCast(aim, aimSkillIndex, false))
+            {
+                g_virtualSelectedSkillSlot = aim.slot;
+            }
+        }
+        else if (distUi > kSkillAimDeadzoneUi)
+        {
+            AndroidCastSkillInDirection(aim.slot, dxUi * geometry.pxPerUiX, dyUi * geometry.pxPerUiY);
+        }
+        else
+        {
+            ApplyVirtualSkillSlotPress(aim.slot, (MU_MobileGetTicks() - aim.downMs) >= kSkillSlotRebindHoldMs);
+        }
+
         return true;
     }
 
@@ -19754,6 +20406,74 @@ void UpdateAndroidHoldFeedback()
 {
     const uint32_t nowMs = MU_MobileGetTicks();
 
+    // ML style: holding a skill button (without dragging) shows the aim joystick after a moment.
+    if (kSkillHoldAimEnabled && g_androidSkillSlotPress.slot >= 0 && IsMlSkillMode() && (nowMs - g_androidSkillSlotPress.downMs) >= kSkillAimHoldMs)
+    {
+        const int holdSkillIndex = GetVirtualOverlayHotKeySkillIndex(g_androidSkillSlotPress.slot);
+
+        if (IsValidSkillIndex(holdSkillIndex)
+            && IsVirtualPadAvailable()
+            && Hero != nullptr
+            && Hero->Dead <= 0)
+        {
+            g_androidSkillAim = AndroidSkillAimState{};
+            g_androidSkillAim.active = true;
+            g_androidSkillAim.finger = g_androidSkillSlotPress.fingerId;
+            g_androidSkillAim.slot = g_androidSkillSlotPress.slot;
+            g_androidSkillAim.originX = g_androidSkillSlotPress.downX;
+            g_androidSkillAim.originY = g_androidSkillSlotPress.downY;
+            g_androidSkillAim.uiX = g_androidSkillSlotPress.downX;
+            g_androidSkillAim.uiY = g_androidSkillSlotPress.downY;
+            g_androidSkillAim.downMs = g_androidSkillSlotPress.downMs;
+            g_androidSkillSlotPress = AndroidSkillSlotPressState{};
+        }
+    }
+
+    if (g_androidSkillAim.active)
+    {
+        if (!IsVirtualPadAvailable() || Hero == nullptr || Hero->Dead > 0)
+        {
+            g_androidSkillAim = AndroidSkillAimState{};
+        }
+        else
+        {
+            const float adx = g_androidSkillAim.uiX - g_androidSkillAim.originX;
+            const float ady = g_androidSkillAim.uiY - g_androidSkillAim.originY;
+            const bool inside = ((adx * adx) + (ady * ady)) <= (kSkillAimDeadzoneUi * kSkillAimDeadzoneUi);
+
+            const int aimHoldSkill = GetVirtualOverlayHotKeySkillIndex(g_androidSkillAim.slot);
+            const bool castsWhileHeld = IsAimGroundSkillIndex(aimHoldSkill);
+
+            // Finger resting on the skill's own button for a second: the skill stops casting and letting go opens the skill
+            // picker to change it (also for the no-target skills). Moving off the button goes back to casting.
+            if (castsWhileHeld && !inside)
+            {
+                g_androidSkillAim.holdReady = false;
+                g_androidSkillAim.downMs = nowMs;   // the one-second rest starts again when the finger comes back
+            }
+
+            if (inside && !g_androidSkillAim.holdReady && (nowMs - g_androidSkillAim.downMs) >= kSkillSlotRebindHoldMs)
+            {
+                g_androidSkillAim.holdReady = true;   // letting go now opens the picker to rebind the slot
+                AndroidHapticPulse(30);
+            }
+            else if (castsWhileHeld && !g_androidSkillAim.holdReady)
+            {
+                // Held: keep casting at the ground point 2 m from the character, which the joystick turns around it.
+                if (!g_androidGroundAim.pendingCast
+                    && !Hero->SafeZone
+                    && !IsAndroidHeroBusyForSkillCast()
+                    && (nowMs - g_androidSkillAim.lastCastMs) >= AimHoldRecastDelayMs(aimHoldSkill))
+                {
+                    if (QueueAimGroundCast(g_androidSkillAim, aimHoldSkill, true))
+                    {
+                        g_androidSkillAim.lastCastMs = nowMs;
+                    }
+                }
+            }
+        }
+    }
+
     if (g_androidSkillSlotPress.slot >= 0 && !g_androidSkillSlotPress.holdReady
         && (nowMs - g_androidSkillSlotPress.downMs) >= kSkillSlotRebindHoldMs)
     {
@@ -19794,6 +20514,7 @@ void UpdateVirtualPadHolds()
     UpdateAndroidMessageBoxClick();
     UpdateAndroidTradeAutoMove();
     UpdateAndroidPendingBuffCast();
+    UpdateAndroidQueuedSkills();
     UpdateAndroidPkTargetState();
 
     if (!IsVirtualPadAvailable())
@@ -19833,7 +20554,7 @@ void UpdateVirtualPadHolds()
         }
 
         const uint32_t repeatMs = IsAndroidComboActive()
-            ? g_virtualComboRepeatMs[g_virtualComboStep]
+            ? EffectiveComboRepeatMs(g_virtualComboStep)
             : (bareSwing ? kVirtualBareSwingRepeatMs : kVirtualAttackRepeatMs);
 
         if ((nowMs - active.lastRepeatMs) >= repeatMs)
@@ -20841,8 +21562,113 @@ void RenderAndroidTeleportRangeRing()
 
 // Reticle for a ground-targeted skill tap while it settles into a pick - see
 // UpdateAndroidGroundAimCast. Drawn at the tapped point itself.
+void RenderAndroidSkillAim()
+{
+    if (!g_androidSkillAim.active || !IsVirtualPadAvailable() || Hero == nullptr)
+    {
+        return;
+    }
+
+    const float ox = g_androidSkillAim.originX;
+    const float oy = g_androidSkillAim.originY;
+    const float dx = g_androidSkillAim.uiX - ox;
+    const float dy = g_androidSkillAim.uiY - oy;
+    const float distUi = std::sqrt((dx * dx) + (dy * dy));
+    const bool beyond = distUi > kSkillAimDeadzoneUi;
+
+    const float shownUi = std::min(distUi, kSkillAimRadiusUi);
+    const float nx = (distUi > 0.001f) ? (dx / distUi) : 0.0f;
+    const float ny = (distUi > 0.001f) ? (dy / distUi) : 0.0f;
+    const float knobX = ox + (nx * shownUi);
+    const float knobY = oy + (ny * shownUi);
+
+    BeginBitmap();
+    DisableTexture();
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // The joystick: ring, dead zone and the thumb.
+    DrawVirtualCircle(ox, oy, kSkillAimRadiusUi, 0.04f, 0.07f, 0.12f, 0.50f, true);
+    DrawVirtualCircle(ox, oy, kSkillAimRadiusUi, 0.60f, 0.82f, 1.0f, 0.90f, false);
+    DrawVirtualCircle(ox, oy, kSkillAimDeadzoneUi, 0.60f, 0.82f, 1.0f, 0.45f, false);
+    DrawVirtualCircle(knobX, knobY, 13.0f, beyond ? 0.30f : 0.55f, beyond ? 0.85f : 0.65f, 1.0f, 0.85f, true);
+    DrawVirtualCircle(knobX, knobY, 13.0f, 0.90f, 0.97f, 1.0f, 0.95f, false);
+
+    // Ground skill: the spot 2 m from the character where it will land, turned by the joystick.
+    const bool groundAim = IsGroundTargetedSkillIndex(GetVirtualOverlayHotKeySkillIndex(g_androidSkillAim.slot))
+        || IsAimGroundSkillIndex(GetVirtualOverlayHotKeySkillIndex(g_androidSkillAim.slot));
+    const bool castingHeld = IsAimGroundSkillIndex(GetVirtualOverlayHotKeySkillIndex(g_androidSkillAim.slot));
+    if (groundAim)
+    {
+        float gwx = 0.0f, gwy = 0.0f, gux = 0.0f, guy = 0.0f;
+        if (ComputeSkillAimGround(g_androidSkillAim, gwx, gwy, gux, guy))
+        {
+            DrawVirtualCircle(gux, guy, 20.0f, 1.0f, 0.55f, 0.20f, 0.30f, true);
+            DrawVirtualCircle(gux, guy, 20.0f, 1.0f, 0.80f, 0.40f, 0.95f, false);
+            DrawVirtualCircle(gux, guy, 6.0f, 1.0f, 0.80f, 0.40f, 0.95f, true);
+        }
+    }
+
+    // A line from the hero along the aimed direction (screen space), ending in an arrow head.
+    if (beyond && !groundAim)
+    {
+        vec3_t heroBody;
+        Vector(Hero->Object.Position[0], Hero->Object.Position[1], Hero->Object.Position[2] + 60.0f, heroBody);
+
+        float hx = 0.0f;
+        float hy = 0.0f;
+        if (ProjectWorldPointWithSnapshot(heroBody, hx, hy))
+        {
+            const VirtualJoystickGeometry geometry = GetVirtualJoystickGeometry();
+            float ux = dx * geometry.pxPerUiX;
+            float uy = dy * geometry.pxPerUiY;
+            const float uLen = std::sqrt((ux * ux) + (uy * uy));
+            ux /= uLen;
+            uy /= uLen;
+
+            const float startX = UiToScreenX(hx);
+            const float startY = static_cast<float>(WindowHeight) - UiToScreenY(hy);
+            const float dGlX = ux;
+            const float dGlY = -uy;                      // screen y is down, GL y is up
+            const float lenPx = UiToScreenX(120.0f);
+            const float endX = startX + (dGlX * lenPx);
+            const float endY = startY + (dGlY * lenPx);
+            const float halfW = std::max(2.0f, UiToScreenX(2.2f));
+            const float px = -dGlY * halfW;              // perpendicular, half the line width
+            const float py = dGlX * halfW;
+            const float headLen = std::max(6.0f, UiToScreenX(10.0f));
+
+            glColor4f(0.55f, 0.85f, 1.0f, 0.70f);
+            glBegin(GL_TRIANGLES);
+            glVertex2f(startX + px, startY + py);
+            glVertex2f(startX - px, startY - py);
+            glVertex2f(endX - px, endY - py);
+            glVertex2f(startX + px, startY + py);
+            glVertex2f(endX - px, endY - py);
+            glVertex2f(endX + px, endY + py);
+            // arrow head
+            glVertex2f(endX + (px * 3.0f), endY + (py * 3.0f));
+            glVertex2f(endX - (px * 3.0f), endY - (py * 3.0f));
+            glVertex2f(endX + (dGlX * headLen), endY + (dGlY * headLen));
+            glEnd();
+        }
+    }
+
+    HFONT font = g_hFontMini != nullptr ? g_hFontMini : g_hFont;
+    const char* label = (g_androidSkillAim.holdReady && !beyond) ? "release: change skill" : (castingHeld ? "casting" : ((beyond || groundAim) ? "release to cast" : "aim"));
+    TextDraw(font, static_cast<int>(ox - 50.0f), static_cast<int>(oy - kSkillAimRadiusUi - 14.0f), 0xFFFFFFFF, 0x0, 100, 0, 3, "%s", label);
+
+    EndBitmap();
+}
+
 void RenderAndroidGroundAim()
 {
+    if (g_androidGroundAim.holdCast)
+    {
+        return;   // a held no-target skill draws its own marker (RenderAndroidSkillAim)
+    }
+
     if ((!g_androidGroundAim.pendingCast && !g_androidGroundAim.dragging) || !IsVirtualPadAvailable())
     {
         return;
@@ -21638,8 +22464,9 @@ void RenderComboSettingsPanel()
     {
         const AndroidUiRect minusRect = GetComboSettingsMinusRect(step);
         const AndroidUiRect plusRect = GetComboSettingsPlusRect(step);
-        const bool atMin = g_virtualComboRepeatMs[step] <= kVirtualComboRepeatMsMin;
-        const bool atMax = g_virtualComboRepeatMs[step] >= kVirtualComboRepeatMsMax;
+        const bool locked = !gAutoCombo.CanConfigure();
+        const bool atMin = locked || EffectiveComboRepeatMs(step) <= kVirtualComboRepeatMsMin;
+        const bool atMax = locked || EffectiveComboRepeatMs(step) >= kVirtualComboRepeatMsMax;
         const bool isNextStep = g_virtualComboEnabled && g_virtualComboStep == step;
 
         DrawVirtualRightPanelButtonBox(minusRect, false);
@@ -21663,7 +22490,7 @@ void RenderComboSettingsPanel()
         TextDraw(bodyFont,
                  static_cast<int>(rect.x), static_cast<int>(labelY + 13.0f),
                  0xFFD0E0FF, 0x0, static_cast<int>(rect.w), 0, 3,
-                 "%u ms", g_virtualComboRepeatMs[step]);
+                 locked ? "%u ms (server)" : "%u ms", EffectiveComboRepeatMs(step));
     }
 
     const AndroidUiRect closeRect = GetComboSettingsCloseRect();
@@ -23603,6 +24430,7 @@ void RenderVirtualPad()
     RenderCameraResetButton();
     RenderAndroidTeleportRangeRing();
     RenderAndroidGroundAim();
+    RenderAndroidSkillAim();
     RenderAndroidTradePicker();
 
     // Last, so the panel and its dimming layer sit over every other control.
@@ -30263,15 +31091,28 @@ void MU_MobileComboSetEnabled(bool on)
     LOGI("VirtualPad: auto-combo %s", on ? "on" : "off");
 }
 
+bool MU_MobileGetMlSkillMode()
+{
+    return IsMlSkillMode();
+}
+
+void MU_MobileSetMlSkillMode(bool on)
+{
+    SetMlSkillMode(on);
+    g_virtualSelectedSkillSlot = -1;   // nothing stays armed from the other style
+    g_androidSkillAim = AndroidSkillAimState{};
+}
+
 int MU_MobileComboGetDelayMs(int step)
 {
     if (step < 0 || step >= kVirtualComboSlotCount) return 0;
-    return static_cast<int>(g_virtualComboRepeatMs[step]);
+    return static_cast<int>(EffectiveComboRepeatMs(step));
 }
+
 
 void MU_MobileComboAddDelayMs(int step, int sign)
 {
-    if (step < 0 || step >= kVirtualComboSlotCount) return;
+    if (step < 0 || step >= kVirtualComboSlotCount || !gAutoCombo.CanConfigure()) return;
     uint32_t& ms = g_virtualComboRepeatMs[step];
     ms = (sign < 0)
         ? std::max(kVirtualComboRepeatMsMin, ms - kVirtualComboRepeatStepMs)

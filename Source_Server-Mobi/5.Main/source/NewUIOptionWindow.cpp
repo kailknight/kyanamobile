@@ -30,6 +30,12 @@ extern bool g_RenderEff;	// ZzzOpenglUtil.cpp
 extern int m_FontSizePlus;	// Winmain.cpp - the text size bonus the running game started with
 #endif
 
+#if defined(__ANDROID__)
+// android_main.cpp: the ML-style skill buttons switch (tap = cast, hold = aim, attack button = normal attack only)
+extern bool MU_MobileGetMlSkillMode();
+extern void MU_MobileSetMlSkillMode(bool on);
+#endif
+
 extern char Mp3FileName[256];
 extern HWND g_hWnd;
 
@@ -899,6 +905,9 @@ bool SEASON3B::CNewUIOptionWindow::HandleModernClick()
 	case MH_NAME:			mShowName ^= 1; g_bGMObservation = mShowName; break;
 	case MH_MINIMAP:		mShowMiniMap ^= 1; break;
 	case MH_TITLE:			mShowDanhHieu ^= 1; break;
+#if defined(__ANDROID__)
+	case MH_MLSKILLS:		MU_MobileSetMlSkillMode(!MU_MobileGetMlSkillMode()); break;
+#endif
 	case MH_MARKETMSG:		mHideMarketNotice ^= 1; break;
 	case MH_ITEMNAMES:
 		if (CNewUINameWindow* pNameWindow = g_pNewUISystem->GetUI_NewNameWindow())
@@ -969,7 +978,12 @@ void SEASON3B::CNewUIOptionWindow::RenderModern()
 	dispRows += 2;	// screen mode + resolution
 #endif
 	const float qualityH = kHeadH + 34.f + kPad;
-	float hA = CardH(3) + kGap + CardH(2) + (bVoice ? kGap + CardH(3 + micRows) : 0.f);
+#if defined(__ANDROID__)
+	const int generalRows = 4;	// + the tap-to-cast skills switch
+#else
+	const int generalRows = 3;
+#endif
+	float hA = CardH(generalRows) + kGap + CardH(2) + (bVoice ? kGap + CardH(3 + micRows) : 0.f);
 	const float hB = CardH(eEndOnOffGrap) + kGap + CardH(2);
 	const float hC = CardH(dispRows) + kGap + qualityH + kGap + CardH(1);
 	float total = hA;
@@ -1029,11 +1043,15 @@ void SEASON3B::CNewUIOptionWindow::RenderModern()
 	// ================= column A: general, sound, voice =================
 	{
 		float y = top;
-		float yy = DrawCard(colX[0], y, kColW, CardH(3), "General", kTextAccent);
+		float yy = DrawCard(colX[0], y, kColW, CardH(generalRows), "General", kTextAccent);
 		DrawToggleRow(colX[0], yy, kColW, GlobalText[386], m_bAutoAttack, MH_AUTOATTACK, 0); yy += kRowH;
 		DrawToggleRow(colX[0], yy, kColW, GlobalText[387], m_bWhisperSound, MH_WHISPER, 0); yy += kRowH;
 		DrawToggleRow(colX[0], yy, kColW, GlobalText[919], m_bSlideHelp, MH_SLIDEHELP, 0);
-		y += CardH(3) + kGap;
+#if defined(__ANDROID__)
+		yy += kRowH;
+		DrawToggleRow(colX[0], yy, kColW, "Tap to cast skills", MU_MobileGetMlSkillMode(), MH_MLSKILLS, 0);
+#endif
+		y += CardH(generalRows) + kGap;
 
 		yy = DrawCard(colX[0], y, kColW, CardH(2), "Sound", kTextAccent);
 		DrawToggleRow(colX[0], yy, kColW, "Music", m_MusicOnOff != 0, MH_MUSIC, 0); yy += kRowH;
