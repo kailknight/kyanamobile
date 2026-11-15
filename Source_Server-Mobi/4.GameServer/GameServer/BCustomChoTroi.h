@@ -90,6 +90,17 @@ struct SDHP_REQ_MARKET_SELL
 	int TypeItem;
 	int ItemDay;
 	int Pass;
+	DWORD TokenLow;		// the listing's id (GameServer makes it, DataServer files it under it and sends it back)
+	DWORD TokenHigh;
+};
+
+// 0xFE:0x04 DataServer -> GameServer: the listing with this token is in ItemMarketData with its item. Until this arrives the
+// GameServer keeps the listing in Data\ChoTroiPending and sends it again.
+struct SDHP_ANS_MARKET_SELL_ACK
+{
+	PBMSG_HEAD2 h;
+	DWORD TokenLow;
+	DWORD TokenHigh;
 };
 //===Get List Cho Troi
 struct PMSG_REQ_MARKET_ITEM //Client Send GS
@@ -167,6 +178,13 @@ struct BCSEV_COUNTLIST
 	int Count;
 	int Type;
 };
+// A listing that left the player's cache slot but has not been confirmed by the DataServer yet.
+struct PENDING_MARKET_SELL
+{
+	SDHP_REQ_MARKET_SELL msg;
+	DWORD lastSend;
+};
+
 class BCustomChoTroi
 {
 public:
@@ -192,6 +210,15 @@ public:
 	void DGAnsItemBuy(SDHP_ANS_MARKET_BUY* lpMsg);
 
 	void GDReqItemStatus(int aIndex);;
+
+	//==SELL safety: every listing is written to Data\ChoTroiPending before it is sent and kept until the DataServer confirms it
+	void SellJournalAdd(SDHP_REQ_MARKET_SELL* lpMsg);
+	void DGAnsItemSellAck(SDHP_ANS_MARKET_SELL_ACK* lpMsg);
+	void SellRetryProc();
+	void SellJournalLoad();
+	std::map<unsigned __int64, PENDING_MARKET_SELL> m_PendingSell;
+	bool m_PendingLoaded;
+	DWORD m_PendingTick;
 	void DGAnsItemStatus(CBCUSTOM_LOAD_COUNT* lpMsg);
 	int GetRateTaxTypeItem(int TypeItem, int TypeCoin);
 

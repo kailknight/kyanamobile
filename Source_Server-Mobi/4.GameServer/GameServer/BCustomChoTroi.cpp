@@ -511,6 +511,9 @@ void BCustomChoTroi::CGReqItemSell(PMSG_REQ_MARKET_SELL * lpMsg, int aIndex)
 	{
 		gNotice.GCNoticeSend(aIndex, eMessageBox, 0, 0, 0, 0, 0, this->GetMessage(9), gItemLevel.GetItemName(lpUser->CH_InfoItem[0].m_Index, lpUser->CH_InfoItem[0].m_Level), ItemPrice, "Chaos");//
 	}
+	// The item only exists in this packet from here on: write it to disk first and keep it until the DataServer confirms it
+	this->SellJournalAdd(&pMsg);
+
 	gDataServerConnection.DataSend((BYTE*)& pMsg, pMsg.h.size);
 
 	gObj[aIndex].CH_IndexItem[0] = -1;
@@ -1067,3 +1070,147 @@ void BCustomChoTroi::GuiThuThongBao(LPOBJ lpTarget, char* Subject, char* message
 }
 
 #endif
+
+//////////////////////////////////////////////////////////////////////
+// Listing safety: a listing is written to Data\ChoTroiPending\<token>.bin before it is sent, deleted when the DataServer
+// confirms it (0xFE:0x04), and sent again every 20 seconds until then. After a GameServer restart the files are read back.
+//////////////////////////////////////////////////////////////////////
+
+static void SellJournalPath(char* out,int size,unsigned __int64 token) // OK
+{
+	sprintf_s(out,size,".\\Data\\ChoTroiPending\\%016I64X.bin",token);
+}
+
+void BCustomChoTroi::SellJournalAdd(SDHP_REQ_MARKET_SELL* lpMsg) // OK
+{
+	static LONG s_counter = 0;
+
+	if(this->m_PendingLoaded == false)
+	{
+		this->SellJournalLoad();
+	}
+
+	const unsigned __int64 token = (((unsigned __int64)time(0)) << 24) | (((unsigned __int64)(gServerInfo.m_ServerCode & 0xFF)) << 16) | (unsigned __int64)(InterlockedIncrement(&s_counter) & 0xFFFF);
+
+	lpMsg->TokenLow = (DWORD)(token & 0xFFFFFFFF);
+
+	lpMsg->TokenHigh = (DWORD)(token >> 32);
+
+	CreateDirectory(".\\Data\\ChoTroiPending",0);
+
+	char path[260];
+
+	SellJournalPath(path,sizeof(path),token);
+
+	HANDLE file = CreateFile(path,GENERIC_WRITE,0,0,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,0);
+
+	if(file != INVALID_HANDLE_VALUE)
+	{
+		DWORD written = 0;
+		WriteFile(file,lpMsg,sizeof(SDHP_REQ_MARKET_SELL),&written,0);
+		FlushFileBuffers(file);
+		CloseHandle(file);
+	}
+	else
+	{
+		LogAdd(LOG_RED,"[ChoTroi] could not write the listing backup %s",path);
+	}
+
+	PENDING_MARKET_SELL pending;
+	pending.msg = *lpMsg;
+	pending.lastSend = GetTickCount();
+
+	this->m_PendingSell[token] = pending;
+}
+
+void BCustomChoTroi::DGAnsItemSellAck(SDHP_ANS_MARKET_SELL_ACK* lpMsg) // OK
+{
+	const unsigned __int64 token = (((unsigned __int64)lpMsg->TokenHigh) << 32) | (unsigned __int64)lpMsg->TokenLow;
+
+	this->m_PendingSell.erase(token);
+
+	char path[260];
+
+	SellJournalPath(path,sizeof(path),token);
+
+	DeleteFile(path);
+}
+
+void BCustomChoTroi::SellJournalLoad() // OK
+{
+	this->m_PendingLoaded = true;
+
+	WIN32_FIND_DATA data;
+
+	HANDLE find = FindFirstFile(".\\Data\\ChoTroiPending\\*.bin",&data);
+
+	if(find == INVALID_HANDLE_VALUE)
+	{
+		return;
+	}
+
+	do
+	{
+		char path[260];
+
+		sprintf_s(path,".\\Data\\ChoTroiPending\\%s",data.cFileName);
+
+		HANDLE file = CreateFile(path,GENERIC_READ,FILE_SHARE_READ,0,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,0);
+
+		if(file == INVALID_HANDLE_VALUE)
+		{
+			continue;
+		}
+
+		PENDING_MARKET_SELL pending;
+
+		DWORD read = 0;
+
+		if(ReadFile(file,&pending.msg,sizeof(SDHP_REQ_MARKET_SELL),&read,0) != 0 && read == sizeof(SDHP_REQ_MARKET_SELL))
+		{
+			const unsigned __int64 token = (((unsigned __int64)pending.msg.TokenHigh) << 32) | (unsigned __int64)pending.msg.TokenLow;
+
+			pending.lastSend = GetTickCount()-15000; // first resend a few seconds after the start
+
+			this->m_PendingSell[token] = pending;
+
+			LogAdd(LOG_RED,"[ChoTroi] unconfirmed listing of %s found at start (%s): it is sent to the DataServer again",pending.msg.Name,data.cFileName);
+		}
+
+		CloseHandle(file);
+	}
+	while(FindNextFile(find,&data) != 0);
+
+	FindClose(find);
+}
+
+// once a second from the server timer
+void BCustomChoTroi::SellRetryProc() // OK
+{
+	if(this->m_PendingLoaded == false)
+	{
+		this->SellJournalLoad();
+	}
+
+	if(this->m_PendingSell.empty() != 0 || (GetTickCount()-this->m_PendingTick) < 5000)
+	{
+		return;
+	}
+
+	this->m_PendingTick = GetTickCount();
+
+	for(std::map<unsigned __int64,PENDING_MARKET_SELL>::iterator it = this->m_PendingSell.begin();it != this->m_PendingSell.end();++it)
+	{
+		if((GetTickCount()-it->second.lastSend) < 20000)
+		{
+			continue;
+		}
+
+		it->second.lastSend = GetTickCount();
+
+		if(gDataServerConnection.DataSend((BYTE*)&it->second.msg,sizeof(SDHP_REQ_MARKET_SELL)) != 0)
+		{
+			LogAdd(LOG_RED,"[ChoTroi] listing %016I64X of %s not confirmed yet: sent again",it->first,it->second.msg.Name);
+		}
+	}
+}

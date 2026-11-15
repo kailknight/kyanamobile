@@ -795,6 +795,9 @@ void DataServerProtocolCore(BYTE head,BYTE* lpMsg,int size) // OK
 			case 0x03: //Cong Coin
 				gBCustomChoTroi.DGAnsItemStatus((CBCUSTOM_LOAD_COUNT*)lpMsg);
 				break;
+			case 0x04: // the DataServer filed a listing: the local backup of it can go
+				gBCustomChoTroi.DGAnsItemSellAck((SDHP_ANS_MARKET_SELL_ACK*)lpMsg);
+				break;
 
 			}
 			break;
