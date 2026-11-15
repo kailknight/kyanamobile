@@ -513,6 +513,11 @@ void CB_KingOfKira::DrawWindow()
 
 extern int CachTexture; // ZzzOpenglUtil.cpp
 
+// The flag's own GL texture. The texture manager keeps zeroing Bitmaps[BITMAP_KOK_FLAG].TextureNumber (it is a plain guild.tga
+// slot as far as it knows), and a flag drawn with texture 0 is white: a debug log showed the slot at 0 most of the time
+// while the uploads themselves were correct. So the slot is pointed back at this texture on every frame.
+static GLuint s_kokOwnTexture = 0;
+
 void CB_KingOfKira::UploadMark()
 {
 	static const unsigned int colors[16] =
@@ -539,19 +544,23 @@ void CB_KingOfKira::UploadMark()
 
 	// The flag gets a GL texture of its own: nothing else may draw into it (the guild marks above the players' heads
 	// are drawn into a shared texture all the time).
-	static GLuint ownTexture = 0;
-
-	if (ownTexture == 0)
+	// (it may also have been deleted along with the slot, then a new one is made)
+	if (s_kokOwnTexture != 0 && !glIsTexture(s_kokOwnTexture))
 	{
-		glGenTextures(1, &ownTexture);
+		s_kokOwnTexture = 0;
 	}
 
-	if (ownTexture == 0)
+	if (s_kokOwnTexture == 0)
+	{
+		glGenTextures(1, &s_kokOwnTexture);
+	}
+
+	if (s_kokOwnTexture == 0)
 	{
 		return;
 	}
 
-	b->TextureNumber = ownTexture;
+	b->TextureNumber = s_kokOwnTexture;
 	b->Width = 8;
 	b->Height = 8;
 	b->Components = 4;
@@ -573,6 +582,7 @@ void CB_KingOfKira::UploadMark()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	// the bind above bypassed BindTexture(): forget its cached texture so the next BindTexture really binds
 	CachTexture = -1;
+
 }
 
 void CB_KingOfKira::ApplyFlags(bool inWorld)
@@ -604,6 +614,15 @@ void CB_KingOfKira::ApplyFlags(bool inWorld)
 		UploadMark();
 		m_MarkDirty = false;
 		lastUpload = GetTickCount();
+	}
+
+	if (want && s_kokOwnTexture != 0)
+	{
+		BITMAP_t* flagBitmap = &Bitmaps[BITMAP_KOK_FLAG];
+		flagBitmap->TextureNumber = s_kokOwnTexture;
+		flagBitmap->Width = 8;
+		flagBitmap->Height = 8;
+		flagBitmap->Components = 4;
 	}
 
 	for (int k = 0; k < 3; k++)
