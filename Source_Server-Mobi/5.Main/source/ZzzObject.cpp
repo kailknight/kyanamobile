@@ -6938,7 +6938,9 @@ OBJECT *CreateObject(int Type,vec3_t Position,vec3_t Angle,float Scale)
 			// the cursor turned into the "interact" icon and a click on the floor did nothing instead of walking.
 			break;
 		case 60:
-			CreateOperate(o);
+			// The invisible "lean against the wall" boxes are not operates here either: this Dungeon's map data places them
+			// all over (Dungeon 2 especially), and each one turns the pointer into the lean icon and swallows the click, so
+			// the character could not be walked. The box itself stays, only the clickable part is gone.
 			Vector( 40.f, 40.f,160.f,o->BoundingBoxMax);
 			o->HiddenMesh = -2;
 			break;
