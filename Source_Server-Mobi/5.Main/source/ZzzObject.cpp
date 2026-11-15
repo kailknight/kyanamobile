@@ -6932,7 +6932,10 @@ OBJECT *CreateObject(int Type,vec3_t Position,vec3_t Angle,float Scale)
 		switch(Type)
 		{
 		case 59:
-			CreateOperate(o);
+			// Not an operate any more: in this Dungeon Object60.bmd is a plain stone piece (deep_wall07) whose mesh sits ~200 units
+			// away from the object's origin, but an operate is hit-tested with an axis-aligned box around the ORIGIN. So every
+			// one of these pieces (there are hundreds in Dungeon 2) put an invisible clickable box on the bare floor next to it:
+			// the cursor turned into the "interact" icon and a click on the floor did nothing instead of walking.
 			break;
 		case 60:
 			CreateOperate(o);
