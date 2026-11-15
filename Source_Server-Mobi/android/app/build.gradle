@@ -656,7 +656,9 @@ android {
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.6.1'
+    // appcompat 1.7 pulls Kotlin 1.8 stdlib while other libraries still ask for the split jdk7/jdk8 ones: the BOM aligns them
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+    implementation 'androidx.appcompat:appcompat:1.7.0'
     // WCoin recharge in the cash shop (MuBilling.java)
     implementation 'com.android.billingclient:billing:8.0.0'
 }

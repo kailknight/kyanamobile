@@ -903,8 +903,9 @@ public class MuMainNativeActivity extends NativeActivity {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             WindowManager.LayoutParams attrs = getWindow().getAttributes();
-            attrs.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            // Draw into the cutout area. 3 = LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS (Android 11+), 1 = SHORT_EDGES (Android 9-10).
+            // Written as numbers because the named SHORT_EDGES constant is deprecated from Android 15.
+            attrs.layoutInDisplayCutoutMode = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ? 3 : 1;
             getWindow().setAttributes(attrs);
         }
 
@@ -912,8 +913,8 @@ public class MuMainNativeActivity extends NativeActivity {
             getWindow().setDecorFitsSystemWindows(false);
         }
 
-        getWindow().setStatusBarColor(Color.TRANSPARENT);
-        getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        // No setStatusBarColor / setNavigationBarColor: both are deprecated from Android 15, where the bars are always
+        // transparent and drawn over the app (edge-to-edge). The bars are hidden by the immersive flags anyway.
         applyImmersiveFlags();
     }
 
