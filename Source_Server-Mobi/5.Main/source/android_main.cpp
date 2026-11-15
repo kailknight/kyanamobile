@@ -2165,9 +2165,9 @@ constexpr float kZoomDefault = 1200.0f;
 // units because UI space is stretched unevenly on non-4:3 panels, and a pinch
 // should feel the same whichever way the fingers happen to be oriented.
 constexpr float kPinchActivateSlopPx = 24.0f;
-// Pinch zoom is switched off: two fingers (a skill held with one, the joystick with the other) must never turn into a camera
-// gesture that stops the character.
-constexpr bool kAndroidPinchZoomEnabled = false;
+// Pinch zoom works again, but only for two fingers in the open world: a finger on the joystick or holding a skill button is never
+// half of a camera gesture (see HandleAndroidPinchFingerDown), so zooming cannot stop the character.
+constexpr bool kAndroidPinchZoomEnabled = true;
 constexpr float kMainFrameItemHotKeyX = 0.0f;
 constexpr float kMainFrameItemHotKeyY = 430.0f;
 constexpr float kMainFrameItemHotKeyW = 38.0f;

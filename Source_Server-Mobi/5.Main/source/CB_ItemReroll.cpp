@@ -107,7 +107,9 @@ namespace
 	bool PrimaryDown()
 	{
 #if defined(MU_TOUCH_UI)
-		return SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnHeldDn();   // held, so a touch drag keeps going
+		// Key state only: the phone's IsLBtnHeldDn / MouseLButton flags stay set between touches, so a "held" test built
+		// on them never saw a new press and every button (Close included) stopped working after the first touch.
+		return SEASON3B::IsPress(VK_LBUTTON) || SEASON3B::IsRepeat(VK_LBUTTON);
 #else
 		return ((GetKeyState(VK_LBUTTON) & 0x8000) != 0);
 #endif
