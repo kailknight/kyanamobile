@@ -137,11 +137,13 @@ void CB_ActiveInvasions::DrawWindow()
 	static bool s_Set = false, s_Dragging = false, s_WasDown = false;
 
 #if defined(MU_TOUCH_UI)
-	const bool down = SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnDn();
+	// The phone's MouseLButton / IsLBtnHeldDn flags stay set between touches (the debug log showed them never dropping), so
+	// the held state comes from the key state of the left button only: a new press, then repeat while it is held.
+	const bool down = SEASON3B::IsPress(VK_LBUTTON) || SEASON3B::IsRepeat(VK_LBUTTON);
 #else
 	const bool down = ((GetKeyState(VK_LBUTTON) & 0x8000) != 0);
 #endif
-	const bool clickEdge = down && !s_WasDown;
+	const bool clickEdge = SEASON3B::IsPress(VK_LBUTTON);
 	s_WasDown = down;
 
 	if (!s_Set)

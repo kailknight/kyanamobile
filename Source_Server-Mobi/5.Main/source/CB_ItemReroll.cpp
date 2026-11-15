@@ -107,7 +107,7 @@ namespace
 	bool PrimaryDown()
 	{
 #if defined(MU_TOUCH_UI)
-		return SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnDn();
+		return SEASON3B::IsPress(VK_LBUTTON) || CInput::Instance().IsLBtnHeldDn();   // held, so a touch drag keeps going
 #else
 		return ((GetKeyState(VK_LBUTTON) & 0x8000) != 0);
 #endif
