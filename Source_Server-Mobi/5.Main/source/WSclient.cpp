@@ -3559,6 +3559,13 @@ void ReceiveAction(BYTE *ReceiveBuffer,int Size)
 	c->Object.Position[1] = c->TargetY*TERRAIN_SCALE+TERRAIN_SCALE*0.5f;
 	switch(Data->Action)
 	{
+	case 0xE1: // Tarkan Mining: another player swings the pick axe at a stone (the GameServer sends it to the viewport)
+		if(Index != HeroIndex && o->Type == MODEL_PLAYER && Models[MODEL_PLAYER].NumActions > PLAYER_MINING && o->CurrentAction != PLAYER_MINING)
+		{
+			SetPlayerStop(c);
+			SetAction(o,PLAYER_MINING);
+		}
+		break;
 	case AT_STAND1:
 	case AT_STAND2:
 		SetPlayerStop(c);

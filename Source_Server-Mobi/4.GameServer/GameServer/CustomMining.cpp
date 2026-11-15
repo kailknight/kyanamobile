@@ -1213,6 +1213,52 @@ void CCustomMining::StartAttempt(LPOBJ lpObj,CM_SESSION* s) // OK
 	s->IdleTick = s->StartTick;
 
 	this->SendState(lpObj,s,CM_CODE_MINING);
+
+	this->BroadcastSwing(lpObj,s);
+}
+
+// The miner's own client plays the swing from the MINING state; everybody around sees it through the plain C1:18 action packet
+// with the mining action code 0xE1 (the client turns it into the swing), facing the stone.
+void CCustomMining::BroadcastSwing(LPOBJ lpObj,CM_SESSION* s) // OK
+{
+	CM_STONE* stone = this->FindStone(s->Stone);
+
+	if(stone == 0)
+	{
+		return;
+	}
+
+	const double dx = (double)(stone->X-lpObj->X);
+	const double dy = (double)(stone->Y-lpObj->Y);
+
+	int dir = 0;
+
+	if(dx != 0 || dy != 0)
+	{
+		double angle = atan2(dx,-dy)*180.0/3.14159265358979;
+
+		if(angle < 0){angle += 360.0;}
+
+		dir = ((int)floor(angle/45.0+0.5))%8;
+	}
+
+	PMSG_ACTION_SEND pMsg;
+
+	pMsg.header.set(0x18,sizeof(pMsg));
+
+	pMsg.index[0] = SET_NUMBERHB(lpObj->Index);
+
+	pMsg.index[1] = SET_NUMBERLB(lpObj->Index);
+
+	pMsg.dir = (BYTE)(dir+1);
+
+	pMsg.action = 0xE1;
+
+	pMsg.target[0] = SET_NUMBERHB(lpObj->Index);
+
+	pMsg.target[1] = SET_NUMBERLB(lpObj->Index);
+
+	MsgSendV2(lpObj,(BYTE*)&pMsg,pMsg.header.size);
 }
 
 // Applies the hidden outcome of the running attempt to the session. true = success.

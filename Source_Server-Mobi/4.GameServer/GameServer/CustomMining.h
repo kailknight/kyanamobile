@@ -164,6 +164,7 @@ private:
 	void SendState(LPOBJ lpObj,CM_SESSION* s,int code);
 	bool CheckRequirements(LPOBJ lpObj,CM_STONE* stone,int tier,bool checkDur);
 	void StartAttempt(LPOBJ lpObj,CM_SESSION* s);
+	void BroadcastSwing(LPOBJ lpObj,CM_SESSION* s);
 	bool ApplyOutcome(CM_SESSION* s);
 	void Resolve(LPOBJ lpObj,CM_SESSION* s);
 	bool CashOut(LPOBJ lpObj,CM_SESSION* s,bool forced);
