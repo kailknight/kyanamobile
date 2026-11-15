@@ -124,6 +124,11 @@ void CServerDisplayer::Init(HWND hWnd) // OK
 	//                   (default 0 = every dropped item, the biggest log by far).
 	gLog.SetPolicy(ReadLogValue("LogOverwrite",1) != 0,(DWORD)ReadLogValue("LogMaxSizeMB",50));
 
+	// LogKeepDays = 2 (default): one dated file per day for every category (YYYY-MM-DD.txt, and YYYY-MM-DD.2.txt ... past
+	// LogMaxSizeMB), kept for the last 2 days plus today so a problem can be traced back; older dated files are deleted at start
+	// and every midnight. 0 = off (LogOverwrite decides, as before).
+	gLog.SetKeepDays(ReadLogValue("LogKeepDays",2));
+
 	gLogItemDropErrorsOnly = ReadLogValue("LogItemDropErrorsOnly",0);
 
 	gLog.AddLog(ReadLogActive("LOG_GENERAL"),        "LOG");

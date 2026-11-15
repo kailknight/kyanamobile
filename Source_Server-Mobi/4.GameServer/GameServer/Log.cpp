@@ -20,6 +20,7 @@ CLog::CLog() // OK
 	this->m_overwrite = 1;
 
 	this->m_maxBytes = 50*1024*1024;
+	this->m_keepDays = 0;
 
 	InitializeCriticalSection(&this->m_lock);
 }
@@ -31,13 +32,102 @@ void CLog::SetPolicy(BOOL overwrite,DWORD maxMB) // OK
 	this->m_maxBytes = ((maxMB>=4096)?0xFFFFFFFF:(maxMB*1024*1024));
 }
 
+void CLog::SetKeepDays(int days) // OK
+{
+	this->m_keepDays = ((days < 0)?0:days);
+}
+
+// Days since a fixed date, for comparing the dates in the file names.
+static int LogDayNumber(int year,int month,int day) // OK
+{
+	SYSTEMTIME st;
+	memset(&st,0,sizeof(st));
+	st.wYear = (WORD)year;
+	st.wMonth = (WORD)month;
+	st.wDay = (WORD)day;
+
+	FILETIME ft;
+
+	if(SystemTimeToFileTime(&st,&ft) == 0)
+	{
+		return -1;
+	}
+
+	ULARGE_INTEGER value;
+	value.LowPart = ft.dwLowDateTime;
+	value.HighPart = ft.dwHighDateTime;
+
+	return (int)(value.QuadPart/(10000000ULL*86400ULL));
+}
+
+// Deletes this category's dated files (YYYY-MM-DD.txt and YYYY-MM-DD.N.txt) that are more than m_keepDays old. Anything whose
+// name does not start with a date is left alone (the category's own fixed file, other tools' files).
+void CLog::DeleteOldFiles(LOG_INFO* lpInfo,const SYSTEMTIME& today) // OK
+{
+	if(this->m_keepDays <= 0)
+	{
+		return;
+	}
+
+	const int todayNumber = LogDayNumber(today.wYear,today.wMonth,today.wDay);
+
+	if(todayNumber < 0)
+	{
+		return;
+	}
+
+	char pattern[300];
+	wsprintf(pattern,".\\%s\\*.txt",lpInfo->Directory);
+
+	WIN32_FIND_DATA data;
+	HANDLE find = FindFirstFile(pattern,&data);
+
+	if(find == INVALID_HANDLE_VALUE)
+	{
+		return;
+	}
+
+	do
+	{
+		int year = 0,month = 0,day = 0;
+
+		if(strlen(data.cFileName) < 14 || data.cFileName[4] != '-' || data.cFileName[7] != '-' || sscanf_s(data.cFileName,"%4d-%2d-%2d",&year,&month,&day) != 3)
+		{
+			continue;
+		}
+
+		const int number = LogDayNumber(year,month,day);
+
+		if(number >= 0 && (todayNumber-number) > this->m_keepDays)
+		{
+			char path[400];
+			wsprintf(path,".\\%s\\%s",lpInfo->Directory,data.cFileName);
+			DeleteFile(path);
+		}
+	}
+	while(FindNextFile(find,&data) != 0);
+
+	FindClose(find);
+}
+
 // Opens (or reopens) a category's file for the given day.
 // Overwrite mode: <Directory>\<last folder name>.txt, kept only if it was last
 // written today and is under the size limit, otherwise emptied.
 // Dated mode: <Directory>\YYYY-MM-DD.txt, appended to (the original behaviour).
 bool CLog::OpenFile(LOG_INFO* lpInfo,const SYSTEMTIME& today)
 {
-	if(this->m_overwrite == 0)
+	if(this->m_keepDays > 0)
+	{
+		if(lpInfo->Part <= 1)
+		{
+			wsprintf(lpInfo->Filename,".\\%s\\%04d-%02d-%02d.txt",lpInfo->Directory,today.wYear,today.wMonth,today.wDay);
+		}
+		else
+		{
+			wsprintf(lpInfo->Filename,".\\%s\\%04d-%02d-%02d.%d.txt",lpInfo->Directory,today.wYear,today.wMonth,today.wDay,lpInfo->Part);
+		}
+	}
+	else if(this->m_overwrite == 0)
 	{
 		wsprintf(lpInfo->Filename,".\\%s\\%04d-%02d-%02d.txt",lpInfo->Directory,today.wYear,today.wMonth,today.wDay);
 	}
@@ -59,7 +149,13 @@ bool CLog::OpenFile(LOG_INFO* lpInfo,const SYSTEMTIME& today)
 
 	lpInfo->Size = 0;
 
-	if(this->m_overwrite != 0)
+	if(this->m_keepDays > 0)
+	{
+		// appended to (a restart the same day continues the day's file); the size is the current length
+		DWORD existing = GetFileSize(lpInfo->File,0);
+		lpInfo->Size = ((existing == INVALID_FILE_SIZE)?0:existing);
+	}
+	else if(this->m_overwrite != 0)
 	{
 		FILETIME written;
 		SYSTEMTIME utc,local;
@@ -128,12 +224,15 @@ void CLog::AddLog(BOOL active,char* directory) // OK
 		lpInfo->Month = time.wMonth;
 
 		lpInfo->Year = time.wYear;
+		lpInfo->Part = 1;
 
 		if(this->OpenFile(lpInfo,time) == 0)
 		{
 			lpInfo->Active = 0;
 			return;
 		}
+
+		this->DeleteOldFiles(lpInfo,time);
 	}
 }
 
@@ -221,8 +320,24 @@ void CLog::WriteFileLine(eLogType type,char* composed) // OK
 		lpInfo->Month = time.wMonth;
 
 		lpInfo->Year = time.wYear;
+		lpInfo->Part = 1;
 
 		// A new day: overwrite mode empties the same file, dated mode opens the new day's.
+		if(this->OpenFile(lpInfo,time) == 0)
+		{
+			lpInfo->Active = 0;
+			LeaveCriticalSection(&this->m_lock);
+			return;
+		}
+
+		this->DeleteOldFiles(lpInfo,time);
+	}
+	else if(this->m_keepDays > 0 && this->m_maxBytes != 0 && lpInfo->Size >= this->m_maxBytes)
+	{
+		// Keep-days mode never empties a file: past the size limit the day continues in YYYY-MM-DD.2.txt, .3.txt ...
+		CloseHandle(lpInfo->File);
+		lpInfo->Part++;
+
 		if(this->OpenFile(lpInfo,time) == 0)
 		{
 			lpInfo->Active = 0;

@@ -179,6 +179,7 @@ struct SDHP_ANS_MARKET_STATUS
 	int PriceType;
 	int PriceValue;
 	int TypeItem;
+	int ID;			// ItemMarketData row: the payout is only complete when the mail is made, then this row goes
 };
 #endif
 

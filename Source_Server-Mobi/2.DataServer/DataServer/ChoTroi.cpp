@@ -397,7 +397,9 @@ void DeleteItemCoin(int ID)
 }
 void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get va Update List Item Da Ban
 {
-
+	// Sold rows (Status 1) go to the seller's GameServer to be paid. They are NOT deleted here any more: they become Status 2
+	// ("sent") and are deleted by CFriendMail::OnPayoutRequest once the payout letter really exists. A payout lost to a stall
+	// of this server or of SQL leaves its row at Status 2, and it is sent again the next time the seller asks.
 	BYTE send[4096];
 
 	CBCUSTOM_LOAD_COUNT pMsg;
@@ -415,16 +417,25 @@ void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get 
 
 	SDHP_ANS_MARKET_STATUS info;
 
-	if (gQueryManager.ExecQuery("SELECT * FROM ItemMarketData WHERE Account = '%s' AND Status = 1", szAccountID) != 0)
+	if (gQueryManager.ExecQuery("SELECT * FROM ItemMarketData WHERE Account = '%s' AND (Status = 1 OR Status = 2) ORDER BY ID", szAccountID) != 0)
 	{
 		while (gQueryManager.Fetch() != SQL_NO_DATA)
 		{
+			// the reply buffer is 4096 bytes: the rest goes out with the next request
+			if ((size + (int)sizeof(info)) > (int)sizeof(send))
+			{
+				break;
+			}
+
+			memset(&info, 0, sizeof(info));
 
 			info.TypeItem = gQueryManager.GetAsInteger("TypeItem");
 
 			info.PriceType = gQueryManager.GetAsInteger("PriceType");
 
 			info.PriceValue = gQueryManager.GetAsInteger("PriceValue");
+
+			info.ID = gQueryManager.GetAsInteger("ID");
 
 			gQueryManager.GetAsString("Account", info.Account, sizeof(info.Account));
 
@@ -435,11 +446,14 @@ void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get 
 			size += sizeof(info);
 
 			pMsg.count++;
-
 		}
 		gQueryManager.Close();
-		gQueryManager.ExecQuery("Delete FROM ItemMarketData WHERE Account = '%s' AND Status = 1", szAccountID);
-		gQueryManager.Close();
+
+		if (pMsg.count > 0)
+		{
+			gQueryManager.ExecQuery("UPDATE ItemMarketData SET Status = 2 WHERE Account = '%s' AND Status = 1", szAccountID);
+			gQueryManager.Close();
+		}
 	}
 	else
 	{
@@ -447,19 +461,13 @@ void CChoTroi::GDReqItemStatus(SDHP_REQ_MARKET_STATUS* lpMsg, int uIndex) //Get 
 		return;
 	}
 
-
-
 	pMsg.header.size[0] = SET_NUMBERHB(size);
 	pMsg.header.size[1] = SET_NUMBERLB(size);
 
 	memcpy(send, &pMsg, sizeof(pMsg));
 
 	gSocketManager.DataSend(uIndex, send, size);
-
 }
-
-
-
 
 void CChoTroi::GDReqItemListPage(SDHP_REQ_MARKET_ITEM* lpMsg, int uIndex)
 {

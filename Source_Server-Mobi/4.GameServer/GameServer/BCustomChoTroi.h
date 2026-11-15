@@ -159,6 +159,7 @@ struct SDHP_ANS_MARKET_STATUS
 	int PriceType;
 	int PriceValue;
 	int TypeItem;
+	int ID;			// ItemMarketData row, sent back with the payout request so the DataServer can close it
 };
 struct BCSEV_COUNTLIST
 {

@@ -40,6 +40,7 @@ struct LOG_INFO
 	char Filename[256];
 	HANDLE File;
 	DWORD Size;
+	int Part;
 };
 
 class CLog
@@ -52,6 +53,9 @@ public:
 	// (<Directory><Name>.txt) that is emptied when the day changes and when it
 	// passes maxMB (0 = no size limit). overwrite=0: the old one-dated-file-per-day.
 	void SetPolicy(BOOL overwrite,DWORD maxMB);
+	// LogKeepDays > 0: every category writes one dated file per day (YYYY-MM-DD.txt, then YYYY-MM-DD.2.txt ... when a file passes
+	// the size limit) and the dated files older than that many days are deleted at start and every midnight. 0 = off.
+	void SetKeepDays(int days);
 	void Output(eLogType type,char* text,...);
 	// Writes the file exactly like Output but never mirrors to the log panel.
 	// For high-frequency forensic dumps that are worth keeping on disk and
@@ -60,10 +64,12 @@ public:
 private:
 	void WriteFileLine(eLogType type,char* composed);
 	bool OpenFile(LOG_INFO* lpInfo,const SYSTEMTIME& today);
+	void DeleteOldFiles(LOG_INFO* lpInfo,const SYSTEMTIME& today);
 	LOG_INFO m_LogInfo[MAX_LOG];
 	int m_count;
 	BOOL m_overwrite;
 	DWORD m_maxBytes;
+	int m_keepDays;
 	CRITICAL_SECTION m_lock;
 };
 

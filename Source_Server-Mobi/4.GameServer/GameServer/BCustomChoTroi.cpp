@@ -983,9 +983,11 @@ void BCustomChoTroi::DGAnsItemStatus(CBCUSTOM_LOAD_COUNT * lpMsg)
 				case eMarketPriceC: pay.CoinType = FRIENDMAIL_COIN_CHAOS; break;
 			}
 			pay.CoinAmount = (CoinAfterTax > 0) ? (DWORD)CoinAfterTax : 0;
+			pay.MarketID = lpInfo->ID;
 			strcpy_s(pay.Subject,"Flea Market - item sold");
 			sprintf_s(pay.Memo,"Sold: %s +%d\nPrice: %d %s\nTax: %d%%\nPayout: %d %s (claim it from this mail)",gItemLevel.GetItemName(item.m_Index,item.m_Level),item.m_Level,ItemPrice,TypeCoin[ItemPriceType],RateTax,CoinAfterTax,TypeCoin[ItemPriceType]);
-			if(pay.CoinType != FRIENDMAIL_COIN_NONE && pay.CoinAmount > 0)
+			// Always sent when the row has an id: the DataServer deletes the row once the letter exists (or when nothing is owed)
+			if((pay.CoinType != FRIENDMAIL_COIN_NONE && pay.CoinAmount > 0) || pay.MarketID > 0)
 			{
 				gDataServerConnection.DataSend((BYTE*)&pay,pay.header.size);
 			}
