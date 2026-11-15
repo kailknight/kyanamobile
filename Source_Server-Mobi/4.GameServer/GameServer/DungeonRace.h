@@ -125,6 +125,7 @@ public:
 private:
 	// helpers
 	void Announce(const char* format,...);
+	const char* NpcPlace();
 	void Notify(LPOBJ lpObj,const char* format,...);
 	bool Served();
 	bool IsActiveRacer(LPOBJ lpObj);

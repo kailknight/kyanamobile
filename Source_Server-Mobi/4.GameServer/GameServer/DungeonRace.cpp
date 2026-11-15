@@ -12,6 +12,7 @@
 #include "ItemBagManager.h"
 #include "ItemManager.h"
 #include "Map.h"
+#include "MapManager.h"
 #include "MapServerManager.h"
 #include "Monster.h"
 #include "MonsterSetBase.h"
@@ -566,7 +567,7 @@ void CDungeonRace::MainProc() // OK
 			if(remain > 0 && (remain%60) == 0 && remain != this->m_LastAnnounce)
 			{
 				this->m_LastAnnounce = remain;
-				this->Announce("[Dungeon Race] Registration closes in %d minute(s)! %d racer(s) so far. Talk to the guard near the Dungeon gate in Lorencia.",remain/60,(int)this->m_Players.size());
+				this->Announce("[Dungeon Race] Registration closes in %d minute(s)! %d racer(s) so far. Talk to the registration NPC at %s.",remain/60,(int)this->m_Players.size(),this->NpcPlace());
 			}
 			else if((remain == 30 || remain == 10) && remain != this->m_LastAnnounce)
 			{
@@ -626,6 +627,25 @@ void CDungeonRace::MainProc() // OK
 	}
 }
 
+// "Lorencia (127,229)": where the registration NPC really is, taken from the same settings the NPC is spawned from
+const char* CDungeonRace::NpcPlace() // OK
+{
+	static char text[96];
+
+	const char* name = gMapManager.GetMapName(this->m_NpcMap);
+
+	if(name == 0 || name[0] == 0 || strcmp(name,"NoName") == 0)
+	{
+		sprintf_s(text,"map %d (%d,%d)",this->m_NpcMap,this->m_NpcX,this->m_NpcY);
+	}
+	else
+	{
+		sprintf_s(text,"%s (%d,%d)",name,this->m_NpcX,this->m_NpcY);
+	}
+
+	return text;
+}
+
 void CDungeonRace::OpenRegistration() // OK
 {
 	this->m_Players.clear();
@@ -639,7 +659,7 @@ void CDungeonRace::OpenRegistration() // OK
 	this->m_StateEnd = time(0)+(time_t)this->m_RegisterMin*60;
 	this->m_LastAnnounce = this->m_RegisterMin*60;
 
-	this->Announce("[Dungeon Race] Registration is OPEN! It closes in %d minute(s). Talk to the guard near the Dungeon gate in Lorencia to join.",this->m_RegisterMin);
+	this->Announce("[Dungeon Race] Registration is OPEN! It closes in %d minute(s). Talk to the registration NPC at %s to join.",this->m_RegisterMin,this->NpcPlace());
 
 	LogAdd(LOG_BLUE,"[DungeonRace] registration open (%d minutes)",this->m_RegisterMin);
 }
