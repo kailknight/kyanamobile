@@ -8563,7 +8563,9 @@ void MoveHero()
 	{
 		StandTime++;
 
-		if(StandTime >= 40 && !MouseOnWindow && !Hero->Dead &&
+		// Not while mining: this turn-to-the-mouse also sends a 'stand' action, which every client nearby answers with
+		// SetPlayerStop - the other players saw the swing cut off after its first loop.
+		if(StandTime >= 40 && !MouseOnWindow && !Hero->Dead && o->CurrentAction!=PLAYER_MINING &&
 			o->CurrentAction!=PLAYER_POSE1 && o->CurrentAction!=PLAYER_POSE_FEMALE1 &&
 			o->CurrentAction!=PLAYER_SIT1  && o->CurrentAction!=PLAYER_SIT_FEMALE1 && NoAutoAttacking &&
 			o->CurrentAction!=PLAYER_ATTACK_TELEPORT &&

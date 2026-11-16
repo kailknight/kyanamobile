@@ -527,7 +527,7 @@ android {
         // level instead of sitting at 99%. (40 was built the same day, not released.)
         // 48 (2026-10-27): ranked duel + master skill pages, flea market buy confirm and
         // class filter, chaos box / jewel bank / helper fixes, Discord + Facebook buttons.
-        versionCode 50
+        versionCode 51   // 50 is on Play internal testing; 51 = the mining-swing fix
         versionName "1.0.50"
 
         // A diagnostics build can be CPU-profiled with simpleperf without

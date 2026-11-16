@@ -3568,6 +3568,10 @@ void ReceiveAction(BYTE *ReceiveBuffer,int Size)
 		break;
 	case AT_STAND1:
 	case AT_STAND2:
+		if(o->Type == MODEL_PLAYER && o->CurrentAction == PLAYER_MINING)
+		{
+			break; // keep swinging: the swing stops by itself after its three loops (CharacterAnimation)
+		}
 		SetPlayerStop(c);
 		break;
 	case AT_ATTACK1:
